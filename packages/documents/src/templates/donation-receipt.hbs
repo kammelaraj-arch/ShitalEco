@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Donation Receipt — {{reference}}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+      color: #1f2937;
+      background: #fff;
+      padding: 32px;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ─────────────────────────────── */
+    .header {
+      text-align: center;
+      border-bottom: 3px solid #b45309;
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+    .org-name {
+      font-size: 22px;
+      font-weight: bold;
+      color: #b45309;
+    }
+    .org-tagline {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 4px;
+      font-style: italic;
+    }
+    .doc-title {
+      font-size: 15px;
+      font-weight: bold;
+      color: #374151;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-top: 12px;
+    }
+    .reference-badge {
+      display: inline-block;
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 11px;
+      font-weight: bold;
+      padding: 4px 12px;
+      border-radius: 12px;
+      margin-top: 8px;
+      border: 1px solid #fcd34d;
+    }
+
+    /* ── Donor Details ───────────────────────── */
+    .details-section {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+    }
+    .details-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .detail-item {}
+    .detail-label {
+      font-size: 9px;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .detail-value {
+      font-size: 13px;
+      font-weight: 600;
+      color: #111827;
+      margin-top: 2px;
+    }
+
+    /* ── Amount Box ──────────────────────────── */
+    .amount-box {
+      background: linear-gradient(135deg, #b45309, #d97706);
+      color: #fff;
+      border-radius: 10px;
+      padding: 20px 28px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .amount-label { font-size: 12px; opacity: 0.85; text-transform: uppercase; letter-spacing: 1px; }
+    .amount-value { font-size: 40px; font-weight: bold; margin: 8px 0 4px; }
+    .amount-words { font-size: 11px; opacity: 0.8; font-style: italic; }
+
+    /* ── Gift Aid ────────────────────────────── */
+    .gift-aid-box {
+      border: 2px solid #16a34a;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      background: #f0fdf4;
+    }
+    .gift-aid-title {
+      font-size: 13px;
+      font-weight: bold;
+      color: #166534;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .gift-aid-amount {
+      font-size: 18px;
+      font-weight: bold;
+      color: #16a34a;
+      margin-bottom: 8px;
+    }
+    .gift-aid-text {
+      font-size: 11px;
+      color: #374151;
+      line-height: 1.6;
+    }
+    .gift-aid-not-eligible {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 11px;
+      color: #6b7280;
+    }
+
+    /* ── Purpose ─────────────────────────────── */
+    .purpose-section {
+      margin-bottom: 20px;
+    }
+    .purpose-label {
+      font-size: 10px;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .purpose-value {
+      font-size: 13px;
+      color: #374151;
+      background: #f3f4f6;
+      padding: 8px 12px;
+      border-radius: 6px;
+    }
+
+    /* ── Thank You ───────────────────────────── */
+    .thankyou-section {
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      background: #fffbeb;
+      padding: 20px;
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .thankyou-en {
+      font-size: 16px;
+      font-weight: bold;
+      color: #92400e;
+      margin-bottom: 6px;
+    }
+    .thankyou-gu {
+      font-size: 14px;
+      color: #b45309;
+      margin-bottom: 4px;
+      font-style: italic;
+    }
+    .thankyou-hi {
+      font-size: 14px;
+      color: #b45309;
+      font-style: italic;
+    }
+    .blessings {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 10px;
+    }
+
+    /* ── Footer ──────────────────────────────── */
+    .footer {
+      border-top: 1px solid #e5e7eb;
+      padding-top: 14px;
+      font-size: 10px;
+      color: #9ca3af;
+      line-height: 1.7;
+    }
+    .footer-columns {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+    }
+    .footer-legal {
+      margin-top: 10px;
+      font-size: 9px;
+      color: #d1d5db;
+      border-top: 1px solid #f3f4f6;
+      padding-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="org-name">🕉 Shital Hindu Temple</div>
+    <div class="org-tagline">Jay Shree Krishna — Serving the Community Since 1985</div>
+    <div class="doc-title">Donation Receipt</div>
+    <div class="reference-badge">Ref: {{reference}}</div>
+  </div>
+
+  <!-- Donor Details -->
+  <div class="details-section">
+    <div class="details-grid">
+      <div class="detail-item">
+        <div class="detail-label">Donor Name</div>
+        <div class="detail-value">{{donorName}}</div>
+      </div>
+      <div class="detail-item">
+        <div class="detail-label">Date of Donation</div>
+        <div class="detail-value">{{donationDate}}</div>
+      </div>
+      <div class="detail-item">
+        <div class="detail-label">Payment Method</div>
+        <div class="detail-value">{{paymentMethod}}</div>
+      </div>
+      <div class="detail-item">
+        <div class="detail-label">Branch</div>
+        <div class="detail-value">{{branchName}}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Donation Amount -->
+  <div class="amount-box">
+    <div class="amount-label">Total Donation Received</div>
+    <div class="amount-value">{{currency}}{{amount}}</div>
+    {{#if amountInWords}}
+    <div class="amount-words">{{amountInWords}}</div>
+    {{/if}}
+  </div>
+
+  <!-- Purpose -->
+  <div class="purpose-section">
+    <div class="purpose-label">Donation Purpose</div>
+    <div class="purpose-value">{{purpose}}</div>
+  </div>
+
+  <!-- Gift Aid -->
+  {{#if giftAidEligible}}
+  <div class="gift-aid-box">
+    <div class="gift-aid-title">&#9989; Gift Aid Declaration Confirmed</div>
+    <div class="gift-aid-amount">+ {{currency}}{{giftAidAmount}} reclaimed from HMRC</div>
+    <div class="gift-aid-text">
+      As a UK taxpayer, your donation is eligible for Gift Aid. Shital Hindu Temple will reclaim
+      25p in tax for every £1 you donate, at no extra cost to you. This means your total donation
+      to the temple is worth <strong>{{currency}}{{totalWithGiftAid}}</strong>.
+      <br /><br />
+      Gift Aid Declaration Reference: <strong>{{giftAidDeclarationRef}}</strong>
+    </div>
+  </div>
+  {{else}}
+  <div class="gift-aid-not-eligible">
+    <strong>Gift Aid:</strong> This donation is not eligible for Gift Aid, or no Gift Aid declaration
+    is on file. If you are a UK taxpayer and wish to enable Gift Aid on future donations,
+    please contact the temple office.
+  </div>
+  {{/if}}
+
+  <!-- Thank You -->
+  <div class="thankyou-section">
+    <div class="thankyou-en">Thank you for your generous donation!</div>
+    <div class="thankyou-gu">આપના ઉદાર દાન માટે ખૂબ ખૂબ આભાર!</div>
+    <div class="thankyou-hi">आपके उदार दान के लिए हृदय से धन्यवाद!</div>
+    <div class="blessings">
+      Your generosity helps us serve the community and maintain our sacred temple.
+      May God bless you and your family abundantly. 🙏
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-columns">
+      <div>
+        <strong>Shital Hindu Temple</strong><br />
+        Registered Charity Number: {{charityNumber}}<br />
+        {{templeAddress}}<br />
+        Tel: {{templePhone}} | Email: {{templeEmail}}
+      </div>
+      <div style="text-align:right;">
+        <strong>Receipt Details</strong><br />
+        Receipt No: {{reference}}<br />
+        Issued: {{issuedDate}}<br />
+        Issued by: {{issuedBy}}
+      </div>
+    </div>
+    <div class="footer-legal">
+      This receipt is issued in accordance with the Charities Act 2011. Shital Hindu Temple is registered
+      with the Charity Commission for England and Wales (Charity No. {{charityNumber}}).
+      Please retain this receipt for your tax records. Gift Aid claims are made in accordance
+      with HMRC regulations.
+    </div>
+  </div>
+
+</body>
+</html>

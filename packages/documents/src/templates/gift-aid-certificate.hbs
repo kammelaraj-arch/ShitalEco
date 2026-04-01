@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gift Aid Certificate</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+      color: #1f2937;
+      background: #fff;
+      padding: 32px;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+    .header {
+      text-align: center;
+      border-bottom: 3px solid #16a34a;
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+    .org-name { font-size: 22px; font-weight: bold; color: #b45309; }
+    .org-sub { font-size: 11px; color: #9ca3af; margin-top: 4px; }
+    .doc-title {
+      font-size: 16px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #166534;
+      margin-top: 14px;
+    }
+    .cert-number {
+      display: inline-block;
+      background: #dcfce7;
+      color: #166534;
+      font-size: 11px;
+      font-weight: bold;
+      padding: 4px 14px;
+      border-radius: 12px;
+      border: 1px solid #86efac;
+      margin-top: 8px;
+    }
+    .section {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 18px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6b7280;
+      margin-bottom: 12px;
+    }
+    .field-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .field { }
+    .field-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; }
+    .field-value { font-size: 13px; font-weight: 600; color: #111827; margin-top: 2px; }
+    .declaration-box {
+      border: 2px solid #16a34a;
+      border-radius: 8px;
+      padding: 18px 22px;
+      margin-bottom: 18px;
+      background: #f0fdf4;
+    }
+    .declaration-title {
+      font-size: 13px;
+      font-weight: bold;
+      color: #166534;
+      margin-bottom: 10px;
+    }
+    .declaration-text {
+      font-size: 11px;
+      color: #374151;
+      line-height: 1.7;
+    }
+    .summary-box {
+      background: linear-gradient(135deg, #16a34a, #22c55e);
+      color: #fff;
+      border-radius: 8px;
+      padding: 16px 22px;
+      margin-bottom: 18px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      text-align: center;
+    }
+    .summary-item-label { font-size: 10px; opacity: 0.8; text-transform: uppercase; }
+    .summary-item-value { font-size: 18px; font-weight: bold; margin-top: 4px; }
+    .signature-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .sig-box {
+      border-bottom: 1px solid #374151;
+      height: 48px;
+      margin-top: 8px;
+    }
+    .sig-label { font-size: 10px; color: #6b7280; margin-top: 4px; }
+    .footer {
+      border-top: 1px solid #e5e7eb;
+      padding-top: 12px;
+      font-size: 10px;
+      color: #9ca3af;
+      line-height: 1.6;
+    }
+    .hmrc-logo {
+      display: inline-block;
+      background: #1d4ed8;
+      color: #fff;
+      font-size: 10px;
+      font-weight: bold;
+      padding: 3px 8px;
+      border-radius: 3px;
+      margin-left: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="org-name">🕉 Shital Hindu Temple</div>
+    <div class="org-sub">Registered Charity No. {{charityNumber}}</div>
+    <div class="doc-title">Gift Aid Declaration Certificate</div>
+    <div class="cert-number">Certificate No: {{certificateNumber}}</div>
+  </div>
+
+  <!-- Donor Details -->
+  <div class="section">
+    <div class="section-title">Donor Details</div>
+    <div class="field-grid">
+      <div class="field">
+        <div class="field-label">Full Name</div>
+        <div class="field-value">{{donorTitle}} {{donorFirstName}} {{donorLastName}}</div>
+      </div>
+      <div class="field">
+        <div class="field-label">Declaration Date</div>
+        <div class="field-value">{{declarationDate}}</div>
+      </div>
+      <div class="field">
+        <div class="field-label">Home Address</div>
+        <div class="field-value">{{donorAddress}}</div>
+      </div>
+      <div class="field">
+        <div class="field-label">Postcode</div>
+        <div class="field-value">{{donorPostcode}}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Declaration -->
+  <div class="declaration-box">
+    <div class="declaration-title">&#9989; Gift Aid Declaration</div>
+    <div class="declaration-text">
+      I, <strong>{{donorTitle}} {{donorFirstName}} {{donorLastName}}</strong>, want Shital Hindu Temple
+      to reclaim Gift Aid on all qualifying donations I have made since
+      <strong>{{backdateFrom}}</strong> and on all future donations I make,
+      until I notify you otherwise.
+      <br /><br />
+      I confirm that I am a UK taxpayer and understand that if I pay less Income Tax and/or Capital
+      Gains Tax than the amount of Gift Aid claimed on all my donations in that tax year it is my
+      responsibility to pay any difference.
+      <br /><br />
+      I understand that Shital Hindu Temple will reclaim <strong>25p of tax on every £1</strong>
+      that I donate.
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary-box">
+    <div>
+      <div class="summary-item-label">Total Donated</div>
+      <div class="summary-item-value">£{{totalDonated}}</div>
+    </div>
+    <div>
+      <div class="summary-item-label">Gift Aid Reclaimed</div>
+      <div class="summary-item-value">£{{totalGiftAid}}</div>
+    </div>
+    <div>
+      <div class="summary-item-label">Total Benefit</div>
+      <div class="summary-item-value">£{{totalBenefit}}</div>
+    </div>
+  </div>
+
+  <!-- Signature -->
+  <div class="signature-section">
+    <div>
+      <div style="font-size:11px;color:#374151;font-weight:600;">Donor Signature</div>
+      <div class="sig-box"></div>
+      <div class="sig-label">{{donorTitle}} {{donorLastName}} — {{declarationDate}}</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#374151;font-weight:600;">Authorised by Temple</div>
+      <div class="sig-box"></div>
+      <div class="sig-label">{{authorisedBy}} — {{issuedDate}}</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <strong>Shital Hindu Temple</strong> — Registered Charity No. {{charityNumber}} |
+    <span class="hmrc-logo">HMRC</span> Charity Reference: {{hmrcCharityRef}}<br />
+    {{templeAddress}} | {{templePhone}} | {{templeEmail}}<br /><br />
+    This Gift Aid declaration is made in accordance with Schedule 3 of the Finance Act 1990 as amended.
+    Please notify us if you change your name or home address, or if you no longer pay sufficient UK Income
+    Tax or Capital Gains Tax. This document should be retained for your personal tax records.
+    Issued: {{issuedDate}}
+  </div>
+
+</body>
+</html>

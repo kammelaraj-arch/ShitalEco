@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payslip — {{period}}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11px;
+      color: #1f2937;
+      background: #fff;
+      padding: 20px;
+    }
+
+    /* ── Header ─────────────────────────────── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 3px solid #b45309;
+      padding-bottom: 12px;
+      margin-bottom: 16px;
+    }
+    .logo-block { display: flex; flex-direction: column; }
+    .org-name {
+      font-size: 18px;
+      font-weight: bold;
+      color: #b45309;
+      letter-spacing: 0.5px;
+    }
+    .org-subtitle { font-size: 10px; color: #6b7280; margin-top: 2px; }
+    .doc-title-block { text-align: right; }
+    .doc-title {
+      font-size: 16px;
+      font-weight: bold;
+      color: #374151;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .period-label {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+    .period-value { font-weight: bold; color: #374151; }
+
+    /* ── Employee Info ───────────────────────── */
+    .employee-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+    }
+    .info-row { display: flex; flex-direction: column; margin-bottom: 6px; }
+    .info-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; }
+    .info-value { font-size: 12px; color: #111827; font-weight: 600; margin-top: 2px; }
+
+    /* ── Pay Table ───────────────────────────── */
+    .pay-tables {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .pay-table { width: 100%; }
+    .pay-table-title {
+      font-size: 10px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 6px 10px;
+      border-radius: 4px 4px 0 0;
+    }
+    .earnings-title { background: #d1fae5; color: #065f46; }
+    .deductions-title { background: #fee2e2; color: #991b1b; }
+
+    table { width: 100%; border-collapse: collapse; }
+    table th, table td {
+      padding: 6px 10px;
+      text-align: left;
+      border-bottom: 1px solid #f3f4f6;
+      font-size: 11px;
+    }
+    table th {
+      background: #f9fafb;
+      color: #6b7280;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    table td.amount { text-align: right; font-variant-numeric: tabular-nums; }
+    table tbody tr:last-child td { border-bottom: none; }
+    .table-total td {
+      background: #f3f4f6;
+      font-weight: bold;
+      border-top: 2px solid #e5e7eb;
+    }
+
+    /* ── Net Pay ─────────────────────────────── */
+    .net-pay-box {
+      background: linear-gradient(135deg, #b45309, #d97706);
+      color: #fff;
+      border-radius: 8px;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .net-pay-label { font-size: 13px; font-weight: 600; opacity: 0.9; }
+    .net-pay-amount { font-size: 24px; font-weight: bold; letter-spacing: 0.5px; }
+    .net-pay-sub { font-size: 10px; opacity: 0.75; margin-top: 2px; }
+
+    /* ── YTD ─────────────────────────────────── */
+    .ytd-section {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .ytd-title {
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-size: 10px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 6px 12px;
+    }
+    .ytd-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+    }
+    .ytd-item {
+      padding: 10px 12px;
+      border-right: 1px solid #e5e7eb;
+    }
+    .ytd-item:last-child { border-right: none; }
+    .ytd-item-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; }
+    .ytd-item-value { font-size: 13px; font-weight: bold; color: #111827; margin-top: 3px; }
+
+    /* ── Tax / NI Reference ──────────────────── */
+    .reference-section {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+    }
+    .ref-item-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; }
+    .ref-item-value { font-size: 11px; font-weight: 600; color: #374151; margin-top: 2px; }
+
+    /* ── Footer ──────────────────────────────── */
+    .footer {
+      border-top: 1px solid #e5e7eb;
+      padding-top: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .footer-left { font-size: 9px; color: #9ca3af; line-height: 1.6; }
+    .footer-right { font-size: 9px; color: #9ca3af; text-align: right; }
+    .confidential {
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 9px;
+      font-weight: bold;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-block">
+      <div class="org-name">Shital Hindu Temple</div>
+      <div class="org-subtitle">Registered Charity | ERP Platform</div>
+    </div>
+    <div class="doc-title-block">
+      <div class="doc-title">Payslip</div>
+      <div class="period-label">Pay Period: <span class="period-value">{{period}}</span></div>
+      <div class="period-label">Payment Date: <span class="period-value">{{paymentDate}}</span></div>
+    </div>
+  </div>
+
+  <!-- Employee Information -->
+  <div class="employee-section">
+    <div class="info-row">
+      <span class="info-label">Employee Name</span>
+      <span class="info-value">{{employeeName}}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Employee Number</span>
+      <span class="info-value">{{employeeNumber}}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Job Title</span>
+      <span class="info-value">{{jobTitle}}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Department</span>
+      <span class="info-value">{{department}}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Branch</span>
+      <span class="info-value">{{branchName}}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">NI Category</span>
+      <span class="info-value">{{niCategory}}</span>
+    </div>
+  </div>
+
+  <!-- Earnings and Deductions -->
+  <div class="pay-tables">
+
+    <!-- Earnings -->
+    <div>
+      <div class="pay-table-title earnings-title">Earnings</div>
+      <table class="pay-table">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th style="text-align:right;">Amount (£)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Basic Pay</td>
+            <td class="amount">{{basicPay}}</td>
+          </tr>
+          {{#each allowances}}
+          <tr>
+            <td>{{this.name}}</td>
+            <td class="amount">{{this.amount}}</td>
+          </tr>
+          {{/each}}
+          {{#if overtimePay}}
+          <tr>
+            <td>Overtime</td>
+            <td class="amount">{{overtimePay}}</td>
+          </tr>
+          {{/if}}
+        </tbody>
+        <tfoot>
+          <tr class="table-total">
+            <td>Gross Pay</td>
+            <td class="amount">{{grossPay}}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- Deductions -->
+    <div>
+      <div class="pay-table-title deductions-title">Deductions</div>
+      <table class="pay-table">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th style="text-align:right;">Amount (£)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Income Tax ({{taxCode}})</td>
+            <td class="amount">{{incomeTax}}</td>
+          </tr>
+          <tr>
+            <td>National Insurance</td>
+            <td class="amount">{{employeeNi}}</td>
+          </tr>
+          <tr>
+            <td>Pension (Employee)</td>
+            <td class="amount">{{pensionEmployee}}</td>
+          </tr>
+          {{#each otherDeductions}}
+          <tr>
+            <td>{{this.name}}</td>
+            <td class="amount">{{this.amount}}</td>
+          </tr>
+          {{/each}}
+        </tbody>
+        <tfoot>
+          <tr class="table-total">
+            <td>Total Deductions</td>
+            <td class="amount">{{totalDeductions}}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- Net Pay -->
+  <div class="net-pay-box">
+    <div>
+      <div class="net-pay-label">Net Pay</div>
+      <div class="net-pay-sub">Amount paid to your bank account</div>
+    </div>
+    <div style="text-align:right;">
+      <div class="net-pay-amount">£{{netPay}}</div>
+      <div class="net-pay-sub">{{paymentMethod}}</div>
+    </div>
+  </div>
+
+  <!-- Year to Date -->
+  <div class="ytd-section">
+    <div class="ytd-title">Year to Date ({{taxYear}})</div>
+    <div class="ytd-grid">
+      <div class="ytd-item">
+        <div class="ytd-item-label">Gross Pay YTD</div>
+        <div class="ytd-item-value">£{{ytdGross}}</div>
+      </div>
+      <div class="ytd-item">
+        <div class="ytd-item-label">Tax YTD</div>
+        <div class="ytd-item-value">£{{ytdTax}}</div>
+      </div>
+      <div class="ytd-item">
+        <div class="ytd-item-label">NI YTD</div>
+        <div class="ytd-item-value">£{{ytdNi}}</div>
+      </div>
+      <div class="ytd-item">
+        <div class="ytd-item-label">Pension YTD (Employee)</div>
+        <div class="ytd-item-value">£{{ytdPension}}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tax / NI Reference -->
+  <div class="reference-section">
+    <div>
+      <div class="ref-item-label">Tax Code</div>
+      <div class="ref-item-value">{{taxCode}}</div>
+    </div>
+    <div>
+      <div class="ref-item-label">NI Number</div>
+      <div class="ref-item-value">{{niNumber}}</div>
+    </div>
+    <div>
+      <div class="ref-item-label">Employer PAYE Ref</div>
+      <div class="ref-item-value">{{employerPayeRef}}</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-left">
+      Shital Hindu Temple<br />
+      Employer NI Number: {{employerNiNumber}}<br />
+      Registered Charity Number: {{charityNumber}}<br />
+      Pension Provider: {{pensionProvider}} | Employer Pension: £{{pensionEmployer}}
+    </div>
+    <div class="footer-right">
+      <div class="confidential">Confidential</div>
+      <div style="margin-top:6px;">Generated on {{generatedDate}}</div>
+    </div>
+  </div>
+
+</body>
+</html>

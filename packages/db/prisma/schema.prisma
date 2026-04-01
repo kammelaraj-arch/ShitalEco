@@ -1,0 +1,1004 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  TRUSTEE
+  ACCOUNTANT
+  HR_MANAGER
+  BRANCH_MANAGER
+  STAFF
+  VOLUNTEER
+  DEVOTEE
+  KIOSK
+  AUDITOR
+}
+
+enum OtpPurpose {
+  LOGIN
+  EMAIL_VERIFY
+  PHONE_VERIFY
+  MFA_RESET
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+enum TransactionStatus {
+  DRAFT
+  POSTED
+  VOID
+}
+
+enum PaymentProvider {
+  PAYPAL
+  STRIPE
+  CASH
+  BANK_TRANSFER
+  KIOSK
+}
+
+enum DonationStatus {
+  PENDING
+  COMPLETED
+  REFUNDED
+  FAILED
+}
+
+enum BudgetStatus {
+  DRAFT
+  APPROVED
+  ACTIVE
+  CLOSED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACTOR
+  VOLUNTEER
+}
+
+enum SalaryPeriod {
+  ANNUAL
+  MONTHLY
+  HOURLY
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  MATERNITY
+  PATERNITY
+  COMPASSIONATE
+  UNPAID
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  PROCESSING
+  COMPLETED
+  VOID
+}
+
+enum AssetCategory {
+  PROPERTY
+  VEHICLE
+  EQUIPMENT
+  FURNITURE
+  IT
+  OTHER
+}
+
+enum AssetStatus {
+  ACTIVE
+  MAINTENANCE
+  DISPOSED
+  LOST
+}
+
+enum MaintenanceStatus {
+  SCHEDULED
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum ServiceCategory {
+  PUJA
+  HAVAN
+  FESTIVAL
+  CLASS
+  HALL_HIRE
+  OTHER
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  REFUNDED
+}
+
+enum BookingPaymentProvider {
+  PAYPAL
+  STRIPE
+  CASH
+  KIOSK
+}
+
+enum DocumentCategory {
+  POLICY
+  CONTRACT
+  MINUTES
+  REPORT
+  INVOICE
+  RECEIPT
+  OTHER
+}
+
+enum DocumentPermission {
+  VIEW
+  EDIT
+  ADMIN
+}
+
+enum GovernanceDocumentType {
+  CONSTITUTION
+  POLICY
+  MINUTES
+  ANNUAL_REPORT
+  ACCOUNTS
+  SAFEGUARDING
+  OTHER
+}
+
+enum GovernanceDocumentStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  ARCHIVED
+}
+
+enum DeclarationType {
+  INTERESTS
+  FIT_PROPER
+  CONFLICT
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  WHATSAPP
+  PUSH
+}
+
+enum BasketStatus {
+  ACTIVE
+  CHECKOUT
+  COMPLETED
+  ABANDONED
+}
+
+enum BasketItemType {
+  SERVICE
+  DONATION
+  PRODUCT
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  REFUNDED
+  FAILED
+}
+
+enum OrderPaymentProvider {
+  PAYPAL
+  STRIPE
+  CASH
+  KIOSK
+}
+
+// ─────────────────────────────────────────────
+// AUTH / USER DOMAIN
+// ─────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique
+  passwordHash  String?
+  name          String
+  phone         String?
+  role          Role      @default(DEVOTEE)
+  mfaEnabled    Boolean   @default(false)
+  mfaSecret     String?
+  avatarUrl     String?
+  lastLoginAt   DateTime?
+  isActive      Boolean   @default(true)
+  branchId      String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  branch              Branch?              @relation(fields: [branchId], references: [id])
+  sessions            Session[]
+  otpCodes            OtpCode[]
+  employee            Employee?
+  giftAidDeclarations GiftAidDeclaration[]
+  donations           Donation[]
+  leaveRequestsReviewed LeaveRequest[]     @relation("ReviewedBy")
+  timeEntriesApproved TimeEntry[]          @relation("ApprovedBy")
+  assetsAssigned      Asset[]              @relation("AssignedTo")
+  uploadedDocuments   Document[]           @relation("UploadedBy")
+  documentAccess      DocumentAccess[]     @relation("UserAccess")
+  documentAccessGranted DocumentAccess[]   @relation("GrantedBy")
+  governanceApprovals GovernanceDocument[] @relation("ApprovedBy")
+  trusteeDeclarations TrusteeDeclaration[]
+  notifications       Notification[]
+  serviceBookings     ServiceBooking[]
+  baskets             Basket[]
+  orders              Order[]
+  auditLogs           AuditLog[]
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@index([email])
+  @@map("users")
+}
+
+model Session {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @db.Uuid
+  token       String    @unique
+  expiresAt   DateTime
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model OtpCode {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String     @db.Uuid
+  code      String
+  purpose   OtpPurpose
+  expiresAt DateTime
+  used      Boolean    @default(false)
+  createdAt DateTime   @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("otp_codes")
+}
+
+/// Immutable audit trail — no updatedAt, no deletedAt
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String?  @db.Uuid
+  action      String
+  resource    String
+  resourceId  String
+  oldData     Json?
+  newData     Json?
+  ipAddress   String?
+  userAgent   String?
+  branchId    String?  @db.Uuid
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([branchId])
+  @@index([resource, resourceId])
+  @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────────
+// BRANCH DOMAIN
+// ─────────────────────────────────────────────
+
+model Branch {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  code      String    @unique
+  address   Json
+  phone     String
+  email     String
+  isActive  Boolean   @default(true)
+  settings  Json      @default("{}")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  users               User[]
+  accounts            Account[]
+  transactions        Transaction[]
+  giftAidDeclarations GiftAidDeclaration[]
+  donations           Donation[]
+  budgets             Budget[]
+  employees           Employee[]
+  leavePolicies       LeavePolicy[]
+  timeEntries         TimeEntry[]
+  payrollRuns         PayrollRun[]
+  assets              Asset[]
+  templeServices      TempleService[]
+  serviceBookings     ServiceBooking[]
+  documents           Document[]
+  governanceDocuments GovernanceDocument[]
+  trusteeDeclarations TrusteeDeclaration[]
+  baskets             Basket[]
+  orders              Order[]
+
+  @@index([deletedAt])
+  @@map("branches")
+}
+
+// ─────────────────────────────────────────────
+// FINANCE DOMAIN
+// ─────────────────────────────────────────────
+
+model Account {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId  String      @db.Uuid
+  code      String
+  name      String
+  type      AccountType
+  parentId  String?     @db.Uuid
+  isActive  Boolean     @default(true)
+  balance   Decimal     @default(0) @db.Decimal(19, 4)
+  currency  String      @default("GBP")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  deletedAt DateTime?
+
+  branch          Branch           @relation(fields: [branchId], references: [id])
+  parent          Account?         @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children        Account[]        @relation("AccountHierarchy")
+  transactionLines TransactionLine[]
+  budgetLines     BudgetLine[]
+
+  @@unique([branchId, code])
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("accounts")
+}
+
+model Transaction {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId        String            @db.Uuid
+  reference       String            @unique
+  description     String
+  date            DateTime          @db.Date
+  totalAmount     Decimal           @db.Decimal(19, 4)
+  currency        String            @default("GBP")
+  status          TransactionStatus @default(DRAFT)
+  postedBy        String?           @db.Uuid
+  postedAt        DateTime?
+  idempotencyKey  String            @unique
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  deletedAt       DateTime?
+
+  branch      Branch            @relation(fields: [branchId], references: [id])
+  lines       TransactionLine[]
+  donations   Donation[]
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("transactions")
+}
+
+model TransactionLine {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId String   @db.Uuid
+  accountId     String   @db.Uuid
+  description   String?
+  debitAmount   Decimal  @default(0) @db.Decimal(19, 4)
+  creditAmount  Decimal  @default(0) @db.Decimal(19, 4)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account       Account     @relation(fields: [accountId], references: [id])
+
+  @@index([transactionId])
+  @@index([accountId])
+  @@map("transaction_lines")
+}
+
+model GiftAidDeclaration {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @db.Uuid
+  branchId  String    @db.Uuid
+  title     String
+  firstName String
+  lastName  String
+  address   Json
+  postcode  String
+  isActive  Boolean   @default(true)
+  signedAt  DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  user      User       @relation(fields: [userId], references: [id])
+  branch    Branch     @relation(fields: [branchId], references: [id])
+  donations Donation[]
+
+  @@index([userId])
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("gift_aid_declarations")
+}
+
+model Donation {
+  id                    String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String          @db.Uuid
+  branchId              String          @db.Uuid
+  amount                Decimal         @db.Decimal(19, 4)
+  currency              String          @default("GBP")
+  giftAidEligible       Boolean         @default(false)
+  giftAidDeclarationId  String?         @db.Uuid
+  giftAidAmount         Decimal?        @db.Decimal(19, 4)
+  purpose               String
+  reference             String          @unique
+  paymentProvider       PaymentProvider
+  paymentRef            String?
+  status                DonationStatus  @default(PENDING)
+  transactionId         String?         @db.Uuid
+  idempotencyKey        String          @unique
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  deletedAt             DateTime?
+
+  user                User                @relation(fields: [userId], references: [id])
+  branch              Branch              @relation(fields: [branchId], references: [id])
+  giftAidDeclaration  GiftAidDeclaration? @relation(fields: [giftAidDeclarationId], references: [id])
+  transaction         Transaction?        @relation(fields: [transactionId], references: [id])
+
+  @@index([userId])
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("donations")
+}
+
+model Budget {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId    String       @db.Uuid
+  name        String
+  fiscalYear  Int
+  startDate   DateTime     @db.Date
+  endDate     DateTime     @db.Date
+  status      BudgetStatus @default(DRAFT)
+  approvedBy  String?      @db.Uuid
+  approvedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+
+  branch      Branch       @relation(fields: [branchId], references: [id])
+  lines       BudgetLine[]
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("budgets")
+}
+
+model BudgetLine {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  budgetId      String   @db.Uuid
+  accountId     String   @db.Uuid
+  description   String
+  plannedAmount Decimal  @db.Decimal(19, 4)
+  actualAmount  Decimal  @default(0) @db.Decimal(19, 4)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  budget  Budget  @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([budgetId])
+  @@index([accountId])
+  @@map("budget_lines")
+}
+
+// ─────────────────────────────────────────────
+// HR DOMAIN
+// ─────────────────────────────────────────────
+
+model Employee {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String         @unique @db.Uuid
+  branchId         String         @db.Uuid
+  employeeNumber   String         @unique
+  jobTitle         String
+  department       String
+  startDate        DateTime       @db.Date
+  endDate          DateTime?      @db.Date
+  employmentType   EmploymentType
+  salary           Decimal?       @db.Decimal(19, 4)
+  salaryPeriod     SalaryPeriod?
+  niNumber         String?        @unique
+  taxCode          String?
+  isActive         Boolean        @default(true)
+  managerId        String?        @db.Uuid
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
+
+  user          User            @relation(fields: [userId], references: [id])
+  branch        Branch          @relation(fields: [branchId], references: [id])
+  manager       Employee?       @relation("EmployeeHierarchy", fields: [managerId], references: [id])
+  directReports Employee[]      @relation("EmployeeHierarchy")
+  leaveRequests LeaveRequest[]
+  timeEntries   TimeEntry[]
+  payslipLines  PayslipLine[]
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("employees")
+}
+
+model LeavePolicy {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId         String    @db.Uuid
+  name             String
+  leaveType        LeaveType
+  daysEntitlement  Int
+  carryOverLimit   Int       @default(0)
+  requiresApproval Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  branch        Branch         @relation(fields: [branchId], references: [id])
+  leaveRequests LeaveRequest[]
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("leave_policies")
+}
+
+model LeaveRequest {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId     String      @db.Uuid
+  leavePolicyId  String      @db.Uuid
+  startDate      DateTime    @db.Date
+  endDate        DateTime    @db.Date
+  days           Decimal     @db.Decimal(5, 1)
+  reason         String?
+  status         LeaveStatus @default(PENDING)
+  reviewedBy     String?     @db.Uuid
+  reviewedAt     DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  employee    Employee    @relation(fields: [employeeId], references: [id])
+  leavePolicy LeavePolicy @relation(fields: [leavePolicyId], references: [id])
+  reviewer    User?       @relation("ReviewedBy", fields: [reviewedBy], references: [id])
+
+  @@index([employeeId])
+  @@index([deletedAt])
+  @@map("leave_requests")
+}
+
+model TimeEntry {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId  String   @db.Uuid
+  branchId    String   @db.Uuid
+  date        DateTime @db.Date
+  hoursWorked Decimal  @db.Decimal(5, 2)
+  description String?
+  approved    Boolean  @default(false)
+  approvedBy  String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  branch     Branch   @relation(fields: [branchId], references: [id])
+  approver   User?    @relation("ApprovedBy", fields: [approvedBy], references: [id])
+
+  @@index([employeeId])
+  @@index([branchId])
+  @@map("time_entries")
+}
+
+// ─────────────────────────────────────────────
+// PAYROLL DOMAIN
+// ─────────────────────────────────────────────
+
+model PayrollRun {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId        String           @db.Uuid
+  period          String           // e.g. "2024-01"
+  runDate         DateTime         @db.Date
+  status          PayrollRunStatus @default(DRAFT)
+  processedBy     String?          @db.Uuid
+  completedAt     DateTime?
+  totalGross      Decimal          @default(0) @db.Decimal(19, 4)
+  totalNet        Decimal          @default(0) @db.Decimal(19, 4)
+  totalTax        Decimal          @default(0) @db.Decimal(19, 4)
+  totalNi         Decimal          @default(0) @db.Decimal(19, 4)
+  totalPension    Decimal          @default(0) @db.Decimal(19, 4)
+  idempotencyKey  String           @unique
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+
+  branch      Branch        @relation(fields: [branchId], references: [id])
+  payslips    PayslipLine[]
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("payroll_runs")
+}
+
+model PayslipLine {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollRunId     String   @db.Uuid
+  employeeId       String   @db.Uuid
+  grossPay         Decimal  @db.Decimal(19, 4)
+  incomeTax        Decimal  @db.Decimal(19, 4)
+  employeeNi       Decimal  @db.Decimal(19, 4)
+  employerNi       Decimal  @db.Decimal(19, 4)
+  pensionEmployee  Decimal  @db.Decimal(19, 4)
+  pensionEmployer  Decimal  @db.Decimal(19, 4)
+  netPay           Decimal  @db.Decimal(19, 4)
+  taxCode          String
+  niCategory       String   @db.Char(1)
+  earnings         Json
+  deductions       Json
+  ytdGross         Decimal  @db.Decimal(19, 4)
+  ytdTax           Decimal  @db.Decimal(19, 4)
+  ytdNi            Decimal  @db.Decimal(19, 4)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  payrollRun  PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee    Employee   @relation(fields: [employeeId], references: [id])
+
+  @@index([payrollRunId])
+  @@index([employeeId])
+  @@map("payslip_lines")
+}
+
+// ─────────────────────────────────────────────
+// ASSETS DOMAIN
+// ─────────────────────────────────────────────
+
+model Asset {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId       String        @db.Uuid
+  name           String
+  description    String?
+  category       AssetCategory
+  serialNumber   String?
+  purchaseDate   DateTime?     @db.Date
+  purchasePrice  Decimal?      @db.Decimal(19, 4)
+  currentValue   Decimal?      @db.Decimal(19, 4)
+  supplier       String?
+  warrantyExpiry DateTime?     @db.Date
+  location       String?
+  status         AssetStatus   @default(ACTIVE)
+  assignedTo     String?       @db.Uuid
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+
+  branch              Branch              @relation(fields: [branchId], references: [id])
+  assignedUser        User?               @relation("AssignedTo", fields: [assignedTo], references: [id])
+  maintenanceRecords  MaintenanceRecord[]
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("assets")
+}
+
+model MaintenanceRecord {
+  id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assetId       String            @db.Uuid
+  scheduledDate DateTime          @db.Date
+  completedDate DateTime?         @db.Date
+  description   String
+  cost          Decimal?          @db.Decimal(19, 4)
+  performedBy   String?
+  status        MaintenanceStatus @default(SCHEDULED)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId])
+  @@map("maintenance_records")
+}
+
+// ─────────────────────────────────────────────
+// EVENTS / SERVICES DOMAIN
+// ─────────────────────────────────────────────
+
+model TempleService {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId    String          @db.Uuid
+  name        String
+  nameGu      String?
+  nameHi      String?
+  description String?
+  category    ServiceCategory
+  price       Decimal         @default(0) @db.Decimal(19, 4)
+  currency    String          @default("GBP")
+  duration    Int?            // minutes
+  capacity    Int?
+  isActive    Boolean         @default(true)
+  imageUrl    String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deletedAt   DateTime?
+
+  branch   Branch           @relation(fields: [branchId], references: [id])
+  bookings ServiceBooking[]
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("temple_services")
+}
+
+model ServiceBooking {
+  id              String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String                  @db.Uuid
+  branchId        String                  @db.Uuid
+  serviceId       String                  @db.Uuid
+  bookingDate     DateTime                @db.Date
+  startTime       DateTime
+  endTime         DateTime?
+  quantity        Int                     @default(1)
+  totalAmount     Decimal                 @db.Decimal(19, 4)
+  status          BookingStatus           @default(PENDING)
+  notes           String?
+  paymentRef      String?
+  paymentProvider BookingPaymentProvider?
+  idempotencyKey  String                  @unique
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  deletedAt       DateTime?
+
+  user    User          @relation(fields: [userId], references: [id])
+  branch  Branch        @relation(fields: [branchId], references: [id])
+  service TempleService @relation(fields: [serviceId], references: [id])
+
+  @@index([userId])
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("service_bookings")
+}
+
+// ─────────────────────────────────────────────
+// DOCUMENTS DOMAIN
+// ─────────────────────────────────────────────
+
+model Document {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId         String           @db.Uuid
+  uploadedBy       String           @db.Uuid
+  name             String
+  description      String?
+  category         DocumentCategory
+  mimeType         String
+  sizeBytes        BigInt
+  sharePointUrl    String
+  sharePointItemId String           @unique
+  version          Int              @default(1)
+  isPublic         Boolean          @default(false)
+  tags             String[]         @default([])
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  deletedAt        DateTime?
+
+  branch              Branch               @relation(fields: [branchId], references: [id])
+  uploader            User                 @relation("UploadedBy", fields: [uploadedBy], references: [id])
+  accessList          DocumentAccess[]
+  governanceDocuments GovernanceDocument[]
+
+  @@index([branchId])
+  @@index([uploadedBy])
+  @@index([deletedAt])
+  @@map("documents")
+}
+
+model DocumentAccess {
+  id         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId String             @db.Uuid
+  userId     String             @db.Uuid
+  permission DocumentPermission
+  grantedBy  String             @db.Uuid
+  createdAt  DateTime           @default(now())
+
+  document  Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user      User     @relation("UserAccess", fields: [userId], references: [id])
+  grantor   User     @relation("GrantedBy", fields: [grantedBy], references: [id])
+
+  @@unique([documentId, userId])
+  @@index([documentId])
+  @@index([userId])
+  @@map("document_access")
+}
+
+// ─────────────────────────────────────────────
+// COMPLIANCE DOMAIN
+// ─────────────────────────────────────────────
+
+model GovernanceDocument {
+  id          String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId    String                   @db.Uuid
+  title       String
+  type        GovernanceDocumentType
+  status      GovernanceDocumentStatus @default(DRAFT)
+  version     String
+  approvedBy  String?                  @db.Uuid
+  approvedAt  DateTime?
+  documentId  String?                  @db.Uuid
+  reviewDue   DateTime?                @db.Date
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  deletedAt   DateTime?
+
+  branch    Branch    @relation(fields: [branchId], references: [id])
+  approver  User?     @relation("ApprovedBy", fields: [approvedBy], references: [id])
+  document  Document? @relation(fields: [documentId], references: [id])
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("governance_documents")
+}
+
+model TrusteeDeclaration {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String          @db.Uuid
+  branchId        String          @db.Uuid
+  declarationType DeclarationType
+  declaredAt      DateTime
+  expiresAt       DateTime?
+  details         Json?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id])
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@index([userId])
+  @@index([branchId])
+  @@map("trustee_declarations")
+}
+
+// ─────────────────────────────────────────────
+// NOTIFICATIONS DOMAIN
+// ─────────────────────────────────────────────
+
+model Notification {
+  id        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String              @db.Uuid
+  title     String
+  body      String
+  type      NotificationType
+  channel   NotificationChannel
+  read      Boolean             @default(false)
+  readAt    DateTime?
+  metadata  Json?
+  createdAt DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────
+// BASKET / ORDERS DOMAIN
+// ─────────────────────────────────────────────
+
+model Basket {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String?      @db.Uuid
+  sessionId String?
+  branchId  String       @db.Uuid
+  status    BasketStatus @default(ACTIVE)
+  expiresAt DateTime?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  user   User?        @relation(fields: [userId], references: [id])
+  branch Branch       @relation(fields: [branchId], references: [id])
+  items  BasketItem[]
+  order  Order?
+
+  @@index([userId])
+  @@index([branchId])
+  @@map("baskets")
+}
+
+model BasketItem {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  basketId    String         @db.Uuid
+  itemType    BasketItemType
+  referenceId String?
+  name        String
+  description String?
+  quantity    Int            @default(1)
+  unitPrice   Decimal        @db.Decimal(19, 4)
+  totalPrice  Decimal        @db.Decimal(19, 4)
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  basket Basket @relation(fields: [basketId], references: [id], onDelete: Cascade)
+
+  @@index([basketId])
+  @@map("basket_items")
+}
+
+model Order {
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String?              @db.Uuid
+  branchId        String               @db.Uuid
+  basketId        String               @unique @db.Uuid
+  reference       String               @unique
+  status          OrderStatus          @default(PENDING)
+  totalAmount     Decimal              @db.Decimal(19, 4)
+  currency        String               @default("GBP")
+  paymentProvider OrderPaymentProvider?
+  paymentRef      String?
+  idempotencyKey  String               @unique
+  metadata        Json?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  deletedAt       DateTime?
+
+  user   User?   @relation(fields: [userId], references: [id])
+  branch Branch  @relation(fields: [branchId], references: [id])
+  basket Basket  @relation(fields: [basketId], references: [id])
+
+  @@index([userId])
+  @@index([branchId])
+  @@index([deletedAt])
+  @@map("orders")
+}
