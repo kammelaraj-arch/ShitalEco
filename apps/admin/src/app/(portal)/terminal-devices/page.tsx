@@ -44,9 +44,11 @@ interface FormState {
   notes: string
 }
 
+const DEFAULT_LOCATION_ID = 'tml_Gcuz0gCsvSvQZg'
+
 const EMPTY_FORM: FormState = {
   branch_id: '', branch_name: '', label: '', provider: 'stripe_terminal',
-  stripe_reader_id: '', stripe_location_id: '', square_device_id: '',
+  stripe_reader_id: '', stripe_location_id: DEFAULT_LOCATION_ID, square_device_id: '',
   device_type: '', serial_number: '',
   user_id: '', user_name: '', user_email: '', notes: '',
 }
@@ -202,7 +204,7 @@ function DeviceModal({
           {form.provider === 'stripe_terminal' && (
             <div className="space-y-3">
               <Field label="Stripe Reader ID" value={form.stripe_reader_id} onChange={v => set('stripe_reader_id', v)} placeholder="tmr_xxxxxxxxxxxxxx" mono />
-              <Field label="Stripe Location ID" value={form.stripe_location_id} onChange={v => set('stripe_location_id', v)} placeholder="tml_xxxxxxxxxxxxxx" mono />
+              <Field label="Stripe Location ID" value={form.stripe_location_id} onChange={v => set('stripe_location_id', v)} placeholder={DEFAULT_LOCATION_ID} mono />
             </div>
           )}
           {form.provider === 'square' && (
@@ -349,7 +351,7 @@ function AssignUserModal({
 
 function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [branchId, setBranchId] = useState('')
-  const [locationId, setLocationId] = useState('')
+  const [locationId, setLocationId] = useState(DEFAULT_LOCATION_ID)
   const [syncing, setSyncing] = useState(false)
   const [result, setResult] = useState<{ synced: number; created: number; updated: number } | null>(null)
   const [error, setError] = useState('')
@@ -399,7 +401,7 @@ function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
             </div>
           )}
           <Field label="Assign to Branch ID (optional)" value={branchId} onChange={setBranchId} placeholder="wembley" />
-          <Field label="Stripe Location ID (optional)" value={locationId} onChange={setLocationId} placeholder="tml_xxxxxxxxxxxx" mono />
+          <Field label="Stripe Location ID (optional)" value={locationId} onChange={setLocationId} placeholder={DEFAULT_LOCATION_ID} mono />
           <p className="text-white/25 text-xs">Leave blank to use defaults from server config. New readers will be marked unassigned if no branch is provided.</p>
         </div>
         <div className="flex gap-3 px-6 py-4 border-t border-white/5">
@@ -717,7 +719,7 @@ export default function TerminalDevicesPage() {
           {[
             {
               step: '1', title: 'Register Stripe Location',
-              body: 'In your Stripe dashboard, create a Terminal Location for each branch. Copy the tml_xxx ID.',
+              body: `Your Stripe Terminal Location is already configured: ${DEFAULT_LOCATION_ID}. For additional branches, create new locations in the Stripe dashboard.`,
               icon: '🏢',
             },
             {
