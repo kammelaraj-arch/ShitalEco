@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, t, THEMES, KioskTheme } from '../store/kiosk.store'
 import {
   SOFT_DONATION_ITEMS, SHOP_ITEMS, BRICK_TIERS, GENERAL_DONATIONS, PROJECTS,
+  SPONSORSHIP_ITEMS,
   type CatalogItem,
 } from '../data/catalog'
 
@@ -14,6 +15,7 @@ const NAV_SECTIONS = [
     items: [
       { id: 'donations',        label: 'Donations',          labelGu: 'દાન',         labelHi: 'दान',          icon: '🪔' },
       { id: 'soft_donation',    label: 'Soft Item Donation', labelGu: 'વસ્તુ દાન',   labelHi: 'वस्तु दान',    icon: '🎁' },
+      { id: 'sponsorship',      label: 'Sponsorship',        labelGu: 'પ્રાયોજન',    labelHi: 'प्रायोजन',     icon: '📖' },
       { id: 'project_donation', label: 'Project Donation',   labelGu: 'પ્રોજેક્ટ',  labelHi: 'प्रोजेक्ट',   icon: '🏗️' },
       { id: 'services',         label: 'Services',           labelGu: 'સેવાઓ',       labelHi: 'सेवाएं',       icon: '✨' },
       { id: 'shop',             label: 'Shop',               labelGu: 'દુકાન',       labelHi: 'दुकान',        icon: '🛍️' },
@@ -173,6 +175,7 @@ export function HomeScreen() {
     if (activeNav === 'project_donation') return BRICK_TIERS
     if (activeNav === 'shop')             return SHOP_ITEMS
     if (activeNav === 'donations')        return GENERAL_DONATIONS
+    if (activeNav === 'sponsorship')      return SPONSORSHIP_ITEMS
     return []
   })()
 
