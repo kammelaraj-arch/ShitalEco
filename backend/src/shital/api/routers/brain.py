@@ -14,7 +14,13 @@ from shital.core.dna.registry import Fabric
 
 router = APIRouter(prefix="/brain", tags=["digital-brain"])
 
-_brain = DigitalBrain()
+_brain: DigitalBrain | None = None
+
+def get_brain() -> DigitalBrain:
+    global _brain
+    if _brain is None:
+        _brain = DigitalBrain()
+    return _brain
 
 
 class ChatRequest(BaseModel):
@@ -25,14 +31,14 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def chat(body: ChatRequest, ctx: CurrentSpace):
     fabric = Fabric(body.fabric) if body.fabric else None
-    response = await _brain.process(ctx, body.messages, fabric_filter=fabric)
+    response = await get_brain().process(ctx, body.messages, fabric_filter=fabric)
     return {"response": response, "role": "assistant"}
 
 
 @router.post("/stream")
 async def stream_chat(body: ChatRequest, ctx: CurrentSpace):
     async def event_stream() -> AsyncIterator[str]:
-        async for chunk in _brain.stream(ctx, body.messages):
+        async for chunk in get_brain().stream(ctx, body.messages):
             yield f"data: {chunk}\n\n"
         yield "data: [DONE]\n\n"
 
