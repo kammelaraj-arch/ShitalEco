@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 
 export type KioskTheme = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine'
 
@@ -163,7 +164,9 @@ interface KioskState {
   get itemCount(): number
 }
 
-export const useKioskStore = create<KioskState>((set, get) => ({
+export const useKioskStore = create<KioskState>()(
+  persist(
+    (set, get) => ({
   screen: 'idle',
   language: 'en',
   basketId: null,
@@ -241,7 +244,24 @@ export const useKioskStore = create<KioskState>((set, get) => ({
   get itemCount() {
     return get().items.reduce((sum, i) => sum + i.quantity, 0)
   },
-}))
+    }),
+    {
+      name: 'shital-kiosk-config',
+      storage: createJSONStorage(() => localStorage),
+      // Only persist device config + theme — never basket/order state
+      partialize: (state) => ({
+        theme: state.theme,
+        language: state.language,
+        cardProvider: state.cardProvider,
+        stripeReaderId: state.stripeReaderId,
+        stripeReaderLabel: state.stripeReaderLabel,
+        squareDeviceId: state.squareDeviceId,
+        squareDeviceName: state.squareDeviceName,
+        branchId: state.branchId,
+      }),
+    }
+  )
+)
 
 // Translation helper
 export const t = (key: string, lang: Language): string => {
