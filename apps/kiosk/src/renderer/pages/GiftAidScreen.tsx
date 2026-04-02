@@ -51,7 +51,7 @@ async function lookupPostcode(postcode: string): Promise<string[]> {
 // ─── Main GiftAidScreen ───────────────────────────────────────────────────────
 export function GiftAidScreen() {
   const {
-    items, setScreen, setGiftAidDeclaration, language, theme,
+    items, setScreen, setGiftAidDeclaration, setPendingPayment, language, theme,
   } = useKioskStore()
   const th = THEMES[theme]
 
@@ -98,11 +98,13 @@ export function GiftAidScreen() {
       contactEmail: contactMode === 'email' ? email : '',
       contactPhone: contactMode === 'phone' ? phone : '',
     })
+    setPendingPayment(true)
     setScreen('checkout')
   }
 
   const handleNoThanks = () => {
-    setGiftAidDeclaration(null)
+    setGiftAidDeclaration({ agreed: false, fullName: '', postcode: '', address: '', contactEmail: '', contactPhone: '' })
+    setPendingPayment(true)
     setScreen('checkout')
   }
 
@@ -115,6 +117,7 @@ export function GiftAidScreen() {
       contactEmail: noFormMode === 'email' ? noFormEmail : '',
       contactPhone: noFormMode === 'phone' ? noFormPhone : '',
     })
+    setPendingPayment(true)
     setScreen('checkout')
   }
 

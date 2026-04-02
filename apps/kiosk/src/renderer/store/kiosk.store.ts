@@ -144,7 +144,11 @@ interface KioskState {
     contactPhone: string
   } | null
 
+  // Set to true when gift aid screen is done so checkout auto-proceeds to payment
+  pendingPayment: boolean
+
   setGiftAidDeclaration: (decl: KioskState['giftAidDeclaration']) => void
+  setPendingPayment: (v: boolean) => void
   setScreen: (screen: KioskScreen) => void
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
@@ -178,6 +182,7 @@ export const useKioskStore = create<KioskState>()(
   branchId: 'main',
   theme: 'lotus',
   giftAidDeclaration: null,
+  pendingPayment: false,
   cardProvider: 'stripe_terminal',
   stripeReaderId: '',
   stripeReaderLabel: '',
@@ -185,6 +190,7 @@ export const useKioskStore = create<KioskState>()(
   squareDeviceName: '',
 
   setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
+  setPendingPayment: (pendingPayment) => set({ pendingPayment }),
   setScreen: (screen) => set({ screen }),
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
@@ -235,6 +241,7 @@ export const useKioskStore = create<KioskState>()(
     orderRef: null,
     paymentIntent: null,
     giftAidDeclaration: null,
+    pendingPayment: false,
   }),
 
   get total() {

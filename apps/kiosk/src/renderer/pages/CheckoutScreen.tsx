@@ -1,9 +1,9 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 import { DeviceConfigScreen } from './DeviceConfigScreen'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+const API_BASE = import.meta.env.VITE_API_URL || 'https://shital-backend.onrender.com/api/v1'
 
 type PaymentMethod = 'STRIPE_TERMINAL' | 'STRIPE_ONLINE' | 'SQUARE' | 'PAYPAL' | 'CASH'
 
@@ -11,6 +11,7 @@ export function CheckoutScreen() {
   const {
     language, setScreen, items, setOrderResult, branchId, setBasketId,
     theme, cardProvider, stripeReaderId, stripeReaderLabel, squareDeviceId,
+    pendingPayment, setPendingPayment,
   } = useKioskStore()
   const th = THEMES[theme]
 
@@ -88,7 +89,16 @@ export function CheckoutScreen() {
     }
   }
 
-  const handlePay = async () => {
+  // Auto-proceed to payment when returning from gift-aid screen
+  useEffect(() => {
+    if (pendingPayment) {
+      setPendingPayment(false)
+      handlePay()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPayment])
+
+  const handlePay = useCallback(async () => {
     setShowContactModal(false)
     setLoading(true)
     setError('')
@@ -194,7 +204,8 @@ export function CheckoutScreen() {
     } finally {
       setLoading(false)
     }
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMethod, items, total, branchId, stripeReaderId, stripeReaderLabel, squareDeviceId])
 
   return (
     <div className="w-full h-full flex flex-col" style={{ background: THEMES[theme].mainBg }}>
