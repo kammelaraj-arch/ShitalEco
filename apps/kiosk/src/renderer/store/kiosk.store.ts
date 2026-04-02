@@ -121,9 +121,21 @@ interface KioskState {
   branchId: string
   theme: KioskTheme
 
+  // Device config
+  cardProvider: 'stripe_terminal' | 'square' | 'cash'
+  stripeReaderId: string
+  stripeReaderLabel: string
+  squareDeviceId: string
+  squareDeviceName: string
+
   setScreen: (screen: KioskScreen) => void
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
+  setCardDevice: (
+    provider: 'stripe_terminal' | 'square' | 'cash',
+    deviceId: string,
+    deviceLabel: string
+  ) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
   removeItem: (id: string) => void
@@ -146,10 +158,22 @@ export const useKioskStore = create<KioskState>((set, get) => ({
   idleTimer: 120,
   branchId: 'main',
   theme: 'lotus',
+  cardProvider: 'stripe_terminal',
+  stripeReaderId: '',
+  stripeReaderLabel: '',
+  squareDeviceId: '',
+  squareDeviceName: '',
 
   setScreen: (screen) => set({ screen }),
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
+  setCardDevice: (provider, deviceId, deviceLabel) => set(
+    provider === 'stripe_terminal'
+      ? { cardProvider: provider, stripeReaderId: deviceId, stripeReaderLabel: deviceLabel }
+      : provider === 'square'
+      ? { cardProvider: provider, squareDeviceId: deviceId, squareDeviceName: deviceLabel }
+      : { cardProvider: provider }
+  ),
   setBasketId: (basketId) => set({ basketId }),
 
   addItem: (item) => set((state) => {

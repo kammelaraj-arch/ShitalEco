@@ -1,38 +1,91 @@
 import React, { useState } from 'react'
-import { motion } from 'framer-motion'
-import { useKioskStore, t } from '../store/kiosk.store'
-
-type PaymentMethod = 'STRIPE' | 'PAYPAL' | 'CASH'
-
-const PAYMENT_METHODS = [
-  { id: 'STRIPE' as PaymentMethod, label: 'Card Payment', icon: '💳', sub: 'Debit or Credit Card', color: 'from-blue-600 to-indigo-500' },
-  { id: 'PAYPAL' as PaymentMethod, label: 'PayPal / QR Code', icon: '📱', sub: 'Scan with your phone', color: 'from-blue-500 to-cyan-400' },
-  { id: 'CASH' as PaymentMethod, label: 'Cash at Counter', icon: '💷', sub: 'Pay at the front desk', color: 'from-green-600 to-emerald-500' },
-]
+import { motion, AnimatePresence } from 'framer-motion'
+import { useKioskStore, t, THEMES } from '../store/kiosk.store'
+import { DeviceConfigScreen } from './DeviceConfigScreen'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
 
+type PaymentMethod = 'STRIPE_TERMINAL' | 'STRIPE_ONLINE' | 'SQUARE' | 'PAYPAL' | 'CASH'
+
 export function CheckoutScreen() {
-  const { language, setScreen, items, setOrderResult, branchId, setBasketId } = useKioskStore()
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('STRIPE')
+  const {
+    language, setScreen, items, setOrderResult, branchId, setBasketId,
+    theme, cardProvider, stripeReaderId, stripeReaderLabel, squareDeviceId,
+  } = useKioskStore()
+  const th = THEMES[theme]
+
+  const total = items.reduce((s, i) => s + i.totalPrice, 0)
+
+  // Auto-select based on configured device
+  const defaultMethod: PaymentMethod =
+    cardProvider === 'stripe_terminal' ? 'STRIPE_TERMINAL' :
+    cardProvider === 'square' ? 'SQUARE' : 'CASH'
+
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(defaultMethod)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const total = items.reduce((s, i) => s + i.totalPrice, 0)
+  const [showDeviceConfig, setShowDeviceConfig] = useState(false)
+
+  const PAYMENT_METHODS: {
+    id: PaymentMethod; label: string; sub: string; icon: string
+    badge?: string; badgeColor?: string; color: string; borderColor: string
+  }[] = [
+    {
+      id: 'STRIPE_TERMINAL',
+      label: 'Card Reader',
+      sub: stripeReaderId
+        ? `WisePOS E — ${stripeReaderLabel || stripeReaderId.slice(-8)}`
+        : 'Stripe WisePOS E · tap/chip/contactless',
+      icon: '📟',
+      badge: stripeReaderId ? 'Ready' : 'No reader',
+      badgeColor: stripeReaderId ? '#22C55E' : '#F59E0B',
+      color: '#EEF2FF',
+      borderColor: '#6366F1',
+    },
+    {
+      id: 'SQUARE',
+      label: 'Square Terminal',
+      sub: squareDeviceId
+        ? `Square Device — ${squareDeviceId.slice(0, 12)}`
+        : 'Square card present device',
+      icon: '◼',
+      badge: squareDeviceId ? 'Ready' : 'Not configured',
+      badgeColor: squareDeviceId ? '#22C55E' : '#F59E0B',
+      color: '#F9FAFB',
+      borderColor: '#3E4348',
+    },
+    {
+      id: 'PAYPAL',
+      label: 'PayPal / QR',
+      sub: 'Scan QR code with phone',
+      icon: '📱',
+      color: '#EFF6FF',
+      borderColor: '#3B82F6',
+    },
+    {
+      id: 'CASH',
+      label: 'Cash at Counter',
+      sub: 'Pay at the front desk',
+      icon: '💷',
+      color: '#F0FDF4',
+      borderColor: '#22C55E',
+    },
+  ]
 
   const handlePay = async () => {
     setLoading(true)
     setError('')
     try {
-      // Create basket on backend
+      // Create basket
       const basketRes = await fetch(`${API_BASE}/kiosk/basket`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ branch_id: branchId }),
       })
-      const { basket_id, session_id } = await basketRes.json()
+      const { basket_id } = await basketRes.json()
       setBasketId(basket_id)
 
-      // Add all items
+      // Add items
       for (const item of items) {
         await fetch(`${API_BASE}/kiosk/basket/item`, {
           method: 'POST',
@@ -48,123 +101,229 @@ export function CheckoutScreen() {
         })
       }
 
-      // Checkout
-      const checkoutRes = await fetch(`${API_BASE}/kiosk/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          basket_id,
-          payment_provider: selectedMethod,
-          branch_id: branchId,
-        }),
-      })
-      const order = await checkoutRes.json()
-      setOrderResult(order.order_id, order.reference, order.payment || {})
-      setScreen('payment')
-    } catch (e) {
-      setError('Could not process payment. Please try again or ask for assistance.')
+      if (selectedMethod === 'STRIPE_TERMINAL') {
+        // Stripe Terminal: create PaymentIntent → send to reader → poll for result
+        const piRes = await fetch(`${API_BASE}/kiosk/terminal/payment-intent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount_pence: Math.round(total * 100),
+            order_id: basket_id,
+            description: 'Shital Temple Payment',
+            reader_id: stripeReaderId,
+          }),
+        })
+        const pi = await piRes.json()
+        if (pi.error) throw new Error(pi.error)
+
+        // Send to reader
+        if (stripeReaderId) {
+          await fetch(`${API_BASE}/kiosk/terminal/process-payment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reader_id: stripeReaderId, payment_intent_id: pi.payment_intent_id }),
+          })
+        }
+
+        const orderRef = `ORD-${basket_id.slice(0, 8).toUpperCase()}`
+        setOrderResult(basket_id, orderRef, {
+          provider: 'STRIPE_TERMINAL',
+          payment_intent_id: pi.payment_intent_id,
+          client_secret: pi.client_secret,
+          reader_id: stripeReaderId,
+          reader_label: stripeReaderLabel,
+        })
+        setScreen('payment')
+
+      } else if (selectedMethod === 'SQUARE') {
+        const sqRes = await fetch(`${API_BASE}/kiosk/square/terminal-checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount_pence: Math.round(total * 100),
+            order_id: basket_id,
+            device_id: squareDeviceId,
+            description: 'Shital Temple Payment',
+          }),
+        })
+        const sq = await sqRes.json()
+        if (sq.error) throw new Error(sq.error)
+
+        const orderRef = `ORD-${basket_id.slice(0, 8).toUpperCase()}`
+        setOrderResult(basket_id, orderRef, {
+          provider: 'SQUARE',
+          checkout_id: sq.checkout_id,
+          device_id: squareDeviceId,
+        })
+        setScreen('payment')
+
+      } else {
+        // PayPal / Cash: use legacy checkout
+        const checkoutRes = await fetch(`${API_BASE}/kiosk/checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            basket_id,
+            payment_provider: selectedMethod === 'PAYPAL' ? 'PAYPAL' : 'CASH',
+            branch_id: branchId,
+          }),
+        })
+        const order = await checkoutRes.json()
+        setOrderResult(order.order_id, order.reference, order.payment || {})
+        setScreen('payment')
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Could not process payment. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="w-full h-full flex flex-col">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="px-10 pt-8 pb-4"
-      >
-        <button onClick={() => setScreen('basket')} className="text-saffron-400/60 text-lg mb-2 block">← Back to Basket</button>
-        <h1 className="text-4xl font-black text-gold-gradient">{t('checkout', language)}</h1>
-      </motion.div>
+    <div className="w-full h-full flex flex-col" style={{ background: THEMES[theme].mainBg }}>
 
-      {/* Progress steps */}
-      <div className="px-10 mb-6">
-        <div className="flex items-center gap-2">
-          {['Basket', 'Payment Method', 'Pay'].map((step, i) => (
-            <React.Fragment key={step}>
-              <div className={`step-indicator flex-1 ${i <= 1 ? 'bg-saffron-400' : 'bg-white/10'}`} />
-              <span className={`text-sm font-medium ${i <= 1 ? 'text-saffron-400' : 'text-white/30'}`}>{step}</span>
-            </React.Fragment>
-          ))}
+      {/* Header */}
+      <div
+        className="flex items-center gap-3 px-5 py-4 border-b"
+        style={{ background: th.headerBg, borderColor: 'rgba(0,0,0,0.06)' }}
+      >
+        <button
+          onClick={() => setScreen('basket')}
+          className="text-sm font-semibold px-3 py-2 rounded-xl transition-colors"
+          style={{ color: th.sectionCountColor, background: `${th.langActive}15` }}
+        >
+          ← Back
+        </button>
+        <h1 className="font-black text-xl flex-1" style={{ color: th.headerText }}>Checkout</h1>
+        <div className="text-right">
+          <p className="text-xs font-medium opacity-50" style={{ color: th.headerText }}>{items.length} items</p>
+          <p className="font-black text-lg" style={{ color: th.sectionCountColor }}>£{total.toFixed(2)}</p>
         </div>
       </div>
 
-      <div className="flex-1 px-10 kiosk-scroll">
-        <h2 className="text-white/70 text-xl font-semibold mb-5">How would you like to pay?</h2>
+      <div className="flex-1 overflow-y-auto p-5" style={{ scrollbarWidth: 'none' }}>
 
-        <div className="grid grid-cols-1 gap-4 mb-6">
-          {PAYMENT_METHODS.map((method, i) => (
-            <motion.button
-              key={method.id}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.08 }}
-              onClick={() => setSelectedMethod(method.id)}
-              className={`
-                relative overflow-hidden rounded-4xl p-7 flex items-center gap-6
-                transition-all service-card ripple
-                ${selectedMethod === method.id
-                  ? `bg-gradient-to-r ${method.color} shadow-2xl scale-[1.02]`
-                  : 'glass-card border-white/10'}
-              `}
-            >
-              {selectedMethod === method.id && (
-                <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent pointer-events-none" />
-              )}
-              <span className="text-5xl">{method.icon}</span>
-              <div className="text-left flex-1">
-                <p className="text-white font-black text-2xl">{method.label}</p>
-                <p className="text-white/60 text-lg">{method.sub}</p>
-              </div>
-              {selectedMethod === method.id && (
-                <div className="w-8 h-8 rounded-full bg-white/30 flex items-center justify-center">
-                  <span className="text-white text-lg font-bold">✓</span>
-                </div>
-              )}
-            </motion.button>
-          ))}
+        {/* Section label */}
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-gray-400">How would you like to pay?</p>
+          <button
+            onClick={() => setShowDeviceConfig(true)}
+            className="text-xs font-semibold flex items-center gap-1 px-3 py-1.5 rounded-lg transition-colors"
+            style={{ color: th.sectionCountColor, background: `${th.langActive}12` }}
+          >
+            ⚙ Device Setup
+          </button>
         </div>
+
+        {/* Payment method cards */}
+        <div className="flex flex-col gap-3 mb-5">
+          {PAYMENT_METHODS.map((method, i) => {
+            const isActive = selectedMethod === method.id
+            return (
+              <motion.button
+                key={method.id}
+                initial={{ opacity: 0, x: -16 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.06 }}
+                onClick={() => setSelectedMethod(method.id)}
+                className="flex items-center gap-4 p-4 rounded-2xl border-2 text-left transition-all active:scale-[0.98]"
+                style={{
+                  borderColor: isActive ? method.borderColor : '#E5E7EB',
+                  background: isActive ? method.color : 'white',
+                  boxShadow: isActive ? `0 4px 16px ${method.borderColor}25` : '0 1px 3px rgba(0,0,0,0.05)',
+                }}
+              >
+                <span className="text-3xl w-10 text-center">{method.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-gray-900 text-base">{method.label}</p>
+                    {method.badge && (
+                      <span
+                        className="text-xs font-bold px-2 py-0.5 rounded-full"
+                        style={{ background: `${method.badgeColor}20`, color: method.badgeColor }}
+                      >
+                        {method.badge}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-gray-500 text-sm truncate">{method.sub}</p>
+                </div>
+                {isActive && (
+                  <div
+                    className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+                    style={{ background: method.borderColor }}
+                  >
+                    <span className="text-white text-xs font-black">✓</span>
+                  </div>
+                )}
+              </motion.button>
+            )
+          })}
+        </div>
+
+        {/* Info box */}
+        {selectedMethod === 'STRIPE_TERMINAL' && !stripeReaderId && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800 mb-4"
+          >
+            <p className="font-bold mb-1">⚠ No reader configured</p>
+            <p className="text-xs text-amber-700">Tap <strong>Device Setup</strong> above to connect a Stripe WisePOS E reader. Payment will still be created but won't be sent to a reader.</p>
+          </motion.div>
+        )}
 
         {error && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-red-500/20 border border-red-500/30 rounded-3xl p-5 mb-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 text-sm text-red-700"
           >
-            <p className="text-red-400 font-semibold">{error}</p>
+            <p className="font-bold mb-0.5">Payment failed</p>
+            <p>{error}</p>
           </motion.div>
         )}
+
+        {/* Order summary */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Order Summary</p>
+          {items.map(item => (
+            <div key={item.id} className="flex justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
+              <span className="text-gray-700">{item.name} × {item.quantity}</span>
+              <span className="font-semibold text-gray-900">£{item.totalPrice.toFixed(2)}</span>
+            </div>
+          ))}
+          <div className="flex justify-between font-black text-base mt-3 pt-3 border-t border-gray-200">
+            <span>Total</span>
+            <span style={{ color: th.sectionCountColor }}>£{total.toFixed(2)}</span>
+          </div>
+        </div>
       </div>
 
-      {/* Total & Pay */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="px-10 pb-8"
-      >
-        <div className="flex justify-between items-center mb-5">
-          <span className="text-white/60 text-2xl font-semibold">{t('total', language)}</span>
-          <span className="text-white font-black text-4xl">£{total.toFixed(2)}</span>
-        </div>
+      {/* Pay button */}
+      <div className="px-5 pb-5 pt-3 border-t border-gray-100">
         <button
           onClick={handlePay}
           disabled={loading}
-          className="w-full bg-saffron-gradient py-7 rounded-4xl font-black text-3xl text-white shadow-2xl pay-btn-pulse ripple disabled:opacity-50"
+          className="w-full py-5 rounded-2xl text-white font-black text-xl transition-all active:scale-[0.98] shadow-lg disabled:opacity-50"
+          style={{
+            background: loading ? '#9CA3AF' : `linear-gradient(135deg, ${th.basketBtn}, ${th.basketBtnHover})`,
+            boxShadow: `0 8px 24px ${th.basketBtn}50`,
+          }}
         >
           {loading ? (
             <span className="flex items-center justify-center gap-3">
-              <motion.span animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
-                🕉️
-              </motion.span>
+              <motion.span animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>🕉</motion.span>
               Processing...
             </span>
           ) : (
-            `${t('pay_now', language)} · £${total.toFixed(2)}`
+            `Pay £${total.toFixed(2)} →`
           )}
         </button>
-      </motion.div>
+      </div>
+
+      {/* Device config overlay */}
+      <AnimatePresence>
+        {showDeviceConfig && <DeviceConfigScreen onClose={() => setShowDeviceConfig(false)} />}
+      </AnimatePresence>
     </div>
   )
 }

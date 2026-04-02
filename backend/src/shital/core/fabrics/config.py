@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_TERMINAL_LOCATION_ID: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+
+    # Square
+    SQUARE_ACCESS_TOKEN: str = ""
+    SQUARE_ENVIRONMENT: str = "sandbox"  # sandbox | production
+    SQUARE_LOCATION_ID: str = ""
 
     # MeiliSearch
     MEILISEARCH_URL: str = "http://localhost:7700"

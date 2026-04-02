@@ -272,6 +272,210 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
     }
 
 
+# ─── Stripe Terminal ──────────────────────────────────────────────────────────
+
+@router.post("/terminal/connection-token")
+async def stripe_connection_token():
+    """Create a Stripe Terminal connection token for the JS SDK."""
+    import stripe
+    from shital.core.fabrics.config import settings
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        token = stripe.terminal.ConnectionToken.create()
+        return {"secret": token.secret}
+    except Exception as e:
+        return {"error": str(e), "secret": ""}
+
+
+class TerminalPaymentInput(BaseModel):
+    amount_pence: int
+    currency: str = "GBP"
+    order_id: str
+    description: str = "Shital Temple Payment"
+    reader_id: str = ""
+
+
+@router.post("/terminal/payment-intent")
+async def create_terminal_payment_intent(body: TerminalPaymentInput):
+    """Create a PaymentIntent for Stripe Terminal (WisePOS E)."""
+    import stripe
+    from shital.core.fabrics.config import settings
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=body.amount_pence,
+            currency=body.currency.lower(),
+            payment_method_types=["card_present"],
+            capture_method="automatic",
+            description=body.description,
+            metadata={"order_id": body.order_id, "reader_id": body.reader_id},
+        )
+        return {
+            "payment_intent_id": intent.id,
+            "client_secret": intent.client_secret,
+            "status": intent.status,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+class ReaderActionInput(BaseModel):
+    reader_id: str
+    payment_intent_id: str
+
+
+@router.post("/terminal/process-payment")
+async def process_payment_on_reader(body: ReaderActionInput):
+    """Send payment to the WisePOS E reader to collect card."""
+    import stripe
+    from shital.core.fabrics.config import settings
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        action = stripe.terminal.Reader.process_payment_intent(
+            body.reader_id,
+            payment_intent=body.payment_intent_id,
+        )
+        return {"reader_id": body.reader_id, "status": action.action.status if action.action else "unknown"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/terminal/cancel-action")
+async def cancel_reader_action(body: ReaderActionInput):
+    """Cancel current action on the reader."""
+    import stripe
+    from shital.core.fabrics.config import settings
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        stripe.terminal.Reader.cancel_action(body.reader_id)
+        return {"cancelled": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/terminal/readers")
+async def list_terminal_readers(location_id: str = ""):
+    """List registered Stripe Terminal readers."""
+    import stripe
+    from shital.core.fabrics.config import settings
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        params: dict = {"limit": 20}
+        if location_id:
+            params["location"] = location_id
+        elif settings.STRIPE_TERMINAL_LOCATION_ID:
+            params["location"] = settings.STRIPE_TERMINAL_LOCATION_ID
+        readers = stripe.terminal.Reader.list(**params)
+        return {
+            "readers": [
+                {
+                    "id": r.id,
+                    "label": r.label or r.id,
+                    "device_type": r.device_type,
+                    "status": r.status,
+                    "serial_number": getattr(r, "serial_number", ""),
+                    "location": r.location,
+                }
+                for r in readers.data
+            ]
+        }
+    except Exception as e:
+        return {"readers": [], "error": str(e)}
+
+
+# ─── Square Terminal ──────────────────────────────────────────────────────────
+
+class SquareCheckoutInput(BaseModel):
+    amount_pence: int
+    order_id: str
+    description: str = "Shital Temple Payment"
+    device_id: str = ""
+    note: str = ""
+
+
+@router.post("/square/terminal-checkout")
+async def square_terminal_checkout(body: SquareCheckoutInput):
+    """Create a Square Terminal checkout — sends payment to Square device."""
+    import httpx
+    from shital.core.fabrics.config import settings
+
+    base = (
+        "https://connect.squareup.com"
+        if settings.SQUARE_ENVIRONMENT == "production"
+        else "https://connect.squareupsandbox.com"
+    )
+    headers = {
+        "Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+        "Square-Version": "2024-06-04",
+    }
+    amount_money = body.amount_pence * 10  # Square uses smallest currency unit (pence × 10 for GBP? no — pence is already smallest)
+    # GBP: 1 pound = 100 pence. Square amount is in pence for GBP.
+    payload = {
+        "idempotency_key": body.order_id,
+        "checkout": {
+            "amount_money": {"amount": body.amount_pence, "currency": "GBP"},
+            "reference_id": body.order_id,
+            "note": body.note or body.description,
+            "device_options": {
+                "device_id": body.device_id or settings.SQUARE_LOCATION_ID,
+                "skip_receipt_screen": False,
+                "collect_signature": False,
+                "tip_settings": {"allow_tipping": False},
+            },
+            "payment_type": "CARD_PRESENT",
+        },
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(f"{base}/v2/terminals/checkouts", headers=headers, json=payload, timeout=15)
+        data = resp.json()
+        if "checkout" in data:
+            return {
+                "checkout_id": data["checkout"]["id"],
+                "device_id": body.device_id,
+                "status": data["checkout"]["status"],
+                "amount": body.amount_pence / 100,
+            }
+        return {"error": data.get("errors", [{}])[0].get("detail", "Unknown error")}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/square/devices")
+async def list_square_devices():
+    """List registered Square Terminal devices."""
+    import httpx
+    from shital.core.fabrics.config import settings
+
+    base = (
+        "https://connect.squareup.com"
+        if settings.SQUARE_ENVIRONMENT == "production"
+        else "https://connect.squareupsandbox.com"
+    )
+    headers = {
+        "Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}",
+        "Square-Version": "2024-06-04",
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{base}/v2/devices", headers=headers, timeout=10)
+        data = resp.json()
+        return {
+            "devices": [
+                {
+                    "id": d["id"],
+                    "name": d.get("attributes", {}).get("name", d["id"]),
+                    "status": d.get("status", {}).get("category", "unknown"),
+                    "model": d.get("attributes", {}).get("model", ""),
+                }
+                for d in data.get("devices", [])
+            ]
+        }
+    except Exception as e:
+        return {"devices": [], "error": str(e)}
+
+
 @router.get("/donation-amounts")
 async def donation_amounts():
     """Preset donation amounts for the kiosk donation screen."""

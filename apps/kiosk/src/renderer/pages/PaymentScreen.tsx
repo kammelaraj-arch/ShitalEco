@@ -1,132 +1,303 @@
 import React, { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
-import { useKioskStore } from '../store/kiosk.store'
+import { motion, AnimatePresence } from 'framer-motion'
+import { useKioskStore, THEMES } from '../store/kiosk.store'
 import { QRCodeSVG } from 'qrcode.react'
 
-export function PaymentScreen() {
-  const { setScreen, paymentIntent, orderRef, items } = useKioskStore()
-  const [timeLeft, setTimeLeft] = useState(300) // 5 min timeout
-  const total = items.reduce((s, i) => s + i.totalPrice, 0)
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
 
-  const provider = (paymentIntent as Record<string, unknown>)?.provider as string
-  const approvalUrl = (paymentIntent as Record<string, unknown>)?.approval_url as string
-  const clientSecret = (paymentIntent as Record<string, unknown>)?.client_secret as string
+type ReaderStatus = 'waiting' | 'processing' | 'succeeded' | 'failed' | 'cancelled'
+
+export function PaymentScreen() {
+  const { setScreen, paymentIntent, orderRef, items, theme } = useKioskStore()
+  const th = THEMES[theme]
+
+  const total = items.reduce((s, i) => s + i.totalPrice, 0)
+  const pi = paymentIntent as Record<string, unknown>
+  const provider = pi?.provider as string
+  const approvalUrl = pi?.approval_url as string
+  const readerLabel = pi?.reader_label as string
+  const paymentIntentId = pi?.payment_intent_id as string
+  const readerId = pi?.reader_id as string
+  const checkoutId = pi?.checkout_id as string
+
+  const [timeLeft, setTimeLeft] = useState(300)
+  const [readerStatus, setReaderStatus] = useState<ReaderStatus>('waiting')
+  const [statusMessage, setStatusMessage] = useState('')
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setTimeLeft((t) => {
-        if (t <= 1) {
-          clearInterval(timer)
-          setScreen('home')
-          return 0
-        }
+      setTimeLeft(t => {
+        if (t <= 1) { clearInterval(timer); setScreen('home'); return 0 }
         return t - 1
       })
     }, 1000)
     return () => clearInterval(timer)
   }, [])
 
-  // Simulate payment completion for demo
-  const handleSimulatePayment = () => {
-    setScreen('confirmation')
+  // Poll reader status for Stripe Terminal
+  useEffect(() => {
+    if (provider !== 'STRIPE_TERMINAL' || !readerId || !paymentIntentId) return
+
+    setReaderStatus('processing')
+    setStatusMessage('Waiting for card...')
+
+    // Poll every 2 seconds
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/terminal/payment-intent-status?id=${paymentIntentId}`)
+        const d = await res.json()
+        if (d.status === 'succeeded') {
+          clearInterval(poll)
+          setReaderStatus('succeeded')
+          setStatusMessage('Payment successful!')
+          setTimeout(() => setScreen('confirmation'), 1500)
+        } else if (d.status === 'canceled') {
+          clearInterval(poll)
+          setReaderStatus('cancelled')
+          setStatusMessage('Payment was cancelled.')
+        } else if (d.status === 'requires_payment_method') {
+          setStatusMessage('Present card to the reader...')
+        } else if (d.status === 'processing') {
+          setStatusMessage('Processing payment...')
+        }
+      } catch { /* ignore poll errors */ }
+    }, 2000)
+
+    return () => clearInterval(poll)
+  }, [provider, readerId, paymentIntentId])
+
+  // Poll Square Terminal checkout status
+  useEffect(() => {
+    if (provider !== 'SQUARE' || !checkoutId) return
+    setReaderStatus('processing')
+    setStatusMessage('Waiting for card on Square Terminal...')
+
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/square/terminal-checkout/${checkoutId}`)
+        const d = await res.json()
+        if (d.status === 'COMPLETED') {
+          clearInterval(poll)
+          setReaderStatus('succeeded')
+          setStatusMessage('Payment successful!')
+          setTimeout(() => setScreen('confirmation'), 1500)
+        } else if (['CANCELED', 'CANCEL_REQUESTED'].includes(d.status)) {
+          clearInterval(poll)
+          setReaderStatus('cancelled')
+          setStatusMessage('Payment was cancelled.')
+        }
+      } catch { }
+    }, 2500)
+
+    return () => clearInterval(poll)
+  }, [provider, checkoutId])
+
+  const handleCancel = async () => {
+    if (provider === 'STRIPE_TERMINAL' && readerId) {
+      await fetch(`${API_BASE}/kiosk/terminal/cancel-action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reader_id: readerId, payment_intent_id: paymentIntentId }),
+      }).catch(() => {})
+    }
+    setScreen('checkout')
   }
 
+  const statusColors: Record<ReaderStatus, string> = {
+    waiting:    '#F59E0B',
+    processing: '#3B82F6',
+    succeeded:  '#22C55E',
+    failed:     '#EF4444',
+    cancelled:  '#6B7280',
+  }
+
+  const isTerminal = provider === 'STRIPE_TERMINAL' || provider === 'SQUARE'
+
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center px-10">
+    <div
+      className="w-full h-full flex flex-col items-center justify-center px-8 py-6"
+      style={{ background: th.mainBg }}
+    >
       <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
+        initial={{ opacity: 0, scale: 0.92 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-xl text-center"
+        className="w-full max-w-md"
       >
-        {/* Header */}
-        <div className="mb-8">
-          <motion.div
-            animate={{ scale: [1, 1.1, 1] }}
-            transition={{ duration: 2, repeat: Infinity }}
-            className="text-7xl mb-4"
-          >
-            {provider === 'PAYPAL' ? '📱' : provider === 'CASH' ? '💷' : '💳'}
-          </motion.div>
-          <h1 className="text-4xl font-black text-white mb-2">
-            {provider === 'PAYPAL' ? 'Scan to Pay with PayPal' :
-             provider === 'CASH' ? 'Pay at the Counter' :
-             'Tap or Insert Your Card'}
-          </h1>
-          <p className="text-saffron-400/60 text-xl">Order {orderRef} · £{total.toFixed(2)}</p>
-        </div>
 
-        {/* Payment UI */}
-        {provider === 'PAYPAL' && approvalUrl && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="glass-card rounded-4xl p-8 mb-8"
-          >
-            <QRCodeSVG
-              value={approvalUrl}
-              size={220}
-              bgColor="transparent"
-              fgColor="#FF9933"
-              level="M"
-              className="mx-auto"
-            />
-            <p className="text-white/60 text-base mt-4">Scan with PayPal app or camera</p>
-          </motion.div>
-        )}
+        {/* ── Card Reader UI ────────────────────────────────────── */}
+        {isTerminal && (
+          <div className="text-center mb-6">
+            {/* Provider logo */}
+            <div className="flex items-center justify-center gap-3 mb-6">
+              <div
+                className="px-4 py-2 rounded-xl text-white text-sm font-black shadow-md"
+                style={{ background: provider === 'STRIPE_TERMINAL' ? '#6366F1' : '#3E4348' }}
+              >
+                {provider === 'STRIPE_TERMINAL' ? '🔷 Stripe Terminal' : '◼ Square Terminal'}
+              </div>
+            </div>
 
-        {provider === 'STRIPE' && (
-          <div className="glass-card rounded-4xl p-10 mb-8">
-            <motion.div
-              animate={{ y: [0, -8, 0] }}
-              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-              className="text-8xl mb-4"
-            >
-              💳
+            {/* Reader device illustration */}
+            <motion.div className="relative inline-flex flex-col items-center mb-6">
+              {/* Device body */}
+              <div className="relative w-40 bg-gray-800 rounded-3xl shadow-2xl overflow-hidden border-4 border-gray-700">
+                {/* Screen */}
+                <div
+                  className="h-28 flex flex-col items-center justify-center gap-2 m-2 rounded-2xl"
+                  style={{
+                    background:
+                      readerStatus === 'succeeded'
+                        ? 'linear-gradient(135deg,#22C55E,#16A34A)'
+                        : readerStatus === 'failed' || readerStatus === 'cancelled'
+                        ? 'linear-gradient(135deg,#EF4444,#DC2626)'
+                        : 'linear-gradient(135deg,#1E293B,#0F172A)',
+                  }}
+                >
+                  <AnimatePresence mode="wait">
+                    {readerStatus === 'succeeded' ? (
+                      <motion.div key="ok" initial={{ scale: 0 }} animate={{ scale: 1 }} className="text-5xl">✓</motion.div>
+                    ) : readerStatus === 'failed' || readerStatus === 'cancelled' ? (
+                      <motion.div key="fail" initial={{ scale: 0 }} animate={{ scale: 1 }} className="text-5xl">✗</motion.div>
+                    ) : (
+                      <motion.div
+                        key="waiting"
+                        animate={{ scale: [1, 1.15, 1], opacity: [0.7, 1, 0.7] }}
+                        transition={{ duration: 1.8, repeat: Infinity }}
+                        className="text-4xl"
+                      >
+                        {provider === 'STRIPE_TERMINAL' ? '📶' : '◼'}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  <p className="text-white/80 text-xs font-bold px-3 text-center leading-tight">
+                    {readerStatus === 'succeeded' ? 'Approved' :
+                     readerStatus === 'failed' ? 'Declined' :
+                     readerStatus === 'cancelled' ? 'Cancelled' :
+                     'Tap, Insert or Swipe'}
+                  </p>
+                </div>
+
+                {/* Chip reader slot */}
+                <div className="mx-4 mb-2 h-1.5 bg-gray-600 rounded-full" />
+
+                {/* NFC ring */}
+                <div className="mx-auto mb-3 w-10 h-10 rounded-full border-2 border-gray-600 flex items-center justify-center">
+                  <motion.div
+                    animate={readerStatus === 'processing' ? { scale: [1, 1.4, 1], opacity: [1, 0.3, 1] } : {}}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                    className="text-gray-500 text-sm"
+                  >
+                    )))
+                  </motion.div>
+                </div>
+              </div>
+
+              {/* Status dot */}
+              <motion.div
+                className="absolute -top-2 -right-2 w-5 h-5 rounded-full border-2 border-white shadow-lg"
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+                style={{ background: statusColors[readerStatus] }}
+              />
             </motion.div>
-            <p className="text-white text-2xl font-bold mb-2">Please tap, insert or swipe your card</p>
-            <p className="text-saffron-400/60 text-lg">on the card reader below the screen</p>
+
+            <h2 className="font-black text-2xl mb-2" style={{ color: th.sectionTitleColor }}>
+              {readerStatus === 'succeeded'
+                ? '✓ Payment Approved'
+                : readerStatus === 'cancelled'
+                ? 'Payment Cancelled'
+                : `Tap or Insert Card`}
+            </h2>
+            <p className="text-sm font-medium mb-1" style={{ color: th.sectionCountColor }}>
+              {readerLabel ? `Reader: ${readerLabel}` : provider}
+            </p>
+            <p className="text-gray-400 text-sm">
+              {statusMessage || 'Present your card to the reader'}
+            </p>
+
+            {/* Amount pill */}
+            <div
+              className="inline-flex items-center gap-2 mt-4 px-5 py-2.5 rounded-2xl shadow-sm"
+              style={{ background: `${th.basketBtn}15` }}
+            >
+              <span className="font-black text-2xl" style={{ color: th.sectionTitleColor }}>£{total.toFixed(2)}</span>
+              <span className="text-sm text-gray-400">{orderRef}</span>
+            </div>
           </div>
         )}
 
+        {/* ── PayPal QR ─────────────────────────────────────────── */}
+        {provider === 'PAYPAL' && (
+          <div className="text-center mb-6">
+            <h2 className="font-black text-2xl mb-4" style={{ color: th.sectionTitleColor }}>Scan to Pay</h2>
+            <div className="bg-white rounded-3xl p-6 shadow-lg inline-block mb-4">
+              {approvalUrl ? (
+                <QRCodeSVG value={approvalUrl} size={200} bgColor="white" fgColor="#1C0000" level="M" />
+              ) : (
+                <div className="w-48 h-48 bg-gray-100 rounded-2xl flex items-center justify-center text-gray-300 text-4xl">📱</div>
+              )}
+            </div>
+            <p className="text-gray-500 text-sm">Scan with PayPal app or phone camera</p>
+            <div className="mt-4 inline-block px-5 py-2.5 rounded-2xl shadow-sm" style={{ background: `${th.basketBtn}15` }}>
+              <span className="font-black text-2xl" style={{ color: th.sectionTitleColor }}>£{total.toFixed(2)}</span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Cash ─────────────────────────────────────────────── */}
         {provider === 'CASH' && (
-          <div className="glass-card rounded-4xl p-10 mb-8">
-            <p className="text-white text-2xl font-bold mb-3">Please proceed to the front desk</p>
-            <p className="text-saffron-400/60 text-xl mb-4">Quote your order reference:</p>
-            <p className="text-4xl font-black text-gold-gradient">{orderRef}</p>
+          <div className="text-center mb-6">
+            <div className="text-6xl mb-4">💷</div>
+            <h2 className="font-black text-2xl mb-2" style={{ color: th.sectionTitleColor }}>Pay at the Counter</h2>
+            <p className="text-gray-500 mb-5">Show this reference to staff:</p>
+            <div className="bg-white rounded-2xl p-5 shadow-lg border-2 border-dashed border-gray-200 mb-4">
+              <p className="font-black text-4xl tracking-widest text-center" style={{ color: th.sectionCountColor }}>
+                {orderRef}
+              </p>
+            </div>
+            <p className="text-gray-400 text-sm">Amount due: <span className="font-black" style={{ color: th.sectionTitleColor }}>£{total.toFixed(2)}</span></p>
           </div>
         )}
 
-        {/* Timeout indicator */}
-        <div className="mb-6">
-          <div className="flex justify-between text-white/40 text-sm mb-1">
-            <span>Session expires in</span>
-            <span>{Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}</span>
+        {/* Timer bar */}
+        <div className="mb-5">
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>Session expires</span>
+            <span className={timeLeft < 60 ? 'text-red-500 font-bold' : ''}>
+              {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
+            </span>
           </div>
-          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <motion.div
-              className="h-full bg-saffron-400 rounded-full"
-              style={{ width: `${(timeLeft / 300) * 100}%` }}
+              className="h-full rounded-full"
+              style={{
+                width: `${(timeLeft / 300) * 100}%`,
+                background: timeLeft < 60 ? '#EF4444' : th.basketBtn,
+              }}
               transition={{ duration: 1 }}
             />
           </div>
         </div>
 
         {/* Actions */}
-        <div className="flex gap-4">
+        <div className="flex gap-3">
           <button
-            onClick={() => setScreen('checkout')}
-            className="flex-1 glass-card py-5 rounded-3xl text-white/60 font-bold text-xl ripple"
+            onClick={handleCancel}
+            className="flex-1 py-4 rounded-2xl border-2 border-gray-200 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors active:scale-95"
           >
-            ← Back
+            ← Cancel
           </button>
-          {/* Demo button — remove in production */}
-          <button
-            onClick={handleSimulatePayment}
-            className="flex-2 bg-saffron-gradient py-5 px-8 rounded-3xl text-white font-black text-xl ripple"
-          >
-            ✓ Payment Complete
-          </button>
+          {!isTerminal && (
+            <button
+              onClick={() => setScreen('confirmation')}
+              className="py-4 px-6 rounded-2xl text-white font-black text-sm transition-all active:scale-95 shadow-lg"
+              style={{ background: `linear-gradient(135deg,${th.basketBtn},${th.basketBtnHover})`, flex: 2 }}
+            >
+              ✓ Confirm Payment
+            </button>
+          )}
         </div>
+
       </motion.div>
     </div>
   )
