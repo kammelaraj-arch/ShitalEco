@@ -20,7 +20,7 @@ export function DonateScreen() {
   const [showKeypad, setShowKeypad] = useState(false)
   const [keypadValue, setKeypadValue] = useState('')
 
-  const effectiveAmount = selectedAmount ?? parseFloat(customAmount) || 0
+  const effectiveAmount = selectedAmount ?? (parseFloat(customAmount) || 0)
   const giftAidExtra = effectiveAmount * 0.25
 
   const handleKeypad = (key: string) => {

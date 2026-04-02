@@ -1,6 +1,7 @@
 {
   "name": "@shital/kiosk",
   "version": "1.0.0",
+  "type": "module",
   "private": true,
   "description": "Shital Temple Self-Service Kiosk — McDonald's quality touch interface",
   "main": "src/main/main.js",
