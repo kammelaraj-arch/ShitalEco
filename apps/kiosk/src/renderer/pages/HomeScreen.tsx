@@ -232,15 +232,19 @@ export function HomeScreen() {
 
         {/* Title + MENU breadcrumb */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h1 className="font-black text-2xl leading-tight tracking-tight" style={{ color: th.headerText }}>Shital Temple</h1>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-black uppercase tracking-widest px-2 py-0.5 rounded-md" style={{ background: 'rgba(255,255,255,0.2)', color: th.headerText }}>
+          <h1 className="font-black text-xl leading-tight tracking-tight" style={{ color: th.headerText }}>Shital Temple</h1>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span
+              className="text-sm font-black uppercase tracking-wider px-3 py-1 rounded-lg flex items-center gap-1.5"
+              style={{ background: 'rgba(255,255,255,0.25)', color: th.headerText }}
+            >
               ☰ MENU
             </span>
-            <span className="text-xs font-semibold" style={{ color: th.headerSub }}>›</span>
-            <span className="text-xs font-bold uppercase tracking-wide" style={{ color: th.headerSub }}>
+            <span className="text-base font-bold" style={{ color: th.headerSub }}>›</span>
+            <span
+              className="text-sm font-black uppercase tracking-wide px-2 py-1 rounded-lg"
+              style={{ background: 'rgba(255,255,255,0.12)', color: th.headerText }}
+            >
               {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
             </span>
           </div>
