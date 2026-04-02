@@ -70,6 +70,7 @@ from shital.api.routers.kiosk import router as kiosk_router                     
 from shital.api.routers.items import router as items_router                        # noqa: E402
 from shital.api.routers.giftaid import router as giftaid_router                    # noqa: E402
 from shital.api.routers.terminal_devices import router as terminal_devices_router  # noqa: E402
+from shital.api.routers.users import router as users_router                        # noqa: E402
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(auth_azure_router, prefix="/api/v1")
@@ -81,6 +82,7 @@ app.include_router(kiosk_router, prefix="/api/v1")
 app.include_router(items_router, prefix="/api/v1")
 app.include_router(giftaid_router, prefix="/api/v1")
 app.include_router(terminal_devices_router, prefix="/api/v1")
+app.include_router(users_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])
