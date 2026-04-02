@@ -215,25 +215,35 @@ export function HomeScreen() {
 
       {/* ══ HEADER ══════════════════════════════════════════════════════════ */}
       <header
-        className="flex items-center h-16 px-4 gap-3 relative z-20 flex-shrink-0"
+        className="flex items-center h-20 px-4 gap-3 relative z-20 flex-shrink-0"
         style={{
           background: th.headerBg,
-          borderBottom: `2px solid rgba(255,153,51,0.25)`,
-          boxShadow: '0 2px 12px rgba(0,0,0,0.10)',
+          borderBottom: `3px solid rgba(255,153,51,0.35)`,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
         }}
       >
         {/* Logo */}
         <div
-          className="w-11 h-11 rounded-full flex items-center justify-center text-xl font-black shadow-lg border-2 border-white/30 flex-shrink-0"
+          className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-black shadow-xl border-2 border-white/30 flex-shrink-0"
           style={{ background: th.logoBg, color: th.logoText }}
         >
           🕉
         </div>
 
-        {/* Title */}
+        {/* Title + MENU breadcrumb */}
         <div className="flex-1 min-w-0">
-          <h1 className="font-black text-xl leading-tight" style={{ color: th.headerText }}>Shital</h1>
-          <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: th.headerSub }}>Wembley</p>
+          <div className="flex items-center gap-2 mb-0.5">
+            <h1 className="font-black text-2xl leading-tight tracking-tight" style={{ color: th.headerText }}>Shital Temple</h1>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-black uppercase tracking-widest px-2 py-0.5 rounded-md" style={{ background: 'rgba(255,255,255,0.2)', color: th.headerText }}>
+              ☰ MENU
+            </span>
+            <span className="text-xs font-semibold" style={{ color: th.headerSub }}>›</span>
+            <span className="text-xs font-bold uppercase tracking-wide" style={{ color: th.headerSub }}>
+              {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
+            </span>
+          </div>
         </div>
 
         {/* Language pills */}
@@ -285,7 +295,7 @@ export function HomeScreen() {
 
         {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
         <aside
-          className="w-52 flex-shrink-0 flex flex-col relative z-10 overflow-y-auto"
+          className="w-56 flex-shrink-0 flex flex-col relative z-10 overflow-y-auto"
           style={{
             background: `linear-gradient(180deg, ${th.sidebarFrom} 0%, ${th.sidebarTo} 100%)`,
             borderRight: `2px solid rgba(255,153,51,0.20)`,
@@ -303,7 +313,7 @@ export function HomeScreen() {
                   <button
                     key={item.id}
                     onClick={() => setActiveNav(item.id)}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-left transition-all relative"
+                    className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-all relative"
                     style={{
                       background: isActive ? th.sidebarActiveBg : 'transparent',
                       color: isActive ? th.sidebarActiveText : th.sidebarText,
@@ -312,12 +322,12 @@ export function HomeScreen() {
                     {/* Active bar */}
                     {isActive && (
                       <span
-                        className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full"
+                        className="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full"
                         style={{ background: th.sidebarIndicator }}
                       />
                     )}
-                    <span className="text-base">{item.icon}</span>
-                    <span className={`text-sm leading-tight ${isActive ? 'font-bold' : 'font-medium'}`}>
+                    <span className={`text-xl ${isActive ? '' : 'opacity-80'}`}>{item.icon}</span>
+                    <span className={`text-sm leading-tight tracking-wide ${isActive ? 'font-black' : 'font-semibold'}`}>
                       {getNavLabel(item, language)}
                     </span>
                   </button>
@@ -347,28 +357,30 @@ export function HomeScreen() {
           <section className="flex-1 flex flex-col overflow-hidden" style={{ borderBottom: `2px solid rgba(0,0,0,0.06)` }}>
             {/* Section header */}
             <div
-              className="flex items-center gap-3 px-5 py-3 flex-shrink-0"
+              className="flex items-center gap-3 px-5 py-4 flex-shrink-0"
               style={{
                 background: th.sectionHeaderBg,
-                borderBottom: `1px solid rgba(0,0,0,0.06)`,
-                boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+                borderBottom: `2px solid rgba(0,0,0,0.08)`,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
               }}
             >
-              <span className="text-xl">{activeNavItem?.icon ?? '✨'}</span>
-              <h2 className="font-black text-base tracking-wide" style={{ color: th.sectionTitleColor }}>
-                {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
-              </h2>
-              <span className="ml-auto text-xs font-semibold" style={{ color: th.sectionCountColor }}>
-                {useCatalog ? catalogItems.length : filteredServices.length} items
-              </span>
+              <span className="text-2xl">{activeNavItem?.icon ?? '✨'}</span>
+              <div>
+                <h2 className="font-black text-lg tracking-tight leading-tight" style={{ color: th.sectionTitleColor }}>
+                  {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
+                </h2>
+                <p className="text-xs font-semibold" style={{ color: th.sectionCountColor }}>
+                  {useCatalog ? catalogItems.length : filteredServices.length} items available
+                </p>
+              </div>
               {/* Gift Aid indicator */}
               {useCatalog && (
-                <span className={`ml-2 text-xs font-bold px-2 py-0.5 rounded-full ${
+                <span className={`ml-auto text-xs font-black px-3 py-1 rounded-full ${
                   activeNav === 'donations' || activeNav === 'project_donation'
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-red-50 text-red-600'
+                    ? 'bg-green-100 text-green-700 border border-green-200'
+                    : 'bg-gray-100 text-gray-500 border border-gray-200'
                 }`}>
-                  {activeNav === 'donations' || activeNav === 'project_donation' ? '✓ Gift Aid' : '✗ Not Gift Aid'}
+                  {activeNav === 'donations' || activeNav === 'project_donation' ? '✓ Gift Aid Eligible' : '✗ Not Gift Aid'}
                 </span>
               )}
             </div>
@@ -397,23 +409,23 @@ export function HomeScreen() {
                           className="relative overflow-hidden rounded-2xl text-left shadow-md transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5 bg-white border border-gray-100"
                         >
                           {/* Color band */}
-                          <div className="h-1.5 w-full" style={{ background: item.imageColor }} />
-                          <div className="p-3">
-                            <div className="flex items-start justify-between mb-1.5">
-                              <span className="text-3xl">{item.emoji}</span>
-                              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
-                                item.giftAidEligible ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                          <div className="h-2 w-full" style={{ background: item.imageColor }} />
+                          <div className="p-3.5">
+                            <div className="flex items-start justify-between mb-2">
+                              <span className="text-4xl">{item.emoji}</span>
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                                item.giftAidEligible ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-gray-100 text-gray-500'
                               }`}>
                                 {item.giftAidEligible ? '✓ GA' : '✗ GA'}
                               </span>
                             </div>
-                            <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">
+                            <p className="font-black text-gray-900 text-sm leading-snug line-clamp-2">
                               {language === 'gu' ? item.nameGu || item.name : language === 'hi' ? item.nameHi || item.name : item.name}
                             </p>
-                            {item.unit && <p className="text-gray-400 text-xs mt-0.5">{item.unit}</p>}
-                            <div className="flex items-center justify-between mt-2">
-                              <p className="font-black text-base" style={{ color: th.sectionCountColor }}>£{item.price}</p>
-                              <span className="text-xs px-2 py-0.5 rounded-full text-white font-semibold" style={{ background: th.basketBtn }}>+ Add</span>
+                            {item.unit && <p className="text-gray-400 text-xs mt-0.5 font-medium">{item.unit}</p>}
+                            <div className="flex items-center justify-between mt-2.5">
+                              <p className="font-black text-xl" style={{ color: th.sectionCountColor }}>£{item.price}</p>
+                              <span className="text-xs px-3 py-1 rounded-xl text-white font-black shadow-sm" style={{ background: th.basketBtn }}>+ ADD</span>
                             </div>
                           </div>
                           <AnimatePresence>
@@ -447,11 +459,11 @@ export function HomeScreen() {
                         >
                           <div className="absolute inset-0 bg-gradient-to-br from-white/25 to-transparent rounded-2xl pointer-events-none" />
                           <div className="relative z-10">
-                            <span className="text-3xl block mb-1.5">{m.icon}</span>
-                            <p className="text-white font-bold text-sm leading-snug line-clamp-2 drop-shadow-sm">{getName(svc, language)}</p>
-                            <div className="flex items-center justify-between mt-2">
-                              <p className="text-white font-black text-lg drop-shadow-sm">£{svc.price}</p>
-                              <span className="text-white/80 text-xs bg-white/20 px-2 py-0.5 rounded-full">+ Add</span>
+                            <span className="text-4xl block mb-2">{m.icon}</span>
+                            <p className="text-white font-black text-sm leading-snug line-clamp-2 drop-shadow-sm">{getName(svc, language)}</p>
+                            <div className="flex items-center justify-between mt-2.5">
+                              <p className="text-white font-black text-xl drop-shadow-sm">£{svc.price}</p>
+                              <span className="text-white text-xs bg-white/25 px-3 py-1 rounded-xl font-black">+ ADD</span>
                             </div>
                           </div>
                           <AnimatePresence>
@@ -540,10 +552,10 @@ export function HomeScreen() {
                 </div>
                 <button
                   onClick={() => setScreen('basket')}
-                  className="text-white font-black px-6 py-2.5 rounded-xl text-sm transition-all shadow-lg active:scale-95 hover:opacity-90"
+                  className="text-white font-black px-8 py-3 rounded-2xl text-base transition-all shadow-xl active:scale-95 hover:opacity-90 tracking-wide"
                   style={{ background: th.basketBtn }}
                 >
-                  View Basket →
+                  VIEW BASKET →
                 </button>
               </motion.div>
             )}
