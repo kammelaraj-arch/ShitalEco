@@ -23,6 +23,14 @@ services:
         value: production
       - key: CORS_ORIGINS
         value: "https://shital-kiosk.vercel.app,https://shital-admin.vercel.app"
+      - key: MS_CLIENT_ID
+        value: "bffbf7af-3bdb-4b05-94ca-fd7313e5ba28"
+      - key: MS_TENANT_ID
+        value: "cfbf46ad-f8bd-4a26-b0d5-989df0c6e8cc"
+      - key: MS_CLIENT_SECRET
+        value: "x1f8Q~I_H3PDVomGQbDr1PX71tdWLOEdyO4s3cua"
+      - key: STRIPE_TERMINAL_LOCATION_ID
+        value: "tml_Gcuz0gCsvSvQZg"
     healthCheckPath: /health
 
 databases:
