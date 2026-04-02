@@ -115,10 +115,32 @@ export const GENERAL_DONATIONS: CatalogItem[] = [
   { id: 'lamp_month', name: 'Lamp Sponsorship £11/month', nameGu: 'દીપ પ્રાયોજન', nameHi: 'दीपक प्रायोजन', icon: '🪔', emoji: '🪔', price: 11, category: 'GENERAL_DONATION', giftAidEligible: true, description: 'Sponsor a lamp in the temple — monthly', unit: '/month', imageColor: '#FEF9C3' },
 ]
 
+// ─── Temple Sponsorship Items (from shirdisai.org.uk) ─────────────────────────
+// Physical temple item sponsorships — NOT gift aid eligible (goods/services received)
+export const SPONSORSHIP_ITEMS: CatalogItem[] = [
+  // Satcharitra Books
+  { id: 'book_11',   name: 'Satcharitra Books (11)', nameGu: 'સતચરિત્ર ૧૧ પ્રત', nameHi: 'सतचरित्र 11 प्रतियां', icon: '📖', emoji: '📖', price: 21,   category: 'SPONSORSHIP', giftAidEligible: false, description: 'Sponsor 11 Shri Sai Satcharitra books', unit: '11 books', imageColor: '#FDE68A' },
+  { id: 'book_51',   name: 'Satcharitra Books (51)', nameGu: 'સતચરિત્ર ૫૧ પ્રત', nameHi: 'सतचरित्र 51 प्रतियां', icon: '📖', emoji: '📖', price: 101,  category: 'SPONSORSHIP', giftAidEligible: false, description: 'Sponsor 51 Sai Satcharitra books', unit: '51 books', imageColor: '#F59E0B' },
+  { id: 'book_101',  name: 'Satcharitra Books (101)', nameGu: 'સતચરિત્ર ૧૦૧ પ્રત', nameHi: 'सतचरित्र 101 प्रतियां', icon: '📖', emoji: '📖', price: 201,  category: 'SPONSORSHIP', giftAidEligible: false, description: 'Sponsor 101 Sai Satcharitra books', unit: '101 books', imageColor: '#D97706' },
+  { id: 'book_501',  name: 'Satcharitra Books (501)', nameGu: 'સતચરિત્ર ૫૦૧ પ્રત', nameHi: 'सतचरित्र 501 प्रतियां', icon: '📖', emoji: '📖', price: 1001, category: 'SPONSORSHIP', giftAidEligible: false, description: 'Sponsor 501 Sai Satcharitra books', unit: '501 books', imageColor: '#B45309' },
+  { id: 'book_1001', name: 'Satcharitra Books (1001)', nameGu: 'સતચરિત્ર ૧૦૦૧ પ્રત', nameHi: 'सतचरित्र 1001 प्रतियां', icon: '📖', emoji: '📖', price: 2001, category: 'SPONSORSHIP', giftAidEligible: false, description: 'Sponsor 1001 Sai Satcharitra books', unit: '1001 books', imageColor: '#92400E' },
+  // Baba's Shawls
+  { id: 'shawl_day',   name: "Baba's Shawl (1 Day)",   nameGu: 'બાબાની ચાદર (1 દિવસ)', nameHi: 'बाबा का शॉल (1 दिन)', icon: '🧣', emoji: '🧣', price: 41,  category: 'SPONSORSHIP', giftAidEligible: false, description: "Sponsor Baba's shawl for one day", unit: '1 day', imageColor: '#E0E7FF' },
+  { id: 'shawl_week',  name: "Baba's Shawl (1 Week)",  nameGu: 'બાબાની ચાદર (1 અઠવ)', nameHi: 'बाबा का शॉल (1 सप्ताह)', icon: '🧣', emoji: '🧣', price: 151, category: 'SPONSORSHIP', giftAidEligible: false, description: "Sponsor Baba's shawl for one week", unit: '1 week', imageColor: '#C7D2FE' },
+  { id: 'shawl_fortnight', name: "Baba's Shawl (Fortnight)", nameGu: 'ચાદર (2 અઠવ)', nameHi: 'बाबा का शॉल (2 सप्ताह)', icon: '🧣', emoji: '🧣', price: 251, category: 'SPONSORSHIP', giftAidEligible: false, description: "Sponsor Baba's shawl for a fortnight", unit: '2 weeks', imageColor: '#A5B4FC' },
+  { id: 'shawl_month', name: "Baba's Shawl (1 Month)", nameGu: 'ચાદર (1 મહિનો)', nameHi: 'बाबा का शॉल (1 महीना)', icon: '🧣', emoji: '🧣', price: 651, category: 'SPONSORSHIP', giftAidEligible: false, description: "Sponsor Baba's shawl for one month", unit: '1 month', imageColor: '#818CF8' },
+  // Flower Garlands
+  { id: 'garland_day',   name: 'Flower Garland (1 Day)',   nameGu: 'ફૂલ માળા (1 દિવસ)', nameHi: 'फूल माला (1 दिन)', icon: '💐', emoji: '💐', price: 21,  category: 'SPONSORSHIP', giftAidEligible: false, description: 'Sponsor flower garlands for one day', unit: '1 day', imageColor: '#FCE7F3' },
+  { id: 'garland_week',  name: 'Flower Garland (1 Week)',  nameGu: 'ફૂલ માળા (1 અઠવ)', nameHi: 'फूल माला (1 सप्ताह)', icon: '💐', emoji: '💐', price: 101, category: 'SPONSORSHIP', giftAidEligible: false, description: 'Sponsor flower garlands for one week', unit: '1 week', imageColor: '#FBCFE8' },
+  { id: 'garland_fortnight', name: 'Flower Garland (Fortnight)', nameGu: 'ફૂલ માળા (2 અઠવ)', nameHi: 'फूल माला (2 सप्ताह)', icon: '💐', emoji: '💐', price: 201, category: 'SPONSORSHIP', giftAidEligible: false, description: 'Sponsor flower garlands for a fortnight', unit: '2 weeks', imageColor: '#F9A8D4' },
+  { id: 'garland_month', name: 'Flower Garland (1 Month)', nameGu: 'ફૂલ માળા (1 મહિનો)', nameHi: 'फूल माला (1 महीना)', icon: '💐', emoji: '💐', price: 651, category: 'SPONSORSHIP', giftAidEligible: false, description: 'Sponsor flower garlands for a full month', unit: '1 month', imageColor: '#EC4899' },
+]
+
 // ─── Combined catalog ─────────────────────────────────────────────────────────
 export const ALL_CATALOG_ITEMS: CatalogItem[] = [
   ...SOFT_DONATION_ITEMS,
   ...BRICK_TIERS,
   ...SHOP_ITEMS,
   ...GENERAL_DONATIONS,
+  ...SPONSORSHIP_ITEMS,
 ]
