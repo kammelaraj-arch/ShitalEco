@@ -1,6 +1,7 @@
 {
   "name": "shital-admin",
   "framework": "nextjs",
+  "rootDirectory": "apps/admin",
   "buildCommand": "next build",
   "outputDirectory": ".next",
   "installCommand": "npm install",
