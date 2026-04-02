@@ -27,7 +27,7 @@ async function lookupPostcode(postcode: string): Promise<string[]> {
   const clean = postcode.trim().toUpperCase()
   try {
     const res = await fetch(
-      `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=YOUR_KEY&expand=true`,
+      `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=CkqEZqIrkEOGlQhie_NL8w48103&expand=true`,
       { signal: AbortSignal.timeout(4000) }
     )
     if (res.ok) {
