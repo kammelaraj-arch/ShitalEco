@@ -8,17 +8,17 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
 const NAV_SECTIONS = [
   {
     items: [
-      { id: 'donations',        label: 'Donations',          labelGu: 'દાન',         labelHi: 'दान',          icon: '🪔' },
-      { id: 'soft_donation',    label: 'Soft Item Donation', labelGu: 'વસ્તુ દાન',   labelHi: 'वस्तु दान',    icon: '🎁' },
-      { id: 'project_donation', label: 'Project Donation',   labelGu: 'પ્રોજેક્ટ',  labelHi: 'प्रोजेक्ट',   icon: '🏗️' },
-      { id: 'services',         label: 'Services',           labelGu: 'સેવાઓ',       labelHi: 'सेवाएं',       icon: '✨' },
-      { id: 'shop',             label: 'Shop',               labelGu: 'દુકાન',       labelHi: 'दुकान',        icon: '🛍️' },
+      { id: 'donations',        label: 'Donations',          labelGu: 'દાન',         labelHi: 'दान',          icon: '🪔', screen: 'donate' as const },
+      { id: 'soft_donation',    label: 'Soft Item Donation', labelGu: 'વસ્તુ દાન',   labelHi: 'वस्तु दान',    icon: '🎁', screen: 'soft-donation' as const },
+      { id: 'project_donation', label: 'Project Donation',   labelGu: 'પ્રોજેક્ટ',  labelHi: 'प्रोजेक्ट',   icon: '🏗️', screen: 'project-donation' as const },
+      { id: 'services',         label: 'Services',           labelGu: 'સેવાઓ',       labelHi: 'सेवाएं',       icon: '✨', screen: 'services' as const },
+      { id: 'shop',             label: 'Shop',               labelGu: 'દુકાન',       labelHi: 'दुकान',        icon: '🛍️', screen: 'shop' as const },
     ],
   },
   {
     items: [
-      { id: 'information',  label: 'Information',  labelGu: 'માહિતી', labelHi: 'जानकारी', icon: 'ℹ️' },
-      { id: 'registration', label: 'Registration', labelGu: 'નોંધણી', labelHi: 'पंजीकरण', icon: '📝' },
+      { id: 'information',  label: 'Information',  labelGu: 'માહિતી', labelHi: 'जानकारी', icon: 'ℹ️', screen: 'home' as const },
+      { id: 'registration', label: 'Registration', labelGu: 'નોંધણી', labelHi: 'पंजीकरण', icon: '📝', screen: 'home' as const },
     ],
   },
 ]
@@ -271,7 +271,21 @@ export function HomeScreen() {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setActiveNav(item.id)}
+                    onClick={() => {
+                      // Navigate to dedicated screen if one exists for this nav item
+                      const dedicatedScreens: Record<string, Parameters<typeof setScreen>[0]> = {
+                        soft_donation:    'soft-donation',
+                        project_donation: 'project-donation',
+                        shop:             'shop',
+                        services:         'services',
+                        donations:        'donate',
+                      }
+                      if (dedicatedScreens[item.id]) {
+                        setScreen(dedicatedScreens[item.id])
+                      } else {
+                        setActiveNav(item.id)
+                      }
+                    }}
                     className="w-full flex items-center gap-3 px-4 py-3 text-left transition-all relative"
                     style={{
                       background: isActive ? th.sidebarActiveBg : 'transparent',
@@ -366,7 +380,19 @@ export function HomeScreen() {
                           <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/20 to-transparent rounded-b-2xl pointer-events-none" />
 
                           <div className="relative z-10">
-                            <span className="text-3xl block mb-1.5">{m.icon}</span>
+                            <div className="flex items-start justify-between mb-1.5">
+                              <span className="text-3xl">{m.icon}</span>
+                              {/* GA badge */}
+                              {svc.category === 'DONATION' ? (
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-400/30 text-green-100 flex items-center gap-0.5">
+                                  ✓ GA
+                                </span>
+                              ) : (
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-400/30 text-red-100">
+                                  ✗ GA
+                                </span>
+                              )}
+                            </div>
                             <p className="text-white font-bold text-sm leading-snug line-clamp-2 drop-shadow-sm">
                               {getName(svc, language)}
                             </p>

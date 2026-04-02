@@ -490,3 +490,16 @@ async def donation_amounts():
         ],
         "currency": "GBP",
     }
+
+
+# ─── GetAddress Postcode Lookup (proxied for kiosk) ──────────────────────────
+
+@router.get("/postcode/{postcode}")
+async def postcode_lookup(postcode: str):
+    """Proxy GetAddress.io for kiosk Gift Aid address lookup."""
+    from shital.capabilities.giftaid.capabilities import lookup_postcode
+    from shital.core.space.context import DigitalSpace
+    import uuid
+    ctx = DigitalSpace(user_id="kiosk", user_email="kiosk@shital.org", role="KIOSK",
+                       branch_id="main", permissions=[], session_id=str(uuid.uuid4()))
+    return await lookup_postcode(ctx, postcode)

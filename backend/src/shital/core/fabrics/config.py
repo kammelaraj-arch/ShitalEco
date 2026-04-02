@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     MEILISEARCH_URL: str = "http://localhost:7700"
     MEILISEARCH_MASTER_KEY: str = ""
 
+    # GetAddress.io (UK postcode lookup for Gift Aid)
+    GETADDRESS_API_KEY: str = ""
+
+    # HMRC Gift Aid
+    HMRC_GIFT_AID_USER_ID: str = ""          # HMRC Government Gateway User ID
+    HMRC_GIFT_AID_PASSWORD: str = ""         # HMRC Gateway Password
+    HMRC_GIFT_AID_VENDOR_ID: str = ""        # Software vendor ID
+    HMRC_GIFT_AID_CHARITY_HMO_REF: str = ""  # Charity HMRC reference (e.g. AB12345)
+    HMRC_GIFT_AID_ENVIRONMENT: str = "test"  # test | live
+
     # App
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"

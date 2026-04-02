@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useKioskStore, t, THEMES } from '../store/kiosk.store'
+import { useKioskStore, THEMES } from '../store/kiosk.store'
 import { DeviceConfigScreen } from './DeviceConfigScreen'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
@@ -72,7 +72,24 @@ export function CheckoutScreen() {
     },
   ]
 
+  const hasGiftAidItems = items.some(i => i.giftAidEligible)
+
+  // Show email/phone modal before payment when no gift aid items
+  const [showContactModal, setShowContactModal] = useState(false)
+  const [contactMode, setContactMode] = useState<'email' | 'phone'>('email')
+  const [contactEmail, setContactEmail] = useState('')
+  const [contactPhone, setContactPhone] = useState('')
+
+  const handlePayClick = () => {
+    if (hasGiftAidItems) {
+      setScreen('gift-aid')
+    } else {
+      setShowContactModal(true)
+    }
+  }
+
   const handlePay = async () => {
+    setShowContactModal(false)
     setLoading(true)
     setError('')
     try {
@@ -282,26 +299,38 @@ export function CheckoutScreen() {
           </motion.div>
         )}
 
-        {/* Order summary */}
+        {/* Order summary with Gift Aid indicators */}
         <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Order Summary</p>
           {items.map(item => (
-            <div key={item.id} className="flex justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
-              <span className="text-gray-700">{item.name} × {item.quantity}</span>
-              <span className="font-semibold text-gray-900">£{item.totalPrice.toFixed(2)}</span>
+            <div key={item.id} className="flex items-center justify-between text-sm py-1.5 border-b border-gray-50 last:border-0 gap-2">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                {item.giftAidEligible ? (
+                  <span className="flex-shrink-0 text-xs font-black text-green-600" title="Gift Aid eligible">✓</span>
+                ) : (
+                  <span className="flex-shrink-0 text-xs font-medium text-gray-300" title="Not Gift Aid eligible">—</span>
+                )}
+                <span className="text-gray-700 truncate">{item.name} × {item.quantity}</span>
+              </div>
+              <span className="font-semibold text-gray-900 flex-shrink-0">£{item.totalPrice.toFixed(2)}</span>
             </div>
           ))}
           <div className="flex justify-between font-black text-base mt-3 pt-3 border-t border-gray-200">
             <span>Total</span>
             <span style={{ color: th.sectionCountColor }}>£{total.toFixed(2)}</span>
           </div>
+          {hasGiftAidItems && (
+            <div className="mt-2 rounded-xl bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700">
+              <span className="font-bold">✓ Gift Aid eligible items detected.</span> You'll be asked about Gift Aid next.
+            </div>
+          )}
         </div>
       </div>
 
       {/* Pay button */}
       <div className="px-5 pb-5 pt-3 border-t border-gray-100">
         <button
-          onClick={handlePay}
+          onClick={handlePayClick}
           disabled={loading}
           className="w-full py-5 rounded-2xl text-white font-black text-xl transition-all active:scale-[0.98] shadow-lg disabled:opacity-50"
           style={{
@@ -314,11 +343,84 @@ export function CheckoutScreen() {
               <motion.span animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>🕉</motion.span>
               Processing...
             </span>
+          ) : hasGiftAidItems ? (
+            `Next: Gift Aid →`
           ) : (
             `Pay £${total.toFixed(2)} →`
           )}
         </button>
       </div>
+
+      {/* Contact modal (no gift aid items) */}
+      <AnimatePresence>
+        {showContactModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end justify-center"
+            style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setShowContactModal(false)}
+          >
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="w-full bg-white rounded-t-3xl p-6 shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="w-12 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
+              <h3 className="font-black text-xl text-gray-900 mb-1">Receive Your Receipt</h3>
+              <p className="text-gray-500 text-sm mb-4">Please provide your email or phone to receive a receipt.</p>
+
+              <div className="flex gap-2 mb-3">
+                {(['email', 'phone'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setContactMode(mode)}
+                    className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95"
+                    style={{
+                      background: contactMode === mode ? th.langActive : '#F3F4F6',
+                      color: contactMode === mode ? '#fff' : '#6B7280',
+                    }}
+                  >
+                    {mode === 'email' ? '📧 Email' : '📱 Phone'}
+                  </button>
+                ))}
+              </div>
+
+              {contactMode === 'email' ? (
+                <input
+                  type="email"
+                  value={contactEmail}
+                  onChange={e => setContactEmail(e.target.value)}
+                  placeholder="your@email.com"
+                  className="w-full px-4 py-4 rounded-2xl border-2 text-base font-medium outline-none mb-4"
+                  style={{ borderColor: contactEmail.includes('@') ? '#22C55E' : '#E5E7EB', background: '#F9FAFB' }}
+                />
+              ) : (
+                <input
+                  type="tel"
+                  value={contactPhone}
+                  onChange={e => setContactPhone(e.target.value)}
+                  placeholder="07xxx xxxxxx"
+                  className="w-full px-4 py-4 rounded-2xl border-2 text-base font-medium outline-none mb-4"
+                  style={{ borderColor: contactPhone.length > 7 ? '#22C55E' : '#E5E7EB', background: '#F9FAFB' }}
+                />
+              )}
+
+              <button
+                onClick={handlePay}
+                className="w-full py-4 rounded-2xl text-white font-black text-lg transition-all active:scale-[0.98] shadow-lg"
+                style={{ background: `linear-gradient(135deg,${th.basketBtn},${th.basketBtnHover})`, boxShadow: `0 6px 20px ${th.basketBtn}40` }}
+              >
+                Pay £{total.toFixed(2)} →
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Device config overlay */}
       <AnimatePresence>

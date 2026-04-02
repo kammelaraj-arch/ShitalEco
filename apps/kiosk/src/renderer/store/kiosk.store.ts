@@ -94,6 +94,11 @@ export type KioskScreen =
   | 'payment'
   | 'confirmation'
   | 'admin-pin'
+  | 'soft-donation'
+  | 'project-donation'
+  | 'shop'
+  | 'gift-aid'
+  | 'receipt'
 
 export type Language = 'en' | 'gu' | 'hi'
 
@@ -107,6 +112,7 @@ export interface BasketItem {
   unitPrice: number
   totalPrice: number
   referenceId?: string
+  giftAidEligible?: boolean
 }
 
 interface KioskState {
@@ -128,6 +134,16 @@ interface KioskState {
   squareDeviceId: string
   squareDeviceName: string
 
+  giftAidDeclaration: {
+    agreed: boolean
+    fullName: string
+    postcode: string
+    address: string
+    contactEmail: string
+    contactPhone: string
+  } | null
+
+  setGiftAidDeclaration: (decl: KioskState['giftAidDeclaration']) => void
   setScreen: (screen: KioskScreen) => void
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
@@ -158,12 +174,14 @@ export const useKioskStore = create<KioskState>((set, get) => ({
   idleTimer: 120,
   branchId: 'main',
   theme: 'lotus',
+  giftAidDeclaration: null,
   cardProvider: 'stripe_terminal',
   stripeReaderId: '',
   stripeReaderLabel: '',
   squareDeviceId: '',
   squareDeviceName: '',
 
+  setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
   setScreen: (screen) => set({ screen }),
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
@@ -213,6 +231,7 @@ export const useKioskStore = create<KioskState>((set, get) => ({
     orderId: null,
     orderRef: null,
     paymentIntent: null,
+    giftAidDeclaration: null,
   }),
 
   get total() {

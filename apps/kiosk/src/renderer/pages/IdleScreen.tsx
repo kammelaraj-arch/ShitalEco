@@ -8,8 +8,8 @@ export function IdleScreen() {
   return (
     <div
       className="w-full h-full flex flex-col items-center justify-center bg-temple-gradient cursor-pointer"
-      onClick={() => setScreen('language')}
-      onTouchStart={() => setScreen('language')}
+      onClick={() => setScreen('home')}
+      onTouchStart={() => setScreen('home')}
     >
       {/* Animated background rings */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

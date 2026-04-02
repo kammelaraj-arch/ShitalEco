@@ -66,6 +66,8 @@ from shital.api.routers.finance import router as finance_router    # noqa: E402
 from shital.api.routers.hr import router as hr_router              # noqa: E402
 from shital.api.routers.payroll import router as payroll_router    # noqa: E402
 from shital.api.routers.kiosk import router as kiosk_router        # noqa: E402
+from shital.api.routers.items import router as items_router        # noqa: E402
+from shital.api.routers.giftaid import router as giftaid_router    # noqa: E402
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(brain_router, prefix="/api/v1")
@@ -73,6 +75,8 @@ app.include_router(finance_router, prefix="/api/v1")
 app.include_router(hr_router, prefix="/api/v1")
 app.include_router(payroll_router, prefix="/api/v1")
 app.include_router(kiosk_router, prefix="/api/v1")
+app.include_router(items_router, prefix="/api/v1")
+app.include_router(giftaid_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])
