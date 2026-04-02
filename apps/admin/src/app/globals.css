@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+:root {
+  --bg-deep: #0f0700;
+  --bg-dark: #1a0a00;
+  --bg-card: rgba(255, 153, 51, 0.05);
+  --border: rgba(255, 153, 51, 0.12);
+  --saffron: #FF9933;
+  --gold: #FFD700;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-family: 'Inter', system-ui, sans-serif; }
+
+body {
+  background: var(--bg-deep);
+  color: white;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,153,51,0.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,153,51,0.4); }
+
+/* Glass morphism card */
+.glass {
+  background: rgba(255, 153, 51, 0.05);
+  border: 1px solid rgba(255, 153, 51, 0.12);
+  backdrop-filter: blur(20px);
+}
+
+/* Gold gradient text */
+.text-gold {
+  background: linear-gradient(135deg, #FFD700 0%, #FFA500 50%, #FF6B35 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Saffron gradient text */
+.text-saffron-gradient {
+  background: linear-gradient(135deg, #FF9933, #FF6B35);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Stat card hover */
+.stat-card {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.2s ease;
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(255, 153, 51, 0.15);
+}
+
+/* Nav item active */
+.nav-active {
+  background: rgba(255, 153, 51, 0.1);
+  border-right: 3px solid #FF9933;
+}
+
+/* Input */
+.input-field {
+  @apply bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white
+         placeholder-white/30 focus:outline-none focus:border-saffron-400/50
+         focus:ring-1 focus:ring-saffron-400/30 transition-all w-full;
+}
+
+/* Button variants */
+.btn-primary {
+  @apply bg-saffron-gradient text-white font-semibold px-6 py-3 rounded-xl
+         hover:opacity-90 active:scale-[0.98] transition-all shadow-saffron;
+}
+.btn-secondary {
+  @apply glass text-white/70 font-medium px-6 py-3 rounded-xl
+         hover:text-white hover:bg-white/10 active:scale-[0.98] transition-all;
+}
+.btn-danger {
+  @apply bg-red-500/80 text-white font-semibold px-6 py-3 rounded-xl
+         hover:bg-red-500 active:scale-[0.98] transition-all;
+}
+
+/* Table */
+.data-table { @apply w-full border-collapse; }
+.data-table th {
+  @apply text-left text-white/40 text-xs font-semibold uppercase tracking-wider
+         py-3 px-4 border-b border-white/5;
+}
+.data-table td {
+  @apply py-3 px-4 text-white/80 text-sm border-b border-white/5;
+}
+.data-table tr:hover td { @apply bg-white/[0.02]; }
+
+/* Badge */
+.badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+.badge-green { @apply bg-green-500/20 text-green-400; }
+.badge-yellow { @apply bg-yellow-500/20 text-yellow-400; }
+.badge-red { @apply bg-red-500/20 text-red-400; }
+.badge-blue { @apply bg-blue-500/20 text-blue-400; }
+.badge-orange { @apply bg-saffron-400/20 text-saffron-400; }

@@ -1,0 +1,148 @@
+name: Shital ERP CI/CD
+
+on:
+  push:
+    branches: [main, 'claude/**', develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+  PNPM_VERSION: "9.4.0"
+
+jobs:
+  # ─── Python Backend Tests ──────────────────────────────────────────────────
+  backend-tests:
+    name: Python Backend
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: shital_test
+          POSTGRES_USER: shital
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -e ".[dev]"
+
+      - name: Run linting
+        working-directory: backend
+        run: ruff check src/
+
+      - name: Run type checking
+        working-directory: backend
+        run: mypy src/shital --ignore-missing-imports
+
+      - name: Run tests
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://shital:test_password@localhost:5432/shital_test
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: test-jwt-secret-at-least-32-characters-long
+          ANTHROPIC_API_KEY: test-key
+          APP_ENV: test
+        run: pytest tests/ -v --cov=src/shital --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: backend/coverage.xml
+
+  # ─── Frontend Tests ────────────────────────────────────────────────────────
+  frontend-tests:
+    name: Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript check
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build packages
+        run: pnpm build --filter=@shital/config --filter=@shital/db
+
+  # ─── Docker Build ──────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ghcr.io/${{ github.repository }}/backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build admin
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/admin
+          push: true
+          tags: ghcr.io/${{ github.repository }}/admin:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
