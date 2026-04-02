@@ -61,6 +61,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ─── Mount all routers ────────────────────────────────────────────────────────
 from shital.api.routers.auth import router as auth_router                          # noqa: E402
+from shital.api.routers.auth_azure import router as auth_azure_router              # noqa: E402
 from shital.api.routers.brain import router as brain_router                        # noqa: E402
 from shital.api.routers.finance import router as finance_router                    # noqa: E402
 from shital.api.routers.hr import router as hr_router                              # noqa: E402
@@ -71,6 +72,7 @@ from shital.api.routers.giftaid import router as giftaid_router                 
 from shital.api.routers.terminal_devices import router as terminal_devices_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(auth_azure_router, prefix="/api/v1")
 app.include_router(brain_router, prefix="/api/v1")
 app.include_router(finance_router, prefix="/api/v1")
 app.include_router(hr_router, prefix="/api/v1")

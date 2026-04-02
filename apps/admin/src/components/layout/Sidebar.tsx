@@ -57,6 +57,7 @@ const NAV_SECTIONS = [
     items: [
       { href: '/settings/branches', icon: '🌿', label: 'Branches' },
       { href: '/settings/users', icon: '🔐', label: 'Users & Roles' },
+      { href: '/settings/azure-ad', icon: '🔷', label: 'Azure AD / SSO' },
     ],
   },
 ]
