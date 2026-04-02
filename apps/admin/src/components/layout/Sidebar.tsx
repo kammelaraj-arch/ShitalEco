@@ -47,6 +47,12 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    label: 'Kiosk',
+    items: [
+      { href: '/terminal-devices', icon: '💳', label: 'Terminal Devices' },
+    ],
+  },
+  {
     label: 'System',
     items: [
       { href: '/settings/branches', icon: '🌿', label: 'Branches' },

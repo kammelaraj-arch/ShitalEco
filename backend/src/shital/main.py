@@ -60,14 +60,15 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ─── Mount all routers ────────────────────────────────────────────────────────
-from shital.api.routers.auth import router as auth_router          # noqa: E402
-from shital.api.routers.brain import router as brain_router        # noqa: E402
-from shital.api.routers.finance import router as finance_router    # noqa: E402
-from shital.api.routers.hr import router as hr_router              # noqa: E402
-from shital.api.routers.payroll import router as payroll_router    # noqa: E402
-from shital.api.routers.kiosk import router as kiosk_router        # noqa: E402
-from shital.api.routers.items import router as items_router        # noqa: E402
-from shital.api.routers.giftaid import router as giftaid_router    # noqa: E402
+from shital.api.routers.auth import router as auth_router                          # noqa: E402
+from shital.api.routers.brain import router as brain_router                        # noqa: E402
+from shital.api.routers.finance import router as finance_router                    # noqa: E402
+from shital.api.routers.hr import router as hr_router                              # noqa: E402
+from shital.api.routers.payroll import router as payroll_router                    # noqa: E402
+from shital.api.routers.kiosk import router as kiosk_router                        # noqa: E402
+from shital.api.routers.items import router as items_router                        # noqa: E402
+from shital.api.routers.giftaid import router as giftaid_router                    # noqa: E402
+from shital.api.routers.terminal_devices import router as terminal_devices_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(brain_router, prefix="/api/v1")
@@ -77,6 +78,7 @@ app.include_router(payroll_router, prefix="/api/v1")
 app.include_router(kiosk_router, prefix="/api/v1")
 app.include_router(items_router, prefix="/api/v1")
 app.include_router(giftaid_router, prefix="/api/v1")
+app.include_router(terminal_devices_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])
