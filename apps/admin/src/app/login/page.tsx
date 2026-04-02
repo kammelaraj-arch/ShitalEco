@@ -1,8 +1,8 @@
 'use client'
-import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+const API = process.env.NEXT_PUBLIC_API_URL || 'https://shital-backend.onrender.com/api/v1'
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 
@@ -11,6 +11,7 @@ function saveSession(data: any) {
   sessionStorage.setItem('shital_access_token', data.access_token)
   sessionStorage.setItem('shital_refresh_token', data.refresh_token)
   sessionStorage.setItem('shital_user', JSON.stringify(data.user))
+  document.cookie = 'shital_token=1; path=/; samesite=lax'
 }
 
 // ─── Login page ───────────────────────────────────────────────────────────────
@@ -21,6 +22,22 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [msLoading, setMsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [azureAvailable, setAzureAvailable] = useState<boolean | null>(null) // null = checking
+
+  // Check Azure AD availability on mount
+  useEffect(() => {
+    async function checkAzure() {
+      try {
+        const res = await fetch(`${API}/auth/azure/config`, { signal: AbortSignal.timeout(5000) })
+        if (!res.ok) { setAzureAvailable(false); return }
+        const data = await res.json()
+        setAzureAvailable(!!(data.enabled && data.client_id))
+      } catch {
+        setAzureAvailable(false)
+      }
+    }
+    checkAzure()
+  }, [])
 
   // ── Email/password login ──────────────────────────────────────────────────
 
@@ -67,10 +84,10 @@ export default function LoginPage() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-6"
+      className="min-h-screen flex items-center justify-center p-6 relative"
       style={{ background: 'linear-gradient(135deg, #0f0f1a 0%, #1a0a2e 50%, #0f0f1a 100%)' }}
     >
-      {/* Background pattern */}
+      {/* Background orbs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-orange-500/5 blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-indigo-500/5 blur-3xl" />
@@ -100,78 +117,123 @@ export default function LoginPage() {
           style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
         >
           {/* Error */}
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-4 bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl"
-            >
-              {error}
-            </motion.div>
-          )}
-
-          {/* Microsoft SSO button */}
-          <button
-            onClick={handleMicrosoftLogin}
-            disabled={msLoading}
-            className="w-full flex items-center justify-center gap-3 py-3 rounded-xl font-semibold text-sm transition-all mb-5 disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
-            style={{
-              background: '#2563eb',
-              color: 'white',
-              boxShadow: '0 4px 20px rgba(37,99,235,0.35)',
-            }}
-          >
-            {msLoading ? (
-              <span className="animate-spin">⌛</span>
-            ) : (
-              <MicrosoftLogo />
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                key="error"
+                initial={{ opacity: 0, y: -8, height: 0 }}
+                animate={{ opacity: 1, y: 0, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mb-4 bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl overflow-hidden"
+              >
+                {error}
+              </motion.div>
             )}
-            {msLoading ? 'Signing in…' : 'Sign in with Microsoft 365'}
-          </button>
+          </AnimatePresence>
 
-          {/* Divider */}
-          <div className="flex items-center gap-3 mb-5">
-            <div className="flex-1 h-px bg-white/8" />
-            <span className="text-white/25 text-xs font-medium">or continue with email</span>
-            <div className="flex-1 h-px bg-white/8" />
-          </div>
+          {/* Microsoft SSO button — only shown when Azure is available */}
+          <AnimatePresence>
+            {azureAvailable && (
+              <motion.div
+                key="ms-btn"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <button
+                  onClick={handleMicrosoftLogin}
+                  disabled={msLoading}
+                  className="w-full flex items-center justify-center gap-3 py-3 rounded-xl font-semibold text-sm transition-all mb-5 disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+                  style={{
+                    background: '#2563eb',
+                    color: 'white',
+                    boxShadow: '0 4px 20px rgba(37,99,235,0.35)',
+                  }}
+                >
+                  {msLoading ? (
+                    <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⌛</span>
+                  ) : (
+                    <MicrosoftLogo />
+                  )}
+                  {msLoading ? 'Signing in…' : 'Sign in with Microsoft 365'}
+                </button>
+
+                {/* Divider */}
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.08)' }} />
+                  <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                    or continue with email
+                  </span>
+                  <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.08)' }} />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Email/password form */}
           <form onSubmit={handleEmailLogin} className="space-y-4">
             <div>
-              <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Email</label>
+              <label
+                className="block text-xs font-semibold mb-1.5 uppercase tracking-wider"
+                style={{ color: 'rgba(255,255,255,0.5)' }}
+              >
+                Email
+              </label>
               <input
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
                 placeholder="admin@shital.org"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder-white/20 focus:outline-none focus:border-orange-400/50 transition-colors"
+                className="w-full rounded-xl px-4 py-3 text-white text-sm focus:outline-none transition-colors"
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: 'white',
+                }}
+                onFocus={e => (e.target.style.borderColor = 'rgba(251,146,60,0.5)')}
+                onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
               />
             </div>
             <div>
-              <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Password</label>
+              <label
+                className="block text-xs font-semibold mb-1.5 uppercase tracking-wider"
+                style={{ color: 'rgba(255,255,255,0.5)' }}
+              >
+                Password
+              </label>
               <input
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder-white/20 focus:outline-none focus:border-orange-400/50 transition-colors"
+                className="w-full rounded-xl px-4 py-3 text-sm focus:outline-none transition-colors"
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: 'white',
+                }}
+                onFocus={e => (e.target.style.borderColor = 'rgba(251,146,60,0.5)')}
+                onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
               />
             </div>
             <button
               type="submit"
               disabled={loading}
               className="w-full py-3 rounded-xl font-black text-sm text-white transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98] mt-1"
-              style={{ background: 'linear-gradient(135deg, #d97706, #ea580c)', boxShadow: '0 4px 20px rgba(217,119,6,0.35)' }}
+              style={{
+                background: 'linear-gradient(135deg, #d97706, #ea580c)',
+                boxShadow: '0 4px 20px rgba(217,119,6,0.35)',
+              }}
             >
               {loading ? 'Signing in…' : 'Sign In →'}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-white/20 text-xs mt-6">
+        <p className="text-center text-xs mt-6" style={{ color: 'rgba(255,255,255,0.2)' }}>
           Shital Temple ERP • UK Registered Charity
         </p>
       </motion.div>
