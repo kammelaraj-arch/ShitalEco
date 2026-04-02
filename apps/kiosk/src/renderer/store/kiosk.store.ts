@@ -1,5 +1,87 @@
 import { create } from 'zustand'
 
+export type KioskTheme = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine'
+
+export const THEMES: Record<KioskTheme, {
+  name: string; emoji: string; desc: string
+  headerBg: string; headerBorder: string; headerText: string; headerSub: string
+  logoBg: string; logoText: string
+  sidebarFrom: string; sidebarTo: string; sidebarBorder: string
+  sidebarText: string; sidebarActiveBg: string; sidebarActiveText: string; sidebarIndicator: string
+  mainBg: string; sectionHeaderBg: string; sectionHeaderBorder: string
+  sectionTitleColor: string; sectionCountColor: string
+  promotedBg: string; promotedBorder: string; promotedTitleColor: string
+  basketBarBg: string; basketBarBorder: string; basketBarText: string; basketBarSubText: string
+  basketBtn: string; basketBtnHover: string
+  langActive: string; langInactive: string
+}> = {
+  lotus: {
+    name: 'Lotus Light', emoji: '🪷', desc: 'Clean & bright',
+    headerBg: '#FFFFFF', headerBorder: '#FF9933/30', headerText: '#1C0000', headerSub: '#FF9933',
+    logoBg: 'linear-gradient(135deg,#FF9933,#FF6600)', logoText: '#FFFFFF',
+    sidebarFrom: '#FFF3E0', sidebarTo: '#FFE0B2', sidebarBorder: '#FF9933/40',
+    sidebarText: '#5D2E00', sidebarActiveBg: '#FF9933', sidebarActiveText: '#FFFFFF', sidebarIndicator: '#FF6600',
+    mainBg: '#FAFAFA', sectionHeaderBg: '#FFFFFF', sectionHeaderBorder: '#FF9933/20',
+    sectionTitleColor: '#1C0000', sectionCountColor: '#FF9933',
+    promotedBg: 'linear-gradient(to right,#FFF3E0,#F3E5F5)', promotedBorder: '#CE93D8/40', promotedTitleColor: '#6A1B9A',
+    basketBarBg: '#1C0000', basketBarBorder: '#FF9933/40', basketBarText: '#FFFFFF', basketBarSubText: '#FFD700',
+    basketBtn: '#FF9933', basketBtnHover: '#FF7700',
+    langActive: '#FF9933', langInactive: '#FF9933/50',
+  },
+  saffron: {
+    name: 'Saffron Temple', emoji: '🪔', desc: 'Rich & warm',
+    headerBg: '#1C0000', headerBorder: '#FF9933/40', headerText: '#FFD700', headerSub: '#FF9933',
+    logoBg: 'linear-gradient(135deg,#FF9933,#FF6600)', logoText: '#FFFFFF',
+    sidebarFrom: '#FF9933', sidebarTo: '#E55C00', sidebarBorder: '#FFD700/30',
+    sidebarText: '#FFFFFF', sidebarActiveBg: 'rgba(28,0,0,0.3)', sidebarActiveText: '#FFD700', sidebarIndicator: '#FFD700',
+    mainBg: '#FFF8EC', sectionHeaderBg: 'rgba(255,255,255,0.6)', sectionHeaderBorder: '#FF9933/20',
+    sectionTitleColor: '#1C0000', sectionCountColor: '#FF9933',
+    promotedBg: 'linear-gradient(to right,rgba(75,0,130,0.08),rgba(196,30,58,0.08))', promotedBorder: '#C41E3A/20', promotedTitleColor: '#4B0082',
+    basketBarBg: '#1C0000', basketBarBorder: '#FF9933/40', basketBarText: '#FFFFFF', basketBarSubText: '#FFD700',
+    basketBtn: '#FF9933', basketBtnHover: '#FF7700',
+    langActive: '#FF9933', langInactive: '#FF9933/50',
+  },
+  royal: {
+    name: 'Royal Gold', emoji: '👑', desc: 'Majestic & divine',
+    headerBg: '#0D0D2B', headerBorder: '#FFD700/30', headerText: '#FFD700', headerSub: '#9B8FE0',
+    logoBg: 'linear-gradient(135deg,#FFD700,#FFA500)', logoText: '#0D0D2B',
+    sidebarFrom: '#1A1A4E', sidebarTo: '#2D1B69', sidebarBorder: '#FFD700/20',
+    sidebarText: '#E0D7FF', sidebarActiveBg: 'rgba(255,215,0,0.15)', sidebarActiveText: '#FFD700', sidebarIndicator: '#FFD700',
+    mainBg: '#F8F6FF', sectionHeaderBg: '#FFFFFF', sectionHeaderBorder: '#7C3AED/15',
+    sectionTitleColor: '#1A1A4E', sectionCountColor: '#7C3AED',
+    promotedBg: 'linear-gradient(to right,#EDE9FE,#FEF3C7)', promotedBorder: '#7C3AED/30', promotedTitleColor: '#5B21B6',
+    basketBarBg: '#0D0D2B', basketBarBorder: '#FFD700/30', basketBarText: '#FFFFFF', basketBarSubText: '#FFD700',
+    basketBtn: '#FFD700', basketBtnHover: '#FFC200',
+    langActive: '#FFD700', langInactive: '#9B8FE0/60',
+  },
+  peacock: {
+    name: 'Peacock Blue', emoji: '🦚', desc: 'Krishna inspired',
+    headerBg: '#003333', headerBorder: '#00BCD4/30', headerText: '#80DEEA', headerSub: '#4DD0E1',
+    logoBg: 'linear-gradient(135deg,#0097A7,#006064)', logoText: '#FFFFFF',
+    sidebarFrom: '#004D40', sidebarTo: '#00695C', sidebarBorder: '#80CBC4/30',
+    sidebarText: '#E0F2F1', sidebarActiveBg: 'rgba(0,188,212,0.2)', sidebarActiveText: '#80DEEA', sidebarIndicator: '#FFD700',
+    mainBg: '#F0FDFA', sectionHeaderBg: '#FFFFFF', sectionHeaderBorder: '#0097A7/20',
+    sectionTitleColor: '#004D40', sectionCountColor: '#0097A7',
+    promotedBg: 'linear-gradient(to right,#E0F7FA,#F3E5F5)', promotedBorder: '#0097A7/30', promotedTitleColor: '#00695C',
+    basketBarBg: '#003333', basketBarBorder: '#00BCD4/30', basketBarText: '#FFFFFF', basketBarSubText: '#80DEEA',
+    basketBtn: '#0097A7', basketBtnHover: '#007B83',
+    langActive: '#4DD0E1', langInactive: '#4DD0E1/40',
+  },
+  jasmine: {
+    name: 'Jasmine Breeze', emoji: '🌸', desc: 'Soft & serene',
+    headerBg: '#FFF9F0', headerBorder: '#FFCC80/50', headerText: '#4E342E', headerSub: '#FF8F00',
+    logoBg: 'linear-gradient(135deg,#FFCA28,#FF8F00)', logoText: '#FFFFFF',
+    sidebarFrom: '#FFF8E1', sidebarTo: '#FFECB3', sidebarBorder: '#FFCA28/40',
+    sidebarText: '#5D4037', sidebarActiveBg: '#FFCA28', sidebarActiveText: '#4E342E', sidebarIndicator: '#FF8F00',
+    mainBg: '#FFFEF7', sectionHeaderBg: 'rgba(255,255,255,0.9)', sectionHeaderBorder: '#FFCA28/30',
+    sectionTitleColor: '#4E342E', sectionCountColor: '#FF8F00',
+    promotedBg: 'linear-gradient(to right,#FFF9C4,#FCE4EC)', promotedBorder: '#F48FB1/30', promotedTitleColor: '#AD1457',
+    basketBarBg: '#4E342E', basketBarBorder: '#FFCA28/40', basketBarText: '#FFFFFF', basketBarSubText: '#FFCA28',
+    basketBtn: '#FF8F00', basketBtnHover: '#E65100',
+    langActive: '#FF8F00', langInactive: '#FF8F00/40',
+  },
+}
+
 export type KioskScreen =
   | 'idle'
   | 'language'
@@ -37,9 +119,11 @@ interface KioskState {
   paymentIntent: Record<string, unknown> | null
   idleTimer: number
   branchId: string
+  theme: KioskTheme
 
   setScreen: (screen: KioskScreen) => void
   setLanguage: (lang: Language) => void
+  setTheme: (theme: KioskTheme) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
   removeItem: (id: string) => void
@@ -61,9 +145,11 @@ export const useKioskStore = create<KioskState>((set, get) => ({
   paymentIntent: null,
   idleTimer: 120,
   branchId: 'main',
+  theme: 'lotus',
 
   setScreen: (screen) => set({ screen }),
   setLanguage: (language) => set({ language }),
+  setTheme: (theme) => set({ theme }),
   setBasketId: (basketId) => set({ basketId }),
 
   addItem: (item) => set((state) => {
