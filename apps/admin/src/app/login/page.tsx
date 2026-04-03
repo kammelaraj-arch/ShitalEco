@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'https://sshitaleco.onrender.com/api/v1'
@@ -23,6 +23,8 @@ export default function LoginPage() {
   const [msLoading, setMsLoading] = useState(false)
   const [error, setError] = useState('')
   const [azureAvailable, setAzureAvailable] = useState<boolean | null>(null) // null = checking
+  const [slowLoad, setSlowLoad] = useState(false)
+  const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Check Azure AD availability on mount
   useEffect(() => {
@@ -44,12 +46,16 @@ export default function LoginPage() {
   async function handleEmailLogin(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    setSlowLoad(false)
     setLoading(true)
+    // Show "waking up" message after 6 seconds (Render free tier cold start)
+    slowTimer.current = setTimeout(() => setSlowLoad(true), 6000)
     try {
       const res = await fetch(`${API}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
+        signal: AbortSignal.timeout(90000), // 90s — covers Render cold start
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
@@ -59,8 +65,14 @@ export default function LoginPage() {
       saveSession(data)
       window.location.href = '/dashboard'
     } catch (err: any) {
-      setError(err.message || 'Login failed')
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+        setError('Server is taking too long to respond. Please try again in a moment.')
+      } else {
+        setError(err.message || 'Login failed')
+      }
     } finally {
+      if (slowTimer.current) clearTimeout(slowTimer.current)
+      setSlowLoad(false)
       setLoading(false)
     }
   }
@@ -228,7 +240,11 @@ export default function LoginPage() {
                 boxShadow: '0 4px 20px rgba(217,119,6,0.35)',
               }}
             >
-              {loading ? 'Signing in…' : 'Sign In →'}
+              {loading
+              ? slowLoad
+                ? 'Server waking up, please wait…'
+                : 'Signing in…'
+              : 'Sign In →'}
             </button>
           </form>
         </div>

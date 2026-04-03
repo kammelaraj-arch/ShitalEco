@@ -430,52 +430,62 @@ export function BasketScreen() {
         <motion.div
           initial={{ y: 60, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="flex-shrink-0 px-6 pb-6 pt-4 space-y-3"
+          className="flex-shrink-0 px-6 pb-6 pt-4"
           style={{ borderTop: '2px solid rgba(0,0,0,0.06)', background: th.mainBg }}
         >
-          {/* Gift Aid button — only if there are eligible items */}
-          {hasEligible && (
-            <motion.button
-              onClick={() => setShowGiftAidForm(true)}
-              whileTap={{ scale: 0.97 }}
-              className="w-full rounded-2xl px-6 py-5 flex items-center justify-between text-left shadow-xl"
-              style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}
-            >
-              <div className="flex items-center gap-4">
-                <span className="text-4xl">🇬🇧</span>
+          {/* Two-column layout when Gift Aid is available */}
+          <div className={hasEligible ? 'grid grid-cols-2 gap-3' : ''}>
+            {/* Gift Aid button — only if there are eligible items */}
+            {hasEligible && (
+              <motion.button
+                onClick={() => setShowGiftAidForm(true)}
+                whileTap={{ scale: 0.97 }}
+                className="rounded-2xl px-5 py-5 flex flex-col gap-2 text-left shadow-xl"
+                style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl">🇬🇧</span>
+                  <span className="text-white text-xl font-black flex-shrink-0">→</span>
+                </div>
                 <div>
-                  <p className="text-white font-black text-lg leading-tight">
-                    Boost with Gift Aid · £{(total + giftAidBonus).toFixed(2)}
+                  <p className="text-white font-black text-base leading-tight">
+                    Boost with Gift Aid
                   </p>
-                  <p className="text-green-200 text-sm">
-                    Temple gets <span className="font-bold text-white">+£{giftAidBonus.toFixed(2)} extra</span> from HMRC — <span className="font-bold text-white">no extra cost to you</span>
+                  <p className="text-white font-black text-lg">£{(total + giftAidBonus).toFixed(2)}</p>
+                  <p className="text-green-200 text-xs mt-0.5">
+                    +£{giftAidBonus.toFixed(2)} extra from HMRC free
                   </p>
                 </div>
-              </div>
-              <span className="text-white text-2xl font-black flex-shrink-0">→</span>
-            </motion.button>
-          )}
+              </motion.button>
+            )}
 
-          {/* Normal checkout button */}
-          <motion.button
-            onClick={handleNormalCheckout}
-            whileTap={{ scale: 0.97 }}
-            className="w-full rounded-2xl px-6 py-4 flex items-center justify-between text-white shadow-lg"
-            style={{ background: hasEligible ? 'rgba(0,0,0,0.12)' : th.basketBtn }}
-          >
-            <span
-              className="font-black text-lg"
-              style={{ color: hasEligible ? th.sectionTitleColor : 'white' }}
+            {/* Normal checkout button */}
+            <motion.button
+              onClick={handleNormalCheckout}
+              whileTap={{ scale: 0.97 }}
+              className="rounded-2xl px-5 py-5 flex flex-col justify-between shadow-lg"
+              style={{ background: hasEligible ? 'rgba(0,0,0,0.08)' : th.basketBtn, minHeight: hasEligible ? undefined : undefined }}
             >
-              {hasEligible ? 'Continue without Gift Aid' : `Checkout · £${total.toFixed(2)}`}
-            </span>
-            <span
-              className="text-xl font-black"
-              style={{ color: hasEligible ? th.sectionTitleColor : 'white' }}
-            >
-              {hasEligible ? `£${total.toFixed(2)} →` : '→'}
-            </span>
-          </motion.button>
+              {hasEligible ? (
+                <>
+                  <span className="text-xl font-black" style={{ color: th.sectionTitleColor }}>→</span>
+                  <div>
+                    <p className="font-black text-base" style={{ color: th.sectionTitleColor }}>
+                      Continue without Gift Aid
+                    </p>
+                    <p className="font-black text-lg" style={{ color: th.sectionTitleColor }}>
+                      £{total.toFixed(2)}
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="font-black text-lg text-white">{`Checkout · £${total.toFixed(2)}`}</span>
+                  <span className="text-xl font-black text-white">→</span>
+                </>
+              )}
+            </motion.button>
+          </div>
         </motion.div>
       )}
     </div>
