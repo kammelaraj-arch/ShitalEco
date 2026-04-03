@@ -427,31 +427,7 @@ export function BasketScreen() {
         >
           {/* Two-column layout when Gift Aid is available */}
           <div className={hasEligible ? 'grid grid-cols-2 gap-3' : ''}>
-            {/* Gift Aid button — only if there are eligible items */}
-            {hasEligible && (
-              <motion.button
-                onClick={() => setShowGiftAidForm(true)}
-                whileTap={{ scale: 0.97 }}
-                className="rounded-2xl px-5 py-5 flex flex-col gap-2 text-left shadow-xl"
-                style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-3xl">🇬🇧</span>
-                  <span className="text-white text-xl font-black flex-shrink-0">→</span>
-                </div>
-                <div>
-                  <p className="text-white font-black text-base leading-tight">
-                    Boost with Gift Aid
-                  </p>
-                  <p className="text-white font-black text-lg">£{(total + giftAidBonus).toFixed(2)}</p>
-                  <p className="text-green-200 text-xs mt-0.5">
-                    +£{giftAidBonus.toFixed(2)} extra from HMRC free
-                  </p>
-                </div>
-              </motion.button>
-            )}
-
-            {/* Normal checkout button */}
+            {/* Normal checkout button — LEFT */}
             <motion.button
               onClick={handleNormalCheckout}
               whileTap={{ scale: 0.97 }}
@@ -477,6 +453,26 @@ export function BasketScreen() {
                 </>
               )}
             </motion.button>
+
+            {/* Gift Aid button — RIGHT */}
+            {hasEligible && (
+              <motion.button
+                onClick={() => setShowGiftAidForm(true)}
+                whileTap={{ scale: 0.97 }}
+                className="rounded-2xl px-5 py-5 flex flex-col gap-2 text-left shadow-xl"
+                style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl">🇬🇧</span>
+                  <span className="text-white text-xl font-black flex-shrink-0">→</span>
+                </div>
+                <div>
+                  <p className="text-white font-black text-base leading-tight">Boost with Gift Aid</p>
+                  <p className="text-white font-black text-lg">£{(total + giftAidBonus).toFixed(2)}</p>
+                  <p className="text-green-200 text-xs mt-0.5">+£{giftAidBonus.toFixed(2)} extra from HMRC free</p>
+                </div>
+              </motion.button>
+            )}
           </div>
         </motion.div>
       )}
