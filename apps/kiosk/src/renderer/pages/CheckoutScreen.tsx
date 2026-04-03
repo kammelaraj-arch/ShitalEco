@@ -24,35 +24,39 @@ export function CheckoutScreen() {
   async function processPayment() {
     setError('')
     try {
-      // 1. Create basket
+      // 1. Create basket (non-fatal — DB may not be available; payment still proceeds)
       setStage('Creating order…')
-      const basketRes = await fetch(`${API_BASE}/kiosk/basket`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ branch_id: branchId }),
-      })
-      if (!basketRes.ok) {
-        const txt = await basketRes.text()
-        throw new Error(`Order creation failed (${basketRes.status}): ${txt.slice(0, 120)}`)
-      }
-      const { basket_id } = await basketRes.json()
-      setBasketId(basket_id)
-
-      // 2. Add items
-      setStage('Adding items…')
-      for (const item of items) {
-        await fetch(`${API_BASE}/kiosk/basket/item`, {
+      let basket_id = crypto.randomUUID()
+      try {
+        const basketRes = await fetch(`${API_BASE}/kiosk/basket`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            basket_id,
-            item_type: item.type,
-            reference_id: item.referenceId,
-            name: item.name,
-            quantity: item.quantity,
-            unit_price: item.unitPrice,
-          }),
+          body: JSON.stringify({ branch_id: branchId }),
         })
+        if (basketRes.ok) {
+          const data = await basketRes.json()
+          if (data.basket_id) basket_id = data.basket_id
+        }
+      } catch { /* DB unavailable — continue with local UUID */ }
+      setBasketId(basket_id)
+
+      // 2. Add items (best-effort — non-fatal)
+      setStage('Adding items…')
+      for (const item of items) {
+        try {
+          await fetch(`${API_BASE}/kiosk/basket/item`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              basket_id,
+              item_type: item.type,
+              reference_id: item.referenceId,
+              name: item.name,
+              quantity: item.quantity,
+              unit_price: item.unitPrice,
+            }),
+          })
+        } catch { /* non-fatal */ }
       }
 
       // 3. Create PaymentIntent
