@@ -5,9 +5,10 @@
   "installCommand": "npm install",
   "framework": null,
   "env": {
-    "VITE_API_URL": "https://sshitaleco.onrender.com/api/v1"
+    "VITE_API_URL": "/api/v1"
   },
   "rewrites": [
+    { "source": "/api/v1/:path*", "destination": "https://sshitaleco.onrender.com/api/v1/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
