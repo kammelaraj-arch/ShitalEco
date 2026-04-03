@@ -102,6 +102,7 @@ export const SHOP_ITEMS: CatalogItem[] = [
 
 // ─── General Donations (gift aid eligible) ────────────────────────────────────
 export const GENERAL_DONATIONS: CatalogItem[] = [
+  { id: 'gen_1', name: 'Test Donation £1', nameGu: 'પરીક્ષણ દાન £1', nameHi: 'परीक्षण दान £1', icon: '🧪', emoji: '🧪', price: 1, category: 'GENERAL_DONATION', giftAidEligible: false, description: 'Test payment — £1', imageColor: '#EFF6FF', image: 'https://images.unsplash.com/photo-1532629345422-7515f3d16bb6?w=400&h=250&fit=crop&q=80' },
   { id: 'gen_5', name: 'General Donation £5', nameGu: 'સામાન્ય દાન £5', nameHi: 'सामान्य दान £5', icon: '🙏', emoji: '🙏', price: 5, category: 'GENERAL_DONATION', giftAidEligible: true, description: 'General donation to the temple', imageColor: '#FEF3C7' },
   { id: 'gen_10', name: 'General Donation £10', nameGu: 'સામાન્ય દાન £10', nameHi: 'सामान्य दान £10', icon: '🙏', emoji: '🙏', price: 10, category: 'GENERAL_DONATION', giftAidEligible: true, description: 'General donation to the temple', imageColor: '#FEF3C7' },
   { id: 'gen_25', name: 'General Donation £25', nameGu: 'સામાન્ય દાન £25', nameHi: 'सामान्य दान £25', icon: '🙏', emoji: '🙏', price: 25, category: 'GENERAL_DONATION', giftAidEligible: true, description: 'General donation to the temple', imageColor: '#FDE68A' },
