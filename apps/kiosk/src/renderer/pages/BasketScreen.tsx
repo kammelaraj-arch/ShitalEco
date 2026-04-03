@@ -8,8 +8,8 @@ async function lookupPostcode(postcode: string): Promise<string[]> {
   const clean = postcode.trim().toUpperCase()
   try {
     const res = await fetch(
-      `/getaddress/find/${encodeURIComponent(clean)}?api-key=CkqEZqIrkEOGlQhie_NL8w48103&expand=true`,
-      { signal: AbortSignal.timeout(8000) }
+      `/api/address-lookup?postcode=${encodeURIComponent(clean)}`,
+      { signal: AbortSignal.timeout(10000) }
     )
     if (res.ok) {
       const data = await res.json()
@@ -235,20 +235,20 @@ function GiftAidScreen({
         <div className="h-4" />
       </div>
 
-      {/* Continue to Pay button */}
-      <div className="flex-shrink-0 px-5 pb-6 pt-3" style={{ borderTop: '2px solid #f0fdf4', background: '#fff' }}>
-        <button
-          onClick={handleContinue}
-          className="w-full py-5 rounded-2xl font-black text-white text-lg shadow-xl active:scale-[0.98] transition-all"
-          style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', boxShadow: '0 6px 24px #16a34a40' }}
-        >
-          Continue to Pay · £{total.toFixed(2)} →
-        </button>
+      {/* Bottom buttons — 2 columns in same row */}
+      <div className="flex-shrink-0 px-5 pb-6 pt-3 flex gap-3" style={{ borderTop: '2px solid #f0fdf4', background: '#fff' }}>
         <button
           onClick={onBack}
-          className="w-full mt-3 py-3 text-gray-400 text-sm font-medium active:opacity-70"
+          className="flex-1 py-4 rounded-2xl font-bold text-gray-600 text-base border-2 border-gray-200 active:scale-[0.97] transition-all"
         >
-          ← Back to Basket
+          ← Back
+        </button>
+        <button
+          onClick={handleContinue}
+          className="flex-[2] py-4 rounded-2xl font-black text-white text-base shadow-xl active:scale-[0.98] transition-all"
+          style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', boxShadow: '0 4px 16px #16a34a40' }}
+        >
+          Continue to Pay · £{total.toFixed(2)} →
         </button>
       </div>
     </motion.div>
