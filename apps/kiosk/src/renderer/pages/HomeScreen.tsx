@@ -359,7 +359,7 @@ export function HomeScreen() {
                         onClick={() => handleAddCatalog(item)}
                         className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
                       >
-                        {/* Image area — real photo with emoji fallback */}
+                        {/* Image area — per-item photo with emoji fallback */}
                         <div
                           className="relative overflow-hidden flex-shrink-0"
                           style={{ height: 100, background: item.imageColor }}
@@ -368,9 +368,9 @@ export function HomeScreen() {
                           <div className="absolute inset-0 flex items-center justify-center">
                             <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.55 }}>{item.emoji}</span>
                           </div>
-                          {/* Real image on top — disappears on error */}
+                          {/* Per-item photo (falls back to category image) */}
                           <img
-                            src={getCategoryImage(item.category)}
+                            src={item.image ?? getCategoryImage(item.category)}
                             alt=""
                             className="absolute inset-0 w-full h-full object-cover"
                             onError={e => (e.currentTarget.style.display = 'none')}

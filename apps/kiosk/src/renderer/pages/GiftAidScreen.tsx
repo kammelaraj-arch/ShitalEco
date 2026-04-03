@@ -23,25 +23,22 @@ const MOCK_ADDRESSES: Record<string, string[]> = {
   ],
 }
 
-// getAddress.io domain token — authorized for shital-kiosk.vercel.app
-const GETADDRESS_TOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
 async function lookupPostcode(postcode: string): Promise<string[]> {
-  const clean = postcode.trim().toUpperCase()
+  const clean = postcode.trim().toUpperCase().replace(/\s+/g, ' ')
   try {
+    // Use backend proxy — avoids CORS, uses server-side API key
     const res = await fetch(
-      `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GETADDRESS_TOKEN}&expand=true`,
+      `${API_BASE}/kiosk/postcode/${encodeURIComponent(clean)}`,
       { signal: AbortSignal.timeout(10000) }
     )
     if (res.ok) {
       const data = await res.json()
-      if (data.addresses?.length) {
-        return data.addresses.map((a: any) =>
-          typeof a === 'string' ? a : [a.line_1, a.line_2, a.town_or_city, a.county, a.postcode].filter(Boolean).join(', ')
-        )
-      }
+      if (data.addresses?.length) return data.addresses
     }
   } catch {}
+  // Fallback mock
   const prefix = clean.slice(0, 3)
   return MOCK_ADDRESSES[prefix] ?? MOCK_ADDRESSES.DEFAULT
 }
