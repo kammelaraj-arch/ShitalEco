@@ -41,10 +41,10 @@ export function PaymentScreen() {
     setReaderStatus('processing')
     setStatusMessage('Waiting for card...')
 
-    // Poll every 2 seconds
+    // Poll every 2.5 seconds — detect card tap completion
     const poll = setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE}/terminal/payment-intent-status?id=${paymentIntentId}`)
+        const res = await fetch(`${API_BASE}/kiosk/terminal/payment-intent-status?id=${paymentIntentId}`)
         const d = await res.json()
         if (d.status === 'succeeded') {
           clearInterval(poll)

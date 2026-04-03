@@ -353,6 +353,19 @@ async def cancel_reader_action(body: ReaderActionInput):
         return {"error": str(e)}
 
 
+@router.get("/terminal/payment-intent-status")
+async def get_payment_intent_status(id: str):
+    """Poll a PaymentIntent status — used by kiosk to detect card tap success."""
+    import stripe
+    from shital.core.fabrics.config import settings
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        intent = stripe.PaymentIntent.retrieve(id)
+        return {"status": intent.status, "id": intent.id}
+    except Exception as e:
+        return {"status": "unknown", "error": str(e)}
+
+
 @router.get("/terminal/readers")
 async def list_terminal_readers(location_id: str = ""):
     """List registered Stripe Terminal readers."""
