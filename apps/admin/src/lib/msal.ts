@@ -6,7 +6,7 @@
  * at runtime so they can be managed in the server .env without a frontend rebuild.
  */
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+const API = process.env.NEXT_PUBLIC_API_URL || 'https://sshitaleco.onrender.com/api/v1'
 
 export interface AzureConfig {
   client_id: string
@@ -23,7 +23,7 @@ let _azureConfig: AzureConfig | null = null
 export async function getAzureConfig(): Promise<AzureConfig> {
   if (_azureConfig) return _azureConfig
   try {
-    const res = await fetch(`${API}/auth/azure/config`)
+    const res = await fetch(`${API}/auth/azure/config`, { signal: AbortSignal.timeout(15000) })
     const data = await res.json()
     _azureConfig = data as AzureConfig
     return _azureConfig

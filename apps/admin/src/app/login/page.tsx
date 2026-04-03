@@ -81,15 +81,23 @@ export default function LoginPage() {
 
   async function handleMicrosoftLogin() {
     setError('')
+    setSlowLoad(false)
     setMsLoading(true)
+    slowTimer.current = setTimeout(() => setSlowLoad(true), 6000)
     try {
       const { signInWithMicrosoft } = await import('@/lib/msal')
       const data = await signInWithMicrosoft()
       saveSession(data)
       window.location.href = '/dashboard'
     } catch (err: any) {
-      setError(err.message || 'Microsoft sign-in failed')
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+        setError('Server is taking too long to respond. Please try again.')
+      } else {
+        setError(err.message || 'Microsoft sign-in failed')
+      }
     } finally {
+      if (slowTimer.current) clearTimeout(slowTimer.current)
+      setSlowLoad(false)
       setMsLoading(false)
     }
   }
@@ -168,7 +176,9 @@ export default function LoginPage() {
                   ) : (
                     <MicrosoftLogo />
                   )}
-                  {msLoading ? 'Signing in…' : 'Sign in with Microsoft 365'}
+                  {msLoading
+                    ? slowLoad ? 'Connecting, please wait…' : 'Signing in…'
+                    : 'Sign in with Microsoft 365'}
                 </button>
 
                 {/* Divider */}
