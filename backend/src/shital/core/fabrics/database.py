@@ -15,7 +15,7 @@ from sqlalchemy.orm import DeclarativeBase
 from shital.core.fabrics.config import settings
 
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    settings.async_database_url,
     echo=settings.APP_ENV == "development",
     pool_size=3,
     max_overflow=2,

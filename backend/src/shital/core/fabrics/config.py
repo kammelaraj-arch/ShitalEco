@@ -4,8 +4,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Database
+    # Database — Render provides plain postgresql:// scheme; asyncpg needs postgresql+asyncpg://
     DATABASE_URL: str = "postgresql+asyncpg://shital:shital@localhost:5432/shital"
+
+    @property
+    def async_database_url(self) -> str:
+        url = self.DATABASE_URL
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        return url
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # Auth
