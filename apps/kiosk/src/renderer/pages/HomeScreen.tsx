@@ -44,6 +44,34 @@ const CATEGORY_META: Record<string, { color: string; icon: string }> = {
   DONATION:  { color: '#d69e2e', icon: '🙏' },
 }
 
+// ─── Category image URLs (Unsplash) — emoji shows if image fails to load ──────
+const CATEGORY_IMAGES: Record<string, string> = {
+  // Service categories
+  PUJA:             'https://source.unsplash.com/featured/400x240/?indian,diya,puja,lamp&sig=1',
+  HAVAN:            'https://source.unsplash.com/featured/400x240/?fire,sacred,ceremony&sig=2',
+  CLASS:            'https://source.unsplash.com/featured/400x240/?yoga,meditation&sig=3',
+  HALL_HIRE:        'https://source.unsplash.com/featured/400x240/?banquet,hall,event&sig=4',
+  FESTIVAL:         'https://source.unsplash.com/featured/400x240/?diwali,festival,lights&sig=5',
+  DONATION:         'https://source.unsplash.com/featured/400x240/?temple,donation,giving&sig=6',
+  // Catalog categories
+  GRAINS:           'https://source.unsplash.com/featured/400x240/?rice,grain,wheat&sig=7',
+  OIL_ESSENTIALS:   'https://source.unsplash.com/featured/400x240/?cooking,oil,kitchen&sig=8',
+  PULSES:           'https://source.unsplash.com/featured/400x240/?lentils,dal,pulses&sig=9',
+  PROJECT_DONATION: 'https://source.unsplash.com/featured/400x240/?temple,construction&sig=10',
+  PUJA_ITEMS:       'https://source.unsplash.com/featured/400x240/?incense,coconut,ritual&sig=11',
+  PRASAD:           'https://source.unsplash.com/featured/400x240/?indian,sweets,modak&sig=12',
+  BOOKS:            'https://source.unsplash.com/featured/400x240/?scripture,books,holy&sig=13',
+  MURTIS:           'https://source.unsplash.com/featured/400x240/?ganesh,statue,murti&sig=14',
+  MALAS:            'https://source.unsplash.com/featured/400x240/?prayer,beads,mala&sig=15',
+  PUJA_ACCESSORIES: 'https://source.unsplash.com/featured/400x240/?brass,puja,thali&sig=16',
+  GENERAL_DONATION: 'https://source.unsplash.com/featured/400x240/?temple,prayer,flowers&sig=17',
+  SPONSORSHIP:      'https://source.unsplash.com/featured/400x240/?flower,garland,marigold&sig=18',
+}
+
+function getCategoryImage(category: string): string {
+  return CATEGORY_IMAGES[category] || CATEGORY_IMAGES.DONATION
+}
+
 const MOCK_ITEMS: Service[] = [
   { id: '1',  name: 'Ganesh Puja',         name_gu: 'ગણેશ પૂજા',       name_hi: 'गणेश पूजा',      category: 'PUJA',      price: 51  },
   { id: '2',  name: 'Satyanarayan Katha',  name_gu: 'સત્યનારાયણ',      name_hi: 'सत्यनारायण',     category: 'PUJA',      price: 101 },
@@ -321,26 +349,42 @@ export function HomeScreen() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.025 }}
                         onClick={() => handleAddCatalog(item)}
-                        className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all"
-                        style={{ minHeight: 140 }}
+                        className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
                       >
-                        {/* Colour top stripe */}
-                        <div className="h-1.5 w-full" style={{ background: item.imageColor }} />
-
-                        <div className="p-3">
-                          <div className="flex items-start justify-between mb-2">
-                            <span className="text-3xl leading-none">{item.emoji}</span>
-                            {item.giftAidEligible && (
-                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 flex-shrink-0">GA</span>
-                            )}
+                        {/* Image area — real photo with emoji fallback */}
+                        <div
+                          className="relative overflow-hidden flex-shrink-0"
+                          style={{ height: 100, background: item.imageColor }}
+                        >
+                          {/* Emoji always present as fallback */}
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.55 }}>{item.emoji}</span>
                           </div>
-                          <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2 mb-1">
-                            {language === 'gu' ? item.nameGu || item.name : language === 'hi' ? item.nameHi || item.name : item.name}
-                          </p>
-                          {item.unit && <p className="text-gray-400 text-xs">{item.unit}</p>}
-                          <div className="flex items-center justify-between mt-2">
+                          {/* Real image on top — disappears on error */}
+                          <img
+                            src={getCategoryImage(item.category)}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                            onError={e => (e.currentTarget.style.display = 'none')}
+                            loading="lazy"
+                          />
+                          {/* Gift Aid badge */}
+                          {item.giftAidEligible && (
+                            <span className="absolute top-2 right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500 text-white shadow-sm z-10">GA</span>
+                          )}
+                        </div>
+
+                        {/* Details */}
+                        <div className="p-3 flex-1 flex flex-col justify-between">
+                          <div>
+                            <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">
+                              {language === 'gu' ? item.nameGu || item.name : language === 'hi' ? item.nameHi || item.name : item.name}
+                            </p>
+                            {item.unit && <p className="text-gray-400 text-xs mt-0.5">{item.unit}</p>}
+                          </div>
+                          <div className="flex items-center justify-between mt-2.5">
                             <p className="font-black text-lg text-gray-900">£{item.price}</p>
-                            <span className="text-xs px-2 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
+                            <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
                           </div>
                         </div>
 
@@ -348,11 +392,11 @@ export function HomeScreen() {
                           {isAdded && (
                             <motion.div
                               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                              className="absolute inset-0 bg-green-50 flex items-center justify-center rounded-2xl"
+                              className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
                             >
                               <div className="text-center">
-                                <span className="text-3xl block">✓</span>
-                                <span className="text-xs font-bold text-green-700">Added!</span>
+                                <span className="text-4xl block">✓</span>
+                                <span className="text-sm font-bold text-green-700">Added!</span>
                               </div>
                             </motion.div>
                           )}
@@ -374,29 +418,43 @@ export function HomeScreen() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.03 }}
                         onClick={() => handleAdd(svc)}
-                        className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all"
-                        style={{ minHeight: 140 }}
+                        className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
                       >
-                        <div className="h-1.5 w-full" style={{ background: m.color }} />
-                        <div className="p-3">
-                          <div className="mb-2">
-                            <span className="text-3xl leading-none">{m.icon}</span>
+                        {/* Image area */}
+                        <div
+                          className="relative overflow-hidden flex-shrink-0"
+                          style={{ height: 100, background: `${m.color}25` }}
+                        >
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.6 }}>{m.icon}</span>
                           </div>
-                          <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2 mb-1">{getName(svc, language)}</p>
-                          <div className="flex items-center justify-between mt-2">
+                          <img
+                            src={getCategoryImage(svc.category)}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                            onError={e => (e.currentTarget.style.display = 'none')}
+                            loading="lazy"
+                          />
+                        </div>
+
+                        {/* Details */}
+                        <div className="p-3 flex-1 flex flex-col justify-between">
+                          <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">{getName(svc, language)}</p>
+                          <div className="flex items-center justify-between mt-2.5">
                             <p className="font-black text-lg text-gray-900">£{svc.price}</p>
-                            <span className="text-xs px-2 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
+                            <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
                           </div>
                         </div>
+
                         <AnimatePresence>
                           {isAdded && (
                             <motion.div
                               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                              className="absolute inset-0 bg-green-50 flex items-center justify-center rounded-2xl"
+                              className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
                             >
                               <div className="text-center">
-                                <span className="text-3xl block">✓</span>
-                                <span className="text-xs font-bold text-green-700">Added!</span>
+                                <span className="text-4xl block">✓</span>
+                                <span className="text-sm font-bold text-green-700">Added!</span>
                               </div>
                             </motion.div>
                           )}
