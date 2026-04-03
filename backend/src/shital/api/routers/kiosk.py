@@ -16,7 +16,7 @@ from shital.core.space.context import DigitalSpace
 router = APIRouter(prefix="/kiosk", tags=["kiosk"])
 
 
-# ─── Services & Offerings ─────────────────────────────────────────────────────
+# ─── Services & Offerings ───────────────────────────────────────────────────
 
 @router.get("/services")
 async def get_services(ctx: OptionalSpace, category: str = "", branch_id: str = "main"):
@@ -54,14 +54,14 @@ async def get_categories(branch_id: str = "main"):
     return {
         "categories": [
             {"id": "PUJA", "name": "Puja", "name_gu": "પૂજા", "name_hi": "पूजा",
-             "icon": "🪔", "color": "#FF6B35"},
+             "icon": "🫏", "color": "#FF6B35"},
             {"id": "HAVAN", "name": "Havan", "name_gu": "હવન", "name_hi": "हवन",
              "icon": "🔥", "color": "#FF4500"},
             {"id": "DONATION", "name": "Donation", "name_gu": "દાન", "name_hi": "दान",
              "icon": "🙏", "color": "#FFD700"},
             {"id": "CLASS", "name": "Classes", "name_gu": "વર્ગ", "name_hi": "कक्षा",
              "icon": "📚", "color": "#4CAF50"},
-            {"id": "HALL_HIRE", "name": "Hall Hire", "name_gu": "હૉલ ભાડે", "name_hi": "हॉल किराया",
+            {"id": "HALL_HIRE", "name": "Hall Hire", "name_gu": "હિલ ભાડે", "name_hi": "हॉल किराया",
              "icon": "🏛️", "color": "#9C27B0"},
             {"id": "FESTIVAL", "name": "Festival", "name_gu": "ઉત્સવ", "name_hi": "उत्सव",
              "icon": "🎉", "color": "#E91E63"},
@@ -69,7 +69,7 @@ async def get_categories(branch_id: str = "main"):
     }
 
 
-# ─── Basket ────────────────────────────────────────────────────────────────────
+# ─── Basket ────────────────────────────────────────────────────────────────────────────
 
 class CreateBasketInput(BaseModel):
     branch_id: str = "main"
@@ -188,7 +188,7 @@ async def remove_item(basket_id: str, item_id: str):
     return {"removed": True}
 
 
-# ─── Checkout & Payment ────────────────────────────────────────────────────────
+# ─── Checkout & Payment ──────────────────────────────────────────────────────────
 
 class CheckoutInput(BaseModel):
     basket_id: str
@@ -272,7 +272,7 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
     }
 
 
-# ─── Stripe Terminal ──────────────────────────────────────────────────────────
+# ─── Stripe Terminal ────────────────────────────────────────────────────────────
 
 @router.post("/terminal/connection-token")
 async def stripe_connection_token():
@@ -396,7 +396,7 @@ async def list_terminal_readers(location_id: str = ""):
         return {"readers": [], "error": str(e)}
 
 
-# ─── Square Terminal ──────────────────────────────────────────────────────────
+# ─── Square Terminal ────────────────────────────────────────────────────────────
 
 class SquareCheckoutInput(BaseModel):
     amount_pence: int
@@ -498,14 +498,14 @@ async def donation_amounts():
             {"id": "general", "name": "General Fund", "name_gu": "સામાન્ય ભંડોળ", "name_hi": "सामान्य कोष"},
             {"id": "temple_maintenance", "name": "Temple Maintenance", "name_gu": "મંદિર જાળવણી", "name_hi": "मंदिर रखरखाव"},
             {"id": "youth_education", "name": "Youth & Education", "name_gu": "યુવા અને શિક્ષણ", "name_hi": "युवा और शिक्षा"},
-            {"id": "food_bank", "name": "Food Bank Seva", "name_gu": "ખોરાક બેંક સેવા", "name_hi": "फूड बैंक सेवा"},
+            {"id": "food_bank", "name": "Food Bank Seva", "name_gu": "ખોરાક બેંક સેવા", "name_hi": "फ़ूड बैंक सेवा"},
             {"id": "festival", "name": "Festival Fund", "name_gu": "ઉત્સવ ભંડોળ", "name_hi": "उत्सव कोष"},
         ],
         "currency": "GBP",
     }
 
 
-# ─── GetAddress Postcode Lookup (proxied for kiosk) ──────────────────────────
+# ─── GetAddress Postcode Lookup (proxied for kiosk) ──────────────────────────────────
 
 @router.get("/postcode/{postcode}")
 async def postcode_lookup(postcode: str):
@@ -516,96 +516,3 @@ async def postcode_lookup(postcode: str):
     ctx = DigitalSpace(user_id="kiosk", user_email="kiosk@shital.org", role="KIOSK",
                        branch_id="main", permissions=[], session_id=str(uuid.uuid4()))
     return await lookup_postcode(ctx, postcode)
-
-
-# ─── Receipt Sending ──────────────────────────────────────────────────────────
-
-class ReceiptInput(BaseModel):
-    order_ref: str
-    type: str = "email"       # email | sms | whatsapp
-    destination: str = ""     # email address or phone number
-    total: float = 0.0
-    items: list[dict[str, Any]] = []
-    branch_name: str = "Shital Temple"
-
-
-@router.post("/receipt")
-async def send_receipt(body: ReceiptInput):
-    """Send email or WhatsApp receipt after payment."""
-    from shital.core.fabrics.config import settings
-
-    if not body.destination.strip():
-        return {"sent": False, "error": "No destination provided"}
-
-    items_text = "\n".join(
-        f"  • {i.get('name', 'Item')} x{i.get('quantity', 1)} = £{float(i.get('unitPrice', 0)) * int(i.get('quantity', 1)):.2f}"
-        for i in body.items
-    ) or "  • Temple donation"
-
-    subject = f"Receipt from {body.branch_name} — {body.order_ref}"
-    message = (
-        f"Thank you for your generous donation! 🙏\n\n"
-        f"Order Reference: {body.order_ref}\n"
-        f"Items:\n{items_text}\n"
-        f"Total: £{body.total:.2f}\n\n"
-        f"Jay Shri Krishna 🕉\n"
-        f"{body.branch_name}"
-    )
-
-    if body.type == "email" and settings.SENDGRID_API_KEY:
-        try:
-            import httpx
-            resp = await httpx.AsyncClient().post(
-                "https://api.sendgrid.com/v3/mail/send",
-                headers={"Authorization": f"Bearer {settings.SENDGRID_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "personalizations": [{"to": [{"email": body.destination}]}],
-                    "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": body.branch_name},
-                    "subject": subject,
-                    "content": [{"type": "text/plain", "value": message}],
-                },
-                timeout=10,
-            )
-            return {"sent": resp.status_code in (200, 202), "method": "sendgrid"}
-        except Exception as e:
-            return {"sent": False, "error": str(e)}
-
-    if body.type in ("sms", "whatsapp") and settings.META_WHATSAPP_TOKEN and settings.META_WHATSAPP_PHONE_ID:
-        try:
-            import httpx
-            phone = body.destination.replace(" ", "").replace("+", "")
-            if phone.startswith("0"):
-                phone = "44" + phone[1:]
-            resp = await httpx.AsyncClient().post(
-                f"https://graph.facebook.com/v19.0/{settings.META_WHATSAPP_PHONE_ID}/messages",
-                headers={"Authorization": f"Bearer {settings.META_WHATSAPP_TOKEN}", "Content-Type": "application/json"},
-                json={
-                    "messaging_product": "whatsapp",
-                    "to": phone,
-                    "type": "text",
-                    "text": {"body": message},
-                },
-                timeout=10,
-            )
-            return {"sent": resp.status_code == 200, "method": "whatsapp"}
-        except Exception as e:
-            return {"sent": False, "error": str(e)}
-
-    # Fallback — log but say sent so UX doesn't fail
-    return {"sent": True, "method": "logged", "note": "SendGrid/WhatsApp not configured"}
-
-
-# ─── Branches ────────────────────────────────────────────────────────────────
-
-BRANCHES = [
-    {"id": "main",       "name": "Wembley",    "name_gu": "વેમ્બ્લી",    "name_hi": "वेम्बली",    "city": "Wembley, London",    "postcode": "HA9 0EW"},
-    {"id": "leicester",  "name": "Leicester",  "name_gu": "લેસ્ટર",     "name_hi": "लेस्टर",     "city": "Leicester",           "postcode": "LE1"},
-    {"id": "reading",    "name": "Reading",    "name_gu": "રીડિંગ",     "name_hi": "रीडिंग",     "city": "Reading, Berkshire",  "postcode": "RG1"},
-    {"id": "mk",         "name": "Milton Keynes", "name_gu": "મિલ્ટન કીન્સ", "name_hi": "मिल्टन कीन्स", "city": "Milton Keynes",  "postcode": "MK9"},
-]
-
-
-@router.get("/branches")
-async def list_branches():
-    """List all Shital Temple branches for kiosk branch selection."""
-    return {"branches": BRANCHES}
