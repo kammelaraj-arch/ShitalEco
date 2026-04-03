@@ -8,6 +8,10 @@ from shital.capabilities.auth.capabilities import login_with_email, register_dev
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# ── Hardcoded super-admin fallback (works even if DB is not yet migrated) ──────
+_SUPER_ADMIN_EMAIL = "admin@shital.org"
+_SUPER_ADMIN_PASS  = "ShitalAdmin2026!"
+
 
 def _anon_space(request: Request) -> DigitalSpace:
     return DigitalSpace(
@@ -18,8 +22,33 @@ def _anon_space(request: Request) -> DigitalSpace:
     )
 
 
+def _super_admin_token() -> dict:
+    """Return a valid JWT pair for the built-in super admin."""
+    from shital.capabilities.auth.capabilities import _create_access_token, _create_refresh_token
+    admin_id = "00000000-0000-0000-0000-000000000001"
+    access  = _create_access_token(admin_id, _SUPER_ADMIN_EMAIL, "SUPER_ADMIN", "main")
+    refresh = _create_refresh_token(admin_id)
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "user": {
+            "id": admin_id,
+            "email": _SUPER_ADMIN_EMAIL,
+            "name": "Super Admin",
+            "role": "SUPER_ADMIN",
+            "branch_id": "main",
+            "auth_provider": "password",
+        },
+    }
+
+
 @router.post("/login")
 async def login(body: LoginInput, request: Request):
+    # Super admin bypass — works without DB
+    if body.email == _SUPER_ADMIN_EMAIL and body.password == _SUPER_ADMIN_PASS:
+        return _super_admin_token()
     ctx = _anon_space(request)
     return await login_with_email(ctx, body)
 

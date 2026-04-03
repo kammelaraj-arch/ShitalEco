@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://shital-backend.onrender.com/api/v1'
+const API = process.env.NEXT_PUBLIC_API_URL || 'https://sshitaleco.onrender.com/api/v1'
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 

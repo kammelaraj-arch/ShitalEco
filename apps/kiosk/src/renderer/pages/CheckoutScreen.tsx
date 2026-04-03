@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 import { DeviceConfigScreen } from './DeviceConfigScreen'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://shital-backend.onrender.com/api/v1'
+const API_BASE = import.meta.env.VITE_API_URL || 'https://sshitaleco.onrender.com/api/v1'
 
 type PaymentMethod = 'STRIPE_TERMINAL' | 'STRIPE_ONLINE' | 'SQUARE' | 'PAYPAL' | 'CASH'
 
