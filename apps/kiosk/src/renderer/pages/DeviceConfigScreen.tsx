@@ -10,7 +10,7 @@ import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://sshitaleco.onrender.com/api/v1'
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 const BRANCH_ID = import.meta.env.VITE_BRANCH_ID || 'main'
 
 interface StripeReader {

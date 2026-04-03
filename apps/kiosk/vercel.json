@@ -7,6 +7,11 @@
   "env": {
     "VITE_API_URL": "/api/v1"
   },
+  "build": {
+    "env": {
+      "VITE_API_URL": "/api/v1"
+    }
+  },
   "rewrites": [
     { "source": "/api/v1/:path*", "destination": "https://sshitaleco.onrender.com/api/v1/:path*" },
     { "source": "/getaddress/:path*", "destination": "https://api.getaddress.io/:path*" },
