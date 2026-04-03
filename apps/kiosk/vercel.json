@@ -4,6 +4,9 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "framework": null,
+  "env": {
+    "VITE_API_URL": "https://sshitaleco.onrender.com/api/v1"
+  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]
