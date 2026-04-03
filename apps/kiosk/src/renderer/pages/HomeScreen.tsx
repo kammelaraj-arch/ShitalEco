@@ -7,9 +7,9 @@ import {
   type CatalogItem,
 } from '../data/catalog'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
-// ─── Nav structure — ALL stay on HomeScreen, content panel changes ────────────
+// ─── Nav structure ────────────────────────────────────────────────────────────
 const NAV_SECTIONS = [
   {
     items: [
@@ -34,14 +34,14 @@ interface Service {
   description?: string | null; category: string; price: number
 }
 
-const CATEGORY_META: Record<string, { gradient: string; shadow: string; icon: string; light: string }> = {
-  PUJA:      { gradient: 'from-orange-500 to-amber-400',    shadow: 'shadow-orange-300', icon: '🪔', light: '#FFF3E0' },
-  HAVAN:     { gradient: 'from-red-500 to-orange-400',      shadow: 'shadow-red-300',    icon: '🔥', light: '#FFEBEE' },
-  CLASS:     { gradient: 'from-green-500 to-emerald-400',   shadow: 'shadow-green-300',  icon: '📚', light: '#E8F5E9' },
-  HALL_HIRE: { gradient: 'from-violet-500 to-purple-400',   shadow: 'shadow-purple-300', icon: '🏛️', light: '#EDE7F6' },
-  FESTIVAL:  { gradient: 'from-pink-500 to-rose-400',       shadow: 'shadow-pink-300',   icon: '🎉', light: '#FCE4EC' },
-  OTHER:     { gradient: 'from-blue-500 to-cyan-400',       shadow: 'shadow-blue-300',   icon: '✨', light: '#E3F2FD' },
-  DONATION:  { gradient: 'from-yellow-500 to-amber-400',    shadow: 'shadow-yellow-300', icon: '🙏', light: '#FFFDE7' },
+const CATEGORY_META: Record<string, { color: string; icon: string }> = {
+  PUJA:      { color: '#FF9933', icon: '🪔' },
+  HAVAN:     { color: '#e53e3e', icon: '🔥' },
+  CLASS:     { color: '#38a169', icon: '📚' },
+  HALL_HIRE: { color: '#805ad5', icon: '🏛️' },
+  FESTIVAL:  { color: '#d53f8c', icon: '🎉' },
+  OTHER:     { color: '#3182ce', icon: '✨' },
+  DONATION:  { color: '#d69e2e', icon: '🙏' },
 }
 
 const MOCK_ITEMS: Service[] = [
@@ -58,13 +58,6 @@ const MOCK_ITEMS: Service[] = [
   { id: '11', name: 'Food Donation',        name_gu: 'ભોજન દાન',       name_hi: 'भोजन दान',       category: 'DONATION',  price: 21  },
 ]
 
-const PROMOTED: Service[] = [
-  { id: 'p1', name: 'Navratri Puja',       name_gu: 'નવરાત્રી',        name_hi: 'नवरात्री',       category: 'FESTIVAL',  price: 21 },
-  { id: 'p2', name: 'Annual Donation',      name_gu: 'વાર્ષિક દાન',    name_hi: 'वार्षिक दान',    category: 'DONATION',  price: 51 },
-  { id: 'p3', name: 'Gau Seva',             name_gu: 'ગૌ સેવા',        name_hi: 'गौ सेवा',        category: 'DONATION',  price: 11 },
-  { id: 'p4', name: 'Bal Vihar Class',      name_gu: 'બાળ વિહાર',      name_hi: 'बाल विहार',      category: 'CLASS',     price: 10 },
-]
-
 function getName(s: Service, lang: string) {
   if (lang === 'gu' && s.name_gu) return s.name_gu
   if (lang === 'hi' && s.name_hi) return s.name_hi
@@ -77,7 +70,7 @@ function getNavLabel(item: typeof NAV_SECTIONS[0]['items'][0], lang: string) {
   return item.label
 }
 
-// ─── Theme Picker Modal ───────────────────────────────────────────────────────
+// ─── Theme Picker ─────────────────────────────────────────────────────────────
 function ThemePicker({ onClose }: { onClose: () => void }) {
   const { theme, setTheme } = useKioskStore()
   return (
@@ -86,59 +79,37 @@ function ThemePicker({ onClose }: { onClose: () => void }) {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
+      style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)' }}
       onClick={onClose}
     >
       <motion.div
-        initial={{ scale: 0.85, y: 30 }}
+        initial={{ scale: 0.88, y: 24 }}
         animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.85, y: 30 }}
-        className="bg-white rounded-3xl shadow-2xl p-7 w-full max-w-lg"
+        exit={{ scale: 0.88, y: 24 }}
+        className="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-sm"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h2 className="text-xl font-black text-gray-900">Choose Style & Colour</h2>
-            <p className="text-gray-400 text-sm mt-0.5">Pick a theme that resonates with you</p>
-          </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 font-bold text-lg transition-colors">×</button>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-black text-gray-900">Choose Style</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 font-bold">×</button>
         </div>
-
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-1 gap-2">
           {(Object.entries(THEMES) as [KioskTheme, typeof THEMES[KioskTheme]][]).map(([id, th]) => {
             const isActive = theme === id
             return (
               <button
                 key={id}
                 onClick={() => { setTheme(id); onClose() }}
-                className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all text-left ${
-                  isActive ? 'border-orange-400 bg-orange-50 shadow-md' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                className={`flex items-center gap-3 p-3 rounded-2xl border-2 text-left transition-all ${
+                  isActive ? 'border-orange-400 bg-orange-50' : 'border-gray-100 hover:border-gray-200'
                 }`}
               >
-                {/* Swatch */}
-                <div
-                  className="w-12 h-12 rounded-xl flex-shrink-0 shadow-md flex items-center justify-center text-2xl"
-                  style={{ background: th.logoBg }}
-                >
-                  {th.emoji}
-                </div>
-
-                {/* Preview strip */}
-                <div className="flex gap-1.5 flex-shrink-0">
-                  {[th.headerBg, th.sidebarFrom, th.sidebarTo, th.mainBg].map((c, i) => (
-                    <div key={i} className="w-5 h-8 rounded-md shadow-sm border border-black/5" style={{ background: c }} />
-                  ))}
-                </div>
-
-                {/* Label */}
-                <div className="flex-1 min-w-0">
+                <div className="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-xl" style={{ background: th.logoBg }}>{th.emoji}</div>
+                <div className="flex-1">
                   <p className="font-bold text-gray-900 text-sm">{th.name}</p>
                   <p className="text-gray-400 text-xs">{th.desc}</p>
                 </div>
-
-                {isActive && (
-                  <span className="text-orange-500 font-black text-lg flex-shrink-0">✓</span>
-                )}
+                {isActive && <span className="text-orange-500 font-black">✓</span>}
               </button>
             )
           })}
@@ -150,7 +121,7 @@ function ThemePicker({ onClose }: { onClose: () => void }) {
 
 // ─── Main HomeScreen ──────────────────────────────────────────────────────────
 export function HomeScreen() {
-  const { language, setScreen, addItem, items, theme } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, resetKiosk } = useKioskStore()
   const th = THEMES[theme]
   const [activeNav, setActiveNav] = useState('donations')
   const [services, setServices] = useState<Service[]>(MOCK_ITEMS)
@@ -169,7 +140,6 @@ export function HomeScreen() {
 
   const activeNavItem = NAV_SECTIONS.flatMap(s => s.items).find(i => i.id === activeNav)
 
-  // For catalog-based categories, use local catalog data; for services use API data
   const catalogItems: CatalogItem[] = (() => {
     if (activeNav === 'soft_donation')    return SOFT_DONATION_ITEMS
     if (activeNav === 'project_donation') return BRICK_TIERS
@@ -209,48 +179,42 @@ export function HomeScreen() {
     setTimeout(() => setAdded(null), 1400)
   }
 
-  const meta = (cat: string) => CATEGORY_META[cat] ?? CATEGORY_META.OTHER
+  const displayItems = useCatalog ? catalogItems : filteredServices
+  const navLabel = getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)
+  const isGiftAidSection = activeNav === 'donations' || activeNav === 'project_donation'
 
   return (
-    <div className="w-full h-full flex flex-col" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div className="w-full h-full flex flex-col" style={{ fontFamily: 'Inter, system-ui, sans-serif', background: '#f7f3ee' }}>
 
-      {/* ══ HEADER ══════════════════════════════════════════════════════════ */}
+      {/* ══ TOP BAR ════════════════════════════════════════════════════════════ */}
       <header
-        className="flex items-center px-3 md:px-4 gap-2 md:gap-3 relative z-20 flex-shrink-0"
-        style={{
-          height: '56px',
-          background: th.headerBg,
-          borderBottom: `3px solid rgba(255,153,51,0.35)`,
-          boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-        }}
+        className="flex items-center gap-3 px-4 flex-shrink-0"
+        style={{ height: 60, background: th.headerBg, borderBottom: '2px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
       >
         {/* Logo */}
         <div
-          className="w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl font-black shadow-xl border-2 border-white/30 flex-shrink-0"
+          className="w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black flex-shrink-0 shadow border-2 border-white/30"
           style={{ background: th.logoBg, color: th.logoText }}
         >
           🕉
         </div>
 
-        {/* Title */}
+        {/* Temple name */}
         <div className="flex-1 min-w-0">
-          <h1 className="font-black text-base md:text-xl leading-tight tracking-tight" style={{ color: th.headerText }}>Shital Temple</h1>
-          <p className="text-xs hidden md:block" style={{ color: th.headerSub }}>
-            {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
-          </p>
+          <h1 className="font-black text-base leading-tight" style={{ color: th.headerText }}>Shital Temple</h1>
+          <p className="text-xs opacity-70" style={{ color: th.headerSub }}>Wembley, London</p>
         </div>
 
-        {/* Language pills */}
+        {/* Language */}
         <div className="flex gap-1">
           {(['en', 'gu', 'hi'] as const).map(lang => (
             <button
               key={lang}
               onClick={() => useKioskStore.getState().setLanguage(lang)}
-              className="px-2 py-1 rounded-full text-xs font-bold uppercase transition-all"
+              className="px-2 py-1 rounded-lg text-xs font-bold uppercase transition-all"
               style={{
-                background: language === lang ? th.langActive : 'transparent',
+                background: language === lang ? th.langActive : 'rgba(255,255,255,0.15)',
                 color: language === lang ? '#fff' : th.headerSub,
-                border: `1.5px solid ${language === lang ? th.langActive : 'transparent'}`,
               }}
             >
               {lang === 'en' ? 'EN' : lang === 'gu' ? 'ગુ' : 'हि'}
@@ -258,92 +222,48 @@ export function HomeScreen() {
           ))}
         </div>
 
-        {/* Theme picker — hidden on mobile */}
+        {/* Theme picker button */}
         <button
           onClick={() => setShowThemePicker(true)}
-          className="w-9 h-9 rounded-xl hidden md:flex items-center justify-center transition-all active:scale-95"
-          style={{ background: `${th.langActive}20` }}
+          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95"
+          style={{ background: 'rgba(255,255,255,0.15)' }}
+          title="Change theme"
         >
-          <span className="text-lg">🎨</span>
-        </button>
-
-        {/* Basket */}
-        <button
-          onClick={() => setScreen('basket')}
-          className="relative flex items-center gap-1.5 text-white font-bold px-3 py-2 rounded-xl transition-all shadow-md active:scale-95"
-          style={{ background: th.basketBtn }}
-        >
-          <span className="text-base">🛒</span>
-          <span className="hidden sm:inline text-sm font-black">
-            {itemCount > 0 ? `£${total.toFixed(2)}` : 'Basket'}
-          </span>
-          {itemCount > 0 && (
-            <span className="absolute -top-2 -right-2 bg-yellow-400 text-gray-900 text-xs font-black w-5 h-5 rounded-full flex items-center justify-center shadow-md">
-              {itemCount}
-            </span>
-          )}
+          <span className="text-base">🎨</span>
         </button>
       </header>
 
-      {/* ══ MOBILE NAV — horizontal scroll tabs (hidden on md+) ═════════════ */}
-      <div
-        className="flex md:hidden flex-shrink-0 overflow-x-auto gap-1 px-3 py-2"
-        style={{ background: `linear-gradient(90deg, ${th.sidebarFrom}, ${th.sidebarTo})`, scrollbarWidth: 'none' }}
-      >
-        {NAV_SECTIONS.flatMap(s => s.items).map(item => {
-          const isActive = activeNav === item.id
-          return (
-            <button
-              key={item.id}
-              onClick={() => setActiveNav(item.id)}
-              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 whitespace-nowrap"
-              style={{
-                background: isActive ? th.sidebarActiveBg : 'rgba(255,255,255,0.1)',
-                color: isActive ? th.sidebarActiveText : th.sidebarText,
-                border: isActive ? `1.5px solid ${th.sidebarIndicator}` : '1.5px solid transparent',
-              }}
-            >
-              <span>{item.icon}</span>
-              <span>{getNavLabel(item, language)}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      {/* ══ BODY ════════════════════════════════════════════════════════════ */}
+      {/* ══ BODY ═══════════════════════════════════════════════════════════════ */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* ── SIDEBAR — desktop only ───────────────────────────────────────── */}
+        {/* ── SIDEBAR ──────────────────────────────────────────────────────── */}
         <aside
-          className="hidden md:flex w-56 flex-shrink-0 flex-col relative z-10 overflow-y-auto"
+          className="flex-shrink-0 flex flex-col overflow-y-auto"
           style={{
-            background: `linear-gradient(180deg, ${th.sidebarFrom} 0%, ${th.sidebarTo} 100%)`,
-            borderRight: `2px solid rgba(255,153,51,0.20)`,
-            boxShadow: '2px 0 16px rgba(0,0,0,0.08)',
+            width: 160,
+            background: '#fff',
+            borderRight: '1px solid #e5e7eb',
           }}
         >
-          {/* Decorative top border */}
-          <div className="h-1 w-full" style={{ background: 'linear-gradient(to right,#FFD700,#FF9933,#C41E3A,#FF9933,#FFD700)' }} />
-
           {NAV_SECTIONS.map((section, si) => (
-            <nav key={si} className={si > 0 ? 'mt-auto border-t pt-2 pb-2' : 'py-2'} style={{ borderColor: 'rgba(0,0,0,0.08)' }}>
+            <nav key={si} className={si > 0 ? 'border-t border-gray-100 mt-auto' : ''}>
               {section.items.map(item => {
                 const isActive = activeNav === item.id
                 return (
                   <button
                     key={item.id}
                     onClick={() => setActiveNav(item.id)}
-                    className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-all relative"
+                    className="w-full flex flex-col items-center gap-1 py-3 px-2 text-center transition-all relative active:scale-95"
                     style={{
-                      background: isActive ? th.sidebarActiveBg : 'transparent',
-                      color: isActive ? th.sidebarActiveText : th.sidebarText,
+                      background: isActive ? `${th.langActive}15` : 'transparent',
+                      borderLeft: isActive ? `3px solid ${th.langActive}` : '3px solid transparent',
                     }}
                   >
-                    {isActive && (
-                      <span className="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full" style={{ background: th.sidebarIndicator }} />
-                    )}
-                    <span className={`text-xl ${isActive ? '' : 'opacity-80'}`}>{item.icon}</span>
-                    <span className={`text-sm leading-tight tracking-wide ${isActive ? 'font-black' : 'font-semibold'}`}>
+                    <span className="text-2xl leading-none">{item.icon}</span>
+                    <span
+                      className="text-[11px] leading-tight font-semibold"
+                      style={{ color: isActive ? th.langActive : '#6b7280' }}
+                    >
                       {getNavLabel(item, language)}
                     </span>
                   </button>
@@ -352,97 +272,88 @@ export function HomeScreen() {
             </nav>
           ))}
 
+          {/* Exit */}
           <button
             onClick={() => setScreen('idle')}
-            className="mx-3 mb-4 mt-2 py-2 rounded-xl text-xs font-medium flex items-center justify-center gap-2 transition-all"
-            style={{ color: th.sidebarText, border: `1px solid ${th.sidebarBorder}`, background: 'rgba(0,0,0,0.04)' }}
+            className="mx-2 mb-3 mt-2 py-2 rounded-xl text-xs font-medium flex items-center justify-center gap-1 text-gray-400 hover:text-gray-600 transition-colors"
+            style={{ border: '1px solid #e5e7eb' }}
           >
             ← Exit
           </button>
         </aside>
 
-        {/* ── MAIN ────────────────────────────────────────────────────────── */}
-        <main className="flex-1 flex flex-col overflow-hidden" style={{ background: th.mainBg }}>
+        {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
+        <main className="flex-1 flex flex-col overflow-hidden bg-white">
 
-          {/* Selected category items */}
-          <section className="flex-1 flex flex-col overflow-hidden">
-            {/* Section header */}
-            <div
-              className="flex items-center gap-3 px-5 py-4 flex-shrink-0"
-              style={{
-                background: th.sectionHeaderBg,
-                borderBottom: `2px solid rgba(0,0,0,0.08)`,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-              }}
-            >
+          {/* Category title header */}
+          <div
+            className="flex items-center justify-between px-5 py-3 flex-shrink-0"
+            style={{ borderBottom: '1px solid #e5e7eb' }}
+          >
+            <div className="flex items-center gap-2">
               <span className="text-2xl">{activeNavItem?.icon ?? '✨'}</span>
-              <div>
-                <h2 className="font-black text-lg tracking-tight leading-tight" style={{ color: th.sectionTitleColor }}>
-                  {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
-                </h2>
-                <p className="text-xs font-semibold" style={{ color: th.sectionCountColor }}>
-                  {useCatalog ? catalogItems.length : filteredServices.length} items available
-                </p>
-              </div>
-              {useCatalog && (
-                <span className={`ml-auto text-xs font-black px-3 py-1 rounded-full ${
-                  activeNav === 'donations' || activeNav === 'project_donation'
-                    ? 'bg-green-100 text-green-700 border border-green-200'
-                    : 'bg-gray-100 text-gray-500 border border-gray-200'
-                }`}>
-                  {activeNav === 'donations' || activeNav === 'project_donation' ? '✓ Gift Aid Eligible' : '✗ Not Gift Aid'}
-                </span>
-              )}
+              <h2 className="font-black text-xl text-gray-900">{navLabel}</h2>
             </div>
+            {isGiftAidSection && (
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-200">
+                ✓ Gift Aid Eligible
+              </span>
+            )}
+          </div>
 
-            {/* Unified scrollable area — promoted row first, then items grid */}
-            <div
-              className="flex-1 overflow-y-auto p-4 space-y-5"
-              style={{
-                scrollbarWidth: 'thin',
-                scrollbarColor: `${th.basketBtn}60 transparent`,
-              }}
-            >
-              {/* ── Promoted Products row (always visible) ── */}
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-base">⭐</span>
-                  <h3 className="font-black text-sm tracking-wide" style={{ color: th.promotedTitleColor }}>
-                    Featured & Promoted
-                  </h3>
-                  <span className="text-xs bg-yellow-100 text-yellow-700 border border-yellow-200 px-2 py-0.5 rounded-full font-semibold">Special Offer</span>
+          {/* Items grid — scrollable */}
+          <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}>
+            <AnimatePresence mode="popLayout">
+              {displayItems.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
+                  <span className="text-5xl">🛕</span>
+                  <p className="text-sm font-medium text-gray-500">No items in this category</p>
                 </div>
-                <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-                  {PROMOTED.map((p, i) => {
-                    const m = meta(p.category)
-                    const isAdded = added === p.id
+              ) : useCatalog ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {(catalogItems as CatalogItem[]).map((item, i) => {
+                    const isAdded = added === item.id
                     return (
                       <motion.button
-                        key={p.id}
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.07 }}
-                        onClick={() => handleAdd(p)}
-                        className={`flex-shrink-0 w-44 rounded-2xl overflow-hidden shadow-lg bg-gradient-to-br ${m.gradient} text-left active:scale-95 hover:shadow-xl transition-all relative`}
+                        key={item.id}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.025 }}
+                        onClick={() => handleAddCatalog(item)}
+                        className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all"
+                        style={{ minHeight: 140 }}
                       >
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none" />
-                        <span className="absolute top-2 right-2 bg-yellow-300 text-yellow-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase z-10 shadow">
-                          Offer
-                        </span>
-                        <div className="p-3.5 relative z-10">
-                          <span className="text-3xl block mb-1.5">{m.icon}</span>
-                          <p className="text-white font-black text-sm leading-snug line-clamp-2 drop-shadow-sm">{getName(p, language)}</p>
+                        {/* Colour top stripe */}
+                        <div className="h-1.5 w-full" style={{ background: item.imageColor }} />
+
+                        <div className="p-3">
+                          <div className="flex items-start justify-between mb-2">
+                            <span className="text-3xl leading-none">{item.emoji}</span>
+                            {item.giftAidEligible && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 flex-shrink-0">GA</span>
+                            )}
+                          </div>
+                          <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2 mb-1">
+                            {language === 'gu' ? item.nameGu || item.name : language === 'hi' ? item.nameHi || item.name : item.name}
+                          </p>
+                          {item.unit && <p className="text-gray-400 text-xs">{item.unit}</p>}
                           <div className="flex items-center justify-between mt-2">
-                            <p className="text-white font-black text-lg drop-shadow-sm">£{p.price}</p>
-                            <span className="text-white text-xs bg-white/25 px-2 py-1 rounded-lg font-black">+ ADD</span>
+                            <p className="font-black text-lg text-gray-900">£{item.price}</p>
+                            <span className="text-xs px-2 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
                           </div>
                         </div>
+
                         <AnimatePresence>
                           {isAdded && (
-                            <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}
-                              className="absolute inset-0 flex items-center justify-center rounded-2xl" style={{ background: m.light }}>
-                              <div className="flex flex-col items-center gap-1"><span className="text-3xl">✓</span>
-                                <span className="text-xs font-bold text-gray-700">Added!</span></div>
+                            <motion.div
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                              className="absolute inset-0 bg-green-50 flex items-center justify-center rounded-2xl"
+                            >
+                              <div className="text-center">
+                                <span className="text-3xl block">✓</span>
+                                <span className="text-xs font-bold text-green-700">Added!</span>
+                              </div>
                             </motion.div>
                           )}
                         </AnimatePresence>
@@ -450,148 +361,104 @@ export function HomeScreen() {
                     )
                   })}
                 </div>
-              </div>
-
-              {/* Divider */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px" style={{ background: 'rgba(0,0,0,0.08)' }} />
-                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: th.sectionCountColor }}>
-                  All {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
-                </span>
-                <div className="flex-1 h-px" style={{ background: 'rgba(0,0,0,0.08)' }} />
-              </div>
-
-              {/* ── Items grid ── */}
-              <AnimatePresence mode="popLayout">
-                {(useCatalog ? catalogItems : filteredServices).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
-                    <span className="text-5xl">🛕</span>
-                    <p className="text-sm font-medium" style={{ color: th.sectionTitleColor }}>No items in this category</p>
-                  </div>
-                ) : useCatalog ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {catalogItems.map((item, i) => {
-                      const isAdded = added === item.id
-                      return (
-                        <motion.button
-                          key={item.id}
-                          layout
-                          initial={{ opacity: 0, y: 14 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.03 }}
-                          onClick={() => handleAddCatalog(item)}
-                          className="relative overflow-hidden rounded-2xl text-left shadow-md transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5 bg-white border border-gray-100"
-                        >
-                          <div className="h-2 w-full" style={{ background: item.imageColor }} />
-                          <div className="p-3.5">
-                            <div className="flex items-start justify-between mb-2">
-                              <span className="text-4xl">{item.emoji}</span>
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                                item.giftAidEligible ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-gray-100 text-gray-500'
-                              }`}>
-                                {item.giftAidEligible ? '✓ GA' : '✗ GA'}
-                              </span>
-                            </div>
-                            <p className="font-black text-gray-900 text-sm leading-snug line-clamp-2">
-                              {language === 'gu' ? item.nameGu || item.name : language === 'hi' ? item.nameHi || item.name : item.name}
-                            </p>
-                            {item.unit && <p className="text-gray-400 text-xs mt-0.5 font-medium">{item.unit}</p>}
-                            <div className="flex items-center justify-between mt-2.5">
-                              <p className="font-black text-xl" style={{ color: th.sectionCountColor }}>£{item.price}</p>
-                              <span className="text-xs px-3 py-1 rounded-xl text-white font-black shadow-sm" style={{ background: th.basketBtn }}>+ ADD</span>
-                            </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {filteredServices.map((svc, i) => {
+                    const m = CATEGORY_META[svc.category] ?? CATEGORY_META.OTHER
+                    const isAdded = added === svc.id
+                    return (
+                      <motion.button
+                        key={svc.id}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.03 }}
+                        onClick={() => handleAdd(svc)}
+                        className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all"
+                        style={{ minHeight: 140 }}
+                      >
+                        <div className="h-1.5 w-full" style={{ background: m.color }} />
+                        <div className="p-3">
+                          <div className="mb-2">
+                            <span className="text-3xl leading-none">{m.icon}</span>
                           </div>
-                          <AnimatePresence>
-                            {isAdded && (
-                              <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}
-                                className="absolute inset-0 bg-green-50 flex items-center justify-center rounded-2xl">
-                                <div className="text-center"><span className="text-3xl block">✓</span>
-                                  <span className="text-xs font-bold text-green-700">Added!</span></div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </motion.button>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {filteredServices.map((svc, i) => {
-                      const m = meta(svc.category)
-                      const isAdded = added === svc.id
-                      return (
-                        <motion.button
-                          key={svc.id}
-                          layout
-                          initial={{ opacity: 0, y: 14 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.035 }}
-                          onClick={() => handleAdd(svc)}
-                          className={`relative overflow-hidden rounded-2xl text-left shadow-md bg-gradient-to-br ${m.gradient} transition-all active:scale-95 hover:shadow-lg p-3.5`}
-                        >
-                          <div className="absolute inset-0 bg-gradient-to-br from-white/25 to-transparent rounded-2xl pointer-events-none" />
-                          <div className="relative z-10">
-                            <span className="text-4xl block mb-2">{m.icon}</span>
-                            <p className="text-white font-black text-sm leading-snug line-clamp-2 drop-shadow-sm">{getName(svc, language)}</p>
-                            <div className="flex items-center justify-between mt-2.5">
-                              <p className="text-white font-black text-xl drop-shadow-sm">£{svc.price}</p>
-                              <span className="text-white text-xs bg-white/25 px-3 py-1 rounded-xl font-black">+ ADD</span>
-                            </div>
+                          <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2 mb-1">{getName(svc, language)}</p>
+                          <div className="flex items-center justify-between mt-2">
+                            <p className="font-black text-lg text-gray-900">£{svc.price}</p>
+                            <span className="text-xs px-2 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
                           </div>
-                          <AnimatePresence>
-                            {isAdded && (
-                              <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}
-                                className="absolute inset-0 flex items-center justify-center rounded-2xl" style={{ background: m.light }}>
-                                <div className="flex flex-col items-center gap-1"><span className="text-3xl">✓</span>
-                                  <span className="text-xs font-bold text-gray-700">Added!</span></div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </motion.button>
-                      )
-                    })}
-                  </div>
-                )}
-              </AnimatePresence>
-            </div>
-          </section>
-
-          {/* Basket bar */}
-          <AnimatePresence>
-            {itemCount > 0 && (
-              <motion.div
-                initial={{ y: 80, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 80, opacity: 0 }}
-                className="flex-shrink-0 flex items-center justify-between px-5 py-3"
-                style={{
-                  background: th.basketBarBg,
-                  borderTop: `2px solid rgba(255,153,51,0.30)`,
-                  boxShadow: '0 -4px 20px rgba(0,0,0,0.15)',
-                }}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🛒</span>
-                  <div>
-                    <p className="text-xs font-medium opacity-70" style={{ color: th.basketBarText }}>
-                      {itemCount} item{itemCount !== 1 ? 's' : ''}
-                    </p>
-                    <p className="font-black text-lg" style={{ color: th.basketBarSubText }}>
-                      £{total.toFixed(2)}
-                    </p>
-                  </div>
+                        </div>
+                        <AnimatePresence>
+                          {isAdded && (
+                            <motion.div
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                              className="absolute inset-0 bg-green-50 flex items-center justify-center rounded-2xl"
+                            >
+                              <div className="text-center">
+                                <span className="text-3xl block">✓</span>
+                                <span className="text-xs font-bold text-green-700">Added!</span>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </motion.button>
+                    )
+                  })}
                 </div>
-                <button
-                  onClick={() => setScreen('basket')}
-                  className="text-white font-black px-8 py-3 rounded-2xl text-base transition-all shadow-xl active:scale-95 hover:opacity-90 tracking-wide"
-                  style={{ background: th.basketBtn }}
-                >
-                  VIEW BASKET →
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              )}
+            </AnimatePresence>
+          </div>
+
         </main>
+      </div>
+
+      {/* ══ BOTTOM BAR — always visible, McDonald's style ══════════════════════ */}
+      <div
+        className="flex-shrink-0"
+        style={{ background: '#fff', borderTop: '1px solid #e5e7eb', boxShadow: '0 -2px 12px rgba(0,0,0,0.08)' }}
+      >
+        {/* Main row: basket info + View My Order */}
+        <div className="flex items-center gap-3 px-4 py-3">
+          {/* Basket summary */}
+          <div className="flex items-center gap-2 flex-1">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center relative flex-shrink-0"
+              style={{ background: `${th.langActive}15` }}
+            >
+              <span className="text-xl">🛒</span>
+              {itemCount > 0 && (
+                <span
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center text-white shadow"
+                  style={{ background: th.langActive }}
+                >
+                  {itemCount}
+                </span>
+              )}
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 leading-none">{itemCount} item{itemCount !== 1 ? 's' : ''}</p>
+              <p className="font-black text-lg text-gray-900 leading-tight">£{total.toFixed(2)}</p>
+            </div>
+          </div>
+
+          {/* Start Again */}
+          <button
+            onClick={() => { if (window.confirm('Start a new order?')) resetKiosk() }}
+            className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-500 text-sm font-semibold active:scale-95 transition-all flex-shrink-0"
+          >
+            Start Again
+          </button>
+
+          {/* View My Order */}
+          <button
+            onClick={() => setScreen('basket')}
+            disabled={itemCount === 0}
+            className="px-6 py-2.5 rounded-xl text-white font-black text-sm shadow-md active:scale-95 transition-all flex-shrink-0 disabled:opacity-40"
+            style={{ background: itemCount > 0 ? th.langActive : '#9ca3af', minWidth: 140 }}
+          >
+            View My Order →
+          </button>
+        </div>
       </div>
 
       {/* Theme picker overlay */}
