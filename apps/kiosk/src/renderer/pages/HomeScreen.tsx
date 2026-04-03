@@ -149,7 +149,7 @@ function ThemePicker({ onClose }: { onClose: () => void }) {
 
 // ─── Main HomeScreen ──────────────────────────────────────────────────────────
 export function HomeScreen() {
-  const { language, setScreen, addItem, items, theme, resetKiosk } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, resetKiosk, branchId } = useKioskStore()
   const th = THEMES[theme]
   const [activeNav, setActiveNav] = useState('donations')
   const [services, setServices] = useState<Service[]>(MOCK_ITEMS)
@@ -227,10 +227,18 @@ export function HomeScreen() {
           🕉
         </div>
 
-        {/* Temple name */}
+        {/* Temple name + branch */}
         <div className="flex-1 min-w-0">
-          <h1 className="font-black text-base leading-tight" style={{ color: th.headerText }}>Shital Temple</h1>
-          <p className="text-xs opacity-70" style={{ color: th.headerSub }}>Wembley, London</p>
+          <div className="flex items-center gap-2">
+            <h1 className="font-black text-base leading-tight" style={{ color: th.headerText }}>Shital Temple</h1>
+            <span
+              className="text-[10px] font-bold px-2 py-0.5 rounded-full capitalize flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.2)', color: th.headerSub }}
+            >
+              {branchId === 'main' ? 'Wembley' : branchId}
+            </span>
+          </div>
+          <p className="text-xs opacity-60 leading-tight" style={{ color: th.headerSub }}>Wembley, London HA9 0EW</p>
         </div>
 
         {/* Language */}

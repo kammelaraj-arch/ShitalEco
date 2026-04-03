@@ -4,16 +4,24 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 
 // ─── GetAddress.io postcode lookup ────────────────────────────────────────────
 
-async function lookupPostcode(postcode: string): Promise<{ addresses: string[]; valid: boolean; city?: string; county?: string }> {
+// getAddress.io domain token (authorized for shital-kiosk.vercel.app)
+const GETADDRESS_TOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
+
+async function lookupPostcode(postcode: string): Promise<{ addresses: string[]; valid: boolean }> {
   const clean = postcode.trim().toUpperCase()
   try {
     const res = await fetch(
-      `/api/address-lookup?postcode=${encodeURIComponent(clean)}`,
+      `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GETADDRESS_TOKEN}&expand=true`,
       { signal: AbortSignal.timeout(10000) }
     )
     if (res.ok) {
       const data = await res.json()
-      return { addresses: data.addresses || [], valid: !!data.valid, city: data.city, county: data.county }
+      if (data.addresses?.length) {
+        const addresses = data.addresses.map((a: any) =>
+          typeof a === 'string' ? a : [a.line_1, a.line_2, a.town_or_city, a.county, a.postcode].filter(Boolean).join(', ')
+        )
+        return { addresses, valid: true }
+      }
     }
   } catch {}
   return { addresses: [], valid: false }
@@ -37,30 +45,26 @@ function GiftAidScreen({
   const [agreed,     setAgreed]     = useState(true)
   const [gdpr,       setGdpr]       = useState(true)
   const [fullName,   setFullName]   = useState('')
-  const [postcode,       setPostcode]       = useState('')
-  const [postcodeValid,  setPostcodeValid]  = useState(false)
-  const [addressHint,    setAddressHint]    = useState('')   // pre-filled city/county from lookup
-  const [address,        setAddress]        = useState('')
-  const [lookingUp,      setLookingUp]      = useState(false)
-  const [phone,          setPhone]          = useState('')
-  const [email,          setEmail]          = useState('')
-  const [error,          setError]          = useState('')
+  const [postcode,   setPostcode]   = useState('')
+  const [addresses,  setAddresses]  = useState<string[]>([])
+  const [address,    setAddress]    = useState('')
+  const [lookingUp,  setLookingUp]  = useState(false)
+  const [phone,      setPhone]      = useState('')
+  const [email,      setEmail]      = useState('')
+  const [error,      setError]      = useState('')
 
   async function handleLookup() {
     if (!postcode.trim()) return
     setLookingUp(true)
+    setAddresses([])
     setAddress('')
-    setAddressHint('')
-    setPostcodeValid(false)
     const result = await lookupPostcode(postcode)
     setLookingUp(false)
-    if (result.valid) {
-      setPostcodeValid(true)
-      // Pre-fill address with city/county so user just adds house number
-      const hint = [result.city, result.county].filter(Boolean).join(', ')
-      setAddressHint(hint)
+    if (result.valid && result.addresses.length > 0) {
+      setAddresses(result.addresses)
+      if (result.addresses.length === 1) setAddress(result.addresses[0])
     } else {
-      setError('Postcode not found — please check and try again, or type your address below')
+      setError('Postcode not found — please type your address below')
     }
   }
 
@@ -166,11 +170,11 @@ function GiftAidScreen({
           <div className="flex gap-2">
             <input
               value={postcode}
-              onChange={e => { setPostcode(e.target.value.toUpperCase()); setPostcodeValid(false); setAddressHint('') }}
+              onChange={e => { setPostcode(e.target.value.toUpperCase()); setAddresses([]); setAddress('') }}
               onKeyDown={e => e.key === 'Enter' && handleLookup()}
               placeholder="e.g. HA9 0EW"
               className="flex-1 border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-mono focus:outline-none bg-white transition-colors"
-              style={{ borderColor: postcodeValid ? '#16a34a' : '#e5e7eb' }}
+              style={{ borderColor: address ? '#16a34a' : '#e5e7eb' }}
             />
             <button
               onClick={handleLookup}
@@ -182,27 +186,27 @@ function GiftAidScreen({
             </button>
           </div>
 
-          {/* After postcode validated — show house number + pre-filled rest */}
-          {postcodeValid && (
-            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="mt-2 space-y-2">
-              <p className="text-xs text-green-600 font-semibold">✓ Postcode verified — enter your house/flat number below</p>
-              <input
+          {addresses.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="mt-2">
+              <select
                 value={address}
                 onChange={e => setAddress(e.target.value)}
-                placeholder={`e.g. 12 Station Road${addressHint ? ', ' + addressHint : ''}, ${postcode.trim().toUpperCase()}`}
-                className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
-                style={{ borderColor: address.length > 3 ? '#16a34a' : '#6ee7b7' }}
-                autoFocus
-              />
+                className="w-full border-2 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none bg-white"
+                style={{ borderColor: address ? '#16a34a' : '#6ee7b7' }}
+                size={Math.min(addresses.length + 1, 6)}
+              >
+                <option value="">— Select your address —</option>
+                {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
+              </select>
             </motion.div>
           )}
 
-          {/* Manual entry fallback if not yet verified */}
-          {!postcodeValid && postcode.length >= 5 && !lookingUp && (
+          {/* Manual fallback */}
+          {addresses.length === 0 && postcode.length >= 5 && !lookingUp && (
             <input
               value={address}
               onChange={e => setAddress(e.target.value)}
-              placeholder="Or type full address here"
+              placeholder="Or type your full address here"
               className="w-full mt-2 border-2 border-gray-200 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none bg-white"
             />
           )}
