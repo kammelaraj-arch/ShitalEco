@@ -8,7 +8,7 @@ const NAV_SECTIONS = [
   {
     label: 'Overview',
     items: [
-      { href: '/dashboard', icon: '🏛️', label: 'Dashboard' },
+      { href: '/dashboard', icon: '🏗️', label: 'Dashboard' },
       { href: '/ai', icon: '🧠', label: 'Digital Brain' },
     ],
   },
