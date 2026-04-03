@@ -24,18 +24,45 @@ export function CheckoutScreen() {
   async function processPayment() {
     setError('')
     try {
-      // Generate a local order ID (skip basket DB — creates payment intent directly)
-      const orderId = crypto.randomUUID()
-      setBasketId(orderId)
+      // 1. Create basket
+      setStage('Creating order…')
+      const basketRes = await fetch(`${API_BASE}/kiosk/basket`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branch_id: branchId }),
+      })
+      if (!basketRes.ok) {
+        const txt = await basketRes.text()
+        throw new Error(`Order creation failed (${basketRes.status}): ${txt.slice(0, 120)}`)
+      }
+      const { basket_id } = await basketRes.json()
+      setBasketId(basket_id)
 
-      // 1. Create PaymentIntent on Stripe (no DB required)
+      // 2. Add items
+      setStage('Adding items…')
+      for (const item of items) {
+        await fetch(`${API_BASE}/kiosk/basket/item`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            basket_id,
+            item_type: item.type,
+            reference_id: item.referenceId,
+            name: item.name,
+            quantity: item.quantity,
+            unit_price: item.unitPrice,
+          }),
+        })
+      }
+
+      // 3. Create PaymentIntent
       setStage('Preparing payment…')
       const piRes = await fetch(`${API_BASE}/kiosk/terminal/payment-intent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount_pence: Math.round(total * 100),
-          order_id: orderId,
+          order_id: basket_id,
           description: 'Shital Temple Payment',
           reader_id: stripeReaderId,
         }),
@@ -47,7 +74,7 @@ export function CheckoutScreen() {
       const pi = await piRes.json()
       if (pi.error) throw new Error(pi.error)
 
-      // 2. Send to WisePOS E reader
+      // 4. Send to WisePOS E reader
       setStage('Sending to card reader…')
       const prRes = await fetch(`${API_BASE}/kiosk/terminal/process-payment`, {
         method: 'POST',
@@ -64,8 +91,8 @@ export function CheckoutScreen() {
       const pr = await prRes.json()
       if (pr.error) throw new Error(pr.error)
 
-      const orderRef = `ORD-${orderId.slice(0, 8).toUpperCase()}`
-      setOrderResult(orderId, orderRef, {
+      const orderRef = `ORD-${basket_id.slice(0, 8).toUpperCase()}`
+      setOrderResult(basket_id, orderRef, {
         provider: 'STRIPE_TERMINAL',
         payment_intent_id: pi.payment_intent_id,
         client_secret: pi.client_secret,
