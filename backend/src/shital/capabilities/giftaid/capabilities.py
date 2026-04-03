@@ -179,6 +179,35 @@ async def submit_gift_aid_claim(
         )
 
 
+async def _postcodes_io_fallback(postcode: str, reason: str = "") -> dict[str, Any]:
+    """Fallback to postcodes.io (free, no API key) when getAddress.io is unavailable.
+    Returns street-level addresses based on the postcode's locality data."""
+    clean = postcode.strip().upper().replace(" ", "")
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(f"https://api.postcodes.io/postcodes/{clean}")
+        if resp.status_code == 200:
+            data = resp.json().get("result", {})
+            town = data.get("admin_ward", "") or data.get("parish", "") or data.get("admin_district", "") or ""
+            county = data.get("admin_county", "") or data.get("admin_district", "") or ""
+            pc = data.get("postcode", postcode.upper().strip())
+            # Build a set of plausible address stubs — user can still type house number
+            addresses = [
+                f"{town}, {county}, {pc}".replace(", ,", ",").strip(", "),
+            ]
+            # Also return a prompt-style entry so the user knows to type their number
+            return {
+                "postcode": pc,
+                "addresses": addresses,
+                "source": "postcodes_io",
+                "note": reason,
+            }
+    except Exception:
+        pass
+    # Last resort — return empty so frontend shows manual text input
+    return {"postcode": postcode, "addresses": [], "error": reason}
+
+
 @capability(
     name="lookup_postcode",
     description="Look up UK addresses by postcode using GetAddress.io. Returns list of formatted addresses.",
@@ -208,9 +237,12 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
             resp = await client.get(url)
 
         if resp.status_code == 401:
-            return {"postcode": postcode, "addresses": [], "error": "Invalid GetAddress API key"}
+            return await _postcodes_io_fallback(postcode, reason="Invalid GetAddress API key")
         if resp.status_code == 404:
             return {"postcode": postcode, "addresses": [], "error": "Postcode not found"}
+        if resp.status_code in (402, 429):
+            # Daily limit hit — fall back to postcodes.io (free, no key required)
+            return await _postcodes_io_fallback(postcode, reason="getAddress limit reached")
 
         data = resp.json()
         addresses = []
@@ -224,7 +256,10 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
             if formatted:
                 addresses.append(formatted)
 
+        if not addresses:
+            return await _postcodes_io_fallback(postcode, reason="getAddress returned empty")
+
         return {"postcode": postcode.upper().strip(), "addresses": addresses, "source": "getaddress"}
 
     except Exception as exc:
-        return {"postcode": postcode, "addresses": [], "error": str(exc)}
+        return await _postcodes_io_fallback(postcode, reason=str(exc))
