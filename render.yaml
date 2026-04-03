@@ -32,6 +32,8 @@ services:
         value: "x1f8Q~I_H3PDVomGQbDr1PX71tdWLOEdyO4s3cua"
       - key: STRIPE_TERMINAL_LOCATION_ID
         value: "tml_Gcuz0gCsvSvQZg"
+      - key: GETADDRESS_API_KEY
+        value: "CkqEZqIrkEOGlQhie_NL8w48103"
     healthCheckPath: /api/v1/ping
 
 databases:
