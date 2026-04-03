@@ -13,7 +13,7 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/admin", tags=["admin-kiosk"])
 
 
-# ─── Temple Services ──────────────────────────────────────────────────────────
+# ─── Temple Services ─────────────────────────────────────────────────────
 
 class ServiceBody(BaseModel):
     name: str = ""
@@ -123,7 +123,7 @@ async def delete_service(service_id: str):
     return {"deleted": True}
 
 
-# ─── Kiosk Orders ─────────────────────────────────────────────────────────────
+# ─── Kiosk Orders ───────────────────────────────────────────────────────
 
 @router.get("/orders")
 async def list_orders(limit: int = 50, offset: int = 0, status: str = "", branch_id: str = ""):
