@@ -59,41 +59,37 @@ app.add_middleware(
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# ─── Mount all routers ────────────────────────────────────────────────────────
-from shital.api.routers.auth import router as auth_router                          # noqa: E402
-from shital.api.routers.auth_azure import router as auth_azure_router              # noqa: E402
-from shital.api.routers.brain import router as brain_router                        # noqa: E402
-from shital.api.routers.finance import router as finance_router                    # noqa: E402
-from shital.api.routers.hr import router as hr_router                              # noqa: E402
-from shital.api.routers.payroll import router as payroll_router                    # noqa: E402
-from shital.api.routers.kiosk import router as kiosk_router                        # noqa: E402
-from shital.api.routers.items import router as items_router                        # noqa: E402
-from shital.api.routers.giftaid import router as giftaid_router                    # noqa: E402
-from shital.api.routers.terminal_devices import router as terminal_devices_router  # noqa: E402
-from shital.api.routers.users import router as users_router                        # noqa: E402
+# ─── Mount all routers (resilient — import errors logged but don't crash app) ──
+def _mount(module: str, attr: str, prefix: str = "/api/v1") -> None:
+    try:
+        import importlib
+        mod = importlib.import_module(module)
+        app.include_router(getattr(mod, attr), prefix=prefix)
+        logger.info("router_mounted", module=module)
+    except Exception as exc:
+        logger.error("router_mount_failed", module=module, error=str(exc))
 
-app.include_router(auth_router, prefix="/api/v1")
-app.include_router(auth_azure_router, prefix="/api/v1")
-app.include_router(brain_router, prefix="/api/v1")
-app.include_router(finance_router, prefix="/api/v1")
-app.include_router(hr_router, prefix="/api/v1")
-app.include_router(payroll_router, prefix="/api/v1")
-app.include_router(kiosk_router, prefix="/api/v1")
-app.include_router(items_router, prefix="/api/v1")
-app.include_router(giftaid_router, prefix="/api/v1")
-app.include_router(terminal_devices_router, prefix="/api/v1")
-app.include_router(users_router, prefix="/api/v1")
+_mount("shital.api.routers.auth",             "router")
+_mount("shital.api.routers.auth_azure",       "router")
+_mount("shital.api.routers.kiosk",            "router")
+_mount("shital.api.routers.terminal_devices", "router")
+_mount("shital.api.routers.users",            "router")
+_mount("shital.api.routers.items",            "router")
+_mount("shital.api.routers.giftaid",          "router")
+_mount("shital.api.routers.brain",            "router")
+_mount("shital.api.routers.finance",          "router")
+_mount("shital.api.routers.hr",               "router")
+_mount("shital.api.routers.payroll",          "router")
 
 
 @app.get("/health", tags=["system"])
+@app.get("/api/v1/ping", tags=["system"])
 async def health() -> dict[str, Any]:
-    from shital.core.dna.registry import DigitalDNA
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
         "version": "1.0.0",
         "environment": settings.APP_ENV,
-        "capabilities_registered": len(DigitalDNA.all_capabilities()),
     }
 
 
