@@ -203,7 +203,8 @@ export function HomeScreen() {
   }
 
   const handleAdd = (svc: Service) => {
-    addItem({ type: 'SERVICE', name: svc.name, quantity: 1, unitPrice: svc.price, totalPrice: svc.price, referenceId: svc.id, giftAidEligible: false })
+    const giftAidEligible = ['DONATION', 'GENERAL_DONATION', 'PROJECT_DONATION'].includes(svc.category)
+    addItem({ type: svc.category.includes('DONATION') ? 'DONATION' : 'SERVICE', name: svc.name, quantity: 1, unitPrice: svc.price, totalPrice: svc.price, referenceId: svc.id, giftAidEligible })
     setAdded(svc.id)
     setTimeout(() => setAdded(null), 1400)
   }
