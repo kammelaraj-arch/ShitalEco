@@ -33,9 +33,17 @@ const PROVIDERS: { id: Provider; name: string; logo: string; sub: string; color:
   { id: 'cash',            name: 'Cash / Counter',   logo: '💷', sub: 'Customer pays at front desk',            color: '#2E7D32' },
 ]
 
+const BRANCHES = [
+  { id: 'main',      name: 'Wembley',       city: 'Wembley, London' },
+  { id: 'leicester', name: 'Leicester',     city: 'Leicester' },
+  { id: 'reading',   name: 'Reading',       city: 'Reading, Berkshire' },
+  { id: 'mk',        name: 'Milton Keynes', city: 'Milton Keynes' },
+]
+
 export function DeviceConfigScreen({ onClose }: { onClose: () => void }) {
-  const { theme, cardProvider, stripeReaderId, squareDeviceId, setCardDevice } = useKioskStore()
+  const { theme, cardProvider, stripeReaderId, squareDeviceId, setCardDevice, branchId, setBranchId } = useKioskStore()
   const th = THEMES[theme]
+  const [selectedBranch, setSelectedBranch] = useState(branchId)
 
   const [selectedProvider, setSelectedProvider] = useState<Provider>(cardProvider)
   const [dbDevices, setDbDevices]         = useState<DbDevice[]>([])
@@ -135,6 +143,7 @@ export function DeviceConfigScreen({ onClose }: { onClose: () => void }) {
 
   // ── Save ─────────────────────────────────────────────────────────────────────
   const handleSave = () => {
+    setBranchId(selectedBranch)
     if (selectedProvider === 'stripe_terminal') {
       if (manualMode || backendDown) {
         const id = manualReaderId.trim()
@@ -187,6 +196,26 @@ export function DeviceConfigScreen({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="p-5 max-h-[70vh] overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
+
+          {/* Branch */}
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Temple Branch</p>
+          <div className="grid grid-cols-2 gap-2 mb-5">
+            {BRANCHES.map(b => {
+              const isActive = selectedBranch === b.id
+              return (
+                <button
+                  key={b.id}
+                  onClick={() => setSelectedBranch(b.id)}
+                  className="flex flex-col items-start p-3 rounded-2xl border-2 text-left transition-all"
+                  style={{ borderColor: isActive ? th.basketBtn : '#F3F4F6', background: isActive ? `${th.basketBtn}10` : 'white' }}
+                >
+                  <p className="font-bold text-gray-900 text-sm">{b.name}</p>
+                  <p className="text-gray-400 text-xs">{b.city}</p>
+                  {isActive && <span className="text-xs font-black mt-1" style={{ color: th.basketBtn }}>✓ Active</span>}
+                </button>
+              )
+            })}
+          </div>
 
           {/* Provider */}
           <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Choose Provider</p>

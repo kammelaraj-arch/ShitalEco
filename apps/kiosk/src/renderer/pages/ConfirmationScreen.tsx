@@ -32,11 +32,17 @@ export function ConfirmationScreen() {
       await fetch(`${API_BASE}/kiosk/receipt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_ref: orderRef, type, destination: receiptInput }),
+        body: JSON.stringify({
+          order_ref: orderRef,
+          type: type === 'sms' ? 'whatsapp' : 'email',
+          destination: receiptInput,
+          total,
+          items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })),
+        }),
       })
     } catch {}
     setSending(false)
-    setSentMsg(type === 'email' ? `Receipt sent to ${receiptInput}` : `Receipt sent to ${receiptInput}`)
+    setSentMsg(type === 'email' ? `Receipt sent to ${receiptInput}` : `WhatsApp receipt sent to ${receiptInput}`)
     setReceiptStep('done')
   }
 
@@ -113,7 +119,7 @@ export function ConfirmationScreen() {
                     onClick={() => setReceiptStep('sms')}
                     className="flex-1 py-3.5 rounded-xl border-2 border-gray-200 text-gray-700 font-bold text-sm active:scale-95 transition-all hover:border-gray-300"
                   >
-                    📱 SMS
+                    💬 WhatsApp
                   </button>
                   <button
                     onClick={() => setReceiptStep('done')}

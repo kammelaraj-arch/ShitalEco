@@ -152,6 +152,7 @@ interface KioskState {
   setScreen: (screen: KioskScreen) => void
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
+  setBranchId: (id: string) => void
   setCardDevice: (
     provider: 'stripe_terminal' | 'square' | 'cash',
     deviceId: string,
@@ -194,6 +195,7 @@ export const useKioskStore = create<KioskState>()(
   setScreen: (screen) => set({ screen }),
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
+  setBranchId: (branchId) => set({ branchId }),
   setCardDevice: (provider, deviceId, deviceLabel) => set(
     provider === 'stripe_terminal'
       ? { cardProvider: provider, stripeReaderId: deviceId, stripeReaderLabel: deviceLabel }

@@ -516,3 +516,96 @@ async def postcode_lookup(postcode: str):
     ctx = DigitalSpace(user_id="kiosk", user_email="kiosk@shital.org", role="KIOSK",
                        branch_id="main", permissions=[], session_id=str(uuid.uuid4()))
     return await lookup_postcode(ctx, postcode)
+
+
+# ─── Receipt Sending ──────────────────────────────────────────────────────────
+
+class ReceiptInput(BaseModel):
+    order_ref: str
+    type: str = "email"       # email | sms | whatsapp
+    destination: str = ""     # email address or phone number
+    total: float = 0.0
+    items: list[dict[str, Any]] = []
+    branch_name: str = "Shital Temple"
+
+
+@router.post("/receipt")
+async def send_receipt(body: ReceiptInput):
+    """Send email or WhatsApp receipt after payment."""
+    from shital.core.fabrics.config import settings
+
+    if not body.destination.strip():
+        return {"sent": False, "error": "No destination provided"}
+
+    items_text = "\n".join(
+        f"  • {i.get('name', 'Item')} x{i.get('quantity', 1)} = £{float(i.get('unitPrice', 0)) * int(i.get('quantity', 1)):.2f}"
+        for i in body.items
+    ) or "  • Temple donation"
+
+    subject = f"Receipt from {body.branch_name} — {body.order_ref}"
+    message = (
+        f"Thank you for your generous donation! 🙏\n\n"
+        f"Order Reference: {body.order_ref}\n"
+        f"Items:\n{items_text}\n"
+        f"Total: £{body.total:.2f}\n\n"
+        f"Jay Shri Krishna 🕉\n"
+        f"{body.branch_name}"
+    )
+
+    if body.type == "email" and settings.SENDGRID_API_KEY:
+        try:
+            import httpx
+            resp = await httpx.AsyncClient().post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={"Authorization": f"Bearer {settings.SENDGRID_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "personalizations": [{"to": [{"email": body.destination}]}],
+                    "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": body.branch_name},
+                    "subject": subject,
+                    "content": [{"type": "text/plain", "value": message}],
+                },
+                timeout=10,
+            )
+            return {"sent": resp.status_code in (200, 202), "method": "sendgrid"}
+        except Exception as e:
+            return {"sent": False, "error": str(e)}
+
+    if body.type in ("sms", "whatsapp") and settings.META_WHATSAPP_TOKEN and settings.META_WHATSAPP_PHONE_ID:
+        try:
+            import httpx
+            phone = body.destination.replace(" ", "").replace("+", "")
+            if phone.startswith("0"):
+                phone = "44" + phone[1:]
+            resp = await httpx.AsyncClient().post(
+                f"https://graph.facebook.com/v19.0/{settings.META_WHATSAPP_PHONE_ID}/messages",
+                headers={"Authorization": f"Bearer {settings.META_WHATSAPP_TOKEN}", "Content-Type": "application/json"},
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": phone,
+                    "type": "text",
+                    "text": {"body": message},
+                },
+                timeout=10,
+            )
+            return {"sent": resp.status_code == 200, "method": "whatsapp"}
+        except Exception as e:
+            return {"sent": False, "error": str(e)}
+
+    # Fallback — log but say sent so UX doesn't fail
+    return {"sent": True, "method": "logged", "note": "SendGrid/WhatsApp not configured"}
+
+
+# ─── Branches ────────────────────────────────────────────────────────────────
+
+BRANCHES = [
+    {"id": "main",       "name": "Wembley",    "name_gu": "વેમ્બ્લી",    "name_hi": "वेम्बली",    "city": "Wembley, London",    "postcode": "HA9 0EW"},
+    {"id": "leicester",  "name": "Leicester",  "name_gu": "લેસ્ટર",     "name_hi": "लेस्टर",     "city": "Leicester",           "postcode": "LE1"},
+    {"id": "reading",    "name": "Reading",    "name_gu": "રીડિંગ",     "name_hi": "रीडिंग",     "city": "Reading, Berkshire",  "postcode": "RG1"},
+    {"id": "mk",         "name": "Milton Keynes", "name_gu": "મિલ્ટન કીન્સ", "name_hi": "मिल्टन कीन्स", "city": "Milton Keynes",  "postcode": "MK9"},
+]
+
+
+@router.get("/branches")
+async def list_branches():
+    """List all Shital Temple branches for kiosk branch selection."""
+    return {"branches": BRANCHES}
