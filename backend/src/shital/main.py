@@ -80,6 +80,7 @@ _mount("shital.api.routers.brain",            "router")
 _mount("shital.api.routers.finance",          "router")
 _mount("shital.api.routers.hr",               "router")
 _mount("shital.api.routers.payroll",          "router")
+_mount("shital.api.routers.admin_kiosk",      "router")
 
 
 @app.get("/health", tags=["system"])

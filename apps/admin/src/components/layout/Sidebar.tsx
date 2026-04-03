@@ -49,6 +49,8 @@ const NAV_SECTIONS = [
   {
     label: 'Kiosk',
     items: [
+      { href: '/kiosk/services',  icon: '🛕', label: 'Services' },
+      { href: '/kiosk/orders',    icon: '🧾', label: 'Orders' },
       { href: '/terminal-devices', icon: '💳', label: 'Terminal Devices' },
     ],
   },
