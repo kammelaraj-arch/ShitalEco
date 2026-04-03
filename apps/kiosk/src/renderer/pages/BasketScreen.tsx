@@ -242,7 +242,8 @@ export function BasketScreen() {
   const th = THEMES[theme]
 
   const total        = items.reduce((s, i) => s + i.totalPrice, 0)
-  const eligibleAmt  = items.filter(i => i.giftAidEligible).reduce((s, i) => s + i.totalPrice, 0)
+  // Re-derive eligibility from item type so stale localStorage values don't matter
+  const eligibleAmt  = items.filter(i => i.giftAidEligible || i.type === 'DONATION').reduce((s, i) => s + i.totalPrice, 0)
   const giftAidBonus = eligibleAmt * 0.25
   const hasEligible  = eligibleAmt > 0
 
@@ -425,48 +426,51 @@ export function BasketScreen() {
           className="flex-shrink-0 px-6 pb-6 pt-4"
           style={{ borderTop: '2px solid rgba(0,0,0,0.06)', background: th.mainBg }}
         >
-          {/* Always 2-column: checkout left, gift aid right */}
-          <div className="grid grid-cols-2 gap-3">
-            {/* Left — Continue / Checkout */}
+          {hasEligible ? (
+            /* 2-column: Continue without GA (left) | Boost with GA (right, green) */
+            <div className="grid grid-cols-2 gap-3">
+              <motion.button
+                onClick={handleNormalCheckout}
+                whileTap={{ scale: 0.97 }}
+                className="rounded-2xl px-5 py-5 flex flex-col justify-between shadow-lg"
+                style={{ background: 'rgba(0,0,0,0.08)' }}
+              >
+                <span className="text-xl font-black" style={{ color: th.sectionTitleColor }}>→</span>
+                <div>
+                  <p className="font-black text-base" style={{ color: th.sectionTitleColor }}>Continue without Gift Aid</p>
+                  <p className="font-black text-lg" style={{ color: th.sectionTitleColor }}>£{total.toFixed(2)}</p>
+                </div>
+              </motion.button>
+
+              <motion.button
+                onClick={() => setShowGiftAidForm(true)}
+                whileTap={{ scale: 0.97 }}
+                className="rounded-2xl px-5 py-5 flex flex-col gap-2 text-left shadow-xl"
+                style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl">🇬🇧</span>
+                  <span className="text-white text-xl font-black">→</span>
+                </div>
+                <div>
+                  <p className="text-white font-black text-base leading-tight">Boost with Gift Aid</p>
+                  <p className="text-white font-black text-lg">£{(total + giftAidBonus).toFixed(2)}</p>
+                  <p className="text-green-200 text-xs mt-0.5">+£{giftAidBonus.toFixed(2)} extra from HMRC free</p>
+                </div>
+              </motion.button>
+            </div>
+          ) : (
+            /* Full-width orange checkout when no eligible items */
             <motion.button
               onClick={handleNormalCheckout}
               whileTap={{ scale: 0.97 }}
-              className="rounded-2xl px-5 py-5 flex flex-col justify-between shadow-lg"
-              style={{ background: 'rgba(0,0,0,0.08)' }}
+              className="w-full rounded-2xl px-6 py-4 flex items-center justify-between text-white shadow-lg"
+              style={{ background: th.basketBtn }}
             >
-              <span className="text-xl font-black" style={{ color: th.sectionTitleColor }}>→</span>
-              <div>
-                <p className="font-black text-base" style={{ color: th.sectionTitleColor }}>
-                  {hasEligible ? 'Continue without Gift Aid' : 'Checkout'}
-                </p>
-                <p className="font-black text-lg" style={{ color: th.sectionTitleColor }}>£{total.toFixed(2)}</p>
-              </div>
+              <span className="font-black text-lg">Checkout · £{total.toFixed(2)}</span>
+              <span className="text-xl font-black">→</span>
             </motion.button>
-
-            {/* Right — Boost with Gift Aid (green) */}
-            <motion.button
-              onClick={() => setShowGiftAidForm(true)}
-              whileTap={{ scale: 0.97 }}
-              className="rounded-2xl px-5 py-5 flex flex-col gap-2 text-left shadow-xl"
-              style={{ background: hasEligible ? 'linear-gradient(135deg, #16a34a, #15803d)' : 'linear-gradient(135deg, #6b7280, #4b5563)' }}
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-3xl">🇬🇧</span>
-                <span className="text-white text-xl font-black flex-shrink-0">→</span>
-              </div>
-              <div>
-                <p className="text-white font-black text-base leading-tight">Boost with Gift Aid</p>
-                {hasEligible ? (
-                  <>
-                    <p className="text-white font-black text-lg">£{(total + giftAidBonus).toFixed(2)}</p>
-                    <p className="text-green-200 text-xs mt-0.5">+£{giftAidBonus.toFixed(2)} extra from HMRC free</p>
-                  </>
-                ) : (
-                  <p className="text-gray-300 text-xs mt-0.5">Add a donation to enable</p>
-                )}
-              </div>
-            </motion.button>
-          </div>
+          )}
         </motion.div>
       )}
     </div>
