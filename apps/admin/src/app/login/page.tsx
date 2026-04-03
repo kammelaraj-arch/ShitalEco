@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'https://sshitaleco.onrender.com/api/v1'
 
-// ─── Storage helpers ──────────────────────────────────────────────────────────
+// ─── Storage helpers ──────────────────────────────────────────────────
 
 function saveSession(data: any) {
   if (typeof window === 'undefined') return
@@ -14,7 +14,7 @@ function saveSession(data: any) {
   document.cookie = 'shital_token=1; path=/; samesite=lax'
 }
 
-// ─── Login page ───────────────────────────────────────────────────────────────
+// ─── Login page ─────────────────────────────────────────────────────────────────
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -41,7 +41,7 @@ export default function LoginPage() {
     checkAzure()
   }, [])
 
-  // ── Email/password login ──────────────────────────────────────────────────
+  // ── Email/password login ────────────────────────────────────────────────
 
   async function handleEmailLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -77,7 +77,7 @@ export default function LoginPage() {
     }
   }
 
-  // ── Microsoft SSO ─────────────────────────────────────────────────────────
+  // ── Microsoft SSO ───────────────────────────────────────────────────
 
   async function handleMicrosoftLogin() {
     setError('')
@@ -267,7 +267,7 @@ export default function LoginPage() {
   )
 }
 
-// ─── Microsoft Logo SVG ───────────────────────────────────────────────────────
+// ─── Microsoft Logo SVG ─────────────────────────────────────────────────────────────
 
 function MicrosoftLogo() {
   return (
