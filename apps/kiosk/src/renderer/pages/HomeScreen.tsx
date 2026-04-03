@@ -44,28 +44,28 @@ const CATEGORY_META: Record<string, { color: string; icon: string }> = {
   DONATION:  { color: '#d69e2e', icon: '🙏' },
 }
 
-// ─── Category image URLs (Unsplash) — emoji shows if image fails to load ──────
+// ─── Category image URLs (stable Unsplash photo IDs) ─────────────────────────
 const CATEGORY_IMAGES: Record<string, string> = {
   // Service categories
-  PUJA:             'https://source.unsplash.com/featured/400x240/?indian,diya,puja,lamp&sig=1',
-  HAVAN:            'https://source.unsplash.com/featured/400x240/?fire,sacred,ceremony&sig=2',
-  CLASS:            'https://source.unsplash.com/featured/400x240/?yoga,meditation&sig=3',
-  HALL_HIRE:        'https://source.unsplash.com/featured/400x240/?banquet,hall,event&sig=4',
-  FESTIVAL:         'https://source.unsplash.com/featured/400x240/?diwali,festival,lights&sig=5',
-  DONATION:         'https://source.unsplash.com/featured/400x240/?temple,donation,giving&sig=6',
+  PUJA:             'https://images.unsplash.com/photo-1604431696980-07b4a3e01379?w=400&h=250&fit=crop&q=80', // oil lamp / diya
+  HAVAN:            'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=250&fit=crop&q=80', // fire / flames
+  CLASS:            'https://images.unsplash.com/photo-1545205597-3d9d02c29597?w=400&h=250&fit=crop&q=80', // yoga / meditation
+  HALL_HIRE:        'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?w=400&h=250&fit=crop&q=80', // banquet hall
+  FESTIVAL:         'https://images.unsplash.com/photo-1605196560547-b2f7281b7355?w=400&h=250&fit=crop&q=80', // diwali lights
+  DONATION:         'https://images.unsplash.com/photo-1532629345422-7515f3d16bb6?w=400&h=250&fit=crop&q=80', // giving / hands
   // Catalog categories
-  GRAINS:           'https://source.unsplash.com/featured/400x240/?rice,grain,wheat&sig=7',
-  OIL_ESSENTIALS:   'https://source.unsplash.com/featured/400x240/?cooking,oil,kitchen&sig=8',
-  PULSES:           'https://source.unsplash.com/featured/400x240/?lentils,dal,pulses&sig=9',
-  PROJECT_DONATION: 'https://source.unsplash.com/featured/400x240/?temple,construction&sig=10',
-  PUJA_ITEMS:       'https://source.unsplash.com/featured/400x240/?incense,coconut,ritual&sig=11',
-  PRASAD:           'https://source.unsplash.com/featured/400x240/?indian,sweets,modak&sig=12',
-  BOOKS:            'https://source.unsplash.com/featured/400x240/?scripture,books,holy&sig=13',
-  MURTIS:           'https://source.unsplash.com/featured/400x240/?ganesh,statue,murti&sig=14',
-  MALAS:            'https://source.unsplash.com/featured/400x240/?prayer,beads,mala&sig=15',
-  PUJA_ACCESSORIES: 'https://source.unsplash.com/featured/400x240/?brass,puja,thali&sig=16',
-  GENERAL_DONATION: 'https://source.unsplash.com/featured/400x240/?temple,prayer,flowers&sig=17',
-  SPONSORSHIP:      'https://source.unsplash.com/featured/400x240/?flower,garland,marigold&sig=18',
+  GRAINS:           'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=400&h=250&fit=crop&q=80', // rice grains
+  OIL_ESSENTIALS:   'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400&h=250&fit=crop&q=80', // cooking oil bottles
+  PULSES:           'https://images.unsplash.com/photo-1515543904379-3d757afe72e4?w=400&h=250&fit=crop&q=80', // lentils / dal
+  PROJECT_DONATION: 'https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=400&h=250&fit=crop&q=80', // construction / building
+  PUJA_ITEMS:       'https://images.unsplash.com/photo-1601315377985-f4e2a08bf4a0?w=400&h=250&fit=crop&q=80', // incense sticks
+  PRASAD:           'https://images.unsplash.com/photo-1601050690597-df0568f70950?w=400&h=250&fit=crop&q=80', // Indian sweets
+  BOOKS:            'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=250&fit=crop&q=80', // books / scripture
+  MURTIS:           'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=250&fit=crop&q=80', // statue / murti
+  MALAS:            'https://images.unsplash.com/photo-1627308595229-7830a5c91f9f?w=400&h=250&fit=crop&q=80', // prayer beads / mala
+  PUJA_ACCESSORIES: 'https://images.unsplash.com/photo-1518998053901-5348d3961a04?w=400&h=250&fit=crop&q=80', // brass items / thali
+  GENERAL_DONATION: 'https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80', // marigold flowers / temple
+  SPONSORSHIP:      'https://images.unsplash.com/photo-1582845512747-e42001c95638?w=400&h=250&fit=crop&q=80', // flower garland / marigold
 }
 
 function getCategoryImage(category: string): string {
