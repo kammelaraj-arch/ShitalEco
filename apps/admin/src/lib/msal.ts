@@ -16,7 +16,7 @@ export interface AzureConfig {
   enabled: boolean
 }
 
-// ─── Runtime config fetch ─────────────────────────────────────────────────────
+// ─── Runtime config fetch ──────────────────────────────────────────────────
 
 let _azureConfig: AzureConfig | null = null
 
@@ -69,7 +69,7 @@ export async function getMsalInstance() {
   return _msalInstance
 }
 
-// ─── Sign-in with popup ───────────────────────────────────────────────────────
+// ─── Sign-in with popup ────────────────────────────────────────────────
 
 export interface ShitalAuthResult {
   access_token: string
