@@ -19,6 +19,10 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Override sqlalchemy.url from DATABASE_URL environment variable
+from shital.core.fabrics.config import settings as _settings  # noqa: E402
+config.set_main_option("sqlalchemy.url", _settings.async_database_url)
+
 # Import Base so Alembic can discover all mapped models via metadata
 from shital.core.fabrics.database import Base  # noqa: E402
 
