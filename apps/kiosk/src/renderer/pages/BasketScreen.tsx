@@ -34,6 +34,8 @@ function GiftAidForm({
   }) => void
   onSkip: () => void
 }) {
+  const [agreed, setAgreed]         = useState(true)   // pre-checked
+  const [gdpr, setGdpr]             = useState(true)    // pre-checked
   const [fullName, setFullName]     = useState('')
   const [postcode, setPostcode]     = useState('')
   const [addresses, setAddresses]   = useState<string[]>([])
@@ -41,8 +43,6 @@ function GiftAidForm({
   const [lookingUp, setLookingUp]   = useState(false)
   const [email, setEmail]           = useState('')
   const [phone, setPhone]           = useState('')
-  const [agreed, setAgreed]         = useState(false)
-  const [gdpr, setGdpr]             = useState(false)
   const [errors, setErrors]         = useState<string[]>([])
 
   const bonus = eligibleTotal * 0.25
@@ -85,7 +85,7 @@ function GiftAidForm({
           <div>
             <p className="text-white font-black text-lg leading-tight">Gift Aid Declaration</p>
             <p className="text-green-200 text-sm">
-              The temple receives <span className="font-black text-white">£{(eligibleTotal + bonus).toFixed(2)}</span> instead of £{eligibleTotal.toFixed(2)} — <span className="font-bold">no extra cost to you</span>
+              Temple receives <span className="font-black text-white">£{(eligibleTotal + bonus).toFixed(2)}</span> instead of £{eligibleTotal.toFixed(2)} — <span className="font-bold">free for you</span>
             </p>
           </div>
         </div>
@@ -98,7 +98,43 @@ function GiftAidForm({
           </div>
         )}
 
-        {/* Full name */}
+        {/* 1. Gift Aid Declaration checkbox — top, pre-checked */}
+        <button
+          onClick={() => setAgreed(a => !a)}
+          className={`w-full flex items-start gap-3 p-4 rounded-2xl border-2 text-left transition-all ${
+            agreed ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white'
+          }`}
+        >
+          <div className={`w-6 h-6 rounded-lg border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${
+            agreed ? 'bg-green-500 border-green-500' : 'border-gray-300'
+          }`}>
+            {agreed && <span className="text-white text-xs font-black">✓</span>}
+          </div>
+          <p className="text-gray-700 text-xs leading-relaxed">
+            <span className="font-bold text-gray-900">Gift Aid Declaration: </span>
+            I am a UK taxpayer and understand that if I pay less Income Tax and/or Capital Gains Tax than the amount of Gift Aid claimed on all my donations in that tax year it is my responsibility to pay any difference.
+          </p>
+        </button>
+
+        {/* 2. GDPR checkbox — pre-checked */}
+        <button
+          onClick={() => setGdpr(g => !g)}
+          className={`w-full flex items-start gap-3 p-3 rounded-2xl border-2 text-left transition-all ${
+            gdpr ? 'border-blue-300 bg-blue-50' : 'border-gray-100 bg-gray-50'
+          }`}
+        >
+          <div className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${
+            gdpr ? 'bg-blue-500 border-blue-500' : 'border-gray-300'
+          }`}>
+            {gdpr && <span className="text-white text-[9px] font-black">✓</span>}
+          </div>
+          <p className="text-gray-500 text-xs leading-relaxed">
+            <span className="font-semibold text-gray-600">GDPR Consent: </span>
+            I consent to Shital Temple processing my data for Gift Aid reclaiming purposes. My information will not be shared with third parties.
+          </p>
+        </button>
+
+        {/* 3. Full name */}
         <div>
           <label className="block text-gray-700 text-sm font-bold mb-1.5">Full Name <span className="text-red-500">*</span></label>
           <input
@@ -109,7 +145,7 @@ function GiftAidForm({
           />
         </div>
 
-        {/* Postcode lookup */}
+        {/* 4. Postcode lookup */}
         <div>
           <label className="block text-gray-700 text-sm font-bold mb-1.5">Postcode <span className="text-red-500">*</span></label>
           <div className="flex gap-2">
@@ -129,100 +165,56 @@ function GiftAidForm({
               {lookingUp ? '…' : '🔍 Find'}
             </button>
           </div>
-        </div>
-
-        {/* Address dropdown */}
-        {addresses.length > 0 && (
-          <div>
-            <label className="block text-gray-700 text-sm font-bold mb-1.5">Select Address <span className="text-red-500">*</span></label>
+          {/* Address dropdown */}
+          {addresses.length > 0 && (
             <select
               value={address}
               onChange={e => setAddress(e.target.value)}
-              className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none focus:border-green-400 bg-white"
+              className="w-full mt-2 border-2 border-green-300 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none focus:border-green-400 bg-white"
             >
               <option value="">— Select your address —</option>
               {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
             </select>
-          </div>
-        )}
-
-        {/* Manual address entry if not from lookup */}
-        {(addresses.length === 0 || address === '') && postcode && (
-          <div>
-            <label className="block text-gray-700 text-sm font-bold mb-1.5">Address <span className="text-red-500">*</span></label>
+          )}
+          {(addresses.length === 0 || address === '') && postcode.length > 2 && (
             <input
               value={address}
               onChange={e => setAddress(e.target.value)}
               placeholder="House number and street, Town"
-              className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none focus:border-green-400 bg-white"
+              className="w-full mt-2 border-2 border-gray-200 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none focus:border-green-400 bg-white"
             />
-          </div>
-        )}
-
-        {/* Email + Mobile — both shown, both optional */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-gray-700 text-sm font-bold mb-1.5">
-              Email <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="your@email.com"
-              className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none focus:border-green-400 bg-white"
-            />
-          </div>
-          <div>
-            <label className="block text-gray-700 text-sm font-bold mb-1.5">
-              Mobile <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder="07xxx xxxxxx"
-              className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none focus:border-green-400 bg-white"
-            />
-          </div>
+          )}
         </div>
 
-        {/* Declaration */}
-        <button
-          onClick={() => setAgreed(a => !a)}
-          className={`w-full flex items-start gap-3 p-4 rounded-2xl border-2 text-left transition-all ${
-            agreed ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white'
-          }`}
-        >
-          <div className={`w-6 h-6 rounded-lg border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${
-            agreed ? 'bg-green-500 border-green-500' : 'border-gray-300'
-          }`}>
-            {agreed && <span className="text-white text-xs font-black">✓</span>}
-          </div>
-          <p className="text-gray-700 text-xs leading-relaxed">
-            <span className="font-bold text-gray-900">Gift Aid Declaration: </span>
-            I am a UK taxpayer and understand that if I pay less Income Tax and/or Capital Gains Tax than the amount of Gift Aid claimed on all my donations in that tax year it is my responsibility to pay any difference.
-          </p>
-        </button>
+        {/* 5. Email */}
+        <div>
+          <label className="block text-gray-700 text-sm font-bold mb-1.5">
+            Email <span className="text-gray-400 font-normal text-xs">(optional — for receipt)</span>
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="your@email.com"
+            className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-gray-900 text-base font-medium focus:outline-none focus:border-green-400 bg-white"
+          />
+        </div>
 
-        {/* GDPR */}
-        <button
-          onClick={() => setGdpr(g => !g)}
-          className={`w-full flex items-start gap-3 p-3 rounded-2xl border-2 text-left transition-all ${
-            gdpr ? 'border-blue-300 bg-blue-50' : 'border-gray-100 bg-gray-50'
-          }`}
-        >
-          <div className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${
-            gdpr ? 'bg-blue-500 border-blue-500' : 'border-gray-300'
-          }`}>
-            {gdpr && <span className="text-white text-[9px] font-black">✓</span>}
-          </div>
-          <p className="text-gray-500 text-xs leading-relaxed">
-            I consent to Shital Temple processing my data for Gift Aid reclaiming purposes under GDPR. My information will not be shared with third parties.
-          </p>
-        </button>
+        {/* 6. Phone */}
+        <div>
+          <label className="block text-gray-700 text-sm font-bold mb-1.5">
+            Phone Number <span className="text-gray-400 font-normal text-xs">(optional)</span>
+          </label>
+          <input
+            type="tel"
+            value={phone}
+            onChange={e => setPhone(e.target.value)}
+            placeholder="07xxx xxxxxx"
+            className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-gray-900 text-base font-medium focus:outline-none focus:border-green-400 bg-white"
+          />
+        </div>
 
-        {/* Action buttons */}
+        {/* 7. Action buttons */}
         <div className="flex gap-3 pt-2">
           <button
             onClick={onSkip}
@@ -232,10 +224,10 @@ function GiftAidForm({
           </button>
           <button
             onClick={handleConfirm}
-            className="flex-2 py-3.5 px-6 rounded-2xl font-black text-white text-sm shadow-lg transition-all active:scale-95"
+            className="py-3.5 px-6 rounded-2xl font-black text-white text-sm shadow-lg transition-all active:scale-95"
             style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', flex: 2 }}
           >
-            Confirm & Checkout →
+            Confirm &amp; Continue →
           </button>
         </div>
       </div>
