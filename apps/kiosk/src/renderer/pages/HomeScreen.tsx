@@ -358,7 +358,7 @@ export function HomeScreen() {
         <main className="flex-1 flex flex-col overflow-hidden" style={{ background: th.mainBg }}>
 
           {/* Selected category items */}
-          <section className="flex-1 flex flex-col overflow-hidden" style={{ borderBottom: `2px solid rgba(0,0,0,0.06)` }}>
+          <section className="flex-1 flex flex-col overflow-hidden">
             {/* Section header */}
             <div
               className="flex items-center gap-3 px-5 py-4 flex-shrink-0"
@@ -377,7 +377,6 @@ export function HomeScreen() {
                   {useCatalog ? catalogItems.length : filteredServices.length} items available
                 </p>
               </div>
-              {/* Gift Aid indicator */}
               {useCatalog && (
                 <span className={`ml-auto text-xs font-black px-3 py-1 rounded-full ${
                   activeNav === 'donations' || activeNav === 'project_donation'
@@ -389,16 +388,80 @@ export function HomeScreen() {
               )}
             </div>
 
-            {/* Grid */}
-            <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'none' }}>
+            {/* Unified scrollable area — promoted row first, then items grid */}
+            <div
+              className="flex-1 overflow-y-auto p-4 space-y-5"
+              style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: `${th.basketBtn}60 transparent`,
+              }}
+            >
+              {/* ── Promoted Products row (always visible) ── */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-base">⭐</span>
+                  <h3 className="font-black text-sm tracking-wide" style={{ color: th.promotedTitleColor }}>
+                    Featured & Promoted
+                  </h3>
+                  <span className="text-xs bg-yellow-100 text-yellow-700 border border-yellow-200 px-2 py-0.5 rounded-full font-semibold">Special Offer</span>
+                </div>
+                <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                  {PROMOTED.map((p, i) => {
+                    const m = meta(p.category)
+                    const isAdded = added === p.id
+                    return (
+                      <motion.button
+                        key={p.id}
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.07 }}
+                        onClick={() => handleAdd(p)}
+                        className={`flex-shrink-0 w-44 rounded-2xl overflow-hidden shadow-lg bg-gradient-to-br ${m.gradient} text-left active:scale-95 hover:shadow-xl transition-all relative`}
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none" />
+                        <span className="absolute top-2 right-2 bg-yellow-300 text-yellow-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase z-10 shadow">
+                          Offer
+                        </span>
+                        <div className="p-3.5 relative z-10">
+                          <span className="text-3xl block mb-1.5">{m.icon}</span>
+                          <p className="text-white font-black text-sm leading-snug line-clamp-2 drop-shadow-sm">{getName(p, language)}</p>
+                          <div className="flex items-center justify-between mt-2">
+                            <p className="text-white font-black text-lg drop-shadow-sm">£{p.price}</p>
+                            <span className="text-white text-xs bg-white/25 px-2 py-1 rounded-lg font-black">+ ADD</span>
+                          </div>
+                        </div>
+                        <AnimatePresence>
+                          {isAdded && (
+                            <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}
+                              className="absolute inset-0 flex items-center justify-center rounded-2xl" style={{ background: m.light }}>
+                              <div className="flex flex-col items-center gap-1"><span className="text-3xl">✓</span>
+                                <span className="text-xs font-bold text-gray-700">Added!</span></div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </motion.button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-px" style={{ background: 'rgba(0,0,0,0.08)' }} />
+                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: th.sectionCountColor }}>
+                  All {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
+                </span>
+                <div className="flex-1 h-px" style={{ background: 'rgba(0,0,0,0.08)' }} />
+              </div>
+
+              {/* ── Items grid ── */}
               <AnimatePresence mode="popLayout">
                 {(useCatalog ? catalogItems : filteredServices).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
+                  <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
                     <span className="text-5xl">🛕</span>
                     <p className="text-sm font-medium" style={{ color: th.sectionTitleColor }}>No items in this category</p>
                   </div>
                 ) : useCatalog ? (
-                  /* ── Catalog items (Donations, Soft, Projects, Shop) ── */
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {catalogItems.map((item, i) => {
                       const isAdded = added === item.id
@@ -412,7 +475,6 @@ export function HomeScreen() {
                           onClick={() => handleAddCatalog(item)}
                           className="relative overflow-hidden rounded-2xl text-left shadow-md transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5 bg-white border border-gray-100"
                         >
-                          {/* Color band */}
                           <div className="h-2 w-full" style={{ background: item.imageColor }} />
                           <div className="p-3.5">
                             <div className="flex items-start justify-between mb-2">
@@ -446,7 +508,6 @@ export function HomeScreen() {
                     })}
                   </div>
                 ) : (
-                  /* ── Services items ── */
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {filteredServices.map((svc, i) => {
                       const m = meta(svc.category)
@@ -485,47 +546,6 @@ export function HomeScreen() {
                   </div>
                 )}
               </AnimatePresence>
-            </div>
-          </section>
-
-          {/* Promoted Items strip */}
-          <section className="flex-shrink-0" style={{ background: th.promotedBg, borderTop: `2px solid rgba(0,0,0,0.06)` }}>
-            <div className="flex items-center gap-2 px-5 py-2" style={{ borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
-              <span className="text-base">⭐</span>
-              <h3 className="font-black text-sm tracking-wide" style={{ color: th.promotedTitleColor }}>
-                Promoted Items
-              </h3>
-              <span className="ml-1 text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-semibold">Featured</span>
-            </div>
-
-            <div className="flex gap-3 px-4 py-3 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-              {PROMOTED.map((p, i) => {
-                const m = meta(p.category)
-                return (
-                  <motion.button
-                    key={p.id}
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.07 + 0.15 }}
-                    onClick={() => handleAdd(p)}
-                    className={`
-                      flex-shrink-0 w-40 rounded-xl overflow-hidden shadow-md
-                      bg-gradient-to-br ${m.gradient}
-                      text-left p-3 active:scale-95 hover:shadow-lg transition-all relative
-                    `}
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent rounded-xl" />
-                    <span className="absolute top-1.5 right-1.5 bg-yellow-300 text-yellow-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase z-10 shadow-sm">
-                      Offer
-                    </span>
-                    <span className="text-2xl block mb-1 relative z-10">{m.icon}</span>
-                    <p className="text-white font-bold text-xs leading-snug line-clamp-2 relative z-10 drop-shadow-sm">
-                      {getName(p, language)}
-                    </p>
-                    <p className="text-white font-black text-sm mt-1 relative z-10">£{p.price}</p>
-                  </motion.button>
-                )
-              })}
             </div>
           </section>
 
