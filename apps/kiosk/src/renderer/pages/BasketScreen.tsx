@@ -4,7 +4,7 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 
 // ─── GetAddress.io postcode lookup ────────────────────────────────────────────
 
-async function lookupPostcode(postcode: string): Promise<string[]> {
+async function lookupPostcode(postcode: string): Promise<{ addresses: string[]; valid: boolean; city?: string; county?: string }> {
   const clean = postcode.trim().toUpperCase()
   try {
     const res = await fetch(
@@ -13,14 +13,10 @@ async function lookupPostcode(postcode: string): Promise<string[]> {
     )
     if (res.ok) {
       const data = await res.json()
-      if (data.addresses?.length) {
-        return data.addresses.map((a: any) =>
-          typeof a === 'string' ? a : [a.line_1, a.line_2, a.town_or_city, a.county, a.postcode].filter(Boolean).join(', ')
-        )
-      }
+      return { addresses: data.addresses || [], valid: !!data.valid, city: data.city, county: data.county }
     }
   } catch {}
-  return ['1 Temple Road, Wembley, HA9 0EW', '2 Temple Road, Wembley, HA9 0EW', '3 High Road, Wembley, HA9 7AB']
+  return { addresses: [], valid: false }
 }
 
 // ─── Gift Aid full-screen form ────────────────────────────────────────────────
@@ -41,23 +37,31 @@ function GiftAidScreen({
   const [agreed,     setAgreed]     = useState(true)
   const [gdpr,       setGdpr]       = useState(true)
   const [fullName,   setFullName]   = useState('')
-  const [postcode,   setPostcode]   = useState('')
-  const [addresses,  setAddresses]  = useState<string[]>([])
-  const [address,    setAddress]    = useState('')
-  const [lookingUp,  setLookingUp]  = useState(false)
-  const [phone,      setPhone]      = useState('')
-  const [email,      setEmail]      = useState('')
-  const [error,      setError]      = useState('')
+  const [postcode,       setPostcode]       = useState('')
+  const [postcodeValid,  setPostcodeValid]  = useState(false)
+  const [addressHint,    setAddressHint]    = useState('')   // pre-filled city/county from lookup
+  const [address,        setAddress]        = useState('')
+  const [lookingUp,      setLookingUp]      = useState(false)
+  const [phone,          setPhone]          = useState('')
+  const [email,          setEmail]          = useState('')
+  const [error,          setError]          = useState('')
 
   async function handleLookup() {
     if (!postcode.trim()) return
     setLookingUp(true)
-    setAddresses([])
     setAddress('')
-    const found = await lookupPostcode(postcode)
-    setAddresses(found)
-    if (found.length === 1) setAddress(found[0])
+    setAddressHint('')
+    setPostcodeValid(false)
+    const result = await lookupPostcode(postcode)
     setLookingUp(false)
+    if (result.valid) {
+      setPostcodeValid(true)
+      // Pre-fill address with city/county so user just adds house number
+      const hint = [result.city, result.county].filter(Boolean).join(', ')
+      setAddressHint(hint)
+    } else {
+      setError('Postcode not found — please check and try again, or type your address below')
+    }
   }
 
   function handleContinue() {
@@ -162,15 +166,15 @@ function GiftAidScreen({
           <div className="flex gap-2">
             <input
               value={postcode}
-              onChange={e => { setPostcode(e.target.value.toUpperCase()); setAddresses([]); setAddress('') }}
+              onChange={e => { setPostcode(e.target.value.toUpperCase()); setPostcodeValid(false); setAddressHint('') }}
               onKeyDown={e => e.key === 'Enter' && handleLookup()}
               placeholder="e.g. HA9 0EW"
               className="flex-1 border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-mono focus:outline-none bg-white transition-colors"
-              style={{ borderColor: address ? '#16a34a' : '#e5e7eb' }}
+              style={{ borderColor: postcodeValid ? '#16a34a' : '#e5e7eb' }}
             />
             <button
               onClick={handleLookup}
-              disabled={lookingUp || postcode.trim().length < 3}
+              disabled={lookingUp || postcode.trim().length < 5}
               className="px-5 py-3.5 rounded-2xl font-black text-sm text-white disabled:opacity-50 active:scale-95 transition-all flex-shrink-0"
               style={{ background: '#16a34a', minWidth: 100 }}
             >
@@ -178,25 +182,27 @@ function GiftAidScreen({
             </button>
           </div>
 
-          {addresses.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="mt-2">
-              <select
+          {/* After postcode validated — show house number + pre-filled rest */}
+          {postcodeValid && (
+            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="mt-2 space-y-2">
+              <p className="text-xs text-green-600 font-semibold">✓ Postcode verified — enter your house/flat number below</p>
+              <input
                 value={address}
                 onChange={e => setAddress(e.target.value)}
-                className="w-full border-2 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none bg-white"
-                style={{ borderColor: address ? '#16a34a' : '#6ee7b7' }}
-              >
-                <option value="">— Select your address —</option>
-                {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
-              </select>
+                placeholder={`e.g. 12 Station Road${addressHint ? ', ' + addressHint : ''}, ${postcode.trim().toUpperCase()}`}
+                className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
+                style={{ borderColor: address.length > 3 ? '#16a34a' : '#6ee7b7' }}
+                autoFocus
+              />
             </motion.div>
           )}
 
-          {addresses.length === 0 && postcode.length > 3 && !lookingUp && (
+          {/* Manual entry fallback if not yet verified */}
+          {!postcodeValid && postcode.length >= 5 && !lookingUp && (
             <input
               value={address}
               onChange={e => setAddress(e.target.value)}
-              placeholder="Or type address manually"
+              placeholder="Or type full address here"
               className="w-full mt-2 border-2 border-gray-200 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none bg-white"
             />
           )}

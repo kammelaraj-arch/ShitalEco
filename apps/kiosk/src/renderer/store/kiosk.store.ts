@@ -184,8 +184,8 @@ export const useKioskStore = create<KioskState>()(
   giftAidDeclaration: null,
   pendingPayment: false,
   cardProvider: 'stripe_terminal',
-  stripeReaderId: '',
-  stripeReaderLabel: '',
+  stripeReaderId: 'tmr_Gcuz1QQB6nzqMs',
+  stripeReaderLabel: 'Temple WisePOS E',
   squareDeviceId: '',
   squareDeviceName: '',
 
