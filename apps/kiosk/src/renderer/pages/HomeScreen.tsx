@@ -216,8 +216,9 @@ export function HomeScreen() {
 
       {/* ══ HEADER ══════════════════════════════════════════════════════════ */}
       <header
-        className="flex items-center h-20 px-4 gap-3 relative z-20 flex-shrink-0"
+        className="flex items-center px-3 md:px-4 gap-2 md:gap-3 relative z-20 flex-shrink-0"
         style={{
+          height: '56px',
           background: th.headerBg,
           borderBottom: `3px solid rgba(255,153,51,0.35)`,
           boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
@@ -225,30 +226,18 @@ export function HomeScreen() {
       >
         {/* Logo */}
         <div
-          className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-black shadow-xl border-2 border-white/30 flex-shrink-0"
+          className="w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl font-black shadow-xl border-2 border-white/30 flex-shrink-0"
           style={{ background: th.logoBg, color: th.logoText }}
         >
           🕉
         </div>
 
-        {/* Title + MENU breadcrumb */}
+        {/* Title */}
         <div className="flex-1 min-w-0">
-          <h1 className="font-black text-xl leading-tight tracking-tight" style={{ color: th.headerText }}>Shital Temple</h1>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span
-              className="text-sm font-black uppercase tracking-wider px-3 py-1 rounded-lg flex items-center gap-1.5"
-              style={{ background: 'rgba(255,255,255,0.25)', color: th.headerText }}
-            >
-              ☰ MENU
-            </span>
-            <span className="text-base font-bold" style={{ color: th.headerSub }}>›</span>
-            <span
-              className="text-sm font-black uppercase tracking-wide px-2 py-1 rounded-lg"
-              style={{ background: 'rgba(255,255,255,0.12)', color: th.headerText }}
-            >
-              {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
-            </span>
-          </div>
+          <h1 className="font-black text-base md:text-xl leading-tight tracking-tight" style={{ color: th.headerText }}>Shital Temple</h1>
+          <p className="text-xs hidden md:block" style={{ color: th.headerSub }}>
+            {getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)}
+          </p>
         </div>
 
         {/* Language pills */}
@@ -257,7 +246,7 @@ export function HomeScreen() {
             <button
               key={lang}
               onClick={() => useKioskStore.getState().setLanguage(lang)}
-              className="px-2.5 py-1 rounded-full text-xs font-bold uppercase transition-all"
+              className="px-2 py-1 rounded-full text-xs font-bold uppercase transition-all"
               style={{
                 background: language === lang ? th.langActive : 'transparent',
                 color: language === lang ? '#fff' : th.headerSub,
@@ -269,12 +258,11 @@ export function HomeScreen() {
           ))}
         </div>
 
-        {/* Theme picker button */}
+        {/* Theme picker — hidden on mobile */}
         <button
           onClick={() => setShowThemePicker(true)}
-          className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+          className="w-9 h-9 rounded-xl hidden md:flex items-center justify-center transition-all active:scale-95"
           style={{ background: `${th.langActive}20` }}
-          title="Change theme"
         >
           <span className="text-lg">🎨</span>
         </button>
@@ -282,11 +270,13 @@ export function HomeScreen() {
         {/* Basket */}
         <button
           onClick={() => setScreen('basket')}
-          className="relative flex items-center gap-2 text-white font-bold px-4 py-2 rounded-xl transition-all shadow-md active:scale-95"
+          className="relative flex items-center gap-1.5 text-white font-bold px-3 py-2 rounded-xl transition-all shadow-md active:scale-95"
           style={{ background: th.basketBtn }}
         >
-          <span className="text-lg">🛒</span>
-          <span className="hidden sm:inline text-sm">Basket</span>
+          <span className="text-base">🛒</span>
+          <span className="hidden sm:inline text-sm font-black">
+            {itemCount > 0 ? `£${total.toFixed(2)}` : 'Basket'}
+          </span>
           {itemCount > 0 && (
             <span className="absolute -top-2 -right-2 bg-yellow-400 text-gray-900 text-xs font-black w-5 h-5 rounded-full flex items-center justify-center shadow-md">
               {itemCount}
@@ -295,12 +285,37 @@ export function HomeScreen() {
         </button>
       </header>
 
+      {/* ══ MOBILE NAV — horizontal scroll tabs (hidden on md+) ═════════════ */}
+      <div
+        className="flex md:hidden flex-shrink-0 overflow-x-auto gap-1 px-3 py-2"
+        style={{ background: `linear-gradient(90deg, ${th.sidebarFrom}, ${th.sidebarTo})`, scrollbarWidth: 'none' }}
+      >
+        {NAV_SECTIONS.flatMap(s => s.items).map(item => {
+          const isActive = activeNav === item.id
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveNav(item.id)}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 whitespace-nowrap"
+              style={{
+                background: isActive ? th.sidebarActiveBg : 'rgba(255,255,255,0.1)',
+                color: isActive ? th.sidebarActiveText : th.sidebarText,
+                border: isActive ? `1.5px solid ${th.sidebarIndicator}` : '1.5px solid transparent',
+              }}
+            >
+              <span>{item.icon}</span>
+              <span>{getNavLabel(item, language)}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {/* ══ BODY ════════════════════════════════════════════════════════════ */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
+        {/* ── SIDEBAR — desktop only ───────────────────────────────────────── */}
         <aside
-          className="w-56 flex-shrink-0 flex flex-col relative z-10 overflow-y-auto"
+          className="hidden md:flex w-56 flex-shrink-0 flex-col relative z-10 overflow-y-auto"
           style={{
             background: `linear-gradient(180deg, ${th.sidebarFrom} 0%, ${th.sidebarTo} 100%)`,
             borderRight: `2px solid rgba(255,153,51,0.20)`,
@@ -324,12 +339,8 @@ export function HomeScreen() {
                       color: isActive ? th.sidebarActiveText : th.sidebarText,
                     }}
                   >
-                    {/* Active bar */}
                     {isActive && (
-                      <span
-                        className="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full"
-                        style={{ background: th.sidebarIndicator }}
-                      />
+                      <span className="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full" style={{ background: th.sidebarIndicator }} />
                     )}
                     <span className={`text-xl ${isActive ? '' : 'opacity-80'}`}>{item.icon}</span>
                     <span className={`text-sm leading-tight tracking-wide ${isActive ? 'font-black' : 'font-semibold'}`}>
@@ -341,15 +352,10 @@ export function HomeScreen() {
             </nav>
           ))}
 
-          {/* Exit */}
           <button
             onClick={() => setScreen('idle')}
             className="mx-3 mb-4 mt-2 py-2 rounded-xl text-xs font-medium flex items-center justify-center gap-2 transition-all"
-            style={{
-              color: th.sidebarText,
-              border: `1px solid ${th.sidebarBorder}`,
-              background: 'rgba(0,0,0,0.04)',
-            }}
+            style={{ color: th.sidebarText, border: `1px solid ${th.sidebarBorder}`, background: 'rgba(0,0,0,0.04)' }}
           >
             ← Exit
           </button>
