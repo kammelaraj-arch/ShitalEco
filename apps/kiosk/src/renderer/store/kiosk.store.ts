@@ -30,7 +30,7 @@ export const THEMES: Record<KioskTheme, {
     langActive: '#FF9933', langInactive: '#FF9933/50',
   },
   saffron: {
-    name: 'Saffron Temple', emoji: '🪔', desc: 'Rich & warm',
+    name: 'Saffron Temple', emoji: '🫏', desc: 'Rich & warm',
     headerBg: '#1C0000', headerBorder: '#FF9933/40', headerText: '#FFD700', headerSub: '#FF9933',
     logoBg: 'linear-gradient(135deg,#FF9933,#FF6600)', logoText: '#FFFFFF',
     sidebarFrom: '#FF9933', sidebarTo: '#E55C00', sidebarBorder: '#FFD700/30',
@@ -152,7 +152,6 @@ interface KioskState {
   setScreen: (screen: KioskScreen) => void
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
-  setBranchId: (id: string) => void
   setCardDevice: (
     provider: 'stripe_terminal' | 'square' | 'cash',
     deviceId: string,
@@ -195,7 +194,6 @@ export const useKioskStore = create<KioskState>()(
   setScreen: (screen) => set({ screen }),
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
-  setBranchId: (branchId) => set({ branchId }),
   setCardDevice: (provider, deviceId, deviceLabel) => set(
     provider === 'stripe_terminal'
       ? { cardProvider: provider, stripeReaderId: deviceId, stripeReaderLabel: deviceLabel }
@@ -282,7 +280,7 @@ const TRANSLATIONS: Record<string, Record<Language, string>> = {
   'welcome': { en: 'Welcome', gu: 'સ્વાગત છે', hi: 'स्वागत है' },
   'choose_language': { en: 'Choose Language', gu: 'ભાષા પસંદ કરો', hi: 'भाषा चुनें' },
   'home': { en: 'Home', gu: 'ઘર', hi: 'होम' },
-  'services': { en: 'Temple Services', gu: 'મંદિર સેવાઓ', hi: 'मंदिर सेवाएं' },
+  'services': { en: 'Temple Services', gu: 'મંદિર સેવા૞ો', hi: 'मंदिर सेवाएं' },
   'donate': { en: 'Make a Donation', gu: 'દાન કરો', hi: 'दान करें' },
   'basket': { en: 'My Basket', gu: 'મારી ટોપલી', hi: 'मेरी टोकरी' },
   'checkout': { en: 'Checkout', gu: 'ચૂકવો', hi: 'चेकआउट' },
@@ -296,12 +294,12 @@ const TRANSLATIONS: Record<string, Record<Language, string>> = {
   'havan': { en: 'Havan', gu: 'હવન', hi: 'हवन' },
   'donation': { en: 'Donation', gu: 'દાન', hi: 'दान' },
   'classes': { en: 'Classes', gu: 'વર્ગ', hi: 'कक्षा' },
-  'hall_hire': { en: 'Hall Hire', gu: 'હૉલ ભાડે', hi: 'हॉल किराया' },
+  'hall_hire': { en: 'Hall Hire', gu: 'હિલ ભાડે', hi: 'हॉल किराया' },
   'festival': { en: 'Festival', gu: 'ઉત્સવ', hi: 'उत्सव' },
   'your_order': { en: 'Your Order', gu: 'તમારો ઓર્ડર', hi: 'आपका ऑर्डर' },
   'order_confirmed': { en: 'Order Confirmed!', gu: 'ઓર્ડર પુષ્ટ!', hi: 'ऑर्डर पुष्टि!' },
-  'gift_aid': { en: 'Gift Aid (25% extra)', gu: 'ગિફ્ટ એઇડ', hi: 'गिफ्ट एड' },
-  'free': { en: 'Free', gu: 'મફત', hi: 'मुफ्त' },
+  'gift_aid': { en: 'Gift Aid (25% extra)', gu: 'ગિફ્ટ એઇડ', hi: 'गिफ़्ट एड' },
+  'free': { en: 'Free', gu: 'મફત', hi: 'मुफ़्त' },
   'per_person': { en: 'per person', gu: 'પ્રતિ વ્યક્તિ', hi: 'प्रति व्यक्ति' },
   'card_payment': { en: 'Pay by Card', gu: 'કાર્ડ દ્વારા ચૂકવો', hi: 'कार्ड से भुगतान' },
   'jay_shri_krishna': { en: 'Jay Shri Krishna 🙏', gu: 'જય શ્રી કૃષ્ણ 🙏', hi: 'जय श्री कृष्ण 🙏' },
