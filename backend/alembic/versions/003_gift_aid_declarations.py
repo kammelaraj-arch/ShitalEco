@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = '003'
-down_revision = '002'
+down_revision = '002_catalog_items'
 branch_labels = None
 depends_on = None
 
@@ -28,39 +28,42 @@ def upgrade() -> None:
         pass
 
     # Gift Aid declarations table
-    op.create_table(
-        'gift_aid_declarations',
-        sa.Column('id', sa.UUID(), nullable=False, server_default=sa.text('gen_random_uuid()'), primary_key=True),
-        sa.Column('order_ref', sa.String(100), nullable=False),
-        sa.Column('full_name', sa.String(200), nullable=False),
-        sa.Column('postcode', sa.String(20), nullable=False),
-        sa.Column('address', sa.Text(), nullable=False, server_default=''),
-        sa.Column('contact_email', sa.String(254), nullable=False, server_default=''),
-        sa.Column('contact_phone', sa.String(50), nullable=False, server_default=''),
-        sa.Column('donation_amount', sa.Numeric(10, 2), nullable=False),
-        sa.Column('donation_date', sa.Date(), nullable=False),
-        sa.Column('gift_aid_agreed', sa.Boolean(), nullable=False, server_default='true'),
-        sa.Column('hmrc_submitted', sa.Boolean(), nullable=False, server_default='false'),
-        sa.Column('hmrc_submission_ref', sa.String(100), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('NOW()')),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('NOW()')),
-        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
-    )
-    op.create_index('idx_gift_aid_order_ref', 'gift_aid_declarations', ['order_ref'])
-    op.create_index('idx_gift_aid_submitted', 'gift_aid_declarations', ['hmrc_submitted'])
-    op.create_index('idx_gift_aid_postcode', 'gift_aid_declarations', ['postcode'])
+    conn = op.get_bind()
+    conn.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS gift_aid_declarations (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            order_ref VARCHAR(100) NOT NULL,
+            full_name VARCHAR(200) NOT NULL,
+            postcode VARCHAR(20) NOT NULL,
+            address TEXT NOT NULL DEFAULT '',
+            contact_email VARCHAR(254) NOT NULL DEFAULT '',
+            contact_phone VARCHAR(50) NOT NULL DEFAULT '',
+            donation_amount NUMERIC(10,2) NOT NULL,
+            donation_date DATE NOT NULL,
+            gift_aid_agreed BOOLEAN NOT NULL DEFAULT true,
+            hmrc_submitted BOOLEAN NOT NULL DEFAULT false,
+            hmrc_submission_ref VARCHAR(100),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )
+    """))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_gift_aid_order_ref ON gift_aid_declarations(order_ref)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_gift_aid_submitted ON gift_aid_declarations(hmrc_submitted)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_gift_aid_postcode ON gift_aid_declarations(postcode)"))
 
     # Settings table for admin-configurable keys (GetAddress, HMRC etc.)
-    op.create_table(
-        'app_settings',
-        sa.Column('id', sa.UUID(), nullable=False, server_default=sa.text('gen_random_uuid()'), primary_key=True),
-        sa.Column('key', sa.String(100), nullable=False, unique=True),
-        sa.Column('value', sa.Text(), nullable=False, server_default=''),
-        sa.Column('description', sa.Text(), nullable=True),
-        sa.Column('is_secret', sa.Boolean(), nullable=False, server_default='false'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('NOW()')),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('NOW()')),
-    )
+    conn.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            key VARCHAR(100) NOT NULL UNIQUE,
+            value TEXT NOT NULL DEFAULT '',
+            description TEXT,
+            is_secret BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """))
 
 
 def downgrade() -> None:
