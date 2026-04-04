@@ -32,93 +32,53 @@ export function ConfirmationScreen() {
       await fetch(`${API_BASE}/kiosk/receipt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_ref: orderRef, type, destination: receiptInput }),
+        body: JSON.stringify({
+          order_ref: orderRef,
+          type: type === 'sms' ? 'whatsapp' : 'email',
+          destination: receiptInput,
+          total,
+          items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })),
+        }),
       })
     } catch {}
     setSending(false)
-    setSentMsg(type === 'email' ? `Receipt sent to ${receiptInput}` : `Receipt sent to ${receiptInput}`)
+    setSentMsg(type === 'email' ? `Receipt sent to ${receiptInput}` : `WhatsApp receipt sent to ${receiptInput}`)
     setReceiptStep('done')
   }
 
   return (
-    <div
-      className="w-full h-full flex flex-col bg-white"
-      style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
-    >
-      {/* ── Main content — big centered text like McDonald's ── */}
+    <div className="w-full h-full flex flex-col bg-white" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
       <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
 
-        {/* Big animated 🕉 */}
-        <motion.div
-          initial={{ scale: 0, rotate: -30 }}
-          animate={{ scale: 1, rotate: 0 }}
-          transition={{ type: 'spring', damping: 14, stiffness: 180 }}
-          className="mb-6"
-          style={{ fontSize: 96, lineHeight: 1 }}
-        >
+        <motion.div initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', damping: 14, stiffness: 180 }} className="mb-6" style={{ fontSize: 96, lineHeight: 1 }}>
           🕉
         </motion.div>
 
-        {/* Big thank-you text */}
-        <motion.h1
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="font-black text-gray-900 leading-tight mb-3"
-          style={{ fontSize: '2.2rem' }}
-        >
-          Thank you for your
-          <br />
-          generous donation.
-          <br />
+        <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="font-black text-gray-900 leading-tight mb-3" style={{ fontSize: '2.2rem' }}>
+          Thank you for your<br />generous donation.<br />
           <span style={{ color: '#FF9933' }}>Jay Shri Krishna 🙏</span>
         </motion.h1>
 
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="text-gray-400 text-lg mb-2"
-        >
+        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="text-gray-400 text-lg mb-2">
           Order ref: <span className="font-black text-gray-600">{orderRef}</span>
         </motion.p>
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.6 }}
-          className="text-gray-900 font-black text-2xl mb-8"
-        >
+        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }} className="text-gray-900 font-black text-2xl mb-8">
           Total Paid: £{total.toFixed(2)}
         </motion.p>
 
-        {/* Receipt options */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.7 }}
-          className="w-full max-w-sm"
-        >
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }} className="w-full max-w-sm">
           <AnimatePresence mode="wait">
             {receiptStep === 'options' && (
               <motion.div key="options" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <p className="text-sm font-semibold text-gray-500 mb-3">Would you like a receipt?</p>
                 <div className="flex gap-3 justify-center">
-                  <button
-                    onClick={() => setReceiptStep('email')}
-                    className="flex-1 py-3.5 rounded-xl border-2 border-gray-200 text-gray-700 font-bold text-sm active:scale-95 transition-all hover:border-gray-300"
-                  >
+                  <button onClick={() => setReceiptStep('email')} className="flex-1 py-3.5 rounded-xl border-2 border-gray-200 text-gray-700 font-bold text-sm active:scale-95 transition-all hover:border-gray-300">
                     📧 Email
                   </button>
-                  <button
-                    onClick={() => setReceiptStep('sms')}
-                    className="flex-1 py-3.5 rounded-xl border-2 border-gray-200 text-gray-700 font-bold text-sm active:scale-95 transition-all hover:border-gray-300"
-                  >
-                    📱 SMS
+                  <button onClick={() => setReceiptStep('sms')} className="flex-1 py-3.5 rounded-xl border-2 border-gray-200 text-gray-700 font-bold text-sm active:scale-95 transition-all hover:border-gray-300">
+                    💬 WhatsApp
                   </button>
-                  <button
-                    onClick={() => setReceiptStep('done')}
-                    className="flex-1 py-3.5 rounded-xl border-2 border-gray-100 text-gray-400 font-semibold text-sm active:scale-95 transition-all"
-                  >
+                  <button onClick={() => setReceiptStep('done')} className="flex-1 py-3.5 rounded-xl border-2 border-gray-100 text-gray-400 font-semibold text-sm active:scale-95 transition-all">
                     No thanks
                   </button>
                 </div>
@@ -140,18 +100,10 @@ export function ConfirmationScreen() {
                   autoFocus
                 />
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => { setReceiptStep('options'); setReceiptInput('') }}
-                    className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-500 font-semibold text-sm"
-                  >
+                  <button onClick={() => { setReceiptStep('options'); setReceiptInput('') }} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-500 font-semibold text-sm">
                     ← Back
                   </button>
-                  <button
-                    onClick={() => sendReceipt(receiptStep)}
-                    disabled={sending || receiptInput.length < 5}
-                    className="flex-2 py-3 px-6 rounded-xl text-white font-black text-sm shadow active:scale-95 disabled:opacity-50 transition-all"
-                    style={{ background: '#FF9933', flex: 2 }}
-                  >
+                  <button onClick={() => sendReceipt(receiptStep)} disabled={sending || receiptInput.length < 5} className="flex-2 py-3 px-6 rounded-xl text-white font-black text-sm shadow active:scale-95 disabled:opacity-50 transition-all" style={{ background: '#FF9933', flex: 2 }}>
                     {sending ? 'Sending…' : 'Send Receipt →'}
                   </button>
                 </div>
@@ -169,29 +121,13 @@ export function ConfirmationScreen() {
         </motion.div>
       </div>
 
-      {/* ── Bottom bar ── */}
-      <div
-        className="flex-shrink-0 px-5 pb-6 pt-4"
-        style={{ borderTop: '1px solid #e5e7eb' }}
-      >
-        {/* Progress bar */}
+      <div className="flex-shrink-0 px-5 pb-6 pt-4" style={{ borderTop: '1px solid #e5e7eb' }}>
         <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden mb-4">
-          <motion.div
-            className="h-full rounded-full"
-            style={{ background: '#FF9933', width: `${(countdown / AUTO_RESET_SECONDS) * 100}%` }}
-            transition={{ duration: 1 }}
-          />
+          <motion.div className="h-full rounded-full" style={{ background: '#FF9933', width: `${(countdown / AUTO_RESET_SECONDS) * 100}%` }} transition={{ duration: 1 }} />
         </div>
-
         <div className="flex gap-3 items-center">
-          <p className="flex-1 text-xs text-gray-400">
-            Starting over in <span className="font-bold text-gray-600">{countdown}s</span>
-          </p>
-          <button
-            onClick={resetKiosk}
-            className="px-6 py-3 rounded-xl text-white font-black text-sm shadow-md active:scale-95 transition-all"
-            style={{ background: '#FF9933' }}
-          >
+          <p className="flex-1 text-xs text-gray-400">Starting over in <span className="font-bold text-gray-600">{countdown}s</span></p>
+          <button onClick={resetKiosk} className="px-6 py-3 rounded-xl text-white font-black text-sm shadow-md active:scale-95 transition-all" style={{ background: '#FF9933' }}>
             New Order
           </button>
         </div>
