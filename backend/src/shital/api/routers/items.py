@@ -133,6 +133,30 @@ _KIOSK_SCHEDULE_FILTER = """
 
 # ─── Admin: CRUD endpoints (require auth) ─────────────────────────────────────
 
+@router.get("/ping")
+async def ping_items():
+    """No-DB health check for items router."""
+    return {"ok": True, "msg": "items router alive"}
+
+
+@router.get("/schema-check")
+async def schema_check():
+    """Return catalog_items column list from information_schema."""
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+    try:
+        async with SessionLocal() as db:
+            r = await db.execute(text("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'catalog_items' AND table_schema = current_schema()
+                ORDER BY ordinal_position
+            """))
+            cols = [row[0] for row in r.fetchall()]
+        return {"columns": cols, "count": len(cols)}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 @router.get("/")
 async def list_items(
     ctx: OptionalSpace,
