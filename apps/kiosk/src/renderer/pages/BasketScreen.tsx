@@ -4,24 +4,18 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 
 // ─── Address lookup — getAddress.io domain token (client-side browser only) ───
 
-// Domain token for browser CORS calls to /autocomplete (configured for shital-kiosk.vercel.app)
-const GA_DTOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
-
-// Fetch all addresses for a postcode — uses domain token with /autocomplete (CORS-enabled)
+// Fetch all addresses via our Vercel serverless proxy → getAddress.io
 async function lookupAddresses(raw: string): Promise<{ addresses: string[]; postcode: string }> {
   const postcode = raw.trim().toUpperCase()
   const res = await fetch(
-    `https://api.getaddress.io/autocomplete/${encodeURIComponent(postcode)}?api-key=${GA_DTOKEN}&all=true`,
-    { signal: AbortSignal.timeout(10000) }
+    `/api/address-lookup?postcode=${encodeURIComponent(postcode)}`,
+    { signal: AbortSignal.timeout(12000) }
   )
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`API error ${res.status}: ${body.slice(0, 120)}`)
-  }
-  const data = await res.json() as { suggestions?: Array<{ address: string }> }
-  const addresses = (data.suggestions ?? []).map(s => s.address).filter(Boolean)
-  if (addresses.length === 0) throw new Error('No addresses found — please check the postcode and try again')
-  return { addresses, postcode }
+  const data = await res.json() as { addresses?: string[]; postcode?: string; error?: string }
+  if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
+  const addresses = data.addresses ?? []
+  if (addresses.length === 0) throw new Error('No addresses found — please check the postcode')
+  return { addresses, postcode: data.postcode || postcode }
 }
 
 // ─── Gift Aid full-screen form ────────────────────────────────────────────────
