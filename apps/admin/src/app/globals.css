@@ -5,12 +5,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
 :root {
-  --bg-deep: #0f0700;
-  --bg-dark: #1a0a00;
-  --bg-card: rgba(255, 153, 51, 0.05);
-  --border: rgba(255, 153, 51, 0.12);
-  --saffron: #FF9933;
-  --gold: #FFD700;
+  --bg-deep:    #0d0404;
+  --bg-dark:    #180a0a;
+  --bg-card:    rgba(185, 28, 28, 0.06);
+  --border:     rgba(185, 28, 28, 0.18);
+  --crimson:    #B91C1C;
+  --crimson-lt: #E01010;
+  --gold:       #FFD700;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -26,14 +27,22 @@ body {
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,153,51,0.2); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,153,51,0.4); }
+::-webkit-scrollbar-thumb { background: rgba(185,28,28,0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(185,28,28,0.45); }
 
 /* Glass morphism card */
 .glass {
-  background: rgba(255, 153, 51, 0.05);
-  border: 1px solid rgba(255, 153, 51, 0.12);
+  background: rgba(185, 28, 28, 0.06);
+  border: 1px solid rgba(185, 28, 28, 0.15);
   backdrop-filter: blur(20px);
+}
+
+/* Crimson gradient text */
+.text-crimson-gradient {
+  background: linear-gradient(135deg, #E01010, #B91C1C);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* Gold gradient text */
@@ -44,9 +53,9 @@ body {
   background-clip: text;
 }
 
-/* Saffron gradient text */
+/* Saffron gradient text (legacy) */
 .text-saffron-gradient {
-  background: linear-gradient(135deg, #FF9933, #FF6B35);
+  background: linear-gradient(135deg, #B91C1C, #7f1010);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -59,26 +68,26 @@ body {
 }
 .stat-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(255, 153, 51, 0.15);
+  box-shadow: 0 8px 32px rgba(185, 28, 28, 0.2);
 }
 
 /* Nav item active */
 .nav-active {
-  background: rgba(255, 153, 51, 0.1);
-  border-right: 3px solid #FF9933;
+  background: rgba(185, 28, 28, 0.12);
+  border-right: 3px solid #B91C1C;
 }
 
 /* Input */
 .input-field {
   @apply bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white
-         placeholder-white/30 focus:outline-none focus:border-saffron-400/50
-         focus:ring-1 focus:ring-saffron-400/30 transition-all w-full;
+         placeholder-white/30 focus:outline-none focus:border-crimson-700/50
+         focus:ring-1 focus:ring-crimson-700/30 transition-all w-full;
 }
 
 /* Button variants */
 .btn-primary {
-  @apply bg-saffron-gradient text-white font-semibold px-6 py-3 rounded-xl
-         hover:opacity-90 active:scale-[0.98] transition-all shadow-saffron;
+  @apply bg-crimson-gradient text-white font-semibold px-6 py-3 rounded-xl
+         hover:opacity-90 active:scale-[0.98] transition-all shadow-crimson;
 }
 .btn-secondary {
   @apply glass text-white/70 font-medium px-6 py-3 rounded-xl
@@ -104,8 +113,8 @@ body {
 .badge {
   @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
 }
-.badge-green { @apply bg-green-500/20 text-green-400; }
+.badge-green  { @apply bg-green-500/20 text-green-400; }
 .badge-yellow { @apply bg-yellow-500/20 text-yellow-400; }
-.badge-red { @apply bg-red-500/20 text-red-400; }
-.badge-blue { @apply bg-blue-500/20 text-blue-400; }
-.badge-orange { @apply bg-saffron-400/20 text-saffron-400; }
+.badge-red    { @apply bg-red-500/20 text-red-400; }
+.badge-blue   { @apply bg-blue-500/20 text-blue-400; }
+.badge-orange { @apply bg-crimson-700/20 text-crimson-400; }

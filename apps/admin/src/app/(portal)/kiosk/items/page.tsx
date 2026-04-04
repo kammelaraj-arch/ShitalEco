@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
@@ -26,6 +26,7 @@ interface Item {
   price: number
   unit: string
   emoji: string
+  image_url: string
   gift_aid_eligible: boolean
   is_active: boolean
   is_live: boolean
@@ -43,7 +44,7 @@ type FormState = Omit<Item, 'id' | 'price'> & { price: string }
 
 const EMPTY_FORM: FormState = {
   name: '', name_gu: '', name_hi: '', description: '',
-  category: 'GENERAL_DONATION', price: '0', unit: '', emoji: '',
+  category: 'GENERAL_DONATION', price: '0', unit: '', emoji: '', image_url: '',
   gift_aid_eligible: false, is_active: true, is_live: true,
   scope: 'GLOBAL', branch_id: '',
   stock_qty: null, sort_order: 0,
@@ -62,6 +63,8 @@ export default function CatalogItemsPage() {
   const [editing, setEditing] = useState<Item | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [imageUploading, setImageUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -83,7 +86,7 @@ export default function CatalogItemsPage() {
     setForm({
       name: item.name, name_gu: item.name_gu || '', name_hi: item.name_hi || '',
       description: item.description || '', category: item.category,
-      price: String(item.price), unit: item.unit || '', emoji: item.emoji || '',
+      price: String(item.price), unit: item.unit || '', emoji: item.emoji || '', image_url: item.image_url || '',
       gift_aid_eligible: item.gift_aid_eligible, is_active: item.is_active,
       is_live: item.is_live ?? true,
       scope: item.scope, branch_id: item.branch_id || '',
@@ -139,7 +142,18 @@ export default function CatalogItemsPage() {
     i.name.toLowerCase().includes(search.toLowerCase())
   )
 
-  const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50'
+  const handleImageFile = (file: File) => {
+    if (file.size > 3 * 1024 * 1024) { setError('Image must be under 3MB'); return }
+    setImageUploading(true)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      setForm(p => ({ ...p, image_url: e.target?.result as string }))
+      setImageUploading(false)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson-700/50'
   const label = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5'
 
   return (
@@ -196,8 +210,18 @@ export default function CatalogItemsPage() {
                     initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                     className="border-b border-white/5 hover:bg-white/3 transition-colors">
                     <td className="px-4 py-3">
-                      <p className="text-white font-semibold text-sm">{item.emoji} {item.name}</p>
-                      <p className="text-white/30 text-xs">{item.unit}</p>
+                      <div className="flex items-center gap-3">
+                        {item.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.image_url} alt="" className="w-10 h-10 object-cover rounded-lg flex-shrink-0 border border-white/10" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0 text-xl">{item.emoji || '📦'}</div>
+                        )}
+                        <div>
+                          <p className="text-white font-semibold text-sm">{item.name}</p>
+                          <p className="text-white/30 text-xs">{item.unit}</p>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${CATEGORY_COLORS[item.category] || 'bg-white/5 text-white/40 border-white/10'}`}>
@@ -292,6 +316,49 @@ export default function CatalogItemsPage() {
                   <label className={label}>Description</label>
                   <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                     rows={2} className={inp + ' resize-none'} placeholder="Brief description…" />
+                </div>
+
+                {/* Image */}
+                <div>
+                  <label className={label}>Item Image</label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleImageFile(f) }}
+                  />
+                  {form.image_url ? (
+                    <div className="flex items-start gap-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={form.image_url} alt="Preview" className="w-24 h-16 object-cover rounded-xl border border-white/10 flex-shrink-0" />
+                      <div className="flex-1 space-y-2">
+                        <button onClick={() => fileInputRef.current?.click()}
+                          className="w-full py-2 rounded-xl border border-white/10 text-white/60 text-xs font-semibold hover:bg-white/5">
+                          {imageUploading ? 'Uploading…' : 'Change Image'}
+                        </button>
+                        <button onClick={() => setForm(p => ({ ...p, image_url: '' }))}
+                          className="w-full py-2 rounded-xl border border-red-500/30 text-red-400 text-xs font-semibold hover:bg-red-500/10">
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className="border-2 border-dashed border-white/10 rounded-xl p-6 text-center cursor-pointer hover:border-crimson-700/40 transition-colors"
+                    >
+                      <p className="text-white/30 text-2xl mb-1">🖼</p>
+                      <p className="text-white/40 text-xs">Click to upload an image (max 3MB)</p>
+                      <p className="text-white/20 text-[10px] mt-0.5">JPG, PNG, WebP</p>
+                    </div>
+                  )}
+                  <div className="mt-2">
+                    <input value={form.image_url.startsWith('data:') ? '' : form.image_url}
+                      onChange={e => setForm(p => ({ ...p, image_url: e.target.value }))}
+                      placeholder="…or paste an image URL"
+                      className={inp + ' mt-1'} />
+                  </div>
                 </div>
 
                 {/* Display Channel */}

@@ -13,18 +13,18 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 const NAV_SECTIONS = [
   {
     items: [
-      { id: 'donations',        label: 'Donations',          labelGu: 'દાન',         labelHi: 'दान',          icon: '🪔' },
-      { id: 'soft_donation',    label: 'Soft Item Donation', labelGu: 'વસ્તુ દાન',   labelHi: 'वस्तु दान',    icon: '🎁' },
-      { id: 'sponsorship',      label: 'Sponsorship',        labelGu: 'પ્રાયોજન',    labelHi: 'प्रायोजन',     icon: '📖' },
-      { id: 'project_donation', label: 'Project Donation',   labelGu: 'પ્રોજેક્ટ',  labelHi: 'प्रोजेक्ट',   icon: '🏗️' },
-      { id: 'services',         label: 'Services',           labelGu: 'સેવાઓ',       labelHi: 'सेवाएं',       icon: '✨' },
-      { id: 'shop',             label: 'Shop',               labelGu: 'દુકાન',       labelHi: 'दुकान',        icon: '🛍️' },
+      { id: 'donations',        label: 'Donations',          labelGu: 'દાન',         labelHi: 'दान',          labelTe: 'విరాళాలు',       labelTa: 'நன்கொடைகள்',      labelPa: 'ਦਾਨ',              labelMr: 'देणग्या',         labelBn: 'দান',              labelKn: 'ದೇಣಿಗೆಗಳು',      icon: '🪔' },
+      { id: 'soft_donation',    label: 'Soft Item Donation', labelGu: 'વસ્તુ દાન',   labelHi: 'वस्तु दान',    labelTe: 'వస్తు దానం',     labelTa: 'பொருள் நன்கொடை', labelPa: 'ਵਸਤੂ ਦਾਨ',        labelMr: 'वस्तू दान',       labelBn: 'বস্তু দান',        labelKn: 'ವಸ್ತು ದೇಣಿಗೆ',   icon: '🎁' },
+      { id: 'sponsorship',      label: 'Sponsorship',        labelGu: 'પ્રાયોજન',    labelHi: 'प्रायोजन',     labelTe: 'స్పాన్సర్‌షిప్', labelTa: 'நிதியுதவி',       labelPa: 'ਸਪਾਂਸਰਸ਼ਿਪ',      labelMr: 'प्रायोजकत्व',    labelBn: 'স্পনসরশিপ',       labelKn: 'ಪ್ರಾಯೋಜಕತ್ವ',    icon: '📖' },
+      { id: 'project_donation', label: 'Project Donation',   labelGu: 'પ્રોજેક્ટ',  labelHi: 'प्रोजेक्ट',   labelTe: 'ప్రాజెక్ట్ దానం',labelTa: 'திட்ட நன்கொடை', labelPa: 'ਪ੍ਰੋਜੈਕਟ ਦਾਨ',   labelMr: 'प्रकल्प दान',    labelBn: 'প্রকল্প দান',     labelKn: 'ಯೋಜನಾ ದೇಣಿಗೆ',  icon: '🏗️' },
+      { id: 'services',         label: 'Services',           labelGu: 'સેવાઓ',       labelHi: 'सेवाएं',       labelTe: 'సేవలు',           labelTa: 'சேவைகள்',         labelPa: 'ਸੇਵਾਵਾਂ',         labelMr: 'सेवा',            labelBn: 'সেবা',             labelKn: 'ಸೇವೆಗಳು',        icon: '✨' },
+      { id: 'shop',             label: 'Shop',               labelGu: 'દુકાન',       labelHi: 'दुकान',        labelTe: 'దుకాణం',          labelTa: 'கடை',             labelPa: 'ਦੁਕਾਨ',           labelMr: 'दुकान',           labelBn: 'দোকান',            labelKn: 'ಅಂಗಡಿ',          icon: '🛍️' },
     ],
   },
   {
     items: [
-      { id: 'information',  label: 'Information',  labelGu: 'માહિતી', labelHi: 'जानकारी', icon: 'ℹ️' },
-      { id: 'registration', label: 'Registration', labelGu: 'નોંધણી', labelHi: 'पंजीकरण', icon: '📝' },
+      { id: 'information',  label: 'Information',  labelGu: 'માહિતી', labelHi: 'जानकारी', labelTe: 'సమాచారం', labelTa: 'தகவல்',  labelPa: 'ਜਾਣਕਾਰੀ',      labelMr: 'माहिती',  labelBn: 'তথ্য',       labelKn: 'ಮಾಹಿತಿ',    icon: 'ℹ️' },
+      { id: 'registration', label: 'Registration', labelGu: 'નોંધણી', labelHi: 'पंजीकरण', labelTe: 'నమోదు',   labelTa: 'பதிவு',  labelPa: 'ਰਜਿਸਟ੍ਰੇਸ਼ਨ', labelMr: 'नोंदणी',  labelBn: 'নিবন্ধন',  labelKn: 'ನೋಂದಣಿ',   icon: '📝' },
     ],
   },
 ]
@@ -95,6 +95,12 @@ function getName(s: Service, lang: string) {
 function getNavLabel(item: typeof NAV_SECTIONS[0]['items'][0], lang: string) {
   if (lang === 'gu') return item.labelGu
   if (lang === 'hi') return item.labelHi
+  if (lang === 'te') return item.labelTe ?? item.label
+  if (lang === 'ta') return item.labelTa ?? item.label
+  if (lang === 'pa') return item.labelPa ?? item.label
+  if (lang === 'mr') return item.labelMr ?? item.label
+  if (lang === 'bn') return item.labelBn ?? item.label
+  if (lang === 'kn') return item.labelKn ?? item.label
   return item.label
 }
 

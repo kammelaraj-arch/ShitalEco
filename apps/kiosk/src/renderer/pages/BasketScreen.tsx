@@ -335,8 +335,12 @@ function ContactCaptureScreen({
   const [error, setError] = useState('')
 
   function handleContinue() {
-    if (!terms) { setError('Please accept the Terms & Conditions to proceed'); return }
-    if (!gdpr && !anonymous) { setError('Please accept the privacy consent'); return }
+    if (!anonymous) {
+      if (!name.trim()) { setError('Please enter your full name'); return }
+      if (!phone.trim() && !email.trim()) { setError('Please enter a phone number or email address'); return }
+      if (!terms) { setError('Please accept the Terms & Conditions to proceed'); return }
+      if (!gdpr) { setError('Please accept the privacy consent'); return }
+    }
     setError('')
     onConfirm({ name, email, phone, anonymous })
   }
@@ -424,21 +428,21 @@ function ContactCaptureScreen({
         {!anonymous && (
           <>
             <div>
-              <label className="block text-sm font-black text-gray-800 mb-1.5">Full Name <span className="text-gray-400 font-normal text-xs">(optional)</span></label>
+              <label className="block text-sm font-black text-gray-800 mb-1.5">Full Name <span className="text-red-500">*</span></label>
               <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Priya Patel"
                 className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
                 style={{ borderColor: name.length > 1 ? '#FF9933' : '#e5e7eb' }} />
             </div>
 
             <div>
-              <label className="block text-sm font-black text-gray-800 mb-1.5">Email Address <span className="text-gray-400 font-normal text-xs">(for receipt)</span></label>
+              <label className="block text-sm font-black text-gray-800 mb-1.5">Email Address <span className="text-gray-400 font-normal text-xs">(required if no phone)</span></label>
               <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com"
                 className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
                 style={{ borderColor: email.includes('@') ? '#FF9933' : '#e5e7eb' }} />
             </div>
 
             <div>
-              <label className="block text-sm font-black text-gray-800 mb-1.5">Phone / WhatsApp <span className="text-gray-400 font-normal text-xs">(for WhatsApp receipt)</span></label>
+              <label className="block text-sm font-black text-gray-800 mb-1.5">Phone / WhatsApp <span className="text-gray-400 font-normal text-xs">(required if no email)</span></label>
               <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="07xxx xxxxxx"
                 className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
                 style={{ borderColor: phone.length > 7 ? '#FF9933' : '#e5e7eb' }} />
@@ -458,17 +462,21 @@ function ContactCaptureScreen({
           </>
         )}
 
-        {/* T&C — always shown */}
-        <button onClick={() => setTerms(t => !t)}
-          className={`w-full flex items-start gap-3 p-3.5 rounded-2xl border-2 text-left transition-all ${terms ? 'border-orange-300 bg-orange-50' : 'border-gray-100 bg-gray-50'}`}>
-          <div className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${terms ? 'bg-orange-500 border-orange-500' : 'border-gray-300 bg-white'}`}>
-            {terms && <span className="text-white text-[9px] font-black">✓</span>}
-          </div>
-          <p className="text-gray-500 text-xs leading-relaxed">
-            <span className="font-semibold text-gray-700">Terms & Conditions — </span>
-            All payments are voluntary donations to Shital Temple, a registered UK charity. Donations are non-refundable unless made in error. By proceeding you confirm you are authorised to make this payment.
-          </p>
-        </button>
+        {/* T&C — only when Details selected */}
+        {!anonymous && (
+          <button onClick={() => setTerms(t => !t)}
+            className={`w-full flex items-start gap-3 p-3.5 rounded-2xl border-2 text-left transition-all ${terms ? 'border-orange-300 bg-orange-50' : 'border-red-200 bg-red-50'}`}>
+            <div className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${terms ? 'bg-orange-500 border-orange-500' : 'border-red-400 bg-white'}`}>
+              {terms && <span className="text-white text-[9px] font-black">✓</span>}
+            </div>
+            <p className="text-xs leading-relaxed">
+              <span className={`font-bold text-sm ${terms ? 'text-orange-800' : 'text-red-700'}`}>Terms & Conditions * </span>
+              <span className={terms ? 'text-gray-500' : 'text-red-600'}>
+                All payments are voluntary donations to Shital Temple, a registered UK charity. Donations are non-refundable unless made in error. By proceeding you confirm you are authorised to make this payment.
+              </span>
+            </p>
+          </button>
+        )}
 
         <div className="h-2" />
       </div>
