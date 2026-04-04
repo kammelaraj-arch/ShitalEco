@@ -22,7 +22,13 @@ export default async function handler(req: Request) {
     try {
       const res = await fetch(
         `https://api.getaddress.io/find/${clean}?api-key=${GETADDRESS_KEY}`,
-        { signal: AbortSignal.timeout(8000) }
+        {
+          signal: AbortSignal.timeout(8000),
+          headers: {
+            'Origin': 'https://shital-kiosk.vercel.app',
+            'Referer': 'https://shital-kiosk.vercel.app/',
+          },
+        }
       )
       if (res.ok) {
         const data = await res.json() as { addresses?: string[] }
