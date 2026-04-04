@@ -36,6 +36,12 @@ class ItemScope(str, Enum):
 
 # ─── Pydantic Models ──────────────────────────────────────────────────────────
 
+class DisplayChannel(str, Enum):
+    KIOSK = "kiosk"
+    WEB = "web"
+    BOTH = "both"
+
+
 class ItemBase(BaseModel):
     name: str
     name_gu: str = ""
@@ -54,6 +60,11 @@ class ItemBase(BaseModel):
     stock_qty: int | None = None
     sort_order: int = 0
     metadata_json: dict = {}
+    available_from: datetime | None = None
+    available_until: datetime | None = None
+    display_channel: DisplayChannel = DisplayChannel.BOTH
+    branch_stock: dict = {}
+    is_live: bool = True
 
 
 class ItemCreate(ItemBase):
@@ -78,13 +89,17 @@ class ItemUpdate(BaseModel):
     stock_qty: int | None = None
     sort_order: int | None = None
     metadata_json: dict | None = None
+    available_from: datetime | None = None
+    available_until: datetime | None = None
+    display_channel: DisplayChannel | None = None
+    branch_stock: dict | None = None
+    is_live: bool | None = None
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _row_to_dict(row: Any) -> dict:
     d = dict(row)
-    # Convert Decimal to float for JSON serialisation
     if "price" in d and d["price"] is not None:
         d["price"] = float(d["price"])
     if "metadata_json" in d and isinstance(d["metadata_json"], str):
@@ -92,7 +107,25 @@ def _row_to_dict(row: Any) -> dict:
             d["metadata_json"] = json.loads(d["metadata_json"])
         except Exception:
             d["metadata_json"] = {}
+    if "branch_stock" in d and isinstance(d["branch_stock"], str):
+        try:
+            d["branch_stock"] = json.loads(d["branch_stock"])
+        except Exception:
+            d["branch_stock"] = {}
+    # Serialise datetimes to ISO strings
+    for col in ("available_from", "available_until", "created_at", "updated_at"):
+        if col in d and d[col] is not None and hasattr(d[col], "isoformat"):
+            d[col] = d[col].isoformat()
     return d
+
+
+# Date-range + channel + live filter fragment for kiosk endpoints
+_KIOSK_SCHEDULE_FILTER = """
+  AND (is_live IS NULL OR is_live = true)
+  AND (available_from IS NULL OR available_from <= NOW())
+  AND (available_until IS NULL OR available_until >= NOW())
+  AND (display_channel = 'both' OR display_channel = 'kiosk')
+"""
 
 
 # ─── Admin: CRUD endpoints (require auth) ─────────────────────────────────────
@@ -132,6 +165,7 @@ async def list_items(
                        price, currency, unit, emoji, image_url,
                        gift_aid_eligible, is_active, scope, branch_id,
                        stock_qty, sort_order, metadata_json,
+                       available_from, available_until, display_channel, branch_stock, is_live,
                        created_at, updated_at
                 FROM catalog_items
                 WHERE {where}
@@ -156,12 +190,14 @@ async def kiosk_soft_donations(branch_id: str = "main"):
                 text("""
                     SELECT id, name, name_gu, name_hi, description,
                            price, currency, unit, emoji, image_url,
-                           gift_aid_eligible, stock_qty, sort_order, metadata_json
+                           gift_aid_eligible, stock_qty, sort_order, metadata_json,
+                           available_from, available_until, display_channel, branch_stock
                     FROM catalog_items
                     WHERE category = 'SOFT_DONATION'
                       AND is_active = true
                       AND deleted_at IS NULL
                       AND (scope = 'GLOBAL' OR (scope = 'BRANCH' AND branch_id = :bid))
+                """ + _KIOSK_SCHEDULE_FILTER + """
                     ORDER BY sort_order, name
                 """),
                 {"bid": branch_id},
@@ -184,12 +220,14 @@ async def kiosk_projects(branch_id: str = "main"):
                 text("""
                     SELECT id, name, name_gu, name_hi, description,
                            price, currency, unit, emoji, image_url,
-                           gift_aid_eligible, stock_qty, sort_order, metadata_json
+                           gift_aid_eligible, stock_qty, sort_order, metadata_json,
+                           available_from, available_until, display_channel, branch_stock
                     FROM catalog_items
                     WHERE category = 'PROJECT_DONATION'
                       AND is_active = true
                       AND deleted_at IS NULL
                       AND (scope = 'GLOBAL' OR (scope = 'BRANCH' AND branch_id = :bid))
+                """ + _KIOSK_SCHEDULE_FILTER + """
                     ORDER BY sort_order, price
                 """),
                 {"bid": branch_id},
@@ -222,18 +260,26 @@ async def kiosk_shop(branch_id: str = "main"):
                 text("""
                     SELECT id, name, name_gu, name_hi, description,
                            price, currency, unit, emoji, image_url,
-                           gift_aid_eligible, stock_qty, sort_order, metadata_json
+                           gift_aid_eligible, stock_qty, sort_order, metadata_json,
+                           available_from, available_until, display_channel, branch_stock
                     FROM catalog_items
                     WHERE category = 'SHOP'
                       AND is_active = true
                       AND deleted_at IS NULL
                       AND (scope = 'GLOBAL' OR (scope = 'BRANCH' AND branch_id = :bid))
+                """ + _KIOSK_SCHEDULE_FILTER + """
                     ORDER BY sort_order, name
                 """),
                 {"bid": branch_id},
             )
             rows = result.mappings().all()
-        return {"items": [_row_to_dict(r) for r in rows], "branch_id": branch_id}
+        items = [_row_to_dict(r) for r in rows]
+        # For shop items, use branch_stock qty if set for this branch
+        for item in items:
+            bs = item.get("branch_stock") or {}
+            if isinstance(bs, dict) and branch_id in bs:
+                item["stock_qty"] = bs[branch_id]
+        return {"items": items, "branch_id": branch_id}
     except Exception:
         return {"items": [], "branch_id": branch_id}
 
@@ -250,11 +296,13 @@ async def kiosk_general_donations():
                 text("""
                     SELECT id, name, name_gu, name_hi, description,
                            price, currency, unit, emoji, image_url,
-                           gift_aid_eligible, sort_order, metadata_json
+                           gift_aid_eligible, sort_order, metadata_json,
+                           available_from, available_until, display_channel
                     FROM catalog_items
                     WHERE category = 'GENERAL_DONATION'
                       AND is_active = true
                       AND deleted_at IS NULL
+                """ + _KIOSK_SCHEDULE_FILTER + """
                     ORDER BY sort_order, price
                 """),
             )
@@ -303,11 +351,15 @@ async def create_item(body: ItemCreate, ctx: CurrentSpace):
                 INSERT INTO catalog_items
                 (id, name, name_gu, name_hi, description, category, price, currency,
                  unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id,
-                 stock_qty, sort_order, metadata_json, created_at, updated_at)
+                 stock_qty, sort_order, metadata_json,
+                 available_from, available_until, display_channel, branch_stock, is_live,
+                 created_at, updated_at)
                 VALUES
                 (:id, :name, :name_gu, :name_hi, :desc, :category, :price, :currency,
                  :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id,
-                 :stock_qty, :sort_order, :metadata_json::jsonb, :now, :now)
+                 :stock_qty, :sort_order, :metadata_json::jsonb,
+                 :available_from, :available_until, :display_channel, :branch_stock::jsonb, :is_live,
+                 :now, :now)
             """),
             {
                 "id": item_id,
@@ -328,6 +380,11 @@ async def create_item(body: ItemCreate, ctx: CurrentSpace):
                 "stock_qty": body.stock_qty,
                 "sort_order": body.sort_order,
                 "metadata_json": json.dumps(body.metadata_json),
+                "available_from": body.available_from,
+                "available_until": body.available_until,
+                "display_channel": body.display_channel.value,
+                "branch_stock": json.dumps(body.branch_stock),
+                "is_live": body.is_live,
                 "now": now,
             },
         )
@@ -360,6 +417,10 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: CurrentSpace):
         "branch_id": body.branch_id,
         "stock_qty": body.stock_qty,
         "sort_order": body.sort_order,
+        "available_from": body.available_from,
+        "available_until": body.available_until,
+        "display_channel": body.display_channel.value if body.display_channel else None,
+        "is_live": body.is_live,
     }
     for col, val in field_map.items():
         if val is not None:
@@ -367,6 +428,8 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: CurrentSpace):
 
     if body.metadata_json is not None:
         updates["metadata_json"] = json.dumps(body.metadata_json)
+    if body.branch_stock is not None:
+        updates["branch_stock"] = json.dumps(body.branch_stock)
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
