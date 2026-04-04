@@ -532,3 +532,150 @@ BRANCHES = [
 async def list_branches():
     """List all Shital Temple branches for kiosk branch selection."""
     return {"branches": BRANCHES}
+
+
+# ─── QuickDonation Kiosk Accounts ────────────────────────────────────────────
+
+QUICK_KIOSK_ACCOUNTS = [
+    {"email": "quickkiosk-wembley@shital.org",      "name": "QuickKiosk Wembley",       "branch_code": "main",      "password": "Wembley!Kiosk2024"},
+    {"email": "quickkiosk-leicester@shital.org",     "name": "QuickKiosk Leicester",      "branch_code": "leicester", "password": "Leicester!Kiosk2024"},
+    {"email": "quickkiosk-reading@shital.org",       "name": "QuickKiosk Reading",        "branch_code": "reading",   "password": "Reading!Kiosk2024"},
+    {"email": "quickkiosk-mk@shital.org",            "name": "QuickKiosk Milton Keynes",  "branch_code": "mk",        "password": "MiltonKeynes!Kiosk2024"},
+]
+
+
+@router.post("/quick-donation/seed-accounts")
+async def seed_quick_kiosk_accounts():
+    """
+    Create one QuickDonation kiosk user account per branch.
+    Idempotent — skips accounts that already exist.
+    Also ensures branches exist in the branches table.
+    """
+    import bcrypt
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+
+    def _hash(plain: str) -> str:
+        return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(12)).decode()
+
+    now = datetime.utcnow()
+    created: list[dict] = []
+    skipped: list[str] = []
+
+    async with SessionLocal() as db:
+        # 1. Ensure branches exist
+        for b in BRANCHES:
+            branch_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"shital-branch-{b['id']}"))
+            await db.execute(
+                text(
+                    "INSERT INTO branches (id, name, code, address, phone, is_active, created_at, updated_at) "
+                    "VALUES (:id, :name, :code, :addr::jsonb, '', true, :now, :now) "
+                    "ON CONFLICT (code) DO NOTHING"
+                ),
+                {
+                    "id": branch_id, "name": b["name"], "code": b["id"],
+                    "addr": f'{{"city": "{b["city"]}", "postcode": "{b["postcode"]}"}}',
+                    "now": now,
+                },
+            )
+
+        # 2. Create kiosk accounts
+        for acct in QUICK_KIOSK_ACCOUNTS:
+            # Check if already exists
+            existing = (await db.execute(
+                text("SELECT id, branch_id FROM users WHERE email = :email AND deleted_at IS NULL LIMIT 1"),
+                {"email": acct["email"]},
+            )).mappings().first()
+
+            if existing:
+                skipped.append(acct["email"])
+                continue
+
+            # Resolve branch UUID
+            branch_row = (await db.execute(
+                text("SELECT id FROM branches WHERE code = :code LIMIT 1"),
+                {"code": acct["branch_code"]},
+            )).mappings().first()
+            branch_uuid = str(branch_row["id"]) if branch_row else None
+
+            user_id = str(uuid.uuid4())
+            hashed = _hash(acct["password"])
+
+            await db.execute(
+                text(
+                    "INSERT INTO users (id, email, password_hash, name, role, is_active, "
+                    "mfa_enabled, branch_id, created_at, updated_at) "
+                    "VALUES (:id, :email, :hash, :name, 'KIOSK', true, false, :bid, :now, :now)"
+                ),
+                {
+                    "id": user_id, "email": acct["email"], "hash": hashed,
+                    "name": acct["name"], "bid": branch_uuid, "now": now,
+                },
+            )
+
+            created.append({
+                "email": acct["email"],
+                "name": acct["name"],
+                "branch": acct["branch_code"],
+                "password": acct["password"],
+            })
+
+        await db.commit()
+
+    return {
+        "created": created,
+        "skipped": skipped,
+        "total_accounts": len(QUICK_KIOSK_ACCOUNTS),
+        "message": f"Created {len(created)} accounts, skipped {len(skipped)} existing.",
+    }
+
+
+class QuickKioskLoginInput(BaseModel):
+    email: str
+    password: str
+
+
+@router.post("/quick-donation/login")
+async def quick_kiosk_login(body: QuickKioskLoginInput):
+    """
+    Login for QuickDonation kiosk accounts. Returns branch info and reader config.
+    Only KIOSK role accounts can log in via this endpoint.
+    """
+    import bcrypt
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text(
+                "SELECT u.id, u.email, u.name, u.password_hash, u.role, u.branch_id, u.is_active, "
+                "b.code AS branch_code, b.name AS branch_name "
+                "FROM users u LEFT JOIN branches b ON u.branch_id = b.id "
+                "WHERE u.email = :email AND u.deleted_at IS NULL"
+            ),
+            {"email": body.email.lower().strip()},
+        )
+        user = result.mappings().first()
+
+    if not user or not user["password_hash"]:
+        return {"authenticated": False, "error": "Invalid email or password"}
+    if not bcrypt.checkpw(body.password.encode(), user["password_hash"].encode()):
+        return {"authenticated": False, "error": "Invalid email or password"}
+    if not user["is_active"]:
+        return {"authenticated": False, "error": "Account is deactivated"}
+    if user["role"] != "KIOSK":
+        return {"authenticated": False, "error": "Not a kiosk account"}
+
+    return {
+        "authenticated": True,
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user["name"],
+            "role": user["role"],
+        },
+        "branch": {
+            "id": user["branch_code"] or "main",
+            "name": user["branch_name"] or "Unknown",
+        },
+    }
