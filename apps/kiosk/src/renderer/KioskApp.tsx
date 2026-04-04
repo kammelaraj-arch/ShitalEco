@@ -13,6 +13,7 @@ import { CheckoutScreen } from './pages/CheckoutScreen'
 import { PaymentScreen } from './pages/PaymentScreen'
 import { ConfirmationScreen } from './pages/ConfirmationScreen'
 import { ShopScreen } from './pages/ShopScreen'
+import { AdminScreen } from './pages/AdminScreen'
 
 const IDLE_TIMEOUT_MS = 120_000
 
@@ -58,6 +59,7 @@ export function KioskApp() {
       case 'checkout':         return <CheckoutScreen key="checkout" />
       case 'payment':          return <PaymentScreen key="payment" />
       case 'confirmation':     return <ConfirmationScreen key="confirmation" />
+      case 'admin':            return <AdminScreen key="admin" />
       default:                 return <HomeScreen key="home" />
     }
   }

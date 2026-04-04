@@ -86,8 +86,14 @@ export const THEMES: Record<KioskTheme, {
 export type KioskScreen =
   | 'idle' | 'language' | 'home' | 'services' | 'service-detail'
   | 'donate' | 'basket' | 'checkout' | 'payment' | 'confirmation'
-  | 'admin-pin' | 'soft-donation' | 'project-donation' | 'shop'
+  | 'admin' | 'admin-pin' | 'soft-donation' | 'project-donation' | 'shop'
   | 'gift-aid' | 'receipt'
+
+export interface EndScreenTemplate {
+  icon: string          // e.g. "🕉"
+  thankYouLine: string  // e.g. "Jay Shri Krishna 🙏"
+  subMessage: string    // optional extra line
+}
 
 export type Language = 'en' | 'gu' | 'hi'
 
@@ -129,6 +135,8 @@ interface KioskState {
     gdprConsent: boolean; termsConsent: boolean; anonymous: boolean
   } | null
   pendingPayment: boolean
+  endScreenTemplate: EndScreenTemplate
+  setEndScreenTemplate: (t: EndScreenTemplate) => void
   setGiftAidDeclaration: (decl: KioskState['giftAidDeclaration']) => void
   setContactInfo: (info: KioskState['contactInfo']) => void
   setPendingPayment: (v: boolean) => void
@@ -164,6 +172,8 @@ export const useKioskStore = create<KioskState>()(
   giftAidDeclaration: null,
   contactInfo: null,
   pendingPayment: false,
+  endScreenTemplate: { icon: '🕉', thankYouLine: 'Jay Shri Krishna 🙏', subMessage: '' },
+  setEndScreenTemplate: (endScreenTemplate) => set({ endScreenTemplate }),
   cardProvider: 'stripe_terminal',
   stripeReaderId: 'tmr_Gcuz1QQB6nzqMs',
   stripeReaderLabel: 'Temple WisePOS E',
@@ -213,6 +223,7 @@ export const useKioskStore = create<KioskState>()(
         squareDeviceId: state.squareDeviceId,
         squareDeviceName: state.squareDeviceName,
         branchId: state.branchId,
+        endScreenTemplate: state.endScreenTemplate,
       }),
     }
   )

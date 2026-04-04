@@ -267,6 +267,16 @@ export function HomeScreen() {
         >
           <span className="text-base">🎨</span>
         </button>
+
+        {/* Admin settings button */}
+        <button
+          onClick={() => setScreen('admin')}
+          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95"
+          style={{ background: 'rgba(255,255,255,0.15)' }}
+          title="Admin settings"
+        >
+          <span className="text-base">⚙️</span>
+        </button>
       </header>
 
       {/* ══ BODY ═══════════════════════════════════════════════════════════════ */}
