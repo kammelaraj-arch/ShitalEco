@@ -143,6 +143,12 @@ export interface BasketItem {
   name: string
   nameGu?: string
   nameHi?: string
+  nameTe?: string
+  nameTa?: string
+  namePa?: string
+  nameMr?: string
+  nameBn?: string
+  nameKn?: string
   quantity: number
   unitPrice: number
   totalPrice: number

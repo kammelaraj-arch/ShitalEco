@@ -20,6 +20,12 @@ logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[type-arg]
+    # Apply any missing schema columns at startup (idempotent, safe to re-run)
+    try:
+        await _patch_schema()
+    except Exception as exc:
+        logger.error("schema_patch_failed", error=str(exc))
+
     # Register all Digital DNA micro-capabilities
     import shital.capabilities.finance.capabilities      # noqa: F401
     import shital.capabilities.payroll.capabilities      # noqa: F401
@@ -33,6 +39,38 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     logger.info("digital_dna_loaded", total_capabilities=len(DigitalDNA.all_capabilities()))
     yield
     logger.info("shital_shutdown")
+
+
+async def _patch_schema() -> None:
+    """Idempotent schema patcher — adds any columns migrations may have missed."""
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+
+    patches = [
+        # Migration 007 columns on catalog_items
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_from  TIMESTAMPTZ",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_until TIMESTAMPTZ",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS display_channel VARCHAR(20) NOT NULL DEFAULT 'both'",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS branch_stock    JSONB NOT NULL DEFAULT '{}'",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_live         BOOLEAN NOT NULL DEFAULT true",
+        # Migration 009 column on catalog_items
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS name_te         VARCHAR(200) NOT NULL DEFAULT ''",
+        # Migration 007 columns on temple_services (if table exists)
+        "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS available_from  TIMESTAMPTZ",
+        "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS available_until TIMESTAMPTZ",
+        "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS display_channel VARCHAR(20) NOT NULL DEFAULT 'both'",
+        "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS is_live         BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS name_te         VARCHAR(200) NOT NULL DEFAULT ''",
+    ]
+
+    async with SessionLocal() as db:
+        for sql in patches:
+            try:
+                await db.execute(text(sql))
+            except Exception:
+                pass  # column already exists or table doesn't exist
+        await db.commit()
+    logger.info("schema_patch_done")
 
 
 app = FastAPI(
