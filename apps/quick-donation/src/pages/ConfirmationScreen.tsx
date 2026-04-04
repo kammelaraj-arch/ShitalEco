@@ -27,20 +27,6 @@ export function ConfirmationScreen() {
 
   return (
     <div className="w-full h-full flex flex-col bg-white" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
-      {/* Print styles */}
-      <style>{`
-        @media print {
-          body * { visibility: hidden !important; }
-          .print-receipt, .print-receipt * { visibility: visible !important; }
-          .print-receipt {
-            position: fixed !important; top: 0 !important; left: 0 !important;
-            width: 80mm !important; padding: 6mm !important;
-            font-family: 'Courier New', monospace !important; font-size: 11pt !important;
-            background: white !important;
-          }
-        }
-      `}</style>
-
       <div className="flex-1 flex flex-col items-center justify-center px-8 text-center gap-6">
         {/* Success icon */}
         <motion.div
@@ -107,45 +93,6 @@ export function ConfirmationScreen() {
           </p>
         </motion.div>
 
-        {/* Print receipt */}
-        <motion.button
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.65 }}
-          onClick={() => window.print()}
-          className="w-full max-w-xs py-3 rounded-xl border-2 border-gray-200 text-gray-600 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all"
-        >
-          🖨 Print Receipt
-        </motion.button>
-      </div>
-
-      {/* Hidden thermal receipt */}
-      <div className="print-receipt hidden" style={{ display: 'none' }}>
-        <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: 8, marginBottom: 8 }}>
-          <div style={{ fontSize: 18, fontWeight: 900 }}>🕉 Shital Temple</div>
-          <div style={{ fontSize: 11 }}>{branchName} - UK Registered Charity</div>
-          <div style={{ fontSize: 10, marginTop: 2 }}>{new Date().toLocaleString('en-GB')}</div>
-        </div>
-        <div style={{ textAlign: 'center', marginBottom: 8 }}>
-          <div style={{ fontSize: 10, color: '#555' }}>Donation Reference</div>
-          <div style={{ fontSize: 14, fontWeight: 900, letterSpacing: 2 }}>{orderRef}</div>
-        </div>
-        <div style={{ borderTop: '1px dashed #000', paddingTop: 6, marginBottom: 6 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
-            <span>Quick Donation</span>
-            <span style={{ fontWeight: 700 }}>£{amount.toFixed(2)}</span>
-          </div>
-        </div>
-        <div style={{ borderTop: '2px solid #000', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 900, marginBottom: 10 }}>
-          <span>TOTAL</span>
-          <span>£{amount.toFixed(2)}</span>
-        </div>
-        <div style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: 8, fontSize: 10 }}>
-          <div>Thank you for your generous donation</div>
-          <div style={{ marginTop: 4 }}>Jay Shri Krishna</div>
-          <div style={{ marginTop: 6, fontSize: 9, color: '#555' }}>This receipt is for your records.</div>
-          <div style={{ marginTop: 4, fontSize: 9, color: '#555' }}>Gift Aid? Ask a staff member.</div>
-        </div>
       </div>
 
       {/* New Donation CTA */}
