@@ -4,24 +4,28 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 
 // ─── Address lookup — getAddress.io domain token (client-side browser only) ───
 
-// Domain token configured for shital-kiosk.vercel.app in getAddress.io dashboard
-const GA_DTOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
+// getAddress.io API key (client-side — works from browser/residential IPs)
+const GA_API_KEY = 'kSZi9RxDcUCLhU4A6ShTBg48103'
 
-// Fetch all addresses for a postcode from getAddress.io (client-side, uses domain token)
+// Fetch all addresses for a postcode from getAddress.io (client-side browser call)
 async function lookupAddresses(raw: string): Promise<{ addresses: string[]; postcode: string }> {
   const clean = raw.trim().replace(/\s+/g, '').toLowerCase()
   const res = await fetch(
-    `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GA_DTOKEN}`,
+    `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GA_API_KEY}&expand=true`,
     { signal: AbortSignal.timeout(10000) }
   )
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`API error ${res.status}: ${body.slice(0, 120)}`)
   }
-  const data = await res.json() as { addresses?: string[]; postcode?: string }
-  const addresses = (data.addresses ?? [])
-    .map((a: string) => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
-    .filter(Boolean)
+  const data = await res.json() as { addresses?: string[] | Array<{ formatted_address?: string[] }>; postcode?: string }
+  // Handle both compact format (string[]) and expanded format (object[])
+  const addresses = (data.addresses ?? []).map((a) => {
+    if (typeof a === 'string') {
+      return a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', ')
+    }
+    return (a.formatted_address ?? []).filter(Boolean).join(', ')
+  }).filter(Boolean)
   return { addresses, postcode: data.postcode || raw.toUpperCase() }
 }
 
