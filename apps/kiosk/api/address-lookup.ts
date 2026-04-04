@@ -1,21 +1,28 @@
 /**
- * Vercel Serverless Function — UK postcode → full address list via getAddress.io
+ * Vercel Edge Function — UK postcode → full address list via getAddress.io
+ * Runs on Cloudflare edge (UK PoP) so getAddress.io IP block doesn't apply.
  */
 
-export const config = { maxDuration: 10 }
+export const config = { runtime: 'edge' }
 
-const GETADDRESS_KEY = process.env.GETADDRESS_API_KEY || 'zp65T_VYUUiIty5baQgr-A48103'
+const GETADDRESS_KEY = 'zp65T_VYUUiIty5baQgr-A48103'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export default async function handler(req: any, res: any) {
-  res.setHeader('Cache-Control', 'public, max-age=3600')
-  res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'GET')
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET',
+  'Content-Type': 'application/json',
+}
 
-  const raw: string = (req.query?.postcode ?? '').toString().trim()
-  if (!raw) return res.status(400).json({ error: 'postcode required' })
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: CORS })
+}
 
-  const clean = raw.replace(/\s+/g, '').toLowerCase()
+export default async function handler(request: Request): Promise<Response> {
+  const { searchParams } = new URL(request.url)
+  const postcode = (searchParams.get('postcode') ?? '').trim()
+  if (!postcode) return json({ error: 'postcode required' }, 400)
+
+  const clean = postcode.replace(/\s+/g, '').toLowerCase()
 
   try {
     const gaRes = await fetch(
@@ -27,11 +34,11 @@ export default async function handler(req: any, res: any) {
       const addresses = (data.addresses ?? [])
         .map((a: string) => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
         .filter(Boolean)
-      return res.json({ addresses, postcode: data.postcode || raw.toUpperCase() })
+      return json({ addresses, postcode: data.postcode || postcode.toUpperCase() })
     }
     const errBody = await gaRes.text().catch(() => '')
-    return res.status(gaRes.status).json({ error: `getAddress.io: ${gaRes.status} ${errBody.slice(0, 100)}` })
+    return json({ error: `getAddress.io ${gaRes.status}: ${errBody.slice(0, 100)}` }, gaRes.status)
   } catch (e: unknown) {
-    return res.status(500).json({ error: String(e).slice(0, 100) })
+    return json({ error: String(e).slice(0, 100) }, 500)
   }
 }
