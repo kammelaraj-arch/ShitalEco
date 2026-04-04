@@ -287,10 +287,157 @@ function GiftAidScreen({
   )
 }
 
+// ─── Contact Capture Screen ───────────────────────────────────────────────────
+
+function ContactCaptureScreen({
+  total,
+  onConfirm,
+  onBack,
+}: {
+  total: number
+  onConfirm: (info: { name: string; email: string; phone: string; anonymous: boolean }) => void
+  onBack: () => void
+}) {
+  const [anonymous, setAnonymous] = useState(false)
+  const [name,  setName]  = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [gdpr,  setGdpr]  = useState(true)
+  const [terms, setTerms] = useState(true)
+  const [error, setError] = useState('')
+
+  function handleContinue() {
+    if (!terms) { setError('Please accept the Terms & Conditions to proceed'); return }
+    if (!gdpr && !anonymous) { setError('Please accept the privacy consent'); return }
+    setError('')
+    onConfirm({ name, email, phone, anonymous })
+  }
+
+  return (
+    <motion.div
+      initial={{ x: '100%' }}
+      animate={{ x: 0 }}
+      exit={{ x: '100%' }}
+      transition={{ type: 'tween', duration: 0.25 }}
+      className="w-full h-full flex flex-col bg-white"
+      style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 px-5 py-4 flex-shrink-0"
+        style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)', boxShadow: '0 2px 12px rgba(0,0,0,0.15)' }}>
+        <button onClick={onBack}
+          className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white font-bold text-lg active:scale-90">←</button>
+        <div className="flex-1">
+          <h1 className="text-white font-black text-lg leading-tight">Your Details</h1>
+          <p className="text-orange-100 text-xs">Optional — skip anonymously or add details for a receipt</p>
+        </div>
+      </div>
+
+      {/* Scrollable form */}
+      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4" style={{ scrollbarWidth: 'thin' }}>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-2xl font-medium">
+            ⚠ {error}
+          </div>
+        )}
+
+        {/* Receipt info banner */}
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex gap-3 items-start">
+          <span className="text-xl flex-shrink-0">📧</span>
+          <p className="text-amber-800 text-sm leading-snug">
+            <span className="font-black">Get your receipt & stay connected.</span><br/>
+            By sharing your email or phone, we can send your payment receipt and keep you updated about temple events and services.
+          </p>
+        </div>
+
+        {/* Anonymous toggle */}
+        <button
+          onClick={() => { setAnonymous(a => !a); setName(''); setEmail(''); setPhone('') }}
+          className={`w-full flex items-center gap-3 p-4 rounded-2xl border-2 text-left transition-all ${anonymous ? 'border-gray-400 bg-gray-50' : 'border-gray-100'}`}
+        >
+          <div className={`w-6 h-6 rounded-md border-2 flex-shrink-0 flex items-center justify-center transition-all ${anonymous ? 'bg-gray-500 border-gray-500' : 'border-gray-300 bg-white'}`}>
+            {anonymous && <span className="text-white text-xs font-black">✓</span>}
+          </div>
+          <div>
+            <p className="font-black text-gray-800 text-sm">Donate Anonymously</p>
+            <p className="text-gray-400 text-xs">No details required — no receipt will be sent</p>
+          </div>
+        </button>
+
+        {/* Contact fields — hidden when anonymous */}
+        {!anonymous && (
+          <>
+            <div>
+              <label className="block text-sm font-black text-gray-800 mb-1.5">Full Name <span className="text-gray-400 font-normal text-xs">(optional)</span></label>
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Priya Patel"
+                className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
+                style={{ borderColor: name.length > 1 ? '#FF9933' : '#e5e7eb' }} />
+            </div>
+
+            <div>
+              <label className="block text-sm font-black text-gray-800 mb-1.5">Email Address <span className="text-gray-400 font-normal text-xs">(for receipt)</span></label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com"
+                className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
+                style={{ borderColor: email.includes('@') ? '#FF9933' : '#e5e7eb' }} />
+            </div>
+
+            <div>
+              <label className="block text-sm font-black text-gray-800 mb-1.5">Phone / WhatsApp <span className="text-gray-400 font-normal text-xs">(for WhatsApp receipt)</span></label>
+              <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="07xxx xxxxxx"
+                className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
+                style={{ borderColor: phone.length > 7 ? '#FF9933' : '#e5e7eb' }} />
+            </div>
+
+            {/* GDPR */}
+            <button onClick={() => setGdpr(g => !g)}
+              className={`w-full flex items-start gap-3 p-3.5 rounded-2xl border-2 text-left transition-all ${gdpr ? 'border-blue-300 bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
+              <div className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${gdpr ? 'bg-blue-500 border-blue-500' : 'border-gray-300 bg-white'}`}>
+                {gdpr && <span className="text-white text-[9px] font-black">✓</span>}
+              </div>
+              <p className="text-gray-500 text-xs leading-relaxed">
+                <span className="font-semibold text-gray-700">Privacy Consent (GDPR) — </span>
+                I consent to Shital Temple storing my contact details to send receipts and updates about temple activities. My data will not be shared with third parties and I can unsubscribe at any time.
+              </p>
+            </button>
+          </>
+        )}
+
+        {/* T&C — always shown */}
+        <button onClick={() => setTerms(t => !t)}
+          className={`w-full flex items-start gap-3 p-3.5 rounded-2xl border-2 text-left transition-all ${terms ? 'border-orange-300 bg-orange-50' : 'border-gray-100 bg-gray-50'}`}>
+          <div className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${terms ? 'bg-orange-500 border-orange-500' : 'border-gray-300 bg-white'}`}>
+            {terms && <span className="text-white text-[9px] font-black">✓</span>}
+          </div>
+          <p className="text-gray-500 text-xs leading-relaxed">
+            <span className="font-semibold text-gray-700">Terms & Conditions — </span>
+            All payments are voluntary donations to Shital Temple, a registered UK charity. Donations are non-refundable unless made in error. By proceeding you confirm you are authorised to make this payment.
+          </p>
+        </button>
+
+        <div className="h-2" />
+      </div>
+
+      {/* Footer */}
+      <div className="flex-shrink-0 px-5 pb-6 pt-3 flex gap-3" style={{ borderTop: '2px solid #f3f4f6', background: '#fff' }}>
+        <button onClick={onBack}
+          className="flex-1 py-4 rounded-2xl font-bold text-gray-600 text-base border-2 border-gray-200 active:scale-[0.97] transition-all">
+          ← Back
+        </button>
+        <button onClick={handleContinue}
+          className="flex-[2] py-4 rounded-2xl font-black text-white text-base shadow-xl active:scale-[0.98] transition-all"
+          style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)', boxShadow: '0 4px 16px #FF993340' }}>
+          {anonymous ? 'Pay Anonymously' : 'Continue to Pay'} · £{total.toFixed(2)} →
+        </button>
+      </div>
+    </motion.div>
+  )
+}
+
 // ─── Main BasketScreen — "Your Order" McDonald's style ───────────────────────
 
 export function BasketScreen() {
-  const { language, setScreen, items, removeItem, updateQuantity, theme, setGiftAidDeclaration, setPendingPayment, resetKiosk } = useKioskStore()
+  const { language, setScreen, items, removeItem, updateQuantity, theme, setGiftAidDeclaration, setContactInfo, setPendingPayment, resetKiosk } = useKioskStore()
   const th = THEMES[theme]
 
   const total        = items.reduce((s, i) => s + i.totalPrice, 0)
@@ -298,28 +445,49 @@ export function BasketScreen() {
   const giftAidBonus = eligibleAmt * 0.25
   const hasEligible  = eligibleAmt > 0
 
-  const [showGiftAid, setShowGiftAid] = useState(false)
+  const [showGiftAid, setShowGiftAid]       = useState(false)
+  const [showContactCapture, setShowContact] = useState(false)
 
   function handleNormalCheckout() {
     setGiftAidDeclaration(null)
+    setShowContact(true)
+  }
+
+  function handleContactConfirm(info: { name: string; email: string; phone: string; anonymous: boolean }) {
+    setContactInfo({
+      name: info.name, email: info.email, phone: info.phone,
+      anonymous: info.anonymous, gdprConsent: true, termsConsent: true,
+    })
     setPendingPayment(true)
     setScreen('checkout')
   }
 
   function handleGiftAidConfirm(decl: { fullName: string; postcode: string; address: string; email: string; phone: string; agreed: boolean }) {
     setGiftAidDeclaration({
-      agreed: decl.agreed,
-      fullName: decl.fullName,
-      postcode: decl.postcode,
-      address: decl.address,
-      contactEmail: decl.email,
-      contactPhone: decl.phone,
+      agreed: decl.agreed, fullName: decl.fullName, postcode: decl.postcode,
+      address: decl.address, contactEmail: decl.email, contactPhone: decl.phone,
+    })
+    setContactInfo({
+      name: decl.fullName, email: decl.email, phone: decl.phone,
+      anonymous: false, gdprConsent: true, termsConsent: true,
     })
     setPendingPayment(true)
     setScreen('checkout')
   }
 
-  // Show Gift Aid form as full-screen
+  if (showContactCapture) {
+    return (
+      <AnimatePresence mode="wait">
+        <ContactCaptureScreen
+          key="contact"
+          total={total}
+          onConfirm={handleContactConfirm}
+          onBack={() => setShowContact(false)}
+        />
+      </AnimatePresence>
+    )
+  }
+
   if (showGiftAid) {
     return (
       <AnimatePresence mode="wait">
