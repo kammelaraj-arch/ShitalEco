@@ -1,13 +1,25 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, t, THEMES, KioskTheme, Language, LANGUAGE_META } from '../store/kiosk.store'
-import {
-  SOFT_DONATION_ITEMS, SHOP_ITEMS, BRICK_TIERS, GENERAL_DONATIONS, PROJECTS,
-  SPONSORSHIP_ITEMS,
-  type CatalogItem,
-} from '../data/catalog'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
+
+// ─── DB Item interface ────────────────────────────────────────────────────────
+interface DbItem {
+  id: string
+  name: string
+  name_gu?: string | null
+  name_hi?: string | null
+  name_te?: string | null
+  emoji?: string | null
+  price: number
+  unit?: string | null
+  gift_aid_eligible: boolean
+  image_url?: string | null
+  description?: string | null
+  category: string
+  sort_order?: number
+}
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
 const NAV_SECTIONS = [
@@ -72,24 +84,11 @@ function getCategoryImage(category: string): string {
   return CATEGORY_IMAGES[category] || CATEGORY_IMAGES.DONATION
 }
 
-const MOCK_ITEMS: Service[] = [
-  { id: '1',  name: 'Ganesh Puja',         name_gu: 'ગણેશ પૂજા',       name_hi: 'गणेश पूजा',      category: 'PUJA',      price: 51  },
-  { id: '2',  name: 'Satyanarayan Katha',  name_gu: 'સત્યનારાયણ',      name_hi: 'सत्यनारायण',     category: 'PUJA',      price: 101 },
-  { id: '3',  name: 'Lakshmi Puja',        name_gu: 'લક્ષ્મી પૂજા',    name_hi: 'लक्ष्मी पूजा',   category: 'PUJA',      price: 75  },
-  { id: '4',  name: 'Havan Ceremony',      name_gu: 'હવન',              name_hi: 'हवन',             category: 'HAVAN',     price: 151 },
-  { id: '5',  name: 'Yoga Class',          name_gu: 'યોગ વર્ગ',        name_hi: 'योग कक्षा',      category: 'CLASS',     price: 10  },
-  { id: '6',  name: 'Sanskrit Class',      name_gu: 'સંસ્કૃત',         name_hi: 'संस्कृत',        category: 'CLASS',     price: 15  },
-  { id: '7',  name: 'Hall Hire (Half Day)', name_gu: 'હૉલ ભાડે',       name_hi: 'हॉल किराया',     category: 'HALL_HIRE', price: 150 },
-  { id: '8',  name: 'Hall Hire (Full Day)', name_gu: 'સંપૂર્ણ દિવસ',   name_hi: 'पूरा दिन',      category: 'HALL_HIRE', price: 280 },
-  { id: '9',  name: 'Diwali Ticket',        name_gu: 'દિવાળી',         name_hi: 'दिवाली',         category: 'FESTIVAL',  price: 5   },
-  { id: '10', name: 'General Donation',     name_gu: 'સામાન્ય દાન',    name_hi: 'सामान्य दान',    category: 'DONATION',  price: 11  },
-  { id: '11', name: 'Food Donation',        name_gu: 'ભોજન દાન',       name_hi: 'भोजन दान',       category: 'DONATION',  price: 21  },
-]
-
-function getName(s: Service, lang: string) {
-  if (lang === 'gu' && s.name_gu) return s.name_gu
-  if (lang === 'hi' && s.name_hi) return s.name_hi
-  return s.name
+function getDbItemName(item: DbItem | Service, lang: string): string {
+  if (lang === 'gu' && item.name_gu) return item.name_gu
+  if (lang === 'hi' && item.name_hi) return item.name_hi
+  if (lang === 'te' && (item as DbItem).name_te) return (item as DbItem).name_te!
+  return item.name
 }
 
 function getNavLabel(item: typeof NAV_SECTIONS[0]['items'][0], lang: string) {
@@ -204,7 +203,13 @@ export function HomeScreen() {
   const { language, setScreen, addItem, items, theme, resetKiosk, branchId } = useKioskStore()
   const th = THEMES[theme]
   const [activeNav, setActiveNav] = useState('donations')
-  const [services, setServices] = useState<Service[]>(MOCK_ITEMS)
+  const [services, setServices] = useState<Service[]>([])
+  const [softDonations, setSoftDonations] = useState<DbItem[]>([])
+  const [brickTiers, setBrickTiers] = useState<DbItem[]>([])
+  const [shopItems, setShopItems] = useState<DbItem[]>([])
+  const [generalDonations, setGeneralDonations] = useState<DbItem[]>([])
+  const [sponsorships, setSponsorships] = useState<DbItem[]>([])
+  const [loading, setLoading] = useState(true)
   const [added, setAdded] = useState<string | null>(null)
   const [showThemePicker, setShowThemePicker] = useState(false)
   const [showLanguagePicker, setShowLanguagePicker] = useState(false)
@@ -215,41 +220,53 @@ export function HomeScreen() {
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
 
   useEffect(() => {
-    fetch(`${API_BASE}/kiosk/services`)
-      .then(r => r.json())
-      .then(d => { if (d.services?.length) setServices(d.services) })
-      .catch(() => {})
-  }, [])
+    const bid = branchId || 'main'
+    setLoading(true)
+    Promise.all([
+      fetch(`${API_BASE}/items/kiosk/soft-donations?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
+      fetch(`${API_BASE}/items/kiosk/projects?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
+      fetch(`${API_BASE}/items/kiosk/shop?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
+      fetch(`${API_BASE}/items/kiosk/general-donations`).then(r => r.json()).catch(() => ({ items: [] })),
+      fetch(`${API_BASE}/items/kiosk/sponsorship?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
+      fetch(`${API_BASE}/kiosk/services`).then(r => r.json()).catch(() => ({ services: [] })),
+    ]).then(([sd, proj, shop, gd, spon, svcs]) => {
+      setSoftDonations(sd.items ?? [])
+      setBrickTiers(proj.items ?? [])
+      setShopItems(shop.items ?? [])
+      setGeneralDonations(gd.items ?? [])
+      setSponsorships(spon.items ?? [])
+      setServices(svcs.services ?? [])
+    }).finally(() => setLoading(false))
+  }, [branchId])
 
   const activeNavItem = NAV_SECTIONS.flatMap(s => s.items).find(i => i.id === activeNav)
 
-  const catalogItems: CatalogItem[] = (() => {
-    if (activeNav === 'soft_donation')    return SOFT_DONATION_ITEMS
-    if (activeNav === 'project_donation') return BRICK_TIERS
-    if (activeNav === 'shop')             return SHOP_ITEMS
-    if (activeNav === 'donations')        return GENERAL_DONATIONS
-    if (activeNav === 'sponsorship')      return SPONSORSHIP_ITEMS
+  const catalogItems: DbItem[] = (() => {
+    if (activeNav === 'soft_donation')    return softDonations
+    if (activeNav === 'project_donation') return brickTiers
+    if (activeNav === 'shop')             return shopItems
+    if (activeNav === 'donations')        return generalDonations
+    if (activeNav === 'sponsorship')      return sponsorships
     return []
   })()
-
-  const useCatalog = catalogItems.length > 0
 
   const filteredServices = services.filter(s => {
     if (activeNav === 'services') return ['PUJA', 'HAVAN', 'CLASS', 'HALL_HIRE'].includes(s.category)
     return ['PUJA', 'HAVAN', 'CLASS', 'HALL_HIRE', 'FESTIVAL'].includes(s.category)
   })
 
-  const handleAddCatalog = (item: CatalogItem) => {
+  const handleAddCatalog = (item: DbItem) => {
     addItem({
       type: item.category === 'SHOP' ? 'SERVICE' : 'DONATION',
       name: item.name,
-      nameGu: item.nameGu,
-      nameHi: item.nameHi,
+      nameGu: item.name_gu ?? '',
+      nameHi: item.name_hi ?? '',
+      nameTe: item.name_te ?? '',
       quantity: 1,
       unitPrice: item.price,
       totalPrice: item.price,
       referenceId: item.id,
-      giftAidEligible: item.giftAidEligible,
+      giftAidEligible: item.gift_aid_eligible,
       category: item.category,
     })
     setAdded(item.id)
@@ -272,7 +289,7 @@ export function HomeScreen() {
     setTimeout(() => setCustomAdded(false), 1400)
   }
 
-  const displayItems = useCatalog ? catalogItems : filteredServices
+  const useDbCatalog = activeNav !== 'services'
   const navLabel = getNavLabel(activeNavItem ?? NAV_SECTIONS[0].items[0], language)
   const isGiftAidSection = activeNav === 'donations' || activeNav === 'project_donation'
 
@@ -417,140 +434,156 @@ export function HomeScreen() {
 
           {/* Items grid — scrollable */}
           <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}>
-            <AnimatePresence mode="popLayout">
-              {displayItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
-                  <span className="text-5xl">🛕</span>
-                  <p className="text-sm font-medium text-gray-500">No items in this category</p>
-                </div>
-              ) : useCatalog ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {(catalogItems as CatalogItem[]).map((item, i) => {
-                    const isAdded = added === item.id
-                    return (
-                      <motion.button
-                        key={item.id}
-                        layout
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.025 }}
-                        onClick={() => handleAddCatalog(item)}
-                        className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
-                      >
-                        {/* Image area — per-item photo with emoji fallback */}
-                        <div
-                          className="relative overflow-hidden flex-shrink-0"
-                          style={{ height: 100, background: item.imageColor }}
-                        >
-                          {/* Emoji always present as fallback */}
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.55 }}>{item.emoji}</span>
-                          </div>
-                          {/* Per-item photo (falls back to category image) */}
-                          <img
-                            src={item.image ?? getCategoryImage(item.category)}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-cover"
-                            onError={e => (e.currentTarget.style.display = 'none')}
-                            loading="lazy"
-                          />
-                          {/* Gift Aid badge */}
-                          {item.giftAidEligible && (
-                            <span className="absolute top-2 right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500 text-white shadow-sm z-10">GA</span>
-                          )}
-                        </div>
-
-                        {/* Details */}
-                        <div className="p-3 flex-1 flex flex-col justify-between">
-                          <div>
-                            <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">
-                              {language === 'gu' ? item.nameGu || item.name : language === 'hi' ? item.nameHi || item.name : item.name}
-                            </p>
-                            {item.unit && <p className="text-gray-400 text-xs mt-0.5">{item.unit}</p>}
-                          </div>
-                          <div className="flex items-center justify-between mt-2.5">
-                            <p className="font-black text-lg text-gray-900">£{item.price}</p>
-                            <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
-                          </div>
-                        </div>
-
-                        <AnimatePresence>
-                          {isAdded && (
-                            <motion.div
-                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                              className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-60">
+                <span className="text-4xl animate-spin">⏳</span>
+                <p className="text-sm font-medium text-gray-500">Loading...</p>
+              </div>
+            ) : (
+              <AnimatePresence mode="popLayout">
+                {useDbCatalog ? (
+                  catalogItems.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
+                      <span className="text-5xl">🛕</span>
+                      <p className="text-sm font-medium text-gray-500">No items in this category</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {catalogItems.map((item, i) => {
+                        const isAdded = added === item.id
+                        return (
+                          <motion.button
+                            key={item.id}
+                            layout
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.025 }}
+                            onClick={() => handleAddCatalog(item)}
+                            className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                          >
+                            {/* Image area — per-item photo with emoji fallback */}
+                            <div
+                              className="relative overflow-hidden flex-shrink-0"
+                              style={{ height: 100, background: '#f3f4f6' }}
                             >
-                              <div className="text-center">
-                                <span className="text-4xl block">✓</span>
-                                <span className="text-sm font-bold text-green-700">Added!</span>
+                              {/* Emoji always present as fallback */}
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.55 }}>{item.emoji ?? '🙏'}</span>
                               </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </motion.button>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {filteredServices.map((svc, i) => {
-                    const m = CATEGORY_META[svc.category] ?? CATEGORY_META.OTHER
-                    const isAdded = added === svc.id
-                    return (
-                      <motion.button
-                        key={svc.id}
-                        layout
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.03 }}
-                        onClick={() => handleAdd(svc)}
-                        className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
-                      >
-                        {/* Image area */}
-                        <div
-                          className="relative overflow-hidden flex-shrink-0"
-                          style={{ height: 100, background: `${m.color}25` }}
-                        >
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.6 }}>{m.icon}</span>
-                          </div>
-                          <img
-                            src={getCategoryImage(svc.category)}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-cover"
-                            onError={e => (e.currentTarget.style.display = 'none')}
-                            loading="lazy"
-                          />
-                        </div>
+                              {/* Per-item photo (falls back to category image) */}
+                              <img
+                                src={item.image_url || getCategoryImage(item.category)}
+                                alt=""
+                                className="absolute inset-0 w-full h-full object-cover"
+                                onError={e => (e.currentTarget.style.display = 'none')}
+                                loading="lazy"
+                              />
+                              {/* Gift Aid badge */}
+                              {item.gift_aid_eligible && (
+                                <span className="absolute top-2 right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500 text-white shadow-sm z-10">GA</span>
+                              )}
+                            </div>
 
-                        {/* Details */}
-                        <div className="p-3 flex-1 flex flex-col justify-between">
-                          <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">{getName(svc, language)}</p>
-                          <div className="flex items-center justify-between mt-2.5">
-                            <p className="font-black text-lg text-gray-900">£{svc.price}</p>
-                            <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
-                          </div>
-                        </div>
+                            {/* Details */}
+                            <div className="p-3 flex-1 flex flex-col justify-between">
+                              <div>
+                                <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">
+                                  {getDbItemName(item, language)}
+                                </p>
+                                {item.unit && <p className="text-gray-400 text-xs mt-0.5">{item.unit}</p>}
+                              </div>
+                              <div className="flex items-center justify-between mt-2.5">
+                                <p className="font-black text-lg text-gray-900">£{item.price}</p>
+                                <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
+                              </div>
+                            </div>
 
-                        <AnimatePresence>
-                          {isAdded && (
-                            <motion.div
-                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                              className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
+                            <AnimatePresence>
+                              {isAdded && (
+                                <motion.div
+                                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                  className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
+                                >
+                                  <div className="text-center">
+                                    <span className="text-4xl block">✓</span>
+                                    <span className="text-sm font-bold text-green-700">Added!</span>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </motion.button>
+                        )
+                      })}
+                    </div>
+                  )
+                ) : (
+                  filteredServices.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
+                      <span className="text-5xl">🛕</span>
+                      <p className="text-sm font-medium text-gray-500">No items in this category</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {filteredServices.map((svc, i) => {
+                        const m = CATEGORY_META[svc.category] ?? CATEGORY_META.OTHER
+                        const isAdded = added === svc.id
+                        return (
+                          <motion.button
+                            key={svc.id}
+                            layout
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.03 }}
+                            onClick={() => handleAdd(svc)}
+                            className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                          >
+                            {/* Image area */}
+                            <div
+                              className="relative overflow-hidden flex-shrink-0"
+                              style={{ height: 100, background: `${m.color}25` }}
                             >
-                              <div className="text-center">
-                                <span className="text-4xl block">✓</span>
-                                <span className="text-sm font-bold text-green-700">Added!</span>
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.6 }}>{m.icon}</span>
                               </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </motion.button>
-                    )
-                  })}
-                </div>
-              )}
-            </AnimatePresence>
+                              <img
+                                src={getCategoryImage(svc.category)}
+                                alt=""
+                                className="absolute inset-0 w-full h-full object-cover"
+                                onError={e => (e.currentTarget.style.display = 'none')}
+                                loading="lazy"
+                              />
+                            </div>
+
+                            {/* Details */}
+                            <div className="p-3 flex-1 flex flex-col justify-between">
+                              <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">{getDbItemName(svc, language)}</p>
+                              <div className="flex items-center justify-between mt-2.5">
+                                <p className="font-black text-lg text-gray-900">£{svc.price}</p>
+                                <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
+                              </div>
+                            </div>
+
+                            <AnimatePresence>
+                              {isAdded && (
+                                <motion.div
+                                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                  className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
+                                >
+                                  <div className="text-center">
+                                    <span className="text-4xl block">✓</span>
+                                    <span className="text-sm font-bold text-green-700">Added!</span>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </motion.button>
+                        )
+                      })}
+                    </div>
+                  )
+                )}
+              </AnimatePresence>
+            )}
           </div>
 
         </main>
