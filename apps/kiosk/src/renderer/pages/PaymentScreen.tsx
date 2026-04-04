@@ -93,7 +93,7 @@ export function PaymentScreen() {
         body: JSON.stringify({ reader_id: readerId, payment_intent_id: paymentIntentId }),
       }).catch(() => {})
     }
-    setScreen('checkout')
+    setScreen('basket')
   }
 
   const statusColors: Record<ReaderStatus, string> = {

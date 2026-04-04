@@ -229,38 +229,53 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
             "source": "mock",
         }
 
-    clean = postcode.strip().replace(" ", "%20")
-    url = f"https://api.getaddress.io/find/{clean}?api-key={settings.GETADDRESS_API_KEY}&expand=true"
+    # getAddress.io requires lowercase postcode with NO space (e.g. "hp79nq")
+    clean = postcode.strip().lower().replace(" ", "")
+    # Without expand=true, addresses are already formatted strings — simpler and more reliable
+    url = f"https://api.getaddress.io/find/{clean}?api-key={settings.GETADDRESS_API_KEY}"
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(url)
 
+        if resp.status_code == 400:
+            return {"postcode": postcode, "addresses": [], "error": "Invalid postcode format"}
         if resp.status_code == 401:
             return await _postcodes_io_fallback(postcode, reason="Invalid GetAddress API key")
         if resp.status_code == 404:
-            # getAddress.io 404 doesn't always mean invalid — fall back to postcodes.io
-            return await _postcodes_io_fallback(postcode, reason="getAddress: not found")
+            return {"postcode": postcode.upper().strip(), "addresses": [], "error": "Postcode not found"}
         if resp.status_code in (402, 429):
-            # Daily limit hit — fall back to postcodes.io (free, no key required)
             return await _postcodes_io_fallback(postcode, reason="getAddress limit reached")
+        if resp.status_code != 200:
+            return await _postcodes_io_fallback(postcode, reason=f"getAddress HTTP {resp.status_code}")
 
         data = resp.json()
+        # Non-expanded format: each address is a comma-separated string like
+        # "10 Watkin Terrace, , , , , Northampton, Northamptonshire"
+        # Append the postcode and strip empty parts.
+        pc = postcode.upper().strip()
+        raw = data.get("addresses", [])
         addresses = []
-        for a in data.get("addresses", []):
-            parts = [
-                a.get("line_1", ""), a.get("line_2", ""), a.get("line_3", ""),
-                a.get("town_or_city", ""), a.get("county", ""),
-                postcode.upper().strip(),
-            ]
-            formatted = ", ".join(p for p in parts if p)
-            if formatted:
-                addresses.append(formatted)
+        for a in raw:
+            if isinstance(a, str):
+                # Clean up empty segments and append postcode
+                parts = [p.strip() for p in a.split(",") if p.strip()]
+                parts.append(pc)
+                addresses.append(", ".join(parts))
+            elif isinstance(a, dict):
+                # expand=true dict fallback
+                parts = [
+                    a.get("line_1", ""), a.get("line_2", ""), a.get("line_3", ""),
+                    a.get("town_or_city", ""), a.get("county", ""), pc,
+                ]
+                formatted = ", ".join(p for p in parts if p)
+                if formatted:
+                    addresses.append(formatted)
 
         if not addresses:
             return await _postcodes_io_fallback(postcode, reason="getAddress returned empty")
 
-        return {"postcode": postcode.upper().strip(), "addresses": addresses, "source": "getaddress"}
+        return {"postcode": pc, "addresses": addresses, "source": "getaddress"}
 
     except Exception as exc:
         return await _postcodes_io_fallback(postcode, reason=str(exc))
