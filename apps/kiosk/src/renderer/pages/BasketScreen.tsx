@@ -5,7 +5,7 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 // ─── Address lookup — getAddress.io domain token (client-side browser only) ───
 
 // getAddress.io API key (client-side — works from browser/residential IPs)
-const GA_API_KEY = 'kSZi9RxDcUCLhU4A6ShTBg48103'
+const GA_API_KEY = 'zp65T_VYUUiIty5baQgr-A48103'
 
 // Fetch all addresses for a postcode from getAddress.io (client-side browser call)
 async function lookupAddresses(raw: string): Promise<{ addresses: string[]; postcode: string }> {
