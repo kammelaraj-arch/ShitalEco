@@ -5,17 +5,40 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 // ─── Postcode lookup ─────────────────────────────────────────────────────────
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
-
+// getAddress.io — domain-restricted key (safe to use client-side at shital-kiosk.vercel.app)
+const GETADDRESS_KEY = 'kSZi9RxDcUCLhU4A6ShTBg48103'
 
 async function lookupPostcode(postcode: string): Promise<{ addresses: string[]; valid: boolean }> {
   const clean = postcode.trim().replace(/\s/g, '').toLowerCase()
   if (clean.length < 5) return { addresses: [], valid: false }
 
-  // Call the Vercel edge function — runs on UK edge so getAddress.io accepts it
+  // 1. Call getAddress.io directly — browser Origin header matches domain restriction
+  try {
+    const res = await fetch(
+      `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GETADDRESS_KEY}`,
+      { signal: AbortSignal.timeout(8000) }
+    )
+    if (res.ok) {
+      const data = await res.json() as { addresses?: string[] }
+      const pc = postcode.trim().replace(/\s/g, '').toUpperCase().replace(/^(.+?)(\d\w+)$/, '$1 $2')
+      const addrs = (data.addresses ?? [])
+        .map((a: string) => {
+          const parts = a.split(',').map(p => p.trim()).filter(Boolean)
+          if (!parts.some(p => p.toUpperCase().includes(clean.slice(0, 4).toUpperCase()))) {
+            parts.push(pc)
+          }
+          return parts.join(', ')
+        })
+        .filter(Boolean)
+      if (addrs.length) return { addresses: addrs, valid: true }
+    }
+  } catch { /* fall through */ }
+
+  // 2. Fallback — Vercel edge function (proxies getAddress.io from UK edge)
   try {
     const res = await fetch(
       `/api/address-lookup?postcode=${encodeURIComponent(clean)}`,
-      { signal: AbortSignal.timeout(12000) }
+      { signal: AbortSignal.timeout(10000) }
     )
     if (res.ok) {
       const data = await res.json()
