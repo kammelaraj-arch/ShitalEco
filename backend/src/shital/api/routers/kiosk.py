@@ -537,19 +537,35 @@ async def list_branches():
 # ─── QuickDonation Kiosk Accounts ────────────────────────────────────────────
 
 QUICK_KIOSK_ACCOUNTS = [
-    {"email": "quickkiosk-wembley@shital.org",      "name": "QuickKiosk Wembley",       "branch_code": "main",      "password": "Wembley!Kiosk2024"},
-    {"email": "quickkiosk-leicester@shital.org",     "name": "QuickKiosk Leicester",      "branch_code": "leicester", "password": "Leicester!Kiosk2024"},
-    {"email": "quickkiosk-reading@shital.org",       "name": "QuickKiosk Reading",        "branch_code": "reading",   "password": "Reading!Kiosk2024"},
-    {"email": "quickkiosk-mk@shital.org",            "name": "QuickKiosk Milton Keynes",  "branch_code": "mk",        "password": "MiltonKeynes!Kiosk2024"},
+    # Wembley — 4 kiosks
+    {"email": "quickkiosk-wembley-1@shirdisai.org.uk", "name": "QuickKiosk Wembley 1",      "branch_code": "main",      "password": "Wembley!Kiosk2024"},
+    {"email": "quickkiosk-wembley-2@shirdisai.org.uk", "name": "QuickKiosk Wembley 2",      "branch_code": "main",      "password": "Wembley!Kiosk2024"},
+    {"email": "quickkiosk-wembley-3@shirdisai.org.uk", "name": "QuickKiosk Wembley 3",      "branch_code": "main",      "password": "Wembley!Kiosk2024"},
+    {"email": "quickkiosk-wembley-4@shirdisai.org.uk", "name": "QuickKiosk Wembley 4",      "branch_code": "main",      "password": "Wembley!Kiosk2024"},
+    # Leicester — 4 kiosks
+    {"email": "quickkiosk-leicester-1@shirdisai.org.uk", "name": "QuickKiosk Leicester 1",  "branch_code": "leicester", "password": "Leicester!Kiosk2024"},
+    {"email": "quickkiosk-leicester-2@shirdisai.org.uk", "name": "QuickKiosk Leicester 2",  "branch_code": "leicester", "password": "Leicester!Kiosk2024"},
+    {"email": "quickkiosk-leicester-3@shirdisai.org.uk", "name": "QuickKiosk Leicester 3",  "branch_code": "leicester", "password": "Leicester!Kiosk2024"},
+    {"email": "quickkiosk-leicester-4@shirdisai.org.uk", "name": "QuickKiosk Leicester 4",  "branch_code": "leicester", "password": "Leicester!Kiosk2024"},
+    # Reading — 4 kiosks
+    {"email": "quickkiosk-reading-1@shirdisai.org.uk", "name": "QuickKiosk Reading 1",      "branch_code": "reading",   "password": "Reading!Kiosk2024"},
+    {"email": "quickkiosk-reading-2@shirdisai.org.uk", "name": "QuickKiosk Reading 2",      "branch_code": "reading",   "password": "Reading!Kiosk2024"},
+    {"email": "quickkiosk-reading-3@shirdisai.org.uk", "name": "QuickKiosk Reading 3",      "branch_code": "reading",   "password": "Reading!Kiosk2024"},
+    {"email": "quickkiosk-reading-4@shirdisai.org.uk", "name": "QuickKiosk Reading 4",      "branch_code": "reading",   "password": "Reading!Kiosk2024"},
+    # Milton Keynes — 4 kiosks
+    {"email": "quickkiosk-mk-1@shirdisai.org.uk",     "name": "QuickKiosk Milton Keynes 1", "branch_code": "mk",        "password": "MiltonKeynes!Kiosk2024"},
+    {"email": "quickkiosk-mk-2@shirdisai.org.uk",     "name": "QuickKiosk Milton Keynes 2", "branch_code": "mk",        "password": "MiltonKeynes!Kiosk2024"},
+    {"email": "quickkiosk-mk-3@shirdisai.org.uk",     "name": "QuickKiosk Milton Keynes 3", "branch_code": "mk",        "password": "MiltonKeynes!Kiosk2024"},
+    {"email": "quickkiosk-mk-4@shirdisai.org.uk",     "name": "QuickKiosk Milton Keynes 4", "branch_code": "mk",        "password": "MiltonKeynes!Kiosk2024"},
 ]
 
 
 @router.post("/quick-donation/seed-accounts")
 async def seed_quick_kiosk_accounts():
     """
-    Create one QuickDonation kiosk user account per branch.
-    Idempotent — skips accounts that already exist.
-    Also ensures branches exist in the branches table.
+    Create QuickDonation kiosk accounts, branches, and kiosk_profiles.
+    Idempotent — skips anything that already exists.
+    Sets up the full mapping: Branch -> Kiosk User -> Profile -> Device (unassigned).
     """
     import bcrypt
     from shital.core.fabrics.database import SessionLocal
@@ -561,6 +577,7 @@ async def seed_quick_kiosk_accounts():
     now = datetime.utcnow()
     created: list[dict] = []
     skipped: list[str] = []
+    profiles_created: list[dict] = []
 
     async with SessionLocal() as db:
         # 1. Ensure branches exist
@@ -579,55 +596,172 @@ async def seed_quick_kiosk_accounts():
                 },
             )
 
-        # 2. Create kiosk accounts
+        # 2. Create kiosk accounts + kiosk_profiles
         for acct in QUICK_KIOSK_ACCOUNTS:
-            # Check if already exists
             existing = (await db.execute(
                 text("SELECT id, branch_id FROM users WHERE email = :email AND deleted_at IS NULL LIMIT 1"),
                 {"email": acct["email"]},
             )).mappings().first()
 
-            if existing:
-                skipped.append(acct["email"])
-                continue
-
-            # Resolve branch UUID
+            # Resolve branch
             branch_row = (await db.execute(
-                text("SELECT id FROM branches WHERE code = :code LIMIT 1"),
+                text("SELECT id, name FROM branches WHERE code = :code LIMIT 1"),
                 {"code": acct["branch_code"]},
             )).mappings().first()
             branch_uuid = str(branch_row["id"]) if branch_row else None
+            branch_name = branch_row["name"] if branch_row else acct["branch_code"]
 
-            user_id = str(uuid.uuid4())
-            hashed = _hash(acct["password"])
+            if existing:
+                user_id = str(existing["id"])
+                skipped.append(acct["email"])
+            else:
+                user_id = str(uuid.uuid4())
+                hashed = _hash(acct["password"])
+                await db.execute(
+                    text(
+                        "INSERT INTO users (id, email, password_hash, name, role, is_active, "
+                        "mfa_enabled, branch_id, created_at, updated_at) "
+                        "VALUES (:id, :email, :hash, :name, 'KIOSK', true, false, :bid, :now, :now)"
+                    ),
+                    {
+                        "id": user_id, "email": acct["email"], "hash": hashed,
+                        "name": acct["name"], "bid": branch_uuid, "now": now,
+                    },
+                )
+                created.append({
+                    "email": acct["email"],
+                    "name": acct["name"],
+                    "branch": acct["branch_code"],
+                    "password": acct["password"],
+                })
 
+            # 3. Create kiosk_profile (mapping row)
+            profile_id = str(uuid.uuid4())
+            profile_name = f"QuickDonation — {branch_name}"
             await db.execute(
                 text(
-                    "INSERT INTO users (id, email, password_hash, name, role, is_active, "
-                    "mfa_enabled, branch_id, created_at, updated_at) "
-                    "VALUES (:id, :email, :hash, :name, 'KIOSK', true, false, :bid, :now, :now)"
+                    "INSERT INTO kiosk_profiles "
+                    "(id, branch_id, branch_name, user_id, user_email, user_name, "
+                    " profile_name, kiosk_type, display_name, "
+                    " preset_amounts, default_purpose, gift_aid_prompt, "
+                    " idle_timeout_secs, theme, is_active, created_at, updated_at) "
+                    "VALUES (:id, :bid, :bname, :uid, :email, :uname, "
+                    " :pname, 'quick_donation', :dname, "
+                    " '[1, 2.5, 5, 10, 15, 20, 50]'::jsonb, 'General Fund', true, "
+                    " 90, 'saffron', true, :now, :now) "
+                    "ON CONFLICT (branch_id, user_email) DO NOTHING"
                 ),
                 {
-                    "id": user_id, "email": acct["email"], "hash": hashed,
-                    "name": acct["name"], "bid": branch_uuid, "now": now,
+                    "id": profile_id, "bid": acct["branch_code"],
+                    "bname": branch_name, "uid": user_id,
+                    "email": acct["email"], "uname": acct["name"],
+                    "pname": profile_name, "dname": f"Quick Donation {branch_name}",
+                    "now": now,
                 },
             )
-
-            created.append({
-                "email": acct["email"],
-                "name": acct["name"],
+            profiles_created.append({
+                "profile_name": profile_name,
                 "branch": acct["branch_code"],
-                "password": acct["password"],
+                "email": acct["email"],
+                "device": "UNASSIGNED — assign via admin or API",
             })
 
         await db.commit()
 
     return {
-        "created": created,
-        "skipped": skipped,
+        "accounts": {"created": created, "skipped": skipped},
+        "profiles": profiles_created,
         "total_accounts": len(QUICK_KIOSK_ACCOUNTS),
-        "message": f"Created {len(created)} accounts, skipped {len(skipped)} existing.",
+        "message": f"Created {len(created)} accounts, {len(profiles_created)} profiles. "
+                   f"Skipped {len(skipped)} existing accounts. "
+                   f"Assign card devices via POST /kiosk/quick-donation/assign-device.",
     }
+
+
+class AssignDeviceInput(BaseModel):
+    branch_id: str
+    user_email: str
+    stripe_reader_id: str
+    device_label: str = ""
+
+
+@router.post("/quick-donation/assign-device")
+async def assign_device_to_profile(body: AssignDeviceInput):
+    """
+    Assign a Stripe Terminal card reader to a kiosk profile.
+    Links the device in the kiosk_profiles mapping table.
+    """
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+    now = datetime.utcnow()
+
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text(
+                "UPDATE kiosk_profiles SET "
+                "  stripe_reader_id = :rid, device_label = :label, "
+                "  device_provider = 'stripe_terminal', updated_at = :now "
+                "WHERE branch_id = :bid AND user_email = :email AND deleted_at IS NULL "
+                "RETURNING id, profile_name"
+            ),
+            {
+                "rid": body.stripe_reader_id, "label": body.device_label or body.stripe_reader_id,
+                "bid": body.branch_id, "email": body.user_email, "now": now,
+            },
+        )
+        row = result.mappings().first()
+        await db.commit()
+
+    if not row:
+        return {"assigned": False, "error": "Profile not found for this branch/email combination"}
+
+    return {
+        "assigned": True,
+        "profile_id": row["id"],
+        "profile_name": row["profile_name"],
+        "device": body.stripe_reader_id,
+    }
+
+
+@router.get("/quick-donation/profiles")
+async def list_kiosk_profiles(branch_id: str = ""):
+    """List all kiosk profiles with their branch, user, and device assignments."""
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+
+    conditions = ["deleted_at IS NULL"]
+    params: dict[str, Any] = {}
+    if branch_id:
+        conditions.append("branch_id = :bid")
+        params["bid"] = branch_id
+    where = " AND ".join(conditions)
+
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text(f"""
+                SELECT id, branch_id, branch_name, user_id, user_email, user_name,
+                       device_id, device_label, stripe_reader_id, device_provider,
+                       profile_name, kiosk_type, display_name,
+                       preset_amounts, default_purpose, gift_aid_prompt,
+                       idle_timeout_secs, theme, is_active, last_active_at,
+                       notes, created_at, updated_at
+                FROM kiosk_profiles
+                WHERE {where}
+                ORDER BY branch_name, profile_name
+            """),
+            params,
+        )
+        rows = result.mappings().all()
+
+    profiles = []
+    for r in rows:
+        d = dict(r)
+        for k in ("created_at", "updated_at", "last_active_at"):
+            if d.get(k) and isinstance(d[k], datetime):
+                d[k] = d[k].isoformat()
+        profiles.append(d)
+
+    return {"profiles": profiles, "total": len(profiles)}
 
 
 class QuickKioskLoginInput(BaseModel):
@@ -638,14 +772,16 @@ class QuickKioskLoginInput(BaseModel):
 @router.post("/quick-donation/login")
 async def quick_kiosk_login(body: QuickKioskLoginInput):
     """
-    Login for QuickDonation kiosk accounts. Returns branch info and reader config.
-    Only KIOSK role accounts can log in via this endpoint.
+    Login for QuickDonation kiosk accounts.
+    Returns branch info, kiosk profile, and assigned device config.
+    Supports both password auth and Azure AD-linked accounts.
     """
     import bcrypt
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
     async with SessionLocal() as db:
+        # Authenticate user
         result = await db.execute(
             text(
                 "SELECT u.id, u.email, u.name, u.password_hash, u.role, u.branch_id, u.is_active, "
@@ -666,6 +802,34 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     if user["role"] != "KIOSK":
         return {"authenticated": False, "error": "Not a kiosk account"}
 
+    branch_code = user["branch_code"] or "main"
+
+    # Fetch kiosk profile with device assignment
+    profile = None
+    async with SessionLocal() as db:
+        prof_result = await db.execute(
+            text(
+                "SELECT id, profile_name, kiosk_type, display_name, "
+                "  device_label, stripe_reader_id, device_provider, "
+                "  preset_amounts, default_purpose, gift_aid_prompt, "
+                "  idle_timeout_secs, theme "
+                "FROM kiosk_profiles "
+                "WHERE user_email = :email AND is_active = true AND deleted_at IS NULL "
+                "LIMIT 1"
+            ),
+            {"email": user["email"]},
+        )
+        prof_row = prof_result.mappings().first()
+        if prof_row:
+            profile = dict(prof_row)
+
+        # Update last_active_at
+        await db.execute(
+            text("UPDATE kiosk_profiles SET last_active_at = :now WHERE user_email = :email AND deleted_at IS NULL"),
+            {"now": datetime.utcnow(), "email": user["email"]},
+        )
+        await db.commit()
+
     return {
         "authenticated": True,
         "user": {
@@ -675,7 +839,103 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "role": user["role"],
         },
         "branch": {
-            "id": user["branch_code"] or "main",
+            "id": branch_code,
             "name": user["branch_name"] or "Unknown",
         },
+        "profile": profile,
+    }
+
+
+class AzureKioskLoginInput(BaseModel):
+    id_token: str
+
+
+@router.post("/quick-donation/login-azure")
+async def quick_kiosk_login_azure(body: AzureKioskLoginInput):
+    """
+    Login for QuickDonation kiosk via Azure AD SSO.
+    Validates the Microsoft ID token, finds the linked KIOSK user,
+    and returns branch + profile + device config.
+    """
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+
+    if not settings.MS_CLIENT_ID:
+        return {"authenticated": False, "error": "Azure AD SSO is not configured"}
+
+    # Validate token via existing Azure AD endpoint
+    try:
+        from shital.api.routers.auth_azure import verify_azure_token, VerifyTokenInput
+        azure_result = await verify_azure_token(VerifyTokenInput(id_token=body.id_token, default_role="KIOSK"))
+    except Exception as e:
+        return {"authenticated": False, "error": f"Azure AD token validation failed: {e}"}
+
+    azure_user = azure_result.get("user", {})
+    email = azure_user.get("email", "")
+
+    if not email:
+        return {"authenticated": False, "error": "No email in Azure AD token"}
+
+    # Verify user is a KIOSK role
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text(
+                "SELECT u.id, u.email, u.name, u.role, u.is_active, "
+                "b.code AS branch_code, b.name AS branch_name "
+                "FROM users u LEFT JOIN branches b ON u.branch_id = b.id "
+                "WHERE u.email = :email AND u.deleted_at IS NULL"
+            ),
+            {"email": email},
+        )
+        user = result.mappings().first()
+
+    if not user:
+        return {"authenticated": False, "error": "No kiosk account found for this Azure AD user"}
+    if not user["is_active"]:
+        return {"authenticated": False, "error": "Account is deactivated"}
+    if user["role"] != "KIOSK":
+        return {"authenticated": False, "error": "Not a kiosk account. Role: " + user["role"]}
+
+    branch_code = user["branch_code"] or "main"
+
+    # Fetch kiosk profile
+    profile = None
+    async with SessionLocal() as db:
+        prof_result = await db.execute(
+            text(
+                "SELECT id, profile_name, kiosk_type, display_name, "
+                "  device_label, stripe_reader_id, device_provider, "
+                "  preset_amounts, default_purpose, gift_aid_prompt, "
+                "  idle_timeout_secs, theme "
+                "FROM kiosk_profiles "
+                "WHERE user_email = :email AND is_active = true AND deleted_at IS NULL "
+                "LIMIT 1"
+            ),
+            {"email": email},
+        )
+        prof_row = prof_result.mappings().first()
+        if prof_row:
+            profile = dict(prof_row)
+
+        await db.execute(
+            text("UPDATE kiosk_profiles SET last_active_at = :now WHERE user_email = :email AND deleted_at IS NULL"),
+            {"now": datetime.utcnow(), "email": email},
+        )
+        await db.commit()
+
+    return {
+        "authenticated": True,
+        "auth_provider": "azure_ad",
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user["name"],
+            "role": user["role"],
+        },
+        "branch": {
+            "id": branch_code,
+            "name": user["branch_name"] or "Unknown",
+        },
+        "profile": profile,
     }

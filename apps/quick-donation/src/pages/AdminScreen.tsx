@@ -11,10 +11,22 @@ interface Reader {
   status: string
 }
 
+interface KioskProfile {
+  profile_name: string
+  kiosk_type: string
+  display_name: string
+  device_label: string
+  stripe_reader_id: string
+  preset_amounts: number[]
+  default_purpose: string
+  theme: string
+}
+
 interface LoggedInUser {
   name: string
   email: string
   branch: { id: string; name: string }
+  profile: KioskProfile | null
 }
 
 export function AdminScreen() {
@@ -32,6 +44,35 @@ export function AdminScreen() {
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
+  const [azureEnabled, setAzureEnabled] = useState(false)
+  const [azureConfig, setAzureConfig] = useState<{ client_id: string; authority: string } | null>(null)
+
+  // Check Azure AD availability on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/auth/azure/config`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.enabled && d.client_id) {
+          setAzureEnabled(true)
+          setAzureConfig({ client_id: d.client_id, authority: d.authority })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  function applyProfile(data: { branch: { id: string; name: string }; user: { name: string; email: string }; profile: KioskProfile | null }) {
+    setBranchId(data.branch.id)
+    // Apply device from profile if assigned
+    if (data.profile?.stripe_reader_id) {
+      setReader(data.profile.stripe_reader_id, data.profile.device_label || data.profile.stripe_reader_id)
+    }
+    setLoggedIn({
+      name: data.user.name,
+      email: data.user.email,
+      branch: data.branch,
+      profile: data.profile,
+    })
+  }
 
   async function handleLogin() {
     if (!email.trim() || !password.trim()) return
@@ -45,8 +86,7 @@ export function AdminScreen() {
       })
       const data = await res.json()
       if (data.authenticated) {
-        setLoggedIn({ name: data.user.name, email: data.user.email, branch: data.branch })
-        setBranchId(data.branch.id)
+        applyProfile(data)
         loadReaders()
       } else {
         setLoginError(data.error || 'Login failed')
@@ -55,6 +95,65 @@ export function AdminScreen() {
       setLoginError('Cannot reach server')
     }
     setLoginLoading(false)
+  }
+
+  async function handleAzureLogin() {
+    if (!azureConfig) return
+    setLoginLoading(true)
+    setLoginError('')
+
+    // Open Azure AD popup for MSAL login
+    const width = 500
+    const height = 600
+    const left = window.screenX + (window.innerWidth - width) / 2
+    const top = window.screenY + (window.innerHeight - height) / 2
+
+    const redirectUri = `${window.location.origin}/auth-callback`
+    const scope = encodeURIComponent('openid profile email')
+    const authUrl = `${azureConfig.authority}/oauth2/v2.0/authorize?client_id=${azureConfig.client_id}&response_type=id_token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&response_mode=fragment&nonce=${Date.now()}`
+
+    const popup = window.open(authUrl, 'AzureAD', `width=${width},height=${height},left=${left},top=${top}`)
+
+    // Poll for the popup to close and capture the token
+    const pollTimer = setInterval(async () => {
+      try {
+        if (!popup || popup.closed) {
+          clearInterval(pollTimer)
+          setLoginLoading(false)
+          return
+        }
+        const hash = popup.location.hash
+        if (hash && hash.includes('id_token=')) {
+          clearInterval(pollTimer)
+          popup.close()
+
+          const params = new URLSearchParams(hash.substring(1))
+          const idToken = params.get('id_token')
+          if (!idToken) {
+            setLoginError('No token received from Azure AD')
+            setLoginLoading(false)
+            return
+          }
+
+          // Send token to backend for kiosk login
+          const res = await fetch(`${API_BASE}/kiosk/quick-donation/login-azure`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_token: idToken }),
+          })
+          const data = await res.json()
+          if (data.authenticated) {
+            applyProfile(data)
+            loadReaders()
+          } else {
+            setLoginError(data.error || 'Azure AD login failed')
+          }
+          setLoginLoading(false)
+        }
+      } catch {
+        // Cross-origin — keep polling until popup closes or navigates to our redirect URI
+      }
+    }, 500)
   }
 
   async function loadReaders() {
@@ -67,6 +166,25 @@ export function AdminScreen() {
       setReaders([])
     }
     setLoading(false)
+  }
+
+  async function handleAssignDevice(readerId: string, readerLabel: string) {
+    setReader(readerId, readerLabel)
+    // Persist assignment to kiosk_profiles
+    if (loggedIn) {
+      try {
+        await fetch(`${API_BASE}/kiosk/quick-donation/assign-device`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            branch_id: loggedIn.branch.id,
+            user_email: loggedIn.email,
+            stripe_reader_id: readerId,
+            device_label: readerLabel,
+          }),
+        })
+      } catch { /* best-effort */ }
+    }
   }
 
   useEffect(() => {
@@ -89,6 +207,29 @@ export function AdminScreen() {
             </button>
           </div>
 
+          {/* Azure AD Login */}
+          {azureEnabled && (
+            <div className="mb-6">
+              <button
+                onClick={handleAzureLogin}
+                disabled={loginLoading}
+                className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-3"
+                style={{ background: 'linear-gradient(135deg, #0078D4, #005A9E)' }}
+              >
+                <svg className="w-5 h-5" viewBox="0 0 21 21" fill="currentColor">
+                  <path d="M0 0h10v10H0zM11 0h10v10H11zM0 11h10v10H0zM11 11h10v10H11z" />
+                </svg>
+                Sign in with Microsoft
+              </button>
+              <div className="flex items-center gap-3 my-5">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-gray-400 text-xs font-semibold">OR</span>
+                <div className="flex-1 h-px bg-gray-200" />
+              </div>
+            </div>
+          )}
+
+          {/* Email/Password Login */}
           <div className="space-y-4 mb-6">
             <div>
               <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">
@@ -98,7 +239,7 @@ export function AdminScreen() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="quickkiosk-wembley@shital.org"
+                placeholder="quickkiosk-wembley-1@shirdisai.org.uk"
                 className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-orange-400"
                 onKeyDown={e => e.key === 'Enter' && handleLogin()}
               />
@@ -130,7 +271,7 @@ export function AdminScreen() {
             className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.98] transition-all disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
           >
-            {loginLoading ? 'Logging in...' : 'Login'}
+            {loginLoading ? 'Logging in...' : 'Login with Email'}
           </button>
 
           <p className="text-gray-300 text-xs text-center mt-6">
@@ -165,12 +306,17 @@ export function AdminScreen() {
           </div>
         </div>
 
-        {/* Branch info */}
+        {/* Branch + Profile info */}
         <div className="mb-6 px-4 py-3 bg-orange-50 border border-orange-200 rounded-xl">
           <p className="text-orange-700 text-sm font-semibold">
             Branch: <span className="font-black">{loggedIn.branch.name}</span>
           </p>
           <p className="text-orange-600 text-xs">{loggedIn.email}</p>
+          {loggedIn.profile && (
+            <p className="text-orange-500 text-xs mt-1">
+              Profile: {loggedIn.profile.profile_name}
+            </p>
+          )}
         </div>
 
         {/* Card Reader Selection */}
@@ -198,7 +344,7 @@ export function AdminScreen() {
             {readers.map(r => (
               <button
                 key={r.id}
-                onClick={() => setReader(r.id, r.label)}
+                onClick={() => handleAssignDevice(r.id, r.label)}
                 className={`w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98] ${
                   stripeReaderId === r.id
                     ? 'bg-orange-50 border-2 border-orange-400'
