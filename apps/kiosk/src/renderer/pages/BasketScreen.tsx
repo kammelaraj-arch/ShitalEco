@@ -4,38 +4,24 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 
 // ─── Address lookup — getAddress.io domain token (client-side browser only) ───
 
-// getAddress.io API key (client-side — works from browser/residential IPs)
-const GA_API_KEY = 'zp65T_VYUUiIty5baQgr-A48103'
+// Domain token for browser CORS calls to /autocomplete (configured for shital-kiosk.vercel.app)
+const GA_DTOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
 
-// Fetch all addresses for a postcode from getAddress.io autocomplete endpoint
+// Fetch all addresses for a postcode — uses domain token with /autocomplete (CORS-enabled)
 async function lookupAddresses(raw: string): Promise<{ addresses: string[]; postcode: string }> {
   const postcode = raw.trim().toUpperCase()
-  // Try /find first, then /autocomplete as fallback
-  for (const url of [
-    `https://api.getaddress.io/find/${encodeURIComponent(postcode.replace(/\s+/g,'').toLowerCase())}?api-key=${GA_API_KEY}`,
-    `https://api.getaddress.io/autocomplete/${encodeURIComponent(postcode)}?api-key=${GA_API_KEY}&all=true`,
-  ]) {
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
-    if (!res.ok) continue
-    const data = await res.json() as {
-      addresses?: string[];
-      suggestions?: Array<{ address: string }>;
-      postcode?: string
-    }
-    // /find returns { addresses: string[], postcode }
-    if (data.addresses && data.addresses.length > 0) {
-      const addresses = data.addresses
-        .map((a: string) => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
-        .filter(Boolean)
-      return { addresses, postcode: data.postcode || postcode }
-    }
-    // /autocomplete returns { suggestions: [{ address }] }
-    if (data.suggestions && data.suggestions.length > 0) {
-      const addresses = data.suggestions.map(s => s.address).filter(Boolean)
-      return { addresses, postcode }
-    }
+  const res = await fetch(
+    `https://api.getaddress.io/autocomplete/${encodeURIComponent(postcode)}?api-key=${GA_DTOKEN}&all=true`,
+    { signal: AbortSignal.timeout(10000) }
+  )
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`API error ${res.status}: ${body.slice(0, 120)}`)
   }
-  throw new Error('No addresses found — please check the postcode and try again')
+  const data = await res.json() as { suggestions?: Array<{ address: string }> }
+  const addresses = (data.suggestions ?? []).map(s => s.address).filter(Boolean)
+  if (addresses.length === 0) throw new Error('No addresses found — please check the postcode and try again')
+  return { addresses, postcode }
 }
 
 // ─── Gift Aid full-screen form ────────────────────────────────────────────────
