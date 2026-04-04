@@ -79,7 +79,11 @@ export function ConfirmationScreen() {
   }
 
   function handlePrint() {
+    // Make the thermal receipt div visible before printing
+    const el = document.querySelector('.print-receipt') as HTMLElement | null
+    if (el) el.style.display = 'block'
     window.print()
+    if (el) el.style.display = 'none'
   }
 
   function handleStarClick(star: number) {
@@ -92,12 +96,20 @@ export function ConfirmationScreen() {
   return (
     <div className="w-full h-full flex flex-col bg-white" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
 
-      {/* ── Print styles injected into head ── */}
+      {/* ── Print styles ── */}
       <style>{`
         @media print {
-          body * { visibility: hidden; }
-          .print-receipt, .print-receipt * { visibility: visible; }
-          .print-receipt { position: fixed; top: 0; left: 0; width: 100%; }
+          body * { visibility: hidden !important; }
+          .print-receipt, .print-receipt * { visibility: visible !important; }
+          .print-receipt {
+            position: fixed !important;
+            top: 0 !important; left: 0 !important;
+            width: 80mm !important;
+            padding: 6mm !important;
+            font-family: 'Courier New', monospace !important;
+            font-size: 11pt !important;
+            background: white !important;
+          }
         }
       `}</style>
 
@@ -127,10 +139,10 @@ export function ConfirmationScreen() {
           {subMessage && <p className="text-gray-500 text-sm mt-1">{subMessage}</p>}
         </motion.div>
 
-        {/* Print-visible receipt block */}
+        {/* On-screen order summary (compact) */}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.45 }}
-          className="print-receipt w-full max-w-xs bg-gray-50 rounded-2xl px-5 py-3 text-left space-y-1 border border-gray-100">
-          <p className="text-xs text-gray-400 text-center">Order ref: <span className="font-black text-gray-700">{orderRef}</span></p>
+          className="w-full max-w-xs bg-gray-50 rounded-2xl px-5 py-3 text-left space-y-1 border border-gray-100">
+          <p className="text-xs text-gray-400 text-center">Ref: <span className="font-black text-gray-700">{orderRef}</span></p>
           <p className="text-2xl font-black text-gray-900 text-center">£{total.toFixed(2)}</p>
           <div className="border-t border-gray-200 pt-2 mt-1 space-y-0.5">
             {items.map(item => (
@@ -141,6 +153,39 @@ export function ConfirmationScreen() {
             ))}
           </div>
         </motion.div>
+
+        {/* Hidden thermal receipt — only visible when printing */}
+        <div className="print-receipt hidden" style={{ display: 'none' }}>
+          <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 18, fontWeight: 900 }}>🕉 Shital Temple</div>
+            <div style={{ fontSize: 11 }}>{branchName} · Registered UK Charity</div>
+            <div style={{ fontSize: 10, marginTop: 2 }}>{new Date().toLocaleString('en-GB')}</div>
+          </div>
+          <div style={{ textAlign: 'center', marginBottom: 8 }}>
+            <div style={{ fontSize: 10, color: '#555' }}>Order Reference</div>
+            <div style={{ fontSize: 14, fontWeight: 900, letterSpacing: 2 }}>{orderRef}</div>
+          </div>
+          <div style={{ borderTop: '1px dashed #000', paddingTop: 6, marginBottom: 6 }}>
+            {items.map((item, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                <span>{item.name} x{item.quantity}</span>
+                <span style={{ fontWeight: 700 }}>£{item.totalPrice.toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ borderTop: '2px solid #000', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 900, marginBottom: 10 }}>
+            <span>TOTAL</span>
+            <span>£{total.toFixed(2)}</span>
+          </div>
+          {contactInfo?.name && !contactInfo.anonymous && (
+            <div style={{ fontSize: 10, marginBottom: 8 }}>Donor: {contactInfo.name}</div>
+          )}
+          <div style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: 8, fontSize: 10 }}>
+            <div>Thank you for your generous donation 🙏</div>
+            <div style={{ marginTop: 4 }}>Jay Shri Krishna</div>
+            <div style={{ marginTop: 6, fontSize: 9, color: '#555' }}>This receipt is for your records.</div>
+          </div>
+        </div>
 
         {/* ── Star rating ── */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}
