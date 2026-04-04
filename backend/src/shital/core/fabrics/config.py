@@ -9,12 +9,18 @@ class Settings(BaseSettings):
 
     @property
     def async_database_url(self) -> str:
+        from urllib.parse import urlparse, urlencode, urlunparse, parse_qs
         url = self.DATABASE_URL
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        return url
+        # Strip sslmode — asyncpg uses connect_args ssl=True, not libpq sslmode param
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        params.pop("sslmode", None)
+        new_query = urlencode({k: v[0] for k, v in params.items()})
+        return urlunparse(parsed._replace(query=new_query))
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # Auth
