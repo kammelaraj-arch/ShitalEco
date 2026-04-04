@@ -87,7 +87,7 @@ app = FastAPI(
         "Powered by Digital DNA micro-capabilities, Digital Space governance, "
         "and Claude AI Digital Brain orchestration."
     ),
-    version="1.0.5",
+    version="1.0.6",
     default_response_class=ORJSONResponse,
     lifespan=lifespan,
     docs_url="/api/docs",
@@ -135,7 +135,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
-        "version": "1.0.5",
+        "version": "1.0.6",
         "environment": settings.APP_ENV,
     }
 
