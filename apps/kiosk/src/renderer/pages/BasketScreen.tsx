@@ -2,29 +2,36 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 
-// ─── Postcode → Address lookup (Vercel London serverless → getAddress.io) ─────
+// ─── Postcode → Address lookup — 100% client-side ───────────────────────────
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
-async function fetchAddresses(raw: string): Promise<{ addresses: string[]; source: string }> {
+// getAddress.io API key — called directly from the browser (UK IP satisfies restriction)
+const GA_KEY   = 'kSZi9RxDcUCLhU4A6ShTBg48103'
+const GA_DTOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
+
+async function fetchAddresses(raw: string): Promise<string[]> {
   const clean = raw.trim().replace(/\s+/g, '').toLowerCase()
-  if (clean.length < 5) return { addresses: [], source: '' }
+  if (clean.length < 5) return []
 
-  try {
-    // Vercel serverless function runs in London (lhr1) — UK IP accepted by getAddress.io
-    const res = await fetch(
-      `/api/address-lookup?postcode=${encodeURIComponent(clean)}`,
-      { signal: AbortSignal.timeout(12000) }
-    )
-    if (res.ok) {
-      const data = await res.json() as { addresses?: string[]; source?: string }
-      if (data.addresses && data.addresses.length > 0) {
-        return { addresses: data.addresses, source: data.source ?? '' }
+  // Try both keys — main key (UK IP check) then domain token (domain check)
+  for (const key of [GA_KEY, GA_DTOKEN]) {
+    try {
+      const res = await fetch(
+        `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${key}`,
+        { signal: AbortSignal.timeout(7000) }
+      )
+      if (res.ok) {
+        const data = await res.json() as { addresses?: string[] }
+        const addrs = (data.addresses ?? [])
+          .map((a: string) => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
+          .filter(Boolean)
+        if (addrs.length > 0) return addrs
       }
-    }
-  } catch { /* fall through */ }
+    } catch { /* try next */ }
+  }
 
-  return { addresses: [], source: '' }
+  return []
 }
 
 // ─── Gift Aid full-screen form ────────────────────────────────────────────────
@@ -59,12 +66,12 @@ function GiftAidScreen({
     setAddresses([])
     setAddress('')
     setError('')
-    const { addresses: results } = await fetchAddresses(postcode)
+    const results = await fetchAddresses(postcode)
     setLookingUp(false)
     if (results.length > 0) {
       setAddresses(results)
     } else {
-      setError('Postcode not found — please check and try again')
+      setError('Address not found — please type your address below')
     }
   }
 
