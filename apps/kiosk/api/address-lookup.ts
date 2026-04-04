@@ -1,82 +1,61 @@
 /**
- * Vercel Edge Function — UK postcode → full address list
- * Runs on Vercel's UK edge so getAddress.io accepts the request.
- * Falls back to postcodes.io if getAddress.io is unavailable.
+ * Vercel Serverless Function — UK postcode → full address list
+ * Standard Node.js runtime (no 'edge') so Vercel routes to region near user.
+ * For UK kiosk users → routes to London (lhr1) → UK IP → getAddress.io accepts.
  */
-export const config = { runtime: 'edge' }
+
+export const config = { maxDuration: 10 }
 
 const GETADDRESS_KEY = process.env.GETADDRESS_API_KEY || 'kSZi9RxDcUCLhU4A6ShTBg48103'
 
-export default async function handler(req: Request) {
-  const { searchParams } = new URL(req.url)
-  const postcode = (searchParams.get('postcode') || '').trim().toUpperCase()
-  if (!postcode) {
-    return json({ addresses: [], error: 'postcode required' }, 400)
-  }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export default async function handler(req: any, res: any) {
+  res.setHeader('Cache-Control', 'public, max-age=3600')
+  res.setHeader('Access-Control-Allow-Origin', '*')
 
-  // Format for getAddress.io: lowercase, no spaces (e.g. "hp79nq")
-  const clean = postcode.replace(/\s/g, '').toLowerCase()
+  const raw: string = (req.query?.postcode ?? '').toString().trim()
+  if (!raw) return res.status(400).json({ addresses: [], error: 'postcode required' })
 
-  // ── 1. getAddress.io ────────────────────────────────────────────────────────
-  if (GETADDRESS_KEY) {
-    try {
-      const res = await fetch(
-        `https://api.getaddress.io/find/${clean}?api-key=${GETADDRESS_KEY}`,
-        {
-          signal: AbortSignal.timeout(8000),
-          headers: {
-            'Origin': 'https://shital-kiosk.vercel.app',
-            'Referer': 'https://shital-kiosk.vercel.app/',
-          },
-        }
-      )
-      if (res.ok) {
-        const data = await res.json() as { addresses?: string[] }
-        const pc = postcode.replace(/^(\w+)(\d\w+)$/, '$1 $2').toUpperCase() // ensure space
-        const addrs = (data.addresses ?? [])
-          .map((a: string) => {
-            const parts = a.split(',').map(p => p.trim()).filter(Boolean)
-            // append formatted postcode if not already present
-            if (!parts[parts.length - 1]?.toUpperCase().includes(clean.slice(0, 4).toUpperCase())) {
-              parts.push(pc)
-            }
-            return parts.join(', ')
-          })
-          .filter(Boolean)
-        if (addrs.length) {
-          return json({ addresses: addrs, postcode: pc, source: 'getaddress' })
-        }
-      }
-    } catch { /* fall through */ }
-  }
+  const clean = raw.replace(/\s+/g, '').toLowerCase()
 
-  // ── 2. postcodes.io fallback ────────────────────────────────────────────────
+  // ── 1. getAddress.io — full street-level addresses ───────────────────────────
   try {
-    const res = await fetch(
+    const gaRes = await fetch(
+      `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GETADDRESS_KEY}`,
+      { signal: AbortSignal.timeout(8000) }
+    )
+    if (gaRes.ok) {
+      const data = await gaRes.json() as { addresses?: string[]; postcode?: string }
+      const pc = data.postcode || raw.toUpperCase()
+      const addrs = (data.addresses ?? [])
+        .map((a: string) =>
+          a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', ')
+        )
+        .filter(Boolean)
+      if (addrs.length > 0) {
+        return res.json({ addresses: addrs, postcode: pc, source: 'getaddress', count: addrs.length })
+      }
+    }
+  } catch { /* fall through */ }
+
+  // ── 2. postcodes.io fallback (locality only) ─────────────────────────────────
+  try {
+    const pcRes = await fetch(
       `https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`,
       { signal: AbortSignal.timeout(6000) }
     )
-    if (res.ok) {
-      const { result } = await res.json() as { result: Record<string, string> }
-      const ward    = result.admin_ward    || ''
-      const county  = result.admin_county  || result.admin_district || ''
-      const pc      = result.postcode
-      const area    = [ward, county].filter(Boolean).join(', ')
-      return json({
-        addresses: [`${area}, ${pc}`],
+    if (pcRes.ok) {
+      const { result } = await pcRes.json() as { result: Record<string, string> }
+      const area   = result.admin_ward || result.parish || result.admin_district || ''
+      const county = result.admin_county || result.admin_district || ''
+      const pc     = result.postcode
+      return res.json({
+        addresses: [[area, county, pc].filter(Boolean).join(', ')],
         postcode: pc,
         source: 'postcodes_io',
-        note: 'Full addresses unavailable — enter your house number manually',
       })
     }
   } catch { /* fall through */ }
 
-  return json({ addresses: [], error: 'Postcode not found' })
-}
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=3600' },
-  })
+  return res.status(404).json({ addresses: [], error: 'Postcode not found' })
 }

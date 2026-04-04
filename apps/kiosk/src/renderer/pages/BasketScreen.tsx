@@ -2,48 +2,29 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 
-// ─── Postcode → Address lookup via getAddress.io (client-side, domain token) ──
+// ─── Postcode → Address lookup (Vercel London serverless → getAddress.io) ─────
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
-// Domain token — restricted to shital-kiosk.vercel.app, safe for browser use
-const GETADDRESS_TOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
-
-async function fetchAddresses(raw: string): Promise<string[]> {
+async function fetchAddresses(raw: string): Promise<{ addresses: string[]; source: string }> {
   const clean = raw.trim().replace(/\s+/g, '').toLowerCase()
-  if (clean.length < 5) return []
+  if (clean.length < 5) return { addresses: [], source: '' }
 
-  // 1. getAddress.io — full street-level addresses
   try {
+    // Vercel serverless function runs in London (lhr1) — UK IP accepted by getAddress.io
     const res = await fetch(
-      `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GETADDRESS_TOKEN}&expand=false`,
-      { signal: AbortSignal.timeout(8000) }
+      `/api/address-lookup?postcode=${encodeURIComponent(clean)}`,
+      { signal: AbortSignal.timeout(12000) }
     )
     if (res.ok) {
-      const data = await res.json() as { addresses?: string[] }
-      const formatted = (data.addresses ?? [])
-        .map(a => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
-        .filter(Boolean)
-      if (formatted.length > 0) return formatted
+      const data = await res.json() as { addresses?: string[]; source?: string }
+      if (data.addresses && data.addresses.length > 0) {
+        return { addresses: data.addresses, source: data.source ?? '' }
+      }
     }
   } catch { /* fall through */ }
 
-  // 2. Fallback — postcodes.io (validates postcode, returns area only)
-  try {
-    const res = await fetch(
-      `https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`,
-      { signal: AbortSignal.timeout(6000) }
-    )
-    if (res.ok) {
-      const { result } = await res.json() as { result: Record<string, string> }
-      const area   = result.admin_ward || result.parish || ''
-      const county = result.admin_county || result.admin_district || ''
-      const pc     = result.postcode
-      return [`${[area, county, pc].filter(Boolean).join(', ')}`]
-    }
-  } catch { /* nothing */ }
-
-  return []
+  return { addresses: [], source: '' }
 }
 
 // ─── Gift Aid full-screen form ────────────────────────────────────────────────
@@ -78,7 +59,7 @@ function GiftAidScreen({
     setAddresses([])
     setAddress('')
     setError('')
-    const results = await fetchAddresses(postcode)
+    const { addresses: results } = await fetchAddresses(postcode)
     setLookingUp(false)
     if (results.length > 0) {
       setAddresses(results)
