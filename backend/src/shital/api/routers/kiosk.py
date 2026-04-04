@@ -566,6 +566,7 @@ async def seed_quick_kiosk_accounts():
     Create QuickDonation kiosk accounts, branches, and kiosk_profiles.
     Idempotent — skips anything that already exists.
     Sets up the full mapping: Branch -> Kiosk User -> Profile -> Device (unassigned).
+    Auto-creates the kiosk_profiles table if it doesn't exist (no migration needed).
     """
     import bcrypt
     from shital.core.fabrics.database import SessionLocal
@@ -573,6 +574,42 @@ async def seed_quick_kiosk_accounts():
 
     def _hash(plain: str) -> str:
         return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(12)).decode()
+
+    # Auto-create kiosk_profiles table if it doesn't exist
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            CREATE TABLE IF NOT EXISTS kiosk_profiles (
+                id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                branch_id           VARCHAR(100) NOT NULL,
+                branch_name         VARCHAR(200) NOT NULL DEFAULT '',
+                user_id             UUID DEFAULT NULL,
+                user_email          VARCHAR(200) NOT NULL,
+                user_name           VARCHAR(200) NOT NULL DEFAULT '',
+                device_id           UUID DEFAULT NULL,
+                device_label        VARCHAR(255) DEFAULT '',
+                stripe_reader_id    VARCHAR(255) DEFAULT '',
+                device_provider     VARCHAR(50) DEFAULT 'stripe_terminal',
+                profile_name        VARCHAR(200) NOT NULL,
+                kiosk_type          VARCHAR(50) NOT NULL DEFAULT 'quick_donation',
+                display_name        VARCHAR(200) DEFAULT '',
+                preset_amounts      JSONB NOT NULL DEFAULT '[1, 2.5, 5, 10, 15, 20, 50]',
+                default_purpose     VARCHAR(200) DEFAULT 'General Fund',
+                gift_aid_prompt     BOOLEAN NOT NULL DEFAULT true,
+                idle_timeout_secs   INT NOT NULL DEFAULT 90,
+                theme               VARCHAR(50) DEFAULT 'saffron',
+                is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+                last_active_at      TIMESTAMPTZ DEFAULT NULL,
+                notes               TEXT DEFAULT '',
+                created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                deleted_at          TIMESTAMPTZ DEFAULT NULL,
+                UNIQUE(branch_id, user_email)
+            )
+        """))
+        await db.execute(text("CREATE INDEX IF NOT EXISTS idx_kiosk_profiles_branch ON kiosk_profiles(branch_id)"))
+        await db.execute(text("CREATE INDEX IF NOT EXISTS idx_kiosk_profiles_user ON kiosk_profiles(user_id)"))
+        await db.execute(text("CREATE INDEX IF NOT EXISTS idx_kiosk_profiles_device ON kiosk_profiles(device_id)"))
+        await db.commit()
 
     now = datetime.utcnow()
     created: list[dict] = []
