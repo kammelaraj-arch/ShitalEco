@@ -200,24 +200,42 @@ function GiftAidScreen({
             </button>
           </div>
 
-          {/* ── getAddress.io: full address dropdown ── */}
+          {/* ── Address picker ── */}
           {addresses.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="mt-2">
-              <p className="text-xs text-green-700 font-semibold mb-1.5">
-                {addresses.length} addresses found for {resolvedPc} — select yours:
-              </p>
-              <select
-                value={address}
-                onChange={e => setAddress(e.target.value)}
-                className="w-full border-2 rounded-2xl px-4 py-3 text-gray-900 text-sm focus:outline-none bg-white"
-                style={{ borderColor: address ? '#16a34a' : '#6ee7b7' }}
-                size={Math.min(addresses.length + 1, 10)}
-              >
-                <option value="">— Select your address —</option>
-                {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
-              </select>
-              {address && (
-                <p className="mt-1.5 px-1 text-xs text-green-700 font-semibold">✓ Selected: {address}</p>
+            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="mt-3">
+              {address ? (
+                /* Selected state — show confirmation + change button */
+                <div className="flex items-center gap-2 px-4 py-3 rounded-2xl border-2 border-green-400 bg-green-50">
+                  <span className="text-green-600 text-lg flex-shrink-0">✓</span>
+                  <span className="flex-1 text-green-900 font-bold text-sm">{address}</span>
+                  <button
+                    onClick={() => setAddress('')}
+                    className="text-xs text-green-600 font-semibold underline flex-shrink-0 active:opacity-60"
+                  >Change</button>
+                </div>
+              ) : (
+                /* Picker list */
+                <div className="border-2 border-green-200 rounded-2xl overflow-hidden">
+                  <div className="px-4 py-2 bg-green-50 border-b border-green-100">
+                    <span className="text-xs font-bold text-green-700">{addresses.length} addresses — tap to select</span>
+                  </div>
+                  <div className="overflow-y-auto" style={{ maxHeight: 260 }}>
+                    {addresses.map((a, i) => {
+                      // Strip trailing postcode to keep rows short
+                      const display = a.replace(/,?\s*[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i, '').trim().replace(/,$/, '')
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setAddress(a)}
+                          className="w-full text-left px-4 py-3 text-gray-800 text-sm font-medium active:bg-green-50 transition-colors"
+                          style={{ borderBottom: i < addresses.length - 1 ? '1px solid #f0fdf4' : 'none' }}
+                        >
+                          {display}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
               )}
             </motion.div>
           )}
