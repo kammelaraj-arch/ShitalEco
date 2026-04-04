@@ -395,21 +395,40 @@ export function GiftAidScreen() {
                 )}
               </div>
 
-              {/* Anonymous toggle */}
-              <button
-                onClick={() => setNoAnonymous(!noAnonymous)}
-                className="w-full flex items-center gap-3 p-4 rounded-2xl border-2 transition-all active:scale-[0.98]"
-                style={{ borderColor: noAnonymous ? th.langActive : '#e5e7eb', background: noAnonymous ? '#FFF7ED' : '#fff' }}
-              >
-                <div className="w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all"
-                  style={{ borderColor: noAnonymous ? th.langActive : '#9CA3AF', background: noAnonymous ? th.langActive : '#fff' }}>
-                  {noAnonymous && <span className="text-white text-xs font-black">✓</span>}
-                </div>
-                <div className="text-left flex-1">
-                  <p className="font-bold text-sm text-gray-900">{formTextConfig.anonymousLabel}</p>
-                  <p className="text-xs text-gray-400">{formTextConfig.anonymousSub}</p>
-                </div>
-              </button>
+              {/* Details / Anonymous radio row */}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNoAnonymous(false)}
+                  className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
+                  style={{ borderColor: !noAnonymous ? th.langActive : '#e5e7eb', background: !noAnonymous ? '#FFF7ED' : '#fff' }}
+                >
+                  <div className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"
+                    style={{ borderColor: !noAnonymous ? th.langActive : '#9CA3AF' }}>
+                    {!noAnonymous && <div className="w-2.5 h-2.5 rounded-full" style={{ background: th.langActive }} />}
+                  </div>
+                  <div>
+                    <p className="font-black text-sm" style={{ color: !noAnonymous ? '#C2410C' : '#374151' }}>Details</p>
+                    <p className="text-[10px] text-gray-400">Name, email or phone</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setNoAnonymous(true); setNoFormName(''); setNoFormEmail(''); setNoFormPhone('') }}
+                  className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
+                  style={{ borderColor: noAnonymous ? '#6B7280' : '#e5e7eb', background: noAnonymous ? '#F9FAFB' : '#fff' }}
+                >
+                  <div className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"
+                    style={{ borderColor: noAnonymous ? '#6B7280' : '#9CA3AF' }}>
+                    {noAnonymous && <div className="w-2.5 h-2.5 rounded-full bg-gray-500" />}
+                  </div>
+                  <div>
+                    <p className="font-black text-sm" style={{ color: noAnonymous ? '#374151' : '#9CA3AF' }}>{formTextConfig.anonymousLabel}</p>
+                    <p className="text-[10px] text-gray-400">No receipt sent</p>
+                  </div>
+                </button>
+              </div>
 
               {/* Personal detail fields — hidden when anonymous */}
               <AnimatePresence>

@@ -370,28 +370,55 @@ function ContactCaptureScreen({
           </div>
         )}
 
-        {/* Receipt info banner */}
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex gap-3 items-start">
-          <span className="text-xl flex-shrink-0">📧</span>
-          <p className="text-amber-800 text-sm leading-snug">
-            <span className="font-black">Get your receipt & stay connected.</span><br/>
-            By sharing your email or phone, we can send your payment receipt and keep you updated about temple events and services.
-          </p>
+        {/* Details / Anonymous radio selector */}
+        <div className="flex gap-2">
+          {/* Details option */}
+          <button
+            type="button"
+            onClick={() => { setAnonymous(false) }}
+            className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
+            style={{ borderColor: !anonymous ? '#FF9933' : '#e5e7eb', background: !anonymous ? '#FFF7ED' : '#fff' }}
+          >
+            {/* Radio circle */}
+            <div className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"
+              style={{ borderColor: !anonymous ? '#FF9933' : '#9CA3AF' }}>
+              {!anonymous && <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#FF9933' }} />}
+            </div>
+            <div>
+              <p className="font-black text-sm" style={{ color: !anonymous ? '#C2410C' : '#374151' }}>Details</p>
+              <p className="text-[10px] text-gray-400">Name, email or phone</p>
+            </div>
+          </button>
+
+          {/* Anonymous option */}
+          <button
+            type="button"
+            onClick={() => { setAnonymous(true); setName(''); setEmail(''); setPhone('') }}
+            className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
+            style={{ borderColor: anonymous ? '#6B7280' : '#e5e7eb', background: anonymous ? '#F9FAFB' : '#fff' }}
+          >
+            {/* Radio circle */}
+            <div className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"
+              style={{ borderColor: anonymous ? '#6B7280' : '#9CA3AF' }}>
+              {anonymous && <div className="w-2.5 h-2.5 rounded-full bg-gray-500" />}
+            </div>
+            <div>
+              <p className="font-black text-sm" style={{ color: anonymous ? '#374151' : '#9CA3AF' }}>Anonymous</p>
+              <p className="text-[10px] text-gray-400">No receipt sent</p>
+            </div>
+          </button>
         </div>
 
-        {/* Anonymous toggle */}
-        <button
-          onClick={() => { setAnonymous(a => !a); setName(''); setEmail(''); setPhone('') }}
-          className={`w-full flex items-center gap-3 p-4 rounded-2xl border-2 text-left transition-all ${anonymous ? 'border-gray-400 bg-gray-50' : 'border-gray-100'}`}
-        >
-          <div className={`w-6 h-6 rounded-md border-2 flex-shrink-0 flex items-center justify-center transition-all ${anonymous ? 'bg-gray-500 border-gray-500' : 'border-gray-300 bg-white'}`}>
-            {anonymous && <span className="text-white text-xs font-black">✓</span>}
+        {/* Receipt info banner — only shown when Details selected */}
+        {!anonymous && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex gap-3 items-start">
+            <span className="text-xl flex-shrink-0">📧</span>
+            <p className="text-amber-800 text-sm leading-snug">
+              <span className="font-black">Get your receipt &amp; stay connected.</span><br/>
+              By sharing your email or phone, we can send your payment receipt and keep you updated about temple events and services.
+            </p>
           </div>
-          <div>
-            <p className="font-black text-gray-800 text-sm">Donate Anonymously</p>
-            <p className="text-gray-400 text-xs">No details required — no receipt will be sent</p>
-          </div>
-        </button>
+        )}
 
         {/* Contact fields — hidden when anonymous */}
         {!anonymous && (
