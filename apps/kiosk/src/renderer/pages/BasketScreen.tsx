@@ -6,52 +6,20 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
-// Domain token — safe to embed (domain-restricted to shital-kiosk.vercel.app)
-const GETADDRESS_DTOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
 
-async function lookupPostcode(postcode: string): Promise<{ addresses: string[]; valid: boolean; locality?: string }> {
-  const pc = postcode.trim().toUpperCase().replace(/\s+/g, ' ')
-  const clean = pc.replace(/\s/g, '').toLowerCase() // e.g. "hp79nq"
+async function lookupPostcode(postcode: string): Promise<{ addresses: string[]; valid: boolean }> {
+  const clean = postcode.trim().replace(/\s/g, '').toLowerCase()
   if (clean.length < 5) return { addresses: [], valid: false }
 
-  // 1. Try getAddress.io directly from the browser (domain token — works from shital-kiosk.vercel.app)
+  // Call the Vercel edge function — runs on UK edge so getAddress.io accepts it
   try {
     const res = await fetch(
-      `https://api.getaddress.io/find/${clean}?api-key=${GETADDRESS_DTOKEN}`,
-      { signal: AbortSignal.timeout(8000) }
+      `/api/address-lookup?postcode=${encodeURIComponent(clean)}`,
+      { signal: AbortSignal.timeout(12000) }
     )
     if (res.ok) {
       const data = await res.json()
-      const addrs: string[] = (data.addresses ?? [])
-        .map((a: string) => {
-          const parts = a.split(',').map((p: string) => p.trim()).filter(Boolean)
-          parts.push(pc)
-          return parts.join(', ')
-        })
-        .filter(Boolean)
-      if (addrs.length) return { addresses: addrs, valid: true }
-    }
-  } catch { /* fall through */ }
-
-  // 2. Fall back to postcodes.io directly from browser (free, CORS-friendly, no Render needed)
-  try {
-    const res = await fetch(
-      `https://api.postcodes.io/postcodes/${clean}`,
-      { signal: AbortSignal.timeout(6000) }
-    )
-    if (res.ok) {
-      const data = await res.json()
-      const r = data.result
-      const ward    = r.admin_ward    || ''
-      const county  = r.admin_county  || r.admin_district || ''
-      const district = r.admin_district || ''
-      const locality = [ward, county].filter(Boolean).join(', ')
-      // Return one stub entry — user still needs to prepend house number
-      return {
-        addresses: [`${locality}, ${r.postcode}`],
-        valid: true,
-        locality,
-      }
+      if (data.addresses?.length) return { addresses: data.addresses, valid: true }
     }
   } catch { /* fall through */ }
 
