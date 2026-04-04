@@ -161,24 +161,39 @@ async def list_items(
 
     where = " AND ".join(conditions)
 
-    async with SessionLocal() as db:
-        result = await db.execute(
-            text(f"""
-                SELECT id, name, name_gu, name_hi, '' AS name_te, description, category,
-                       price, currency, unit, emoji, image_url,
-                       gift_aid_eligible, is_active, scope, branch_id,
-                       stock_qty, sort_order, metadata_json,
-                       available_from, available_until, display_channel, branch_stock, is_live,
-                       created_at, updated_at
-                FROM catalog_items
-                WHERE {where}
-                ORDER BY sort_order, category, name
-            """),
-            params,
-        )
-        rows = result.mappings().all()
-
-    return {"items": [_row_to_dict(r) for r in rows], "total": len(rows)}
+    try:
+        async with SessionLocal() as db:
+            result = await db.execute(
+                text(f"""
+                    SELECT id, name, name_gu, name_hi, '' AS name_te, description, category,
+                           price, currency, unit, emoji, image_url,
+                           gift_aid_eligible, is_active, scope, branch_id,
+                           stock_qty, sort_order, metadata_json,
+                           available_from, available_until, display_channel, branch_stock, is_live,
+                           created_at, updated_at
+                    FROM catalog_items
+                    WHERE {where}
+                    ORDER BY sort_order, category, name
+                """),
+                params,
+            )
+            rows = result.mappings().all()
+        return {"items": [_row_to_dict(r) for r in rows], "total": len(rows)}
+    except Exception as exc:
+        # Try a minimal query to check if table exists and what columns are available
+        try:
+            async with SessionLocal() as db2:
+                cols_result = await db2.execute(text("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = 'catalog_items' AND table_schema = current_schema()
+                    ORDER BY ordinal_position
+                """))
+                cols = [r[0] for r in cols_result.fetchall()]
+                cnt_result = await db2.execute(text("SELECT COUNT(*) FROM catalog_items WHERE deleted_at IS NULL"))
+                cnt = cnt_result.scalar()
+        except Exception as exc2:
+            raise HTTPException(status_code=500, detail=f"DB error: {exc} / schema error: {exc2}")
+        raise HTTPException(status_code=500, detail={"error": str(exc), "columns": cols, "row_count": cnt})
 
 
 @router.get("/kiosk/soft-donations")
