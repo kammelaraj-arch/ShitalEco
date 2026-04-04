@@ -620,16 +620,17 @@ async def seed_quick_kiosk_accounts():
         # 1. Ensure branches exist
         for b in BRANCHES:
             branch_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"shital-branch-{b['id']}"))
+            import json
+            addr_json = json.dumps({"city": b["city"], "postcode": b["postcode"]})
             await db.execute(
                 text(
                     "INSERT INTO branches (id, name, code, address, phone, is_active, created_at, updated_at) "
-                    "VALUES (:id, :name, :code, :addr::jsonb, '', true, :now, :now) "
+                    "VALUES (:id, :name, :code, CAST(:addr AS jsonb), '', true, :now, :now) "
                     "ON CONFLICT (code) DO NOTHING"
                 ),
                 {
                     "id": branch_id, "name": b["name"], "code": b["id"],
-                    "addr": f'{{"city": "{b["city"]}", "postcode": "{b["postcode"]}"}}',
-                    "now": now,
+                    "addr": addr_json, "now": now,
                 },
             )
 
