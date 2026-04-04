@@ -240,10 +240,10 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
 
         if resp.status_code == 400:
             return {"postcode": postcode, "addresses": [], "error": "Invalid postcode format"}
-        if resp.status_code == 401:
-            return await _postcodes_io_fallback(postcode, reason="Invalid GetAddress API key")
-        if resp.status_code == 404:
-            return {"postcode": postcode.upper().strip(), "addresses": [], "error": "Postcode not found"}
+        if resp.status_code in (401, 403, 404):
+            # 401 = bad key, 403 = no permission, 404 = not found or key issue
+            # Always fall back to postcodes.io so the user gets something useful
+            return await _postcodes_io_fallback(postcode, reason=f"getAddress HTTP {resp.status_code}")
         if resp.status_code in (402, 429):
             return await _postcodes_io_fallback(postcode, reason="getAddress limit reached")
         if resp.status_code != 200:
