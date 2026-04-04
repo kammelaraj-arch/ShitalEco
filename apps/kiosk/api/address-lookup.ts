@@ -5,7 +5,7 @@
  */
 export const config = { runtime: 'edge' }
 
-const GETADDRESS_KEY = process.env.GETADDRESS_API_KEY || ''
+const GETADDRESS_KEY = process.env.GETADDRESS_API_KEY || 'kSZi9RxDcUCLhU4A6ShTBg48103'
 
 export default async function handler(req: Request) {
   const { searchParams } = new URL(req.url)
