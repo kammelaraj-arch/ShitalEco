@@ -124,8 +124,13 @@ interface KioskState {
     agreed: boolean; fullName: string; postcode: string
     address: string; contactEmail: string; contactPhone: string
   } | null
+  contactInfo: {
+    name: string; email: string; phone: string
+    gdprConsent: boolean; termsConsent: boolean; anonymous: boolean
+  } | null
   pendingPayment: boolean
   setGiftAidDeclaration: (decl: KioskState['giftAidDeclaration']) => void
+  setContactInfo: (info: KioskState['contactInfo']) => void
   setPendingPayment: (v: boolean) => void
   setScreen: (screen: KioskScreen) => void
   setLanguage: (lang: Language) => void
@@ -157,6 +162,7 @@ export const useKioskStore = create<KioskState>()(
   branchId: 'main',
   theme: 'lotus',
   giftAidDeclaration: null,
+  contactInfo: null,
   pendingPayment: false,
   cardProvider: 'stripe_terminal',
   stripeReaderId: 'tmr_Gcuz1QQB6nzqMs',
@@ -164,6 +170,7 @@ export const useKioskStore = create<KioskState>()(
   squareDeviceId: '',
   squareDeviceName: '',
   setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
+  setContactInfo: (contactInfo) => set({ contactInfo }),
   setPendingPayment: (pendingPayment) => set({ pendingPayment }),
   setScreen: (screen) => set({ screen }),
   setLanguage: (language) => set({ language }),
@@ -190,7 +197,7 @@ export const useKioskStore = create<KioskState>()(
   })),
   clearBasket: () => set({ items: [], basketId: null }),
   setOrderResult: (orderId, orderRef, paymentIntent) => set({ orderId, orderRef, paymentIntent }),
-  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, pendingPayment: false }),
+  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, contactInfo: null, pendingPayment: false }),
   get total() { return get().items.reduce((sum, i) => sum + i.totalPrice, 0) },
   get itemCount() { return get().items.reduce((sum, i) => sum + i.quantity, 0) },
     }),
