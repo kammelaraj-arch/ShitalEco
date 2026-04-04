@@ -7,22 +7,35 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 // getAddress.io API key (client-side — works from browser/residential IPs)
 const GA_API_KEY = 'zp65T_VYUUiIty5baQgr-A48103'
 
-// Fetch all addresses for a postcode from getAddress.io (client-side browser call)
+// Fetch all addresses for a postcode from getAddress.io autocomplete endpoint
 async function lookupAddresses(raw: string): Promise<{ addresses: string[]; postcode: string }> {
-  const clean = raw.trim().replace(/\s+/g, '').toLowerCase()
-  const res = await fetch(
-    `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GA_API_KEY}`,
-    { signal: AbortSignal.timeout(10000) }
-  )
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`API error ${res.status}: ${body.slice(0, 120)}`)
+  const postcode = raw.trim().toUpperCase()
+  // Try /find first, then /autocomplete as fallback
+  for (const url of [
+    `https://api.getaddress.io/find/${encodeURIComponent(postcode.replace(/\s+/g,'').toLowerCase())}?api-key=${GA_API_KEY}`,
+    `https://api.getaddress.io/autocomplete/${encodeURIComponent(postcode)}?api-key=${GA_API_KEY}&all=true`,
+  ]) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    if (!res.ok) continue
+    const data = await res.json() as {
+      addresses?: string[];
+      suggestions?: Array<{ address: string }>;
+      postcode?: string
+    }
+    // /find returns { addresses: string[], postcode }
+    if (data.addresses && data.addresses.length > 0) {
+      const addresses = data.addresses
+        .map((a: string) => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
+        .filter(Boolean)
+      return { addresses, postcode: data.postcode || postcode }
+    }
+    // /autocomplete returns { suggestions: [{ address }] }
+    if (data.suggestions && data.suggestions.length > 0) {
+      const addresses = data.suggestions.map(s => s.address).filter(Boolean)
+      return { addresses, postcode }
+    }
   }
-  const data = await res.json() as { addresses?: string[]; postcode?: string }
-  const addresses = (data.addresses ?? [])
-    .map((a: string) => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
-    .filter(Boolean)
-  return { addresses, postcode: data.postcode || raw.toUpperCase() }
+  throw new Error('No addresses found — please check the postcode and try again')
 }
 
 // ─── Gift Aid full-screen form ────────────────────────────────────────────────
