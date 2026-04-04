@@ -359,20 +359,23 @@ async def get_item(item_id: str, ctx: OptionalSpace):
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
-    async with SessionLocal() as db:
-        result = await db.execute(
-            text("""
-                SELECT id, name, name_gu, name_hi, description, category,
-                       price, currency, unit, emoji, image_url,
-                       gift_aid_eligible, is_active, scope, branch_id,
-                       stock_qty, sort_order, metadata_json,
-                       created_at, updated_at
-                FROM catalog_items
-                WHERE id = :id AND deleted_at IS NULL
-            """),
-            {"id": item_id},
-        )
-        row = result.mappings().first()
+    try:
+        async with SessionLocal() as db:
+            result = await db.execute(
+                text("""
+                    SELECT id, name, name_gu, name_hi, description, category,
+                           price, currency, unit, emoji, image_url,
+                           gift_aid_eligible, is_active, scope, branch_id,
+                           stock_qty, sort_order, metadata_json,
+                           created_at, updated_at
+                    FROM catalog_items
+                    WHERE id = :id AND deleted_at IS NULL
+                """),
+                {"id": item_id},
+            )
+            row = result.mappings().first()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": str(exc), "item_id": item_id})
 
     if not row:
         raise HTTPException(status_code=404, detail="Item not found")
