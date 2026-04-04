@@ -292,18 +292,9 @@ export function HomeScreen() {
           🕉
         </div>
 
-        {/* Temple name + branch */}
+        {/* Temple name */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="font-black text-base leading-tight" style={{ color: th.headerText }}>Shital Temple</h1>
-            <span
-              className="text-[10px] font-bold px-2 py-0.5 rounded-full capitalize flex-shrink-0"
-              style={{ background: 'rgba(255,255,255,0.2)', color: th.headerSub }}
-            >
-              {branchId === 'main' ? 'Wembley' : branchId === 'leicester' ? 'Leicester' : branchId === 'reading' ? 'Reading' : branchId === 'mk' ? 'Milton Keynes' : branchId}
-            </span>
-          </div>
-          <p className="text-xs opacity-60 leading-tight" style={{ color: th.headerSub }}>Wembley, London HA9 0EW</p>
+          <h1 className="font-black text-base leading-tight" style={{ color: th.headerText }}>Shital</h1>
         </div>
 
         {/* Language picker button */}
