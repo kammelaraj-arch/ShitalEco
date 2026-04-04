@@ -157,6 +157,53 @@ async def schema_check():
         return {"error": str(exc)}
 
 
+@router.get("/debug-conn")
+async def debug_conn():
+    """Raw asyncpg connect test — bypasses SQLAlchemy to diagnose SSL."""
+    import asyncpg
+    import ssl
+    import re
+    from shital.core.fabrics.config import settings
+
+    raw_url = settings.DATABASE_URL
+    safe_url = re.sub(r':([^:@/][^@]*)@', ':***@', raw_url)
+
+    # Try 1: ssl=True
+    try:
+        pg_url = raw_url
+        for old, new in [("postgresql+asyncpg://", "postgresql://"), ("postgres://", "postgresql://")]:
+            pg_url = pg_url.replace(old, new)
+        # Strip sslmode param for asyncpg
+        pg_url = re.sub(r'[?&]sslmode=[^&]*', '', pg_url).rstrip('?&')
+        conn = await asyncpg.connect(pg_url, ssl=True, timeout=8)
+        v = await conn.fetchval("SELECT version()")
+        await conn.close()
+        return {"ok": True, "url": safe_url, "pg_version": v, "ssl": "True"}
+    except Exception as e1:
+        pass
+
+    # Try 2: SSLContext CERT_NONE
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        conn = await asyncpg.connect(pg_url, ssl=ctx, timeout=8)
+        v = await conn.fetchval("SELECT version()")
+        await conn.close()
+        return {"ok": True, "url": safe_url, "pg_version": v, "ssl": "SSLContext-CERT_NONE"}
+    except Exception as e2:
+        pass
+
+    # Try 3: no SSL
+    try:
+        conn = await asyncpg.connect(pg_url, ssl=False, timeout=8)
+        v = await conn.fetchval("SELECT version()")
+        await conn.close()
+        return {"ok": True, "url": safe_url, "pg_version": v, "ssl": "False"}
+    except Exception as e3:
+        return {"ok": False, "url": safe_url, "e1": str(e1), "e2": str(e2), "e3": str(e3)}
+
+
 @router.get("/")
 async def list_items(
     ctx: OptionalSpace,
