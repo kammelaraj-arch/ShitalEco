@@ -2,24 +2,50 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 
-// ─── Postcode lookup via backend proxy ───────────────────────────────────────
+// ─── Postcode lookup ─────────────────────────────────────────────────────────
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
+// Domain token — safe to embed (domain-restricted to shital-kiosk.vercel.app)
+const GETADDRESS_DTOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
+
 async function lookupPostcode(postcode: string): Promise<{ addresses: string[]; valid: boolean }> {
-  const clean = postcode.trim().toUpperCase().replace(/\s+/g, ' ')
+  // Strip spaces and lowercase for getAddress.io format (e.g. "hp79nq")
+  const clean = postcode.trim().toLowerCase().replace(/\s+/g, '')
+  if (clean.length < 5) return { addresses: [], valid: false }
+
+  // 1. Try getAddress.io directly from the browser using domain token (fastest, full addresses)
   try {
     const res = await fetch(
-      `${API_BASE}/kiosk/postcode/${encodeURIComponent(clean)}`,
+      `https://api.getaddress.io/find/${clean}?api-key=${GETADDRESS_DTOKEN}`,
+      { signal: AbortSignal.timeout(8000) }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const pc = postcode.trim().toUpperCase()
+      const addrs: string[] = (data.addresses ?? [])
+        .map((a: string) => {
+          const parts = a.split(',').map((p: string) => p.trim()).filter(Boolean)
+          parts.push(pc)
+          return parts.join(', ')
+        })
+        .filter(Boolean)
+      if (addrs.length) return { addresses: addrs, valid: true }
+    }
+  } catch { /* fall through */ }
+
+  // 2. Fall back to backend proxy (uses postcodes.io locality data)
+  try {
+    const res = await fetch(
+      `${API_BASE}/kiosk/postcode/${encodeURIComponent(postcode.trim().toUpperCase())}`,
       { signal: AbortSignal.timeout(10000) }
     )
     if (res.ok) {
       const data = await res.json()
-      if (data.addresses?.length) {
-        return { addresses: data.addresses, valid: true }
-      }
+      if (data.addresses?.length) return { addresses: data.addresses, valid: true }
     }
-  } catch {}
+  } catch { /* fall through */ }
+
   return { addresses: [], valid: false }
 }
 
