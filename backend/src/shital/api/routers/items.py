@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from shital.api.deps import CurrentSpace
+from shital.api.deps import CurrentSpace, OptionalSpace
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -27,6 +27,7 @@ class ItemCategory(str, Enum):
     PROJECT_DONATION = "PROJECT_DONATION"
     SHOP = "SHOP"
     SERVICE = "SERVICE"
+    SPONSORSHIP = "SPONSORSHIP"
 
 
 class ItemScope(str, Enum):
@@ -46,6 +47,7 @@ class ItemBase(BaseModel):
     name: str
     name_gu: str = ""
     name_hi: str = ""
+    name_te: str = ""
     description: str = ""
     category: ItemCategory
     price: Decimal
@@ -75,6 +77,7 @@ class ItemUpdate(BaseModel):
     name: str | None = None
     name_gu: str | None = None
     name_hi: str | None = None
+    name_te: str | None = None
     description: str | None = None
     category: ItemCategory | None = None
     price: Decimal | None = None
@@ -132,7 +135,7 @@ _KIOSK_SCHEDULE_FILTER = """
 
 @router.get("/")
 async def list_items(
-    ctx: CurrentSpace,
+    ctx: OptionalSpace,
     category: str = "",
     branch_id: str = "",
     scope: str = "",
@@ -161,7 +164,7 @@ async def list_items(
     async with SessionLocal() as db:
         result = await db.execute(
             text(f"""
-                SELECT id, name, name_gu, name_hi, description, category,
+                SELECT id, name, name_gu, name_hi, COALESCE(name_te,'') AS name_te, description, category,
                        price, currency, unit, emoji, image_url,
                        gift_aid_eligible, is_active, scope, branch_id,
                        stock_qty, sort_order, metadata_json,
@@ -313,7 +316,7 @@ async def kiosk_general_donations():
 
 
 @router.get("/{item_id}")
-async def get_item(item_id: str, ctx: CurrentSpace):
+async def get_item(item_id: str, ctx: OptionalSpace):
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
@@ -338,7 +341,7 @@ async def get_item(item_id: str, ctx: CurrentSpace):
 
 
 @router.post("/")
-async def create_item(body: ItemCreate, ctx: CurrentSpace):
+async def create_item(body: ItemCreate, ctx: OptionalSpace):
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
@@ -349,13 +352,13 @@ async def create_item(body: ItemCreate, ctx: CurrentSpace):
         await db.execute(
             text("""
                 INSERT INTO catalog_items
-                (id, name, name_gu, name_hi, description, category, price, currency,
+                (id, name, name_gu, name_hi, name_te, description, category, price, currency,
                  unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id,
                  stock_qty, sort_order, metadata_json,
                  available_from, available_until, display_channel, branch_stock, is_live,
                  created_at, updated_at)
                 VALUES
-                (:id, :name, :name_gu, :name_hi, :desc, :category, :price, :currency,
+                (:id, :name, :name_gu, :name_hi, :name_te, :desc, :category, :price, :currency,
                  :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id,
                  :stock_qty, :sort_order, :metadata_json::jsonb,
                  :available_from, :available_until, :display_channel, :branch_stock::jsonb, :is_live,
@@ -366,6 +369,7 @@ async def create_item(body: ItemCreate, ctx: CurrentSpace):
                 "name": body.name,
                 "name_gu": body.name_gu,
                 "name_hi": body.name_hi,
+                "name_te": body.name_te,
                 "desc": body.description,
                 "category": body.category.value,
                 "price": str(body.price),
@@ -394,7 +398,7 @@ async def create_item(body: ItemCreate, ctx: CurrentSpace):
 
 
 @router.put("/{item_id}")
-async def update_item(item_id: str, body: ItemUpdate, ctx: CurrentSpace):
+async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
@@ -404,6 +408,7 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: CurrentSpace):
         "name": body.name,
         "name_gu": body.name_gu,
         "name_hi": body.name_hi,
+        "name_te": body.name_te,
         "description": body.description,
         "category": body.category.value if body.category else None,
         "price": str(body.price) if body.price is not None else None,
@@ -461,7 +466,7 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: CurrentSpace):
 
 
 @router.delete("/{item_id}")
-async def delete_item(item_id: str, ctx: CurrentSpace):
+async def delete_item(item_id: str, ctx: OptionalSpace):
     """Soft delete — sets deleted_at timestamp."""
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
@@ -556,8 +561,37 @@ _SEED_ITEMS: list[dict] = [
 ]
 
 
+@router.get("/kiosk/sponsorship")
+async def kiosk_sponsorship(branch_id: str = "main"):
+    """Public: SPONSORSHIP items."""
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+    try:
+        async with SessionLocal() as db:
+            result = await db.execute(
+                text("""
+                    SELECT id, name, name_gu, name_hi, description,
+                           price, currency, unit, emoji, image_url,
+                           gift_aid_eligible, stock_qty, sort_order, metadata_json,
+                           available_from, available_until, display_channel, branch_stock
+                    FROM catalog_items
+                    WHERE category = 'SPONSORSHIP'
+                      AND is_active = true
+                      AND deleted_at IS NULL
+                      AND (scope = 'GLOBAL' OR (scope = 'BRANCH' AND branch_id = :bid))
+                """ + _KIOSK_SCHEDULE_FILTER + """
+                    ORDER BY sort_order, price
+                """),
+                {"bid": branch_id},
+            )
+            rows = result.mappings().all()
+        return {"items": [_row_to_dict(r) for r in rows], "branch_id": branch_id}
+    except Exception:
+        return {"items": [], "branch_id": branch_id}
+
+
 @router.post("/seed")
-async def seed_items(ctx: CurrentSpace):
+async def seed_items(ctx: OptionalSpace):
     """Seed the catalog_items table with default items if empty."""
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
@@ -586,20 +620,26 @@ async def seed_items(ctx: CurrentSpace):
             await db.execute(
                 text("""
                     INSERT INTO catalog_items
-                    (id, name, name_gu, name_hi, description, category, price, currency,
+                    (id, name, name_gu, name_hi, name_te, description, category, price, currency,
                      unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id,
                      stock_qty, sort_order, metadata_json, created_at, updated_at)
                     VALUES
-                    (:id, :name, '', '', '', :category, :price, 'GBP',
-                     :unit, '', '', :gift_aid, true, 'GLOBAL', '',
+                    (:id, :name, :name_gu, :name_hi, :name_te, :description, :category, :price, 'GBP',
+                     :unit, :emoji, :image_url, :gift_aid, true, 'GLOBAL', '',
                      NULL, :sort_order, :metadata_json::jsonb, :now, :now)
                 """),
                 {
                     "id": item_id,
                     "name": item["name"],
+                    "name_gu": item.get("name_gu", ""),
+                    "name_hi": item.get("name_hi", ""),
+                    "name_te": item.get("name_te", ""),
+                    "description": item.get("description", ""),
                     "category": item["category"],
                     "price": item["price"],
                     "unit": item.get("unit", ""),
+                    "emoji": item.get("emoji", ""),
+                    "image_url": item.get("image_url", ""),
                     "gift_aid": item.get("gift_aid_eligible", False),
                     "sort_order": item.get("sort_order", 0),
                     "metadata_json": json.dumps(meta),
