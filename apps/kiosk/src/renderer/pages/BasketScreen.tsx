@@ -8,14 +8,16 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 const GA_DTOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
 
 // Fetch all addresses for a postcode from getAddress.io (client-side, uses domain token)
-async function lookupAddresses(raw: string): Promise<{ addresses: string[]; postcode: string } | null> {
+async function lookupAddresses(raw: string): Promise<{ addresses: string[]; postcode: string }> {
   const clean = raw.trim().replace(/\s+/g, '').toLowerCase()
-  if (clean.length < 5) return null
   const res = await fetch(
     `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GA_DTOKEN}`,
     { signal: AbortSignal.timeout(10000) }
   )
-  if (!res.ok) return null
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`API error ${res.status}: ${body.slice(0, 120)}`)
+  }
   const data = await res.json() as { addresses?: string[]; postcode?: string }
   const addresses = (data.addresses ?? [])
     .map((a: string) => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
@@ -59,14 +61,14 @@ function GiftAidScreen({
     setError('')
     try {
       const result = await lookupAddresses(postcode)
-      if (result && result.addresses.length > 0) {
+      if (result.addresses.length > 0) {
         setAddresses(result.addresses)
         setResolvedPc(result.postcode)
       } else {
         setError('No addresses found for this postcode — please check and try again')
       }
-    } catch {
-      setError('Could not fetch addresses — please check your postcode and try again')
+    } catch (e) {
+      setError(String(e).replace('Error: ', ''))
     } finally {
       setLookingUp(false)
     }
