@@ -14,10 +14,6 @@ class Settings(BaseSettings):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        # asyncpg does not accept sslmode= in URL; strip it and let connect_args handle SSL
-        import re
-        url = re.sub(r'[?&]sslmode=[^&]*', '', url)
-        url = re.sub(r'\?$', '', url)  # clean up trailing ?
         return url
     REDIS_URL: str = "redis://localhost:6379/0"
 

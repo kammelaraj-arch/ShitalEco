@@ -20,19 +20,6 @@ logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[type-arg]
-    # Apply any missing schema columns at startup (idempotent, safe to re-run)
-    try:
-        await _patch_schema()
-    except Exception as exc:
-        logger.error("schema_patch_failed", error=str(exc))
-    finally:
-        # Dispose the pool so the patcher's connection doesn't pollute request connections
-        try:
-            from shital.core.fabrics.database import engine
-            await engine.dispose()
-        except Exception:
-            pass
-
     # Register all Digital DNA micro-capabilities
     import shital.capabilities.finance.capabilities      # noqa: F401
     import shital.capabilities.payroll.capabilities      # noqa: F401
@@ -87,7 +74,7 @@ app = FastAPI(
         "Powered by Digital DNA micro-capabilities, Digital Space governance, "
         "and Claude AI Digital Brain orchestration."
     ),
-    version="1.0.6",
+    version="1.0.7",
     default_response_class=ORJSONResponse,
     lifespan=lifespan,
     docs_url="/api/docs",
@@ -135,9 +122,16 @@ async def health() -> dict[str, Any]:
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
-        "version": "1.0.6",
+        "version": "1.0.7",
         "environment": settings.APP_ENV,
     }
+
+
+@app.post("/api/v1/admin/patch-schema", tags=["admin"])
+async def run_schema_patch() -> dict[str, Any]:
+    """Run idempotent schema patcher on demand (safe to call multiple times)."""
+    await _patch_schema()
+    return {"patched": True}
 
 
 @app.get("/api/v1/dna", tags=["dna"])
