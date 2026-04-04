@@ -316,30 +316,94 @@ class ReceiptInput(BaseModel):
 
 @router.post("/receipt")
 async def send_receipt(body: ReceiptInput):
-    """Send email or WhatsApp receipt after payment."""
+    """Send email or WhatsApp receipt after payment. Uses DB-stored email template."""
     from shital.core.fabrics.config import settings
+    from datetime import date as _date
+
     if not body.destination.strip():
         return {"sent": False, "error": "No destination provided"}
-    items_text = "\n".join(f"  \u2022 {i.get('name','Item')} x{i.get('quantity',1)} = \u00a3{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}" for i in body.items) or "  \u2022 Temple donation"
-    subject = f"Receipt from {body.branch_name} \u2014 {body.order_ref}"
-    message = f"Thank you for your generous donation! \ud83d\ude4f\n\nOrder Reference: {body.order_ref}\nItems:\n{items_text}\nTotal: \u00a3{body.total:.2f}\n\nJay Shri Krishna \ud83d\udd49\n{body.branch_name}"
+
+    variables = {
+        "order_ref":     body.order_ref,
+        "customer_name": "",
+        "total":         body.total,
+        "items":         body.items,
+        "branch_name":   body.branch_name,
+        "date":          _date.today().strftime("%-d %B %Y"),
+    }
+
     if body.type == "email" and settings.SENDGRID_API_KEY:
         try:
+            from shital.api.routers.email_templates import render_template
+            from shital.core.fabrics.database import SessionLocal
+            from sqlalchemy import text
+
+            # Load template from DB; fall back to plain text
+            template: dict | None = None
+            try:
+                async with SessionLocal() as db:
+                    result = await db.execute(
+                        text("SELECT subject, html_body, text_body FROM email_templates WHERE template_key = 'donation_receipt' AND is_active"),
+                    )
+                    row = result.mappings().first()
+                    if row:
+                        template = dict(row)
+            except Exception:
+                pass
+
+            if template:
+                subject, html_body, text_body = render_template(template, variables)
+            else:
+                # Minimal fallback
+                items_text = "\n".join(
+                    f"  • {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}"
+                    for i in body.items
+                ) or "  • Temple donation"
+                subject = f"Receipt from {body.branch_name} — {body.order_ref}"
+                html_body = f"<p>Thank you! Order: <strong>{body.order_ref}</strong><br>Total: £{body.total:.2f}</p><p>Jay Shri Krishna 🙏</p>"
+                text_body = f"Thank you for your donation!\n\nOrder: {body.order_ref}\n{items_text}\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}"
+
             import httpx
-            resp = await httpx.AsyncClient().post("https://api.sendgrid.com/v3/mail/send", headers={"Authorization": f"Bearer {settings.SENDGRID_API_KEY}", "Content-Type": "application/json"}, json={"personalizations": [{"to": [{"email": body.destination}]}], "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": body.branch_name}, "subject": subject, "content": [{"type": "text/plain", "value": message}]}, timeout=10)
+            content = [{"type": "text/html", "value": html_body}]
+            if text_body:
+                content.append({"type": "text/plain", "value": text_body})
+
+            resp = await httpx.AsyncClient().post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={"Authorization": f"Bearer {settings.SENDGRID_API_KEY}"},
+                json={
+                    "personalizations": [{"to": [{"email": body.destination}]}],
+                    "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": body.branch_name},
+                    "subject": subject,
+                    "content": content,
+                },
+                timeout=10,
+            )
             return {"sent": resp.status_code in (200, 202), "method": "sendgrid"}
         except Exception as e:
             return {"sent": False, "error": str(e)}
+
     if body.type in ("sms", "whatsapp") and settings.META_WHATSAPP_TOKEN and settings.META_WHATSAPP_PHONE_ID:
         try:
             import httpx
+            items_text = "\n".join(
+                f"• {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}"
+                for i in body.items
+            ) or "• Temple donation"
+            message = f"Thank you! 🙏\n\nOrder: {body.order_ref}\n{items_text}\nTotal: £{body.total:.2f}\n\nJay Shri Krishna\n{body.branch_name}"
             phone = body.destination.replace(" ", "").replace("+", "")
             if phone.startswith("0"):
                 phone = "44" + phone[1:]
-            resp = await httpx.AsyncClient().post(f"https://graph.facebook.com/v19.0/{settings.META_WHATSAPP_PHONE_ID}/messages", headers={"Authorization": f"Bearer {settings.META_WHATSAPP_TOKEN}", "Content-Type": "application/json"}, json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": message}}, timeout=10)
+            resp = await httpx.AsyncClient().post(
+                f"https://graph.facebook.com/v19.0/{settings.META_WHATSAPP_PHONE_ID}/messages",
+                headers={"Authorization": f"Bearer {settings.META_WHATSAPP_TOKEN}"},
+                json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": message}},
+                timeout=10,
+            )
             return {"sent": resp.status_code == 200, "method": "whatsapp"}
         except Exception as e:
             return {"sent": False, "error": str(e)}
+
     return {"sent": True, "method": "logged", "note": "SendGrid/WhatsApp not configured"}
 
 

@@ -59,10 +59,11 @@ const NAV_SECTIONS = [
   {
     label: 'System',
     items: [
-      { href: '/settings/branding', icon: '🎨', label: 'Branding' },
-      { href: '/settings/branches', icon: '🌿', label: 'Branches' },
-      { href: '/settings/users',    icon: '🔐', label: 'Users & Roles' },
-      { href: '/settings/azure-ad', icon: '🔷', label: 'Azure AD / SSO' },
+      { href: '/settings/branding',         icon: '🎨', label: 'Branding' },
+      { href: '/settings/email-templates',  icon: '📧', label: 'Email Templates' },
+      { href: '/settings/branches',         icon: '🌿', label: 'Branches' },
+      { href: '/settings/users',            icon: '🔐', label: 'Users & Roles' },
+      { href: '/settings/azure-ad',         icon: '🔷', label: 'Azure AD / SSO' },
     ],
   },
 ]
