@@ -300,31 +300,96 @@ class QuickDonationRecordInput(BaseModel):
     reader_id: str = ""
 
 
+# Anonymous kiosk user/branch lookup — maps branch codes to UUIDs at runtime.
+# Falls back to using the code directly (works if DB stores string IDs).
+async def _resolve_branch_uuid(db: Any, branch_code: str) -> str:
+    """Resolve a branch short code (e.g. 'main') to its UUID. Returns the code unchanged if not found."""
+    from sqlalchemy import text
+    row = (await db.execute(text("SELECT id FROM branches WHERE code = :code LIMIT 1"), {"code": branch_code})).mappings().first()
+    return str(row["id"]) if row else branch_code
+
+
+async def _resolve_anonymous_user(db: Any) -> str:
+    """Get or create a system 'anonymous-kiosk' user for recording anonymous donations."""
+    from sqlalchemy import text
+    row = (await db.execute(text("SELECT id FROM users WHERE email = 'anonymous-kiosk@shital.org' LIMIT 1"))).mappings().first()
+    if row:
+        return str(row["id"])
+    anon_id = str(uuid.uuid4())
+    await db.execute(
+        text(
+            "INSERT INTO users (id, email, name, role, created_at, updated_at) "
+            "VALUES (:id, 'anonymous-kiosk@shital.org', 'Anonymous Kiosk Donor', 'KIOSK', :now, :now) "
+            "ON CONFLICT (email) DO NOTHING"
+        ),
+        {"id": anon_id, "now": datetime.utcnow()},
+    )
+    await db.commit()
+    # Re-fetch in case of race condition
+    row = (await db.execute(text("SELECT id FROM users WHERE email = 'anonymous-kiosk@shital.org' LIMIT 1"))).mappings().first()
+    return str(row["id"]) if row else anon_id
+
+
 @router.post("/quick-donation/record")
 async def record_quick_donation(body: QuickDonationRecordInput):
-    """Record a quick donation transaction in the orders table for audit and reporting."""
+    """
+    Record a quick donation as an anonymous entry in both the orders and donations tables.
+    All quick donations are stored as anonymous — no personal data is captured.
+    """
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
     order_id = body.basket_id
+    donation_id = str(uuid.uuid4())
     total = body.amount_pence / 100
     now = datetime.utcnow()
     try:
         async with SessionLocal() as db:
+            branch_id = await _resolve_branch_uuid(db, body.branch_id)
+            anon_user_id = await _resolve_anonymous_user(db)
+
+            # 1. Record in orders table (for order tracking / reconciliation)
             await db.execute(
                 text(
-                    "INSERT INTO orders (id, branch_id, basket_id, reference, status, total_amount, currency, "
-                    "payment_provider, payment_ref, idempotency_key, created_at, updated_at) "
-                    "VALUES (:id, :bid, :basket, :ref, 'PENDING', :total, 'GBP', 'KIOSK', :pref, :ikey, :now, :now) "
+                    "INSERT INTO orders (id, user_id, branch_id, basket_id, reference, status, total_amount, currency, "
+                    "payment_provider, payment_ref, idempotency_key, metadata, created_at, updated_at) "
+                    "VALUES (:id, :uid, :bid, :basket, :ref, 'PENDING', :total, 'GBP', 'KIOSK', :pref, :ikey, "
+                    "'{\"source\": \"quick-donation\", \"anonymous\": true}'::jsonb, :now, :now) "
                     "ON CONFLICT (id) DO NOTHING"
                 ),
                 {
-                    "id": order_id, "bid": body.branch_id, "basket": body.basket_id,
-                    "ref": body.order_ref, "total": str(total),
-                    "pref": body.payment_intent_id, "ikey": order_id, "now": now,
+                    "id": order_id, "uid": anon_user_id, "bid": branch_id,
+                    "basket": body.basket_id, "ref": body.order_ref,
+                    "total": str(total), "pref": body.payment_intent_id,
+                    "ikey": order_id, "now": now,
                 },
             )
+
+            # 2. Record in donations table (for donation reporting, Gift Aid, finance)
+            await db.execute(
+                text(
+                    "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
+                    "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
+                    "status, idempotency_key, created_at, updated_at) "
+                    "VALUES (:id, :uid, :bid, :amount, 'GBP', false, 'General Fund', :ref, "
+                    "'KIOSK', :pref, 'PENDING', :ikey, :now, :now) "
+                    "ON CONFLICT (idempotency_key) DO NOTHING"
+                ),
+                {
+                    "id": donation_id, "uid": anon_user_id, "bid": branch_id,
+                    "amount": str(total), "ref": body.order_ref,
+                    "pref": body.payment_intent_id, "ikey": f"qd-{order_id}",
+                    "now": now,
+                },
+            )
+
             await db.commit()
-        return {"recorded": True, "order_id": order_id, "reference": body.order_ref}
+        return {
+            "recorded": True,
+            "order_id": order_id,
+            "donation_id": donation_id,
+            "reference": body.order_ref,
+            "anonymous": True,
+        }
     except Exception as e:
         return {"recorded": False, "error": str(e)}
 
