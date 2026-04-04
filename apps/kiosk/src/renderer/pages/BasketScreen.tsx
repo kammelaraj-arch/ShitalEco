@@ -11,21 +11,17 @@ const GA_API_KEY = 'kSZi9RxDcUCLhU4A6ShTBg48103'
 async function lookupAddresses(raw: string): Promise<{ addresses: string[]; postcode: string }> {
   const clean = raw.trim().replace(/\s+/g, '').toLowerCase()
   const res = await fetch(
-    `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GA_API_KEY}&expand=true`,
+    `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GA_API_KEY}`,
     { signal: AbortSignal.timeout(10000) }
   )
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`API error ${res.status}: ${body.slice(0, 120)}`)
   }
-  const data = await res.json() as { addresses?: string[] | Array<{ formatted_address?: string[] }>; postcode?: string }
-  // Handle both compact format (string[]) and expanded format (object[])
-  const addresses = (data.addresses ?? []).map((a) => {
-    if (typeof a === 'string') {
-      return a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', ')
-    }
-    return (a.formatted_address ?? []).filter(Boolean).join(', ')
-  }).filter(Boolean)
+  const data = await res.json() as { addresses?: string[]; postcode?: string }
+  const addresses = (data.addresses ?? [])
+    .map((a: string) => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
+    .filter(Boolean)
   return { addresses, postcode: data.postcode || raw.toUpperCase() }
 }
 
