@@ -76,6 +76,7 @@ export function GiftAidScreen() {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [declaration, setDeclaration] = useState(false)
+  const [gaTerms,     setGaTerms]     = useState(false)
 
   // No-form — improved personal details capture
   const [noAnonymous, setNoAnonymous] = useState(false)
@@ -132,7 +133,7 @@ export function GiftAidScreen() {
     setScreen('checkout')
   }
 
-  const formValid = fullName.trim().length > 1 && address.trim().length > 3 && declaration && (email.trim() || phone.trim())
+  const formValid = fullName.trim().length > 1 && address.trim().length > 3 && declaration && gaTerms && (email.trim() || phone.trim())
 
   return (
     <div className="w-full h-full flex flex-col" style={{ fontFamily: 'Inter, system-ui, sans-serif', background: th.mainBg }}>
@@ -317,29 +318,47 @@ export function GiftAidScreen() {
                 )}
               </div>
 
-              {/* Declaration */}
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
-                <p className="text-xs text-blue-800 mb-3 leading-relaxed">
-                  <strong>Gift Aid Declaration:</strong> I am a UK taxpayer and understand that if I pay less Income Tax and/or Capital Gains Tax in the current tax year than the amount of Gift Aid claimed on all my donations it is my responsibility to pay any difference.
-                </p>
-                <button
-                  onClick={() => setDeclaration(!declaration)}
-                  className="flex items-center gap-3 text-sm font-bold transition-all active:scale-95"
-                  style={{ color: declaration ? '#166534' : '#374151' }}
+              {/* Declaration — mandatory, starts un-ticked */}
+              <button
+                type="button"
+                onClick={() => setDeclaration(!declaration)}
+                className="w-full flex items-start gap-3 p-4 rounded-2xl border-2 text-left transition-all active:scale-[0.98]"
+                style={{ borderColor: declaration ? '#22C55E' : '#EF4444', background: declaration ? '#F0FDF4' : '#FEF2F2' }}
+              >
+                <div
+                  className="w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-all"
+                  style={{ borderColor: declaration ? '#22C55E' : '#EF4444', background: declaration ? '#22C55E' : '#fff' }}
                 >
-                  <div
-                    className="w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all"
-                    style={{ borderColor: declaration ? '#22C55E' : '#9CA3AF', background: declaration ? '#22C55E' : '#fff' }}
-                  >
-                    {declaration && <span className="text-white text-xs font-black">✓</span>}
-                  </div>
-                  I confirm the above declaration
-                </button>
-              </div>
+                  {declaration && <span className="text-white text-xs font-black">✓</span>}
+                </div>
+                <p className="text-xs leading-relaxed">
+                  <span className={`font-black text-sm ${declaration ? '#166534' : 'text-red-700'}`}>Gift Aid Declaration *</span><br />
+                  <span className="text-gray-700">I am a UK taxpayer and understand that if I pay less Income Tax and/or Capital Gains Tax in the current tax year than the amount of Gift Aid claimed on all my donations it is my responsibility to pay any difference.</span>
+                </p>
+              </button>
+
+              {/* T&C — mandatory, starts un-ticked */}
+              <button
+                type="button"
+                onClick={() => setGaTerms(!gaTerms)}
+                className="w-full flex items-start gap-3 p-4 rounded-2xl border-2 text-left transition-all active:scale-[0.98]"
+                style={{ borderColor: gaTerms ? '#F59E0B' : '#EF4444', background: gaTerms ? '#FFFBEB' : '#FEF2F2' }}
+              >
+                <div
+                  className="w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-all"
+                  style={{ borderColor: gaTerms ? '#F59E0B' : '#EF4444', background: gaTerms ? '#F59E0B' : '#fff' }}
+                >
+                  {gaTerms && <span className="text-white text-xs font-black">✓</span>}
+                </div>
+                <p className="text-xs leading-relaxed">
+                  <span className={`font-black text-sm ${gaTerms ? 'text-amber-800' : 'text-red-700'}`}>Terms &amp; Conditions *</span><br />
+                  <span className={gaTerms ? 'text-amber-700' : 'text-red-600'}>{formTextConfig.termsText}</span>
+                </p>
+              </button>
 
               {/* GDPR notice */}
               <p className="text-xs text-gray-400 text-center px-2">
-                🔒 Your data will be used only for Gift Aid records as required by HMRC and will not be shared with third parties.
+                🔒 {formTextConfig.gdprText}
               </p>
 
               {/* Confirm button */}

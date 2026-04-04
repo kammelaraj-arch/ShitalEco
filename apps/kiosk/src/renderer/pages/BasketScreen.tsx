@@ -47,6 +47,7 @@ function GiftAidScreen({
 
   const [agreed,    setAgreed]   = useState(true)
   const [gdpr,      setGdpr]     = useState(true)
+  const [terms,     setTerms]    = useState(false)
   const [fullName,  setFullName] = useState('')
   const [postcode,  setPostcode] = useState('')
   const [addresses, setAddresses]= useState<string[]>([])
@@ -80,10 +81,11 @@ function GiftAidScreen({
   }
 
   function handleContinue() {
+    if (!agreed) { setError('Please confirm the Gift Aid declaration'); return }
+    if (!terms)  { setError('Please accept the Terms & Conditions to proceed'); return }
     if (!fullName.trim()) { setError('Please enter your full name'); return }
     if (!address) { setError('Please look up your postcode and select your address'); return }
     if (!phone.trim() && !email.trim()) { setError('Please enter a phone number or email'); return }
-    if (!agreed) { setError('Please confirm the Gift Aid declaration'); return }
     setError('')
     onConfirm({ fullName, postcode: resolvedPc || postcode.toUpperCase(), address, email, phone, agreed })
   }
@@ -135,31 +137,50 @@ function GiftAidScreen({
           </div>
         )}
 
-        {/* Gift Aid declaration — pre-ticked */}
+        {/* Gift Aid declaration — pre-ticked, mandatory */}
         <button
+          type="button"
           onClick={() => setAgreed(a => !a)}
-          className={`w-full flex items-start gap-3 p-4 rounded-2xl border-2 text-left transition-all ${agreed ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white'}`}
+          className={`w-full flex items-start gap-3 p-4 rounded-2xl border-2 text-left transition-all active:scale-[0.98] ${agreed ? 'border-green-400 bg-green-50' : 'border-red-200 bg-red-50'}`}
         >
-          <div className={`w-6 h-6 rounded-md border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${agreed ? 'bg-green-500 border-green-500' : 'border-gray-300 bg-white'}`}>
+          <div className={`w-6 h-6 rounded-md border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${agreed ? 'bg-green-500 border-green-500' : 'border-red-400 bg-white'}`}>
             {agreed && <span className="text-white text-xs font-black">✓</span>}
           </div>
-          <p className="text-gray-700 text-xs leading-relaxed text-left">
-            <span className="font-black text-gray-900 text-sm">Gift Aid Declaration </span><br />
-            I am a UK taxpayer and understand that if I pay less Income Tax and/or Capital Gains Tax than the amount of Gift Aid claimed on all my donations in that tax year it is my responsibility to pay any difference.
+          <p className="text-xs leading-relaxed text-left">
+            <span className={`font-black text-sm ${agreed ? 'text-gray-900' : 'text-red-700'}`}>Gift Aid Declaration * </span><br />
+            <span className="text-gray-700">I am a UK taxpayer and understand that if I pay less Income Tax and/or Capital Gains Tax than the amount of Gift Aid claimed on all my donations in that tax year it is my responsibility to pay any difference.</span>
           </p>
         </button>
 
         {/* GDPR — pre-ticked */}
         <button
+          type="button"
           onClick={() => setGdpr(g => !g)}
-          className={`w-full flex items-start gap-3 p-3.5 rounded-2xl border-2 text-left transition-all ${gdpr ? 'border-blue-300 bg-blue-50' : 'border-gray-100 bg-gray-50'}`}
+          className={`w-full flex items-start gap-3 p-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.98] ${gdpr ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white'}`}
         >
-          <div className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${gdpr ? 'bg-blue-500 border-blue-500' : 'border-gray-300 bg-white'}`}>
-            {gdpr && <span className="text-white text-[9px] font-black">✓</span>}
+          <div className={`w-6 h-6 rounded-md border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${gdpr ? 'bg-blue-500 border-blue-500' : 'border-gray-300 bg-white'}`}>
+            {gdpr && <span className="text-white text-xs font-black">✓</span>}
           </div>
           <p className="text-gray-500 text-xs leading-relaxed">
             <span className="font-semibold text-gray-700">GDPR Consent — </span>
             I consent to Shital Temple processing my personal data for Gift Aid reclaiming purposes under HMRC guidelines. My data will not be shared with third parties.
+          </p>
+        </button>
+
+        {/* T&C — mandatory, starts un-ticked */}
+        <button
+          type="button"
+          onClick={() => setTerms(t => !t)}
+          className={`w-full flex items-start gap-3 p-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.98] ${terms ? 'border-amber-300 bg-amber-50' : 'border-red-200 bg-red-50'}`}
+        >
+          <div className={`w-6 h-6 rounded-md border-2 flex-shrink-0 flex items-center justify-center mt-0.5 transition-all ${terms ? 'bg-amber-500 border-amber-500' : 'border-red-400 bg-white'}`}>
+            {terms && <span className="text-white text-xs font-black">✓</span>}
+          </div>
+          <p className="text-xs leading-relaxed">
+            <span className={`font-bold text-sm ${terms ? 'text-amber-800' : 'text-red-700'}`}>Terms &amp; Conditions * </span>
+            <span className={terms ? 'text-amber-700' : 'text-red-600'}>
+              By proceeding you confirm that your donation is made voluntarily and you agree to our charitable donation terms. This consent is required to continue.
+            </span>
           </p>
         </button>
 
