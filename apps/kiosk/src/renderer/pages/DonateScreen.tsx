@@ -4,7 +4,7 @@ import { useKioskStore, t } from '../store/kiosk.store'
 
 const PRESET_AMOUNTS = [5, 10, 25, 50, 100, 250]
 
-const PURPOSES = [
+const PURPOSES: Array<{ id: string; en: string; gu: string; hi: string; icon: string; [key: string]: string }> = [
   { id: 'general', en: 'General Fund', gu: 'સામાન્ય ભંડોળ', hi: 'सामान्य कोष', icon: '🕉️' },
   { id: 'temple_maintenance', en: 'Temple Maintenance', gu: 'મંદિર જાળવણી', hi: 'मंदिर रखरखाव', icon: '🏛️' },
   { id: 'youth_education', en: 'Youth & Education', gu: 'યુવા અને શિક્ષણ', hi: 'युवा और शिक्षा', icon: '📚' },

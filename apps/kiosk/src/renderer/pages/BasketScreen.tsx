@@ -639,66 +639,61 @@ export function BasketScreen() {
         </div>
       )}
 
-      {/* ── Bottom buttons — McDonald's style ── */}
+      {/* ── Bottom buttons — all in one row, graduated sizing ── */}
       <div
         className="flex-shrink-0 px-4 pt-3 pb-4"
         style={{ borderTop: '1px solid #e5e7eb', background: '#fff' }}
       >
-        {items.length > 0 && (
-          <>
-            {/* Primary button row */}
-            {hasEligible ? (
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                {/* Without Gift Aid — outlined */}
-                <button
-                  onClick={handleNormalCheckout}
-                  className="py-4 rounded-xl border-2 border-gray-300 text-gray-700 font-black text-sm active:scale-97 transition-all"
-                >
-                  <div className="text-xs font-semibold text-gray-400 mb-0.5">Without Gift Aid</div>
-                  <div>Confirm &amp; Pay · £{total.toFixed(2)}</div>
-                </button>
+        <div className="flex gap-2 items-stretch">
 
-                {/* With Gift Aid — green filled */}
-                <button
-                  onClick={() => setShowGiftAid(true)}
-                  className="py-4 rounded-xl text-white font-black text-sm shadow-lg active:scale-97 transition-all"
-                  style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}
-                >
-                  <div className="flex items-center justify-center gap-1 mb-0.5">
-                    <span className="text-base">🇬🇧</span>
-                    <span className="text-xs text-green-200">Boost with Gift Aid</span>
-                  </div>
-                  <div>Temple gets £{(total + giftAidBonus).toFixed(2)}</div>
-                </button>
-              </div>
-            ) : (
-              <div className="mb-3">
-                <button
-                  onClick={handleNormalCheckout}
-                  className="w-full py-4 rounded-xl text-white font-black text-base shadow-lg active:scale-[0.98] transition-all"
-                  style={{ background: th.langActive }}
-                >
-                  Confirm &amp; Pay · £{total.toFixed(2)} →
-                </button>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Secondary row */}
-        <div className="flex gap-2">
-          <button
-            onClick={() => setScreen('home')}
-            className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm active:scale-97 transition-all"
-          >
-            ← Order More
-          </button>
+          {/* Start Again — smallest */}
           <button
             onClick={() => { if (window.confirm('Clear basket and start again?')) { resetKiosk(); setScreen('home') } }}
-            className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-400 font-semibold text-sm active:scale-97 transition-all"
+            className="flex-none px-2.5 py-3 rounded-xl border border-gray-200 text-gray-400 font-medium text-[11px] leading-tight active:scale-95 transition-all text-center"
+            style={{ minWidth: 52 }}
           >
-            Start Again
+            Start<br/>Again
           </button>
+
+          {/* Back — slightly larger */}
+          <button
+            onClick={() => setScreen('home')}
+            className="flex-none px-3 py-3 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm active:scale-95 transition-all"
+            style={{ minWidth: 72 }}
+          >
+            ← Back
+          </button>
+
+          {/* Confirm & Pay — medium-large */}
+          {items.length > 0 && (
+            <button
+              onClick={handleNormalCheckout}
+              className="flex-1 py-3 rounded-xl font-black text-sm active:scale-[0.97] transition-all"
+              style={hasEligible
+                ? { border: '2px solid #d1d5db', color: '#374151', background: '#fff' }
+                : { background: th.langActive, color: '#fff', boxShadow: `0 4px 14px ${th.langActive}50` }
+              }
+            >
+              {hasEligible && <div className="text-[10px] font-semibold opacity-60 mb-0.5">Without Gift Aid</div>}
+              <div>Confirm &amp; Pay · £{total.toFixed(2)}</div>
+            </button>
+          )}
+
+          {/* Boost with Gift Aid — biggest */}
+          {items.length > 0 && hasEligible && (
+            <button
+              onClick={() => setShowGiftAid(true)}
+              className="flex-[1.4] py-3 rounded-xl text-white font-black text-sm shadow-lg active:scale-[0.97] transition-all"
+              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}
+            >
+              <div className="flex items-center justify-center gap-1 mb-0.5">
+                <span className="text-base">🇬🇧</span>
+                <span className="text-xs text-green-200">Boost with Gift Aid</span>
+              </div>
+              <div>Temple gets £{(total + giftAidBonus).toFixed(2)}</div>
+            </button>
+          )}
+
         </div>
       </div>
     </motion.div>

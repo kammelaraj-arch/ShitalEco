@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useKioskStore, t, THEMES, KioskTheme } from '../store/kiosk.store'
+import { useKioskStore, t, THEMES, KioskTheme, Language, LANGUAGE_META } from '../store/kiosk.store'
 import {
   SOFT_DONATION_ITEMS, SHOP_ITEMS, BRICK_TIERS, GENERAL_DONATIONS, PROJECTS,
   SPONSORSHIP_ITEMS,
@@ -147,6 +147,52 @@ function ThemePicker({ onClose }: { onClose: () => void }) {
   )
 }
 
+// ─── Language Picker ──────────────────────────────────────────────────────────
+function LanguagePicker({ onClose }: { onClose: () => void }) {
+  const { language, setLanguage } = useKioskStore()
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)' }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.88, y: 24 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.88, y: 24 }}
+        className="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-sm"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-black text-gray-900">🌐 Choose Language</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 font-bold">×</button>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {(Object.entries(LANGUAGE_META) as [Language, typeof LANGUAGE_META[Language]][]).map(([id, meta]) => {
+            const isActive = language === id
+            return (
+              <button
+                key={id}
+                onClick={() => { setLanguage(id); onClose() }}
+                className={`flex flex-col items-center gap-1 p-3 rounded-2xl border-2 transition-all active:scale-95 ${
+                  isActive ? 'border-orange-400 bg-orange-50' : 'border-gray-100 hover:border-gray-200'
+                }`}
+              >
+                <span className="text-xl font-bold" style={{ color: isActive ? '#FF9933' : '#374151' }}>{meta.label}</span>
+                <span className="text-[10px] text-gray-400">{meta.name}</span>
+                {isActive && <span className="text-orange-500 text-xs font-black">✓</span>}
+              </button>
+            )
+          })}
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 // ─── Main HomeScreen ──────────────────────────────────────────────────────────
 export function HomeScreen() {
   const { language, setScreen, addItem, items, theme, resetKiosk, branchId } = useKioskStore()
@@ -155,6 +201,9 @@ export function HomeScreen() {
   const [services, setServices] = useState<Service[]>(MOCK_ITEMS)
   const [added, setAdded] = useState<string | null>(null)
   const [showThemePicker, setShowThemePicker] = useState(false)
+  const [showLanguagePicker, setShowLanguagePicker] = useState(false)
+  const [customAmount, setCustomAmount] = useState('')
+  const [customAdded, setCustomAdded] = useState(false)
 
   const itemCount = items.reduce((s, i) => s + i.quantity, 0)
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
@@ -195,6 +244,7 @@ export function HomeScreen() {
       totalPrice: item.price,
       referenceId: item.id,
       giftAidEligible: item.giftAidEligible,
+      category: item.category,
     })
     setAdded(item.id)
     setTimeout(() => setAdded(null), 1400)
@@ -202,9 +252,18 @@ export function HomeScreen() {
 
   const handleAdd = (svc: Service) => {
     const giftAidEligible = ['DONATION', 'GENERAL_DONATION', 'PROJECT_DONATION'].includes(svc.category)
-    addItem({ type: svc.category.includes('DONATION') ? 'DONATION' : 'SERVICE', name: svc.name, quantity: 1, unitPrice: svc.price, totalPrice: svc.price, referenceId: svc.id, giftAidEligible })
+    addItem({ type: svc.category.includes('DONATION') ? 'DONATION' : 'SERVICE', name: svc.name, quantity: 1, unitPrice: svc.price, totalPrice: svc.price, referenceId: svc.id, giftAidEligible, category: svc.category })
     setAdded(svc.id)
     setTimeout(() => setAdded(null), 1400)
+  }
+
+  const handleAddCustom = () => {
+    const amt = parseFloat(customAmount)
+    if (isNaN(amt) || amt <= 0) return
+    addItem({ type: 'DONATION', name: `Custom Donation £${amt.toFixed(2)}`, quantity: 1, unitPrice: amt, totalPrice: amt, giftAidEligible: true, category: 'GENERAL_DONATION' })
+    setCustomAmount('')
+    setCustomAdded(true)
+    setTimeout(() => setCustomAdded(false), 1400)
   }
 
   const displayItems = useCatalog ? catalogItems : filteredServices
@@ -241,22 +300,34 @@ export function HomeScreen() {
           <p className="text-xs opacity-60 leading-tight" style={{ color: th.headerSub }}>Wembley, London HA9 0EW</p>
         </div>
 
-        {/* Language */}
-        <div className="flex gap-1">
-          {(['en', 'gu', 'hi'] as const).map(lang => (
-            <button
-              key={lang}
-              onClick={() => useKioskStore.getState().setLanguage(lang)}
-              className="px-2 py-1 rounded-lg text-xs font-bold uppercase transition-all"
-              style={{
-                background: language === lang ? th.langActive : 'rgba(255,255,255,0.15)',
-                color: language === lang ? '#fff' : th.headerSub,
-              }}
+        {/* Language picker button */}
+        <button
+          onClick={() => setShowLanguagePicker(true)}
+          className="px-2.5 py-1.5 rounded-lg flex items-center gap-1 active:scale-95 transition-all"
+          style={{ background: 'rgba(255,255,255,0.15)' }}
+          title="Change language"
+        >
+          <span className="text-sm font-black" style={{ color: th.headerText }}>{LANGUAGE_META[language].label}</span>
+          <span className="text-[10px]" style={{ color: th.headerSub }}>▾</span>
+        </button>
+
+        {/* Basket icon with count */}
+        <button
+          onClick={() => itemCount > 0 ? setScreen('basket') : undefined}
+          className="relative w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 transition-all"
+          style={{ background: itemCount > 0 ? `${th.langActive}25` : 'rgba(255,255,255,0.10)' }}
+          title="View basket"
+        >
+          <span className="text-lg">🛒</span>
+          {itemCount > 0 && (
+            <span
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center text-white shadow"
+              style={{ background: th.langActive }}
             >
-              {lang === 'en' ? 'EN' : lang === 'gu' ? 'ગુ' : 'हि'}
-            </button>
-          ))}
-        </div>
+              {itemCount}
+            </span>
+          )}
+        </button>
 
         {/* Theme picker button */}
         <button
@@ -488,6 +559,36 @@ export function HomeScreen() {
         </main>
       </div>
 
+      {/* ══ CUSTOM DONATION STRIP — always visible ═════════════════════════════ */}
+      <div
+        className="flex-shrink-0 px-4 py-2 flex items-center gap-2"
+        style={{ background: '#FFFBEB', borderTop: '1px solid #FDE68A' }}
+      >
+        <span className="text-xs font-bold text-amber-700 flex-shrink-0">🙏 Custom:</span>
+        <div className="flex items-center gap-1 flex-1">
+          <span className="text-sm font-bold text-gray-500 flex-shrink-0">£</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={customAmount}
+            onChange={e => setCustomAmount(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAddCustom()}
+            placeholder="Enter amount"
+            min="1"
+            className="flex-1 px-3 py-1.5 rounded-xl border-2 text-sm font-bold outline-none bg-white"
+            style={{ borderColor: customAmount && parseFloat(customAmount) > 0 ? '#FF9933' : '#FDE68A' }}
+          />
+        </div>
+        <button
+          onClick={handleAddCustom}
+          disabled={!customAmount || parseFloat(customAmount) <= 0}
+          className="px-4 py-1.5 rounded-xl text-white font-black text-sm transition-all active:scale-95 disabled:opacity-40 flex-shrink-0"
+          style={{ background: customAdded ? '#22C55E' : th.langActive }}
+        >
+          {customAdded ? '✓ Added' : '+ Add'}
+        </button>
+      </div>
+
       {/* ══ BOTTOM BAR — always visible, McDonald's style ══════════════════════ */}
       <div
         className="flex-shrink-0"
@@ -540,6 +641,11 @@ export function HomeScreen() {
       {/* Theme picker overlay */}
       <AnimatePresence>
         {showThemePicker && <ThemePicker onClose={() => setShowThemePicker(false)} />}
+      </AnimatePresence>
+
+      {/* Language picker overlay */}
+      <AnimatePresence>
+        {showLanguagePicker && <LanguagePicker onClose={() => setShowLanguagePicker(false)} />}
       </AnimatePresence>
     </div>
   )

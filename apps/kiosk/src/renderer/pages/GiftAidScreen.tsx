@@ -2,6 +2,13 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 
+// Categories where Name + (Phone or Email) are required unless anonymous
+const REQUIRES_NAMED_CONTACT = new Set([
+  'GRAINS', 'OIL_ESSENTIALS', 'PULSES', 'PUJA_ITEMS', 'PRASAD',
+  'BOOKS', 'MURTIS', 'MALAS', 'PUJA_ACCESSORIES',
+  'PROJECT_DONATION', 'SPONSORSHIP',
+])
+
 // ─── Postcode lookup (mock + real) ───────────────────────────────────────────
 const MOCK_ADDRESSES: Record<string, string[]> = {
   'HA9': [
@@ -46,9 +53,10 @@ async function lookupPostcode(postcode: string): Promise<string[]> {
 // ─── Main GiftAidScreen ───────────────────────────────────────────────────────
 export function GiftAidScreen() {
   const {
-    items, setScreen, setGiftAidDeclaration, setPendingPayment, language, theme,
+    items, setScreen, setGiftAidDeclaration, setContactInfo, setPendingPayment, language, theme, formTextConfig,
   } = useKioskStore()
   const th = THEMES[theme]
+  const hasNamedDonations = items.some(i => REQUIRES_NAMED_CONTACT.has(i.category ?? ''))
 
   const eligibleTotal = items
     .filter(i => i.giftAidEligible)
@@ -69,10 +77,21 @@ export function GiftAidScreen() {
   const [phone, setPhone] = useState('')
   const [declaration, setDeclaration] = useState(false)
 
-  // No-form (just contact)
-  const [noFormMode, setNoFormMode] = useState<'email' | 'phone'>('email')
+  // No-form — improved personal details capture
+  const [noAnonymous, setNoAnonymous] = useState(false)
+  const [noFormName,  setNoFormName]  = useState('')
   const [noFormEmail, setNoFormEmail] = useState('')
   const [noFormPhone, setNoFormPhone] = useState('')
+  const [noFormGdpr,  setNoFormGdpr]  = useState(false)
+  const [noFormTerms, setNoFormTerms] = useState(false)
+
+  const noHasAnyData = !!(noFormName.trim() || noFormEmail.trim() || noFormPhone.trim())
+  const noContactOk  = noFormEmail.includes('@') || noFormPhone.trim().length > 7
+  const noFormValid  = noAnonymous
+    ? true
+    : hasNamedDonations
+      ? noFormName.trim().length > 1 && noContactOk && (!noHasAnyData || (noFormGdpr && noFormTerms))
+      : !noHasAnyData || (noFormGdpr && noFormTerms)
 
   const handleLookup = async () => {
     setLookingUp(true)
@@ -104,14 +123,11 @@ export function GiftAidScreen() {
   }
 
   const handleNoFormContinue = () => {
-    setGiftAidDeclaration({
-      agreed: false,
-      fullName: '',
-      postcode: '',
-      address: '',
-      contactEmail: noFormMode === 'email' ? noFormEmail : '',
-      contactPhone: noFormMode === 'phone' ? noFormPhone : '',
-    })
+    const name  = noAnonymous ? '' : noFormName.trim()
+    const email = noAnonymous ? '' : noFormEmail.trim()
+    const phone = noAnonymous ? '' : noFormPhone.trim()
+    setGiftAidDeclaration({ agreed: false, fullName: name, postcode: '', address: '', contactEmail: email, contactPhone: phone })
+    setContactInfo({ name, email, phone, gdprConsent: noAnonymous ? false : noFormGdpr, termsConsent: noAnonymous ? false : noFormTerms, anonymous: noAnonymous })
     setPendingPayment(true)
     setScreen('checkout')
   }
@@ -345,52 +361,134 @@ export function GiftAidScreen() {
             </motion.div>
           )}
 
-          {/* ── STEP: No Gift Aid — just contact capture ── */}
+          {/* ── STEP: No Gift Aid — personal details ── */}
           {step === 'no-form' && (
             <motion.div key="no-form" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
-              <div className="rounded-2xl border border-gray-200 bg-white p-4 text-center">
-                <p className="text-gray-600 text-sm mb-1">Please provide your contact details to receive your receipt:</p>
+
+              {/* Heading */}
+              <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                <p className="font-bold text-gray-800 text-sm">{formTextConfig.noFormHeading}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{formTextConfig.noFormSub}</p>
+                {hasNamedDonations && (
+                  <p className="text-xs font-bold text-amber-700 mt-2 bg-amber-50 px-2 py-1 rounded-lg">
+                    ⚠️ Name and contact details are required for this type of donation.
+                  </p>
+                )}
               </div>
 
-              <div className="flex gap-2">
-                {(['email', 'phone'] as const).map(mode => (
-                  <button
-                    key={mode}
-                    onClick={() => setNoFormMode(mode)}
-                    className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95"
-                    style={{
-                      background: noFormMode === mode ? th.langActive : '#F3F4F6',
-                      color: noFormMode === mode ? '#fff' : '#6B7280',
-                    }}
-                  >
-                    {mode === 'email' ? '📧 Email' : '📱 Phone'}
-                  </button>
-                ))}
-              </div>
+              {/* Anonymous toggle */}
+              <button
+                onClick={() => setNoAnonymous(!noAnonymous)}
+                className="w-full flex items-center gap-3 p-4 rounded-2xl border-2 transition-all active:scale-[0.98]"
+                style={{ borderColor: noAnonymous ? th.langActive : '#e5e7eb', background: noAnonymous ? '#FFF7ED' : '#fff' }}
+              >
+                <div className="w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all"
+                  style={{ borderColor: noAnonymous ? th.langActive : '#9CA3AF', background: noAnonymous ? th.langActive : '#fff' }}>
+                  {noAnonymous && <span className="text-white text-xs font-black">✓</span>}
+                </div>
+                <div className="text-left flex-1">
+                  <p className="font-bold text-sm text-gray-900">{formTextConfig.anonymousLabel}</p>
+                  <p className="text-xs text-gray-400">{formTextConfig.anonymousSub}</p>
+                </div>
+              </button>
 
-              {noFormMode === 'email' ? (
-                <input
-                  type="email"
-                  value={noFormEmail}
-                  onChange={e => setNoFormEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  className="w-full px-4 py-4 rounded-2xl border-2 text-base font-medium outline-none"
-                  style={{ borderColor: noFormEmail.includes('@') ? '#22C55E' : '#E5E7EB', background: '#fff' }}
-                />
-              ) : (
-                <input
-                  type="tel"
-                  value={noFormPhone}
-                  onChange={e => setNoFormPhone(e.target.value)}
-                  placeholder="07xxx xxxxxx"
-                  className="w-full px-4 py-4 rounded-2xl border-2 text-base font-medium outline-none"
-                  style={{ borderColor: noFormPhone.length > 7 ? '#22C55E' : '#E5E7EB', background: '#fff' }}
-                />
-              )}
+              {/* Personal detail fields — hidden when anonymous */}
+              <AnimatePresence>
+                {!noAnonymous && (
+                  <motion.div key="fields" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden space-y-3">
+
+                    {/* Full Name */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                        {formTextConfig.nameLabel}&nbsp;
+                        {hasNamedDonations
+                          ? <span className="text-red-500">*</span>
+                          : <span className="text-gray-300 font-normal normal-case">(optional)</span>
+                        }
+                      </label>
+                      <input type="text" value={noFormName} onChange={e => setNoFormName(e.target.value)}
+                        placeholder="e.g. Ramesh Patel"
+                        className="w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium outline-none transition-all"
+                        style={{ borderColor: noFormName.length > 1 ? '#22C55E' : '#E5E7EB', background: '#fff' }} />
+                    </div>
+
+                    {/* Email */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                        {formTextConfig.emailLabel}&nbsp;
+                        {hasNamedDonations
+                          ? <span className="text-gray-400 font-normal normal-case">(phone or email required)</span>
+                          : <span className="text-gray-300 font-normal normal-case">(optional)</span>
+                        }
+                      </label>
+                      <input type="email" value={noFormEmail} onChange={e => setNoFormEmail(e.target.value)}
+                        placeholder="your@email.com"
+                        className="w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium outline-none transition-all"
+                        style={{ borderColor: noFormEmail.includes('@') ? '#22C55E' : '#E5E7EB', background: '#fff' }} />
+                    </div>
+
+                    {/* Phone */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                        {formTextConfig.phoneLabel}&nbsp;
+                        {hasNamedDonations
+                          ? <span className="text-gray-400 font-normal normal-case">(or email)</span>
+                          : <span className="text-gray-300 font-normal normal-case">(optional)</span>
+                        }
+                      </label>
+                      <input type="tel" value={noFormPhone} onChange={e => setNoFormPhone(e.target.value)}
+                        placeholder="07xxx xxxxxx"
+                        className="w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium outline-none transition-all"
+                        style={{ borderColor: noFormPhone.trim().length > 7 ? '#22C55E' : '#E5E7EB', background: '#fff' }} />
+                    </div>
+
+                    {/* GDPR + T&C — only shown if any data entered */}
+                    <AnimatePresence>
+                      {noHasAnyData && (
+                        <motion.div key="consents" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-3">
+
+                          {/* GDPR */}
+                          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                            <p className="text-xs font-bold text-blue-800 mb-1">🔒 {formTextConfig.gdprTitle}</p>
+                            <p className="text-xs text-blue-700 leading-relaxed mb-3">{formTextConfig.gdprText}</p>
+                            <button onClick={() => setNoFormGdpr(!noFormGdpr)}
+                              className="flex items-center gap-3 text-sm font-bold transition-all active:scale-95"
+                              style={{ color: noFormGdpr ? '#166534' : '#374151' }}>
+                              <div className="w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all"
+                                style={{ borderColor: noFormGdpr ? '#22C55E' : '#9CA3AF', background: noFormGdpr ? '#22C55E' : '#fff' }}>
+                                {noFormGdpr && <span className="text-white text-xs font-black">✓</span>}
+                              </div>
+                              I understand and consent
+                            </button>
+                          </div>
+
+                          {/* T&C */}
+                          <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                            <p className="text-xs font-bold text-amber-800 mb-1">📋 {formTextConfig.termsTitle}</p>
+                            <p className="text-xs text-amber-700 leading-relaxed mb-3">{formTextConfig.termsText}</p>
+                            <button onClick={() => setNoFormTerms(!noFormTerms)}
+                              className="flex items-center gap-3 text-sm font-bold transition-all active:scale-95"
+                              style={{ color: noFormTerms ? '#166534' : '#374151' }}>
+                              <div className="w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all"
+                                style={{ borderColor: noFormTerms ? '#22C55E' : '#9CA3AF', background: noFormTerms ? '#22C55E' : '#fff' }}>
+                                {noFormTerms && <span className="text-white text-xs font-black">✓</span>}
+                              </div>
+                              I agree to the terms
+                            </button>
+                          </div>
+
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               <button
                 onClick={handleNoFormContinue}
-                className="w-full py-4 rounded-2xl text-white font-black text-lg transition-all active:scale-[0.98] shadow-lg"
+                disabled={!noFormValid}
+                className="w-full py-4 rounded-2xl text-white font-black text-lg transition-all active:scale-[0.98] shadow-lg disabled:opacity-40"
                 style={{ background: `linear-gradient(135deg,${th.basketBtn},${th.basketBtnHover})`, boxShadow: `0 6px 20px ${th.basketBtn}40` }}
               >
                 Continue to Payment →

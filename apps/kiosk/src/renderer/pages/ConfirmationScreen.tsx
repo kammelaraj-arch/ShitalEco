@@ -219,22 +219,29 @@ export function ConfirmationScreen() {
 
       </div>
 
-      {/* ── Footer: countdown + New Order ── */}
-      <div className="flex-shrink-0 px-5 pb-5 pt-3" style={{ borderTop: '1px solid #e5e7eb' }}>
-        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden mb-3">
-          <motion.div className="h-full rounded-full"
-            style={{ background: '#FF9933', width: `${(countdown / AUTO_RESET_SECONDS) * 100}%` }}
-            transition={{ duration: 1 }} />
-        </div>
-        <div className="flex gap-3 items-center">
-          <p className="flex-1 text-xs text-gray-400">
-            Starting over in <span className="font-bold text-gray-600">{countdown}s</span>
+      {/* ── Start New Customer — prominent CTA ── */}
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.75 }}
+        className="w-full px-6 pb-2">
+        <button
+          onClick={resetKiosk}
+          className="w-full py-4 rounded-2xl text-white font-black text-lg shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+          style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)', boxShadow: '0 8px 24px #FF993350' }}
+        >
+          🙏 Start New Customer
+        </button>
+      </motion.div>
+
+      {/* ── Footer: countdown ── */}
+      <div className="flex-shrink-0 px-5 pb-4 pt-2">
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <motion.div className="h-full rounded-full"
+              style={{ background: '#FF9933', width: `${(countdown / AUTO_RESET_SECONDS) * 100}%` }}
+              transition={{ duration: 1 }} />
+          </div>
+          <p className="text-xs text-gray-400 flex-shrink-0">
+            Auto-reset in <span className="font-bold text-gray-600">{countdown}s</span>
           </p>
-          <button onClick={resetKiosk}
-            className="px-6 py-3 rounded-xl text-white font-black text-sm shadow-md active:scale-95 transition-all"
-            style={{ background: '#FF9933' }}>
-            New Order
-          </button>
         </div>
       </div>
     </div>

@@ -95,7 +95,47 @@ export interface EndScreenTemplate {
   subMessage: string    // optional extra line
 }
 
-export type Language = 'en' | 'gu' | 'hi'
+export type Language = 'en' | 'gu' | 'hi' | 'te' | 'ta' | 'pa' | 'mr' | 'bn' | 'kn'
+
+export const LANGUAGE_META: Record<Language, { label: string; script: string; name: string }> = {
+  en: { label: 'EN', script: 'English',    name: 'English'    },
+  gu: { label: 'ગુ', script: 'ગુજરાતી',  name: 'Gujarati'   },
+  hi: { label: 'हि', script: 'हिन्दी',    name: 'Hindi'      },
+  te: { label: 'తె', script: 'తెలుగు',    name: 'Telugu'     },
+  ta: { label: 'த',  script: 'தமிழ்',     name: 'Tamil'      },
+  pa: { label: 'ਪੰ', script: 'ਪੰਜਾਬੀ',   name: 'Punjabi'    },
+  mr: { label: 'म',  script: 'मराठी',     name: 'Marathi'    },
+  bn: { label: 'বাং',script: 'বাংলা',     name: 'Bengali'    },
+  kn: { label: 'ಕ',  script: 'ಕನ್ನಡ',    name: 'Kannada'    },
+}
+
+export interface FormTextConfig {
+  noFormHeading: string
+  noFormSub: string
+  anonymousLabel: string
+  anonymousSub: string
+  nameLabel: string
+  emailLabel: string
+  phoneLabel: string
+  gdprTitle: string
+  gdprText: string
+  termsTitle: string
+  termsText: string
+}
+
+const DEFAULT_FORM_TEXT: FormTextConfig = {
+  noFormHeading: 'Your Contact Details',
+  noFormSub: 'Provide your details to receive a receipt. All fields are optional unless marked.',
+  anonymousLabel: 'Donate Anonymously',
+  anonymousSub: 'Your name and contact details will not be recorded.',
+  nameLabel: 'Full Name',
+  emailLabel: 'Email Address',
+  phoneLabel: 'Phone Number',
+  gdprTitle: 'Data Protection (GDPR)',
+  gdprText: 'Your personal data will be held securely for our records in accordance with UK GDPR. It will not be shared with third parties or used for marketing without your consent.',
+  termsTitle: 'Terms & Conditions',
+  termsText: 'By proceeding you confirm that your donation is made voluntarily and you agree to our charitable donation terms.',
+}
 
 export interface BasketItem {
   id: string
@@ -108,6 +148,7 @@ export interface BasketItem {
   totalPrice: number
   referenceId?: string
   giftAidEligible?: boolean
+  category?: string
 }
 
 interface KioskState {
@@ -137,6 +178,8 @@ interface KioskState {
   pendingPayment: boolean
   endScreenTemplate: EndScreenTemplate
   setEndScreenTemplate: (t: EndScreenTemplate) => void
+  formTextConfig: FormTextConfig
+  setFormTextConfig: (c: FormTextConfig) => void
   setGiftAidDeclaration: (decl: KioskState['giftAidDeclaration']) => void
   setContactInfo: (info: KioskState['contactInfo']) => void
   setPendingPayment: (v: boolean) => void
@@ -174,6 +217,8 @@ export const useKioskStore = create<KioskState>()(
   pendingPayment: false,
   endScreenTemplate: { icon: '🕉', thankYouLine: 'Jay Shri Krishna 🙏', subMessage: '' },
   setEndScreenTemplate: (endScreenTemplate) => set({ endScreenTemplate }),
+  formTextConfig: DEFAULT_FORM_TEXT,
+  setFormTextConfig: (formTextConfig) => set({ formTextConfig }),
   cardProvider: 'stripe_terminal',
   stripeReaderId: 'tmr_Gcuz1QQB6nzqMs',
   stripeReaderLabel: 'Temple WisePOS E',
@@ -224,6 +269,7 @@ export const useKioskStore = create<KioskState>()(
         squareDeviceName: state.squareDeviceName,
         branchId: state.branchId,
         endScreenTemplate: state.endScreenTemplate,
+        formTextConfig: state.formTextConfig,
       }),
     }
   )
@@ -234,19 +280,19 @@ export const t = (key: string, lang: Language): string => {
 }
 
 const TRANSLATIONS: Record<string, Record<Language, string>> = {
-  'touch_to_start': { en: 'Touch to Begin', gu: 'શરૂ કરવા સ્પર્શ કરો', hi: 'शुरू करने के लिए छुएं' },
-  'welcome': { en: 'Welcome', gu: 'સ્વાગત છે', hi: 'स्वागत है' },
-  'choose_language': { en: 'Choose Language', gu: 'ભાષા પસંદ કરો', hi: 'भाषा चुनें' },
-  'home': { en: 'Home', gu: 'ઘર', hi: 'होम' },
-  'services': { en: 'Temple Services', gu: 'મંદિર સેવાઓ', hi: 'मंदिर सेवाएं' },
-  'donate': { en: 'Make a Donation', gu: 'દાન કરો', hi: 'दान करें' },
-  'basket': { en: 'My Basket', gu: 'મારી ટોપલી', hi: 'मेरी टोकरी' },
-  'checkout': { en: 'Checkout', gu: 'ચૂકવો', hi: 'चेकआउट' },
-  'total': { en: 'Total', gu: 'કુલ', hi: 'कुल' },
-  'add_to_basket': { en: 'Add to Basket', gu: 'ટોપલીમાં ઉમેરો', hi: 'टोकरी में जोड़ें' },
-  'pay_now': { en: 'Pay Now', gu: 'હમણાં ચૂકવો', hi: 'अभी भुगतान करें' },
-  'thank_you': { en: 'Thank You', gu: 'આભાર', hi: 'धन्यवाद' },
-  'cancel': { en: 'Cancel', gu: 'રદ કરો', hi: 'रद्द करें' },
-  'back': { en: 'Back', gu: 'પાછળ', hi: 'वापस' },
-  'jay_shri_krishna': { en: 'Jay Shri Krishna 🙏', gu: 'જય શ્રી કૃષ્ણ 🙏', hi: 'जय श्री कृष्ण 🙏' },
+  'touch_to_start': { en: 'Touch to Begin',         gu: 'શરૂ કરવા સ્પર્શ કરો', hi: 'शुरू करने के लिए छुएं', te: 'ప్రారంభించడానికి స్పర్శించండి', ta: 'தொடங்க தொடவும்',      pa: 'ਸ਼ੁਰੂ ਕਰਨ ਲਈ ਛੋਹੋ',   mr: 'सुरू करण्यासाठी स्पर्श करा', bn: 'শুরু করতে স্পর্শ করুন', kn: 'ಪ್ರಾರಂಭಿಸಲು ಸ್ಪರ್ಶಿಸಿ' },
+  'welcome':        { en: 'Welcome',                 gu: 'સ્વાગત છે',           hi: 'स्वागत है',             te: 'స్వాగతం',                          ta: 'வரவேற்கிறோம்',         pa: 'ਜੀ ਆਇਆਂ ਨੂੰ',          mr: 'स्वागत आहे',                  bn: 'স্বাগতম',                kn: 'ಸ್ವಾಗತ'           },
+  'choose_language':{ en: 'Choose Language',         gu: 'ભાષા પસંદ કરો',       hi: 'भाषा चुनें',            te: 'భాష ఎంచుకోండి',                   ta: 'மொழி தேர்ந்தெடுங்கள்', pa: 'ਭਾਸ਼ਾ ਚੁਣੋ',            mr: 'भाषा निवडा',                  bn: 'ভাষা বেছে নিন',          kn: 'ಭಾಷೆ ಆಯ್ಕೆ ಮಾಡಿ'  },
+  'home':           { en: 'Home',                    gu: 'ઘર',                  hi: 'होम',                   te: 'హోమ్',                             ta: 'முகப்பு',               pa: 'ਘਰ',                    mr: 'मुख्यपृष्ठ',                  bn: 'হোম',                    kn: 'ಮನೆ'              },
+  'services':       { en: 'Temple Services',         gu: 'મંદિર સેવાઓ',          hi: 'मंदिर सेवाएं',          te: 'దేవాలయ సేవలు',                    ta: 'கோயில் சேவைகள்',       pa: 'ਮੰਦਰ ਸੇਵਾਵਾਂ',         mr: 'मंदिर सेवा',                  bn: 'মন্দির সেবা',            kn: 'ದೇವಾಲಯ ಸೇವೆಗಳು' },
+  'donate':         { en: 'Make a Donation',         gu: 'દાન કરો',             hi: 'दान करें',              te: 'దానం చేయండి',                     ta: 'நன்கொடை வழங்கவும்',    pa: 'ਦਾਨ ਕਰੋ',               mr: 'देणगी करा',                   bn: 'দান করুন',               kn: 'ದಾನ ಮಾಡಿ'         },
+  'basket':         { en: 'My Basket',               gu: 'મારી ટોપલી',          hi: 'मेरी टोकरी',            te: 'నా బాస్కెట్',                     ta: 'என் கூட',               pa: 'ਮੇਰੀ ਟੋਕਰੀ',           mr: 'माझी टोपली',                  bn: 'আমার ঝুড়ি',             kn: 'ನನ್ನ ಬುಟ್ಟಿ'      },
+  'checkout':       { en: 'Checkout',                gu: 'ચૂકવો',               hi: 'चेकआउट',               te: 'చెక్అవుట్',                        ta: 'கட்டணம் செலுத்துங்கள்',pa: 'ਭੁਗਤਾਨ ਕਰੋ',            mr: 'चेकआउट',                      bn: 'চেকআউট',                 kn: 'ಚೆಕ್ಔಟ್'          },
+  'total':          { en: 'Total',                   gu: 'કુલ',                 hi: 'कुल',                   te: 'మొత్తం',                           ta: 'மொத்தம்',               pa: 'ਕੁੱਲ',                  mr: 'एकूण',                        bn: 'মোট',                    kn: 'ಒಟ್ಟು'            },
+  'add_to_basket':  { en: 'Add to Basket',           gu: 'ટોપલીમાં ઉમેરો',      hi: 'टोकरी में जोड़ें',       te: 'బాస్కెట్‌కు జోడించు',             ta: 'கூடையில் சேர்க்கவும்', pa: 'ਟੋਕਰੀ ਵਿੱਚ ਜੋੜੋ',     mr: 'टोपलीत जोडा',                bn: 'ঝুড়িতে যোগ করুন',       kn: 'ಬುಟ್ಟಿಗೆ ಸೇರಿಸಿ'  },
+  'pay_now':        { en: 'Pay Now',                 gu: 'હમણાં ચૂકવો',         hi: 'अभी भुगतान करें',       te: 'ఇప్పుడు చెల్లించు',               ta: 'இப்போது செலுத்துங்கள்',pa: 'ਹੁਣੇ ਭੁਗਤਾਨ ਕਰੋ',       mr: 'आता पैसे द्या',               bn: 'এখনই পেমেন্ট করুন',     kn: 'ಈಗ ಪಾವತಿಸಿ'       },
+  'thank_you':      { en: 'Thank You',               gu: 'આભાર',                hi: 'धन्यवाद',               te: 'ధన్యవాదాలు',                      ta: 'நன்றி',                 pa: 'ਧੰਨਵਾਦ',                mr: 'धन्यवाद',                     bn: 'ধন্যবাদ',                kn: 'ಧನ್ಯವಾದ'          },
+  'cancel':         { en: 'Cancel',                  gu: 'રદ કરો',              hi: 'रद्द करें',             te: 'రద్దు చేయి',                      ta: 'ரத்து செய்யவும்',       pa: 'ਰੱਦ ਕਰੋ',               mr: 'रद्द करा',                    bn: 'বাতিল করুন',             kn: 'ರದ್ದುಗೊಳಿಸಿ'      },
+  'back':           { en: 'Back',                    gu: 'પાછળ',                hi: 'वापस',                  te: 'వెనక్కి',                          ta: 'பின்னால்',              pa: 'ਵਾਪਸ',                  mr: 'परत',                         bn: 'পিছনে',                  kn: 'ಹಿಂದೆ'            },
+  'jay_shri_krishna':{ en: 'Jay Shri Krishna 🙏',   gu: 'જય શ્રી કૃષ્ણ 🙏',   hi: 'जय श्री कृष्ण 🙏',     te: 'జయ శ్రీ కృష్ణ 🙏',                ta: 'ஜெய் ஸ்ரீ கிருஷ்ணா 🙏', pa: 'ਜੈ ਸ਼੍ਰੀ ਕ੍ਰਿਸ਼ਨ 🙏',   mr: 'जय श्री कृष्ण 🙏',           bn: 'জয় শ্রী কৃষ্ণ 🙏',      kn: 'ಜಯ ಶ್ರೀ ಕೃಷ್ಣ 🙏'  },
 }

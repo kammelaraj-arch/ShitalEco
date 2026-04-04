@@ -1,18 +1,20 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
-import { useKioskStore, EndScreenTemplate } from '../store/kiosk.store'
+import { useKioskStore, EndScreenTemplate, FormTextConfig } from '../store/kiosk.store'
 
 const ICON_PRESETS = ['🕉', '🙏', '🪔', '✨', '🌸', '☀️', '🌺', '🕊️']
 
 export function AdminScreen() {
-  const { setScreen, endScreenTemplate, setEndScreenTemplate, branchId, setBranchId } = useKioskStore()
+  const { setScreen, endScreenTemplate, setEndScreenTemplate, formTextConfig, setFormTextConfig, branchId, cardProvider, stripeReaderLabel, squareDeviceName } = useKioskStore()
 
-  const [tab, setTab] = useState<'endscreen' | 'device'>('endscreen')
+  const [tab, setTab] = useState<'endscreen' | 'formtext' | 'device'>('endscreen')
   const [draft, setDraft] = useState<EndScreenTemplate>({ ...endScreenTemplate })
+  const [textDraft, setTextDraft] = useState<FormTextConfig>({ ...formTextConfig })
   const [saved, setSaved] = useState(false)
 
   function handleSave() {
     setEndScreenTemplate(draft)
+    setFormTextConfig(textDraft)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -38,11 +40,11 @@ export function AdminScreen() {
 
       {/* Tabs */}
       <div className="flex gap-0 flex-shrink-0 border-b border-gray-200 bg-white">
-        {(['endscreen', 'device'] as const).map(t => (
+        {(['endscreen', 'formtext', 'device'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className="flex-1 py-3 text-sm font-bold transition-colors"
+            className="flex-1 py-3 text-xs font-bold transition-colors"
             style={{ color: tab === t ? '#FF9933' : '#6b7280', borderBottom: tab === t ? '3px solid #FF9933' : '3px solid transparent' }}>
-            {t === 'endscreen' ? '🎉 End Screen' : '⚙️ Device'}
+            {t === 'endscreen' ? '🎉 End Screen' : t === 'formtext' ? '📝 Form Text' : '⚙️ Device'}
           </button>
         ))}
       </div>
@@ -119,24 +121,67 @@ export function AdminScreen() {
           </div>
         )}
 
+        {tab === 'formtext' && (
+          <div className="space-y-4 max-w-lg">
+            {[
+              { key: 'noFormHeading',  label: 'No Gift Aid — Heading' },
+              { key: 'noFormSub',      label: 'No Gift Aid — Sub Text' },
+              { key: 'anonymousLabel', label: 'Anonymous Checkbox Label' },
+              { key: 'anonymousSub',   label: 'Anonymous Checkbox Sub' },
+              { key: 'nameLabel',      label: 'Name Field Label' },
+              { key: 'emailLabel',     label: 'Email Field Label' },
+              { key: 'phoneLabel',     label: 'Phone Field Label' },
+              { key: 'gdprTitle',      label: 'GDPR Box Title' },
+              { key: 'gdprText',       label: 'GDPR Text' },
+              { key: 'termsTitle',     label: 'T&C Box Title' },
+              { key: 'termsText',      label: 'T&C Text' },
+            ].map(({ key, label }) => (
+              <div key={key}>
+                <label className="block text-xs font-black text-gray-500 uppercase tracking-wide mb-1.5">{label}</label>
+                <textarea
+                  value={(textDraft as unknown as Record<string, string>)[key]}
+                  onChange={e => setTextDraft(d => ({ ...d, [key]: e.target.value }))}
+                  rows={key.endsWith('Text') ? 3 : 1}
+                  className="w-full border-2 rounded-xl px-3 py-2 text-sm focus:outline-none bg-white resize-none"
+                  style={{ borderColor: '#e5e7eb' }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
         {tab === 'device' && (
           <div className="space-y-4 max-w-lg">
-            <div>
-              <label className="block text-sm font-black text-gray-700 mb-2">Branch</label>
-              <div className="grid grid-cols-2 gap-2">
-                {[['main', 'Wembley'], ['leicester', 'Leicester'], ['reading', 'Reading'], ['mk', 'Milton Keynes']].map(([id, name]) => (
-                  <button key={id} onClick={() => setBranchId(id)}
-                    className="py-3 rounded-xl border-2 font-bold text-sm transition-all active:scale-95"
-                    style={{ borderColor: branchId === id ? '#FF9933' : '#e5e7eb', background: branchId === id ? '#fff7ed' : '#fff', color: branchId === id ? '#FF9933' : '#374151' }}>
-                    {name}
-                  </button>
-                ))}
+            <div className="bg-white border border-gray-200 rounded-2xl px-4 py-4">
+              <p className="text-sm font-black text-gray-700 mb-3">Device Info</p>
+              <div className="space-y-2 text-sm text-gray-600">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Branch</span>
+                  <span className="font-bold capitalize">
+                    {branchId === 'main' ? 'Wembley' : branchId === 'leicester' ? 'Leicester' : branchId === 'reading' ? 'Reading' : branchId === 'mk' ? 'Milton Keynes' : branchId}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Payment</span>
+                  <span className="font-bold capitalize">{cardProvider.replace('_', ' ')}</span>
+                </div>
+                {cardProvider === 'stripe_terminal' && stripeReaderLabel && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Terminal</span>
+                    <span className="font-bold">{stripeReaderLabel}</span>
+                  </div>
+                )}
+                {cardProvider === 'square' && squareDeviceName && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Square Device</span>
+                    <span className="font-bold">{squareDeviceName}</span>
+                  </div>
+                )}
               </div>
             </div>
-
             <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-sm text-amber-800">
-              <p className="font-bold mb-1">Payment Terminal</p>
-              <p className="text-xs">Use the Device Setup screen for card reader configuration.</p>
+              <p className="font-bold mb-1">ℹ️ Branch & Device Setup</p>
+              <p className="text-xs">Branch assignment and payment terminal configuration are set at device profile level and cannot be changed here.</p>
             </div>
           </div>
         )}
