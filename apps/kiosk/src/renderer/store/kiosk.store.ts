@@ -30,7 +30,7 @@ export const THEMES: Record<KioskTheme, {
     langActive: '#FF9933', langInactive: '#FF9933/50',
   },
   saffron: {
-    name: 'Saffron Temple', emoji: '🫏', desc: 'Rich & warm',
+    name: 'Saffron Temple', emoji: '🪔', desc: 'Rich & warm',
     headerBg: '#1C0000', headerBorder: '#FF9933/40', headerText: '#FFD700', headerSub: '#FF9933',
     logoBg: 'linear-gradient(135deg,#FF9933,#FF6600)', logoText: '#FFFFFF',
     sidebarFrom: '#FF9933', sidebarTo: '#E55C00', sidebarBorder: '#FFD700/30',
@@ -84,22 +84,10 @@ export const THEMES: Record<KioskTheme, {
 }
 
 export type KioskScreen =
-  | 'idle'
-  | 'language'
-  | 'home'
-  | 'services'
-  | 'service-detail'
-  | 'donate'
-  | 'basket'
-  | 'checkout'
-  | 'payment'
-  | 'confirmation'
-  | 'admin-pin'
-  | 'soft-donation'
-  | 'project-donation'
-  | 'shop'
-  | 'gift-aid'
-  | 'receipt'
+  | 'idle' | 'language' | 'home' | 'services' | 'service-detail'
+  | 'donate' | 'basket' | 'checkout' | 'payment' | 'confirmation'
+  | 'admin-pin' | 'soft-donation' | 'project-donation' | 'shop'
+  | 'gift-aid' | 'receipt'
 
 export type Language = 'en' | 'gu' | 'hi'
 
@@ -127,36 +115,23 @@ interface KioskState {
   idleTimer: number
   branchId: string
   theme: KioskTheme
-
-  // Device config
   cardProvider: 'stripe_terminal' | 'square' | 'cash'
   stripeReaderId: string
   stripeReaderLabel: string
   squareDeviceId: string
   squareDeviceName: string
-
   giftAidDeclaration: {
-    agreed: boolean
-    fullName: string
-    postcode: string
-    address: string
-    contactEmail: string
-    contactPhone: string
+    agreed: boolean; fullName: string; postcode: string
+    address: string; contactEmail: string; contactPhone: string
   } | null
-
-  // Set to true when gift aid screen is done so checkout auto-proceeds to payment
   pendingPayment: boolean
-
   setGiftAidDeclaration: (decl: KioskState['giftAidDeclaration']) => void
   setPendingPayment: (v: boolean) => void
   setScreen: (screen: KioskScreen) => void
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
-  setCardDevice: (
-    provider: 'stripe_terminal' | 'square' | 'cash',
-    deviceId: string,
-    deviceLabel: string
-  ) => void
+  setBranchId: (id: string) => void
+  setCardDevice: (provider: 'stripe_terminal' | 'square' | 'cash', deviceId: string, deviceLabel: string) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
   removeItem: (id: string) => void
@@ -188,12 +163,12 @@ export const useKioskStore = create<KioskState>()(
   stripeReaderLabel: 'Temple WisePOS E',
   squareDeviceId: '',
   squareDeviceName: '',
-
   setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
   setPendingPayment: (pendingPayment) => set({ pendingPayment }),
   setScreen: (screen) => set({ screen }),
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
+  setBranchId: (branchId) => set({ branchId }),
   setCardDevice: (provider, deviceId, deviceLabel) => set(
     provider === 'stripe_terminal'
       ? { cardProvider: provider, stripeReaderId: deviceId, stripeReaderLabel: deviceLabel }
@@ -202,60 +177,26 @@ export const useKioskStore = create<KioskState>()(
       : { cardProvider: provider }
   ),
   setBasketId: (basketId) => set({ basketId }),
-
   addItem: (item) => set((state) => {
-    const existing = state.items.find(
-      (i) => i.referenceId === item.referenceId && i.type === item.type
-    )
+    const existing = state.items.find((i) => i.referenceId === item.referenceId && i.type === item.type)
     if (existing) {
-      return {
-        items: state.items.map((i) =>
-          i.id === existing.id
-            ? { ...i, quantity: i.quantity + item.quantity, totalPrice: (i.quantity + item.quantity) * i.unitPrice }
-            : i
-        ),
-      }
+      return { items: state.items.map((i) => i.id === existing.id ? { ...i, quantity: i.quantity + item.quantity, totalPrice: (i.quantity + item.quantity) * i.unitPrice } : i) }
     }
-    return {
-      items: [...state.items, { ...item, id: crypto.randomUUID() }],
-    }
+    return { items: [...state.items, { ...item, id: crypto.randomUUID() }] }
   }),
-
   removeItem: (id) => set((state) => ({ items: state.items.filter((i) => i.id !== id) })),
-
   updateQuantity: (id, qty) => set((state) => ({
-    items: qty <= 0
-      ? state.items.filter((i) => i.id !== id)
-      : state.items.map((i) => i.id === id ? { ...i, quantity: qty, totalPrice: qty * i.unitPrice } : i),
+    items: qty <= 0 ? state.items.filter((i) => i.id !== id) : state.items.map((i) => i.id === id ? { ...i, quantity: qty, totalPrice: qty * i.unitPrice } : i),
   })),
-
   clearBasket: () => set({ items: [], basketId: null }),
-
   setOrderResult: (orderId, orderRef, paymentIntent) => set({ orderId, orderRef, paymentIntent }),
-
-  resetKiosk: () => set({
-    screen: 'idle',
-    items: [],
-    basketId: null,
-    orderId: null,
-    orderRef: null,
-    paymentIntent: null,
-    giftAidDeclaration: null,
-    pendingPayment: false,
-  }),
-
-  get total() {
-    return get().items.reduce((sum, i) => sum + i.totalPrice, 0)
-  },
-
-  get itemCount() {
-    return get().items.reduce((sum, i) => sum + i.quantity, 0)
-  },
+  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, pendingPayment: false }),
+  get total() { return get().items.reduce((sum, i) => sum + i.totalPrice, 0) },
+  get itemCount() { return get().items.reduce((sum, i) => sum + i.quantity, 0) },
     }),
     {
       name: 'shital-kiosk-config',
       storage: createJSONStorage(() => localStorage),
-      // Only persist device config + theme — never basket/order state
       partialize: (state) => ({
         theme: state.theme,
         language: state.language,
@@ -270,7 +211,6 @@ export const useKioskStore = create<KioskState>()(
   )
 )
 
-// Translation helper
 export const t = (key: string, lang: Language): string => {
   return TRANSLATIONS[key]?.[lang] ?? TRANSLATIONS[key]?.en ?? key
 }
@@ -280,7 +220,7 @@ const TRANSLATIONS: Record<string, Record<Language, string>> = {
   'welcome': { en: 'Welcome', gu: 'સ્વાગત છે', hi: 'स्वागत है' },
   'choose_language': { en: 'Choose Language', gu: 'ભાષા પસંદ કરો', hi: 'भाषा चुनें' },
   'home': { en: 'Home', gu: 'ઘર', hi: 'होम' },
-  'services': { en: 'Temple Services', gu: 'મંદિર સેવા૞ો', hi: 'मंदिर सेवाएं' },
+  'services': { en: 'Temple Services', gu: 'મંદિર સેવાઓ', hi: 'मंदिर सेवाएं' },
   'donate': { en: 'Make a Donation', gu: 'દાન કરો', hi: 'दान करें' },
   'basket': { en: 'My Basket', gu: 'મારી ટોપલી', hi: 'मेरी टोकरी' },
   'checkout': { en: 'Checkout', gu: 'ચૂકવો', hi: 'चेकआउट' },
@@ -290,17 +230,5 @@ const TRANSLATIONS: Record<string, Record<Language, string>> = {
   'thank_you': { en: 'Thank You', gu: 'આભાર', hi: 'धन्यवाद' },
   'cancel': { en: 'Cancel', gu: 'રદ કરો', hi: 'रद्द करें' },
   'back': { en: 'Back', gu: 'પાછળ', hi: 'वापस' },
-  'puja': { en: 'Puja', gu: 'પૂજા', hi: 'पूजा' },
-  'havan': { en: 'Havan', gu: 'હવન', hi: 'हवन' },
-  'donation': { en: 'Donation', gu: 'દાન', hi: 'दान' },
-  'classes': { en: 'Classes', gu: 'વર્ગ', hi: 'कक्षा' },
-  'hall_hire': { en: 'Hall Hire', gu: 'હિલ ભાડે', hi: 'हॉल किराया' },
-  'festival': { en: 'Festival', gu: 'ઉત્સવ', hi: 'उत्सव' },
-  'your_order': { en: 'Your Order', gu: 'તમારો ઓર્ડર', hi: 'आपका ऑर्डर' },
-  'order_confirmed': { en: 'Order Confirmed!', gu: 'ઓર્ડર પુષ્ટ!', hi: 'ऑर्डर पुष्टि!' },
-  'gift_aid': { en: 'Gift Aid (25% extra)', gu: 'ગિફ્ટ એઇડ', hi: 'गिफ़्ट एड' },
-  'free': { en: 'Free', gu: 'મફત', hi: 'मुफ़्त' },
-  'per_person': { en: 'per person', gu: 'પ્રતિ વ્યક્તિ', hi: 'प्रति व्यक्ति' },
-  'card_payment': { en: 'Pay by Card', gu: 'કાર્ડ દ્વારા ચૂકવો', hi: 'कार्ड से भुगतान' },
   'jay_shri_krishna': { en: 'Jay Shri Krishna 🙏', gu: 'જય શ્રી કૃષ્ણ 🙏', hi: 'जय श्री कृष्ण 🙏' },
 }
