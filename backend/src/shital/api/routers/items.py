@@ -659,7 +659,7 @@ async def kiosk_sponsorship(branch_id: str = "main"):
 
 
 @router.post("/seed")
-async def seed_items(ctx: OptionalSpace, force: bool = False):
+async def seed_items(force: bool = False):
     """Seed the catalog_items table with default items. Use force=true to replace existing data."""
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
