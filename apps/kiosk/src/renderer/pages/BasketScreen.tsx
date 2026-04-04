@@ -2,20 +2,33 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 
-// ─── Postcode lookup ─────────────────────────────────────────────────────────
+// ─── Postcode → Address lookup via getAddress.io (client-side, domain token) ──
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
-interface PostcodeLookupResult {
-  valid: boolean
-  postcode: string   // formatted, e.g. "HP7 9NQ"
-  area: string       // e.g. "Little Chalfont"
-  district: string   // e.g. "Buckinghamshire"
-}
+// Domain token — restricted to shital-kiosk.vercel.app, safe for browser use
+const GETADDRESS_TOKEN = 'dtoken_hEDzcyiWMr1qCTSk0cxR1UiFKYfoDY3s3jc_aRAgJJVRVewqW--9F41eyhADhPZyqh-3OOe5ZYGHNFnjs4KY_iVR5xK-A2gNuc0ZtCh7-SsYFN8AOt_vA0vsvz8x4TIJyq2f8fAByc6oAs5CE3Sp6vsCjrSOJT7FQoFJmCVQZ_I8uG3viS1QgAAqS9-N2Maf10ujT9HiQxfrUXm_iqXInw'
 
-async function lookupPostcode(raw: string): Promise<PostcodeLookupResult> {
-  const clean = raw.trim().replace(/\s/g, '').toUpperCase()
-  if (clean.length < 5) return { valid: false, postcode: '', area: '', district: '' }
+async function fetchAddresses(raw: string): Promise<string[]> {
+  const clean = raw.trim().replace(/\s+/g, '').toLowerCase()
+  if (clean.length < 5) return []
+
+  // 1. getAddress.io — full street-level addresses
+  try {
+    const res = await fetch(
+      `https://api.getaddress.io/find/${encodeURIComponent(clean)}?api-key=${GETADDRESS_TOKEN}&expand=false`,
+      { signal: AbortSignal.timeout(8000) }
+    )
+    if (res.ok) {
+      const data = await res.json() as { addresses?: string[] }
+      const formatted = (data.addresses ?? [])
+        .map(a => a.split(',').map((p: string) => p.trim()).filter(Boolean).join(', '))
+        .filter(Boolean)
+      if (formatted.length > 0) return formatted
+    }
+  } catch { /* fall through */ }
+
+  // 2. Fallback — postcodes.io (validates postcode, returns area only)
   try {
     const res = await fetch(
       `https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`,
@@ -23,15 +36,14 @@ async function lookupPostcode(raw: string): Promise<PostcodeLookupResult> {
     )
     if (res.ok) {
       const { result } = await res.json() as { result: Record<string, string> }
-      return {
-        valid: true,
-        postcode: result.postcode,
-        area: result.admin_ward || result.parish || result.admin_district || '',
-        district: result.admin_county || result.admin_district || '',
-      }
+      const area   = result.admin_ward || result.parish || ''
+      const county = result.admin_county || result.admin_district || ''
+      const pc     = result.postcode
+      return [`${[area, county, pc].filter(Boolean).join(', ')}`]
     }
-  } catch { /* network error */ }
-  return { valid: false, postcode: '', area: '', district: '' }
+  } catch { /* nothing */ }
+
+  return []
 }
 
 // ─── Gift Aid full-screen form ────────────────────────────────────────────────
@@ -49,31 +61,27 @@ function GiftAidScreen({
 }) {
   const bonus = eligibleAmt * 0.25
 
-  const [agreed,       setAgreed]      = useState(true)
-  const [gdpr,         setGdpr]        = useState(true)
-  const [fullName,     setFullName]    = useState('')
-  const [postcode,     setPostcode]    = useState('')
-  const [houseNo,      setHouseNo]     = useState('')
-  const [pcInfo,       setPcInfo]      = useState<{ postcode: string; area: string; district: string } | null>(null)
-  const [lookingUp,    setLookingUp]   = useState(false)
-  const [phone,        setPhone]       = useState('')
-  const [email,        setEmail]       = useState('')
-  const [error,        setError]       = useState('')
+  const [agreed,     setAgreed]    = useState(true)
+  const [gdpr,       setGdpr]      = useState(true)
+  const [fullName,   setFullName]  = useState('')
+  const [postcode,   setPostcode]  = useState('')
+  const [addresses,  setAddresses] = useState<string[]>([])
+  const [address,    setAddress]   = useState('')
+  const [lookingUp,  setLookingUp] = useState(false)
+  const [phone,      setPhone]     = useState('')
+  const [email,      setEmail]     = useState('')
+  const [error,      setError]     = useState('')
 
-  const fullAddress = pcInfo
-    ? [houseNo.trim(), pcInfo.area, pcInfo.district, pcInfo.postcode].filter(Boolean).join(', ')
-    : ''
-
-  async function handleLookup() {
+  async function handleFind() {
     if (!postcode.trim()) return
     setLookingUp(true)
-    setPcInfo(null)
-    setHouseNo('')
+    setAddresses([])
+    setAddress('')
     setError('')
-    const result = await lookupPostcode(postcode)
+    const results = await fetchAddresses(postcode)
     setLookingUp(false)
-    if (result.valid) {
-      setPcInfo({ postcode: result.postcode, area: result.area, district: result.district })
+    if (results.length > 0) {
+      setAddresses(results)
     } else {
       setError('Postcode not found — please check and try again')
     }
@@ -81,12 +89,11 @@ function GiftAidScreen({
 
   function handleContinue() {
     if (!fullName.trim())        { setError('Please enter your full name'); return }
-    if (!pcInfo)                 { setError('Please look up your postcode first'); return }
-    if (!houseNo.trim())         { setError('Please enter your house/flat number'); return }
-    if (!phone.trim() && !email.trim()) { setError('Please enter at least a phone number or email'); return }
+    if (!address.trim())         { setError('Please find and select your address'); return }
+    if (!phone.trim() && !email.trim()) { setError('Please enter a phone number or email'); return }
     if (!agreed)                 { setError('Please confirm the Gift Aid declaration'); return }
     setError('')
-    onConfirm({ fullName, postcode: pcInfo.postcode, address: fullAddress, email, phone, agreed })
+    onConfirm({ fullName, postcode: postcode.trim().toUpperCase(), address, email, phone, agreed })
   }
 
   return (
@@ -176,51 +183,67 @@ function GiftAidScreen({
           />
         </div>
 
-        {/* Postcode lookup */}
+        {/* Postcode → Address lookup */}
         <div>
-          <label className="block text-sm font-black text-gray-800 mb-1.5">Postcode <span className="text-red-500">*</span></label>
+          <label className="block text-sm font-black text-gray-800 mb-1.5">
+            Postcode &amp; Address <span className="text-red-500">*</span>
+          </label>
+
+          {/* Postcode row */}
           <div className="flex gap-2">
             <input
               value={postcode}
-              onChange={e => { setPostcode(e.target.value.toUpperCase()); setPcInfo(null); setHouseNo('') }}
-              onKeyDown={e => e.key === 'Enter' && handleLookup()}
-              placeholder="e.g. HA9 0EW"
-              className="flex-1 border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-mono focus:outline-none bg-white transition-colors"
-              style={{ borderColor: pcInfo ? '#16a34a' : '#e5e7eb' }}
+              onChange={e => { setPostcode(e.target.value.toUpperCase()); setAddresses([]); setAddress('') }}
+              onKeyDown={e => e.key === 'Enter' && handleFind()}
+              placeholder="e.g. HA9 0WS"
+              maxLength={8}
+              className="flex-1 border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-lg font-mono tracking-widest focus:outline-none bg-white transition-colors"
+              style={{ borderColor: address ? '#16a34a' : '#e5e7eb' }}
             />
             <button
-              onClick={handleLookup}
-              disabled={lookingUp || postcode.trim().length < 5}
-              className="px-5 py-3.5 rounded-2xl font-black text-sm text-white disabled:opacity-50 active:scale-95 transition-all flex-shrink-0"
-              style={{ background: '#16a34a', minWidth: 100 }}
+              onClick={handleFind}
+              disabled={lookingUp || postcode.trim().replace(/\s/g,'').length < 5}
+              className="px-6 py-3.5 rounded-2xl font-black text-base text-white disabled:opacity-40 active:scale-95 transition-all flex-shrink-0 shadow-md"
+              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', minWidth: 110 }}
             >
-              {lookingUp ? '…' : '🔍 Find'}
+              {lookingUp ? <span className="animate-pulse">…</span> : 'Find'}
             </button>
           </div>
 
-          {pcInfo && (
-            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="mt-3 space-y-2">
-              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-green-700 text-sm font-semibold">
-                <span>✓</span>
-                <span>{pcInfo.postcode} — {[pcInfo.area, pcInfo.district].filter(Boolean).join(', ')}</span>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">House / Flat Number or Name <span className="text-red-500">*</span></label>
-                <input
-                  value={houseNo}
-                  onChange={e => setHouseNo(e.target.value)}
-                  placeholder="e.g. 12  or  Flat 3  or  The Willows"
-                  autoFocus
-                  className="w-full border-2 rounded-2xl px-4 py-3 text-gray-900 text-base focus:outline-none bg-white transition-colors"
-                  style={{ borderColor: houseNo.trim() ? '#16a34a' : '#6ee7b7' }}
-                />
-              </div>
-              {houseNo.trim() && (
-                <p className="text-xs text-gray-500 px-1">
-                  Address: <span className="font-semibold text-gray-700">{fullAddress}</span>
-                </p>
+          {/* Address dropdown — shown when results returned */}
+          {addresses.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+              className="mt-2"
+            >
+              <select
+                value={address}
+                onChange={e => setAddress(e.target.value)}
+                className="w-full border-2 rounded-2xl px-4 py-3 text-gray-900 text-sm font-medium focus:outline-none bg-white"
+                style={{ borderColor: address ? '#16a34a' : '#6ee7b7' }}
+                size={Math.min(addresses.length + 1, 7)}
+              >
+                <option value="">— Select your address ({addresses.length} found) —</option>
+                {addresses.map((a, i) => (
+                  <option key={i} value={a}>{a}</option>
+                ))}
+              </select>
+              {address && (
+                <p className="mt-1 text-xs text-green-700 font-semibold px-1">✓ Selected: {address}</p>
               )}
             </motion.div>
+          )}
+
+          {/* Manual entry fallback after lookup attempted */}
+          {addresses.length === 0 && postcode.trim().length >= 5 && !lookingUp && (
+            <input
+              value={address}
+              onChange={e => setAddress(e.target.value)}
+              placeholder="Or type your full address here"
+              className="w-full mt-2 border-2 border-dashed border-gray-300 rounded-2xl px-4 py-3 text-gray-700 text-sm focus:outline-none bg-gray-50"
+            />
           )}
         </div>
 
