@@ -291,6 +291,54 @@ async def list_square_devices():
         return {"devices": [], "error": str(e)}
 
 
+class QuickDonationRecordInput(BaseModel):
+    basket_id: str
+    order_ref: str
+    amount_pence: int
+    branch_id: str = "main"
+    payment_intent_id: str = ""
+    reader_id: str = ""
+
+
+@router.post("/quick-donation/record")
+async def record_quick_donation(body: QuickDonationRecordInput):
+    """Record a quick donation transaction in the orders table for audit and reporting."""
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+    order_id = body.basket_id
+    total = body.amount_pence / 100
+    now = datetime.utcnow()
+    try:
+        async with SessionLocal() as db:
+            await db.execute(
+                text(
+                    "INSERT INTO orders (id, branch_id, basket_id, reference, status, total_amount, currency, "
+                    "payment_provider, payment_ref, idempotency_key, created_at, updated_at) "
+                    "VALUES (:id, :bid, :basket, :ref, 'PENDING', :total, 'GBP', 'KIOSK', :pref, :ikey, :now, :now) "
+                    "ON CONFLICT (id) DO NOTHING"
+                ),
+                {
+                    "id": order_id, "bid": body.branch_id, "basket": body.basket_id,
+                    "ref": body.order_ref, "total": str(total),
+                    "pref": body.payment_intent_id, "ikey": order_id, "now": now,
+                },
+            )
+            await db.commit()
+        return {"recorded": True, "order_id": order_id, "reference": body.order_ref}
+    except Exception as e:
+        return {"recorded": False, "error": str(e)}
+
+
+@router.get("/quick-donation/presets")
+async def quick_donation_presets():
+    """Return preset amounts for the Quick Donation kiosk."""
+    return {
+        "presets": [1, 2.5, 5, 10, 15, 20, 50],
+        "currency": "GBP",
+        "extra_presets": [25, 75, 100, 200],
+    }
+
+
 @router.get("/donation-amounts")
 async def donation_amounts():
     return {"presets": [5, 10, 25, 50, 100, 250], "purposes": [{"id": "general", "name": "General Fund"}, {"id": "temple_maintenance", "name": "Temple Maintenance"}, {"id": "youth_education", "name": "Youth & Education"}, {"id": "food_bank", "name": "Food Bank Seva"}, {"id": "festival", "name": "Festival Fund"}], "currency": "GBP"}
