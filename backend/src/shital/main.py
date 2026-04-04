@@ -25,6 +25,13 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
         await _patch_schema()
     except Exception as exc:
         logger.error("schema_patch_failed", error=str(exc))
+    finally:
+        # Dispose the pool so the patcher's connection doesn't pollute request connections
+        try:
+            from shital.core.fabrics.database import engine
+            await engine.dispose()
+        except Exception:
+            pass
 
     # Register all Digital DNA micro-capabilities
     import shital.capabilities.finance.capabilities      # noqa: F401
@@ -128,7 +135,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
-        "version": "1.0.2",
+        "version": "1.0.3",
         "environment": settings.APP_ENV,
     }
 
