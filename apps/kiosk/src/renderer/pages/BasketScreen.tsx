@@ -2,20 +2,32 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 
-// ─── Address lookup — getAddress.io domain token (client-side browser only) ───
+// ─── Address lookup — Ideal Postcodes (client-side, CORS-enabled) ────────────
 
-// Fetch all addresses via our Vercel serverless proxy → getAddress.io
+const IDEAL_KEY = 'ak_mnkd7wshn7wBmgOHx8CUKLmaJMePr'
+
+interface IdealAddress {
+  line_1: string; line_2: string; line_3: string;
+  post_town: string; postcode: string;
+}
+
 async function lookupAddresses(raw: string): Promise<{ addresses: string[]; postcode: string }> {
-  const postcode = raw.trim().toUpperCase()
+  const postcode = raw.trim().toUpperCase().replace(/\s+/g, ' ')
+  const encoded = encodeURIComponent(postcode.replace(/\s/g, ''))
   const res = await fetch(
-    `/api/address-lookup?postcode=${encodeURIComponent(postcode)}`,
-    { signal: AbortSignal.timeout(12000) }
+    `https://api.ideal-postcodes.co.uk/v1/postcodes/${encoded}?api_key=${IDEAL_KEY}`,
+    { signal: AbortSignal.timeout(10000) }
   )
-  const data = await res.json() as { addresses?: string[]; postcode?: string; error?: string }
-  if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
-  const addresses = data.addresses ?? []
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { message?: string }
+    throw new Error(body.message || `Error ${res.status}`)
+  }
+  const data = await res.json() as { result?: IdealAddress[] }
+  const addresses = (data.result ?? []).map((a: IdealAddress) =>
+    [a.line_1, a.line_2, a.line_3, a.post_town, a.postcode].filter(Boolean).join(', ')
+  ).filter(Boolean)
   if (addresses.length === 0) throw new Error('No addresses found — please check the postcode')
-  return { addresses, postcode: data.postcode || postcode }
+  return { addresses, postcode: data.result?.[0]?.postcode || postcode }
 }
 
 // ─── Gift Aid full-screen form ────────────────────────────────────────────────
