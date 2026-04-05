@@ -5,6 +5,11 @@ on:
     branches: [claude/shital-erp-platform-iR2UF, main]
   workflow_dispatch:
 
+# Only one deploy at a time — cancel any in-progress run if a new push comes in
+concurrency:
+  group: deploy-vultr
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -90,10 +95,10 @@ jobs:
             docker builder prune -f --filter "until=24h" 2>/dev/null || true
 
             # ── Ensure DB and nginx are always running first ───────────────────
-            # Start DB and nginx (using existing images — never fails)
             docker compose up -d --no-build db certbot 2>/dev/null || true
-            # Start nginx with whatever images exist so HTTP stays up during builds
-            docker compose up -d --no-build nginx 2>/dev/null || true
+            # Start nginx — if no cached image, build it first
+            docker compose up -d --no-build nginx 2>/dev/null || \
+              (docker compose build nginx && docker compose up -d --no-build nginx) || true
 
             # ── STEP 1: Build backend (Python — fast, rarely changes) ─────────
             echo "=== Building backend ==="
