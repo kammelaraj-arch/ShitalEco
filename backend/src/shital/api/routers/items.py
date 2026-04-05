@@ -159,43 +159,51 @@ async def schema_check():
 
 @router.get("/debug-conn")
 async def debug_conn():
-    """Raw asyncpg connect test — keyword args, bypasses URL parsing."""
+    """Raw asyncpg SSL triage — tests external (SSL) and internal (no SSL) hostnames."""
     try:
         import asyncpg
         import ssl
+        import asyncio
         from urllib.parse import urlparse
         from shital.core.fabrics.config import settings
 
         raw_url = settings.DATABASE_URL
         parsed = urlparse(raw_url.replace("postgresql+asyncpg://", "postgresql://"))
-        host = parsed.hostname or ""
+        ext_host = parsed.hostname or ""
         port = parsed.port or 5432
         user = parsed.username or ""
         password = parsed.password or ""
         database = (parsed.path or "").lstrip("/")
 
-        errors: dict[str, str] = {}
+        # Internal hostname: strip .frankfurt-postgres.render.com (Render private network)
+        int_host = ext_host.replace(".frankfurt-postgres.render.com", "")
 
-        for mode in ["ssl_true", "ssl_cert_none"]:
+        results: dict[str, str] = {}
+
+        tests = [
+            ("internal_no_ssl", int_host, False),
+            ("external_ssl_true", ext_host, True),
+            ("external_ssl_none", ext_host, "ctx"),
+        ]
+        for mode, h, s in tests:
             try:
-                if mode == "ssl_cert_none":
+                ssl_arg: object = s
+                if s == "ctx":
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False
                     ctx.verify_mode = ssl.CERT_NONE
                     ssl_arg = ctx
-                else:
-                    ssl_arg = True
                 conn = await asyncpg.connect(
-                    host=host, port=port, user=user, password=password,
+                    host=h, port=port, user=user, password=password,
                     database=database, ssl=ssl_arg, timeout=5,
                 )
                 v = await conn.fetchval("SELECT 1")
                 await conn.close()
-                return {"ok": True, "host": host, "mode": mode, "result": v}
+                return {"ok": True, "mode": mode, "host": h, "result": v}
             except BaseException as e:
-                errors[mode] = f"{type(e).__name__}: {e}"
+                results[mode] = f"{type(e).__name__}: {str(e)[:120]}"
 
-        return {"ok": False, "host": host, "errors": errors}
+        return {"ok": False, "ext_host": ext_host, "int_host": int_host, "results": results}
     except BaseException as outer:
         return {"ok": False, "outer_error": f"{type(outer).__name__}: {outer}"}
 
