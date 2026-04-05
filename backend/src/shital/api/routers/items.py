@@ -159,7 +159,7 @@ async def schema_check():
 
 @router.get("/debug-conn")
 async def debug_conn():
-    """Raw asyncpg SSL triage — TCP test + multiple SSL modes."""
+    """Raw asyncpg SSL triage — TCP + raw start_tls to expose actual TLS error."""
     try:
         import asyncpg
         import ssl
@@ -175,41 +175,57 @@ async def debug_conn():
         password = parsed.password or ""
         database = (parsed.path or "").lstrip("/")
 
-        # Step 1: raw TCP test
-        tcp_ok = False
+        results: dict[str, str] = {}
+
+        # Test 1: raw start_tls to see actual TLS error (not asyncpg's wrapper)
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port), timeout=5
             )
+            # Send PostgreSQL SSLRequest (length=8, code=80877103)
+            ssl_req = (8).to_bytes(4, 'big') + (80877103).to_bytes(4, 'big')
+            writer.write(ssl_req)
+            await writer.drain()
+            resp = await asyncio.wait_for(reader.read(1), timeout=3)
+            server_ssl_resp = resp.decode('ascii', errors='replace') if resp else 'empty'
+            results["pg_ssl_response"] = server_ssl_resp  # 'S'=ok, 'N'=no ssl, 'E'=error
+
+            if resp == b'S':
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                try:
+                    loop = asyncio.get_event_loop()
+                    new_transport = await asyncio.wait_for(
+                        loop.start_tls(writer.transport, writer._protocol, ctx,
+                                       server_side=False, server_hostname=host),
+                        timeout=5,
+                    )
+                    results["tls_handshake"] = "ok"
+                    new_transport.close()
+                except BaseException as tls_e:
+                    results["tls_handshake"] = f"{type(tls_e).__name__}: {str(tls_e)[:200]}"
             writer.close()
-            await writer.wait_closed()
-            tcp_ok = True
-        except BaseException as e:
-            return {"ok": False, "step": "tcp", "host": host, "port": port, "error": f"{type(e).__name__}: {e}"}
-
-        results: dict[str, str] = {}
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        # Step 2: try various asyncpg SSL modes
-        for mode, ssl_arg in [
-            ("ssl_require_str", "require"),
-            ("ssl_true", True),
-            ("ssl_ctx_cert_none", ctx),
-        ]:
             try:
-                conn = await asyncpg.connect(
-                    host=host, port=port, user=user, password=password,
-                    database=database, ssl=ssl_arg, timeout=5,
-                )
-                v = await conn.fetchval("SELECT 1")
-                await conn.close()
-                return {"ok": True, "tcp": tcp_ok, "mode": mode, "host": host, "result": v}
-            except BaseException as e:
-                results[mode] = f"{type(e).__name__}: {str(e)[:120]}"
+                await writer.wait_closed()
+            except Exception:
+                pass
+        except BaseException as e:
+            results["raw_tls_test"] = f"{type(e).__name__}: {str(e)[:120]}"
 
-        return {"ok": False, "tcp": tcp_ok, "host": host, "port": port, "results": results}
+        # Test 2: asyncpg with ssl='require' (asyncpg string mode)
+        try:
+            conn = await asyncpg.connect(
+                host=host, port=port, user=user, password=password,
+                database=database, ssl="require", timeout=5,
+            )
+            v = await conn.fetchval("SELECT 1")
+            await conn.close()
+            return {"ok": True, "mode": "asyncpg_require", "host": host, "result": v}
+        except BaseException as e:
+            results["asyncpg_require"] = f"{type(e).__name__}: {str(e)[:120]}"
+
+        return {"ok": False, "host": host, "port": port, "results": results}
     except BaseException as outer:
         return {"ok": False, "outer_error": f"{type(outer).__name__}: {outer}"}
 
