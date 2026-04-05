@@ -91,6 +91,20 @@ services:
     networks:
       - internal
 
+  # ─── Smart Screen (TV / Android TV display app) ────────────────────────────
+  screen:
+    build:
+      context: .                          # workspace root (pnpm monorepo)
+      dockerfile: apps/screen/Dockerfile
+      args:
+        VITE_API_URL: /api/v1
+        VITE_DONATE_URL: https://shital.org.uk/donate
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - internal
+
   # ─── Nginx Reverse Proxy ───────────────────────────────────────────────────
   nginx:
     image: nginx:alpine
@@ -109,6 +123,7 @@ services:
       - admin
       - quick-donation
       - kiosk
+      - screen
     networks:
       - internal
 

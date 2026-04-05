@@ -132,6 +132,15 @@ jobs:
               echo "WARNING: Kiosk build failed — skipping"
             fi
 
+            # ── STEP 4b: Build smart screen (TV display) ──────────────────────
+            echo "=== Building smart screen ==="
+            if docker compose build screen; then
+              echo "Screen built OK — restarting..."
+              docker compose up -d --no-build --no-deps screen
+            else
+              echo "WARNING: Screen build failed — skipping"
+            fi
+
             # ── STEP 5: Fix alembic version (one-time migration fix) ──────────
             docker compose exec -T db psql -U shitaleco_db_user -d shitaleco_db \
               -c "UPDATE alembic_version SET version_num='003_gift_aid_declarations' WHERE version_num='003';" \
