@@ -79,7 +79,7 @@ export default function LeavePage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-black text-white">Leave Management</h1>
           <p className="text-white/40 mt-1">Track and approve employee leave requests</p>
@@ -95,7 +95,7 @@ export default function LeavePage() {
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: 'Annual Leave', value: '—', icon: '🏖️', color: 'from-blue-600 to-indigo-500' },
           { label: 'Sick Leave', value: '—', icon: '🏥', color: 'from-red-600 to-rose-500' },
@@ -139,7 +139,7 @@ export default function LeavePage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col">
+              className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">New Leave Request</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>

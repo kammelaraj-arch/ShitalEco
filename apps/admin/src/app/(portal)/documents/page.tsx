@@ -144,10 +144,10 @@ export default function DocumentsPage() {
         <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>
       )}
 
-      <div className="flex gap-4">
+      <div className="flex flex-col md:flex-row gap-4">
         {/* Category sidebar */}
         <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
-          className="w-52 flex-shrink-0 space-y-1">
+          className="hidden md:block w-52 flex-shrink-0 space-y-1">
           <button onClick={() => setActiveCategory('')}
             className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-left ${
               activeCategory === '' ? 'bg-saffron-400/15 text-saffron-400 border border-saffron-400/30' : 'text-white/50 hover:text-white/80 hover:bg-white/5'

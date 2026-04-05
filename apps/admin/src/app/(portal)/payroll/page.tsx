@@ -267,7 +267,7 @@ export default function PayrollPage() {
               <p>No payroll runs yet. Use the Calculate or Run Payroll tabs to get started.</p>
             </div>
           ) : (
-            <table className="w-full">
+            <div className="overflow-x-auto"><table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
                   {['Period', 'Employees', 'Total Net', 'Status', 'Run At'].map(h => (
@@ -295,7 +295,7 @@ export default function PayrollPage() {
                   </motion.tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </motion.div>
       )}

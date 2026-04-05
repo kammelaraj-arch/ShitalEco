@@ -147,7 +147,7 @@ export default function BookingsPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: "Today's Bookings", value: loading ? '—' : String(todayCount), icon: '📅', color: 'from-blue-600 to-indigo-500' },
           { label: 'This Period', value: loading ? '—' : String(bookings.length), icon: '🗓️', color: 'from-green-600 to-emerald-500' },
@@ -200,7 +200,7 @@ export default function BookingsPage() {
             <p>{bookings.length === 0 ? 'No bookings in this period.' : 'No bookings match the filter.'}</p>
           </div>
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto"><table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
                 {['Date', 'Title', 'Room', 'Time', 'Organiser', 'Attendees', 'Status', ''].map(h => (
@@ -249,7 +249,7 @@ export default function BookingsPage() {
                 </motion.tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </motion.div>
 

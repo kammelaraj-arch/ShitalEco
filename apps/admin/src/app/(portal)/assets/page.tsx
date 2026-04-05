@@ -156,7 +156,7 @@ export default function AssetsPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: 'Total Assets', value: loading ? '—' : String(data?.total || 0), icon: '📋', color: 'from-blue-600 to-indigo-500' },
           { label: 'Total Value', value: loading ? '—' : `£${totalValue.toLocaleString('en-GB', { minimumFractionDigits: 0 })}`, icon: '💰', color: 'from-green-600 to-emerald-500' },
@@ -199,7 +199,7 @@ export default function AssetsPage() {
             <p className="text-xs mt-1 text-white/20">Add your first asset to start tracking your fixed asset register.</p>
           </div>
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto"><table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
                 {['Name', 'Category', 'Location', 'Purchase Date', 'Value', 'Status', 'Assigned To', ''].map(h => (
@@ -247,7 +247,7 @@ export default function AssetsPage() {
                 </motion.tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </motion.div>
 
@@ -259,7 +259,7 @@ export default function AssetsPage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">{editAsset ? 'Edit Asset' : 'Add Asset'}</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>

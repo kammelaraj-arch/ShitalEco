@@ -124,7 +124,7 @@ export default function FinancePage() {
 
       {/* Summary cards — only when accounts loaded */}
       {accounts.length > 0 && (
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
             { label: 'Total Assets', value: totalAssets, color: 'from-green-600 to-emerald-500', icon: '🏦' },
             { label: 'Total Income', value: totalIncome, color: 'from-amber-600 to-orange-500', icon: '💰' },
@@ -170,7 +170,7 @@ export default function FinancePage() {
               <p className="text-xs mt-1">Use the journal to create double-entry transactions.</p>
             </div>
           ) : (
-            <table className="w-full">
+            <div className="overflow-x-auto"><table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
                   {['Code', 'Account Name', 'Type', 'Balance', ''].map(h => (
@@ -205,7 +205,7 @@ export default function FinancePage() {
                   )
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </motion.div>
       )}
@@ -226,7 +226,7 @@ export default function FinancePage() {
                 <h2 className="text-white font-bold text-xl">Trial Balance</h2>
                 <p className="text-white/40 text-sm">As at {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
               </div>
-              <table className="w-full">
+              <div className="overflow-x-auto"><table className="w-full">
                 <thead>
                   <tr className="border-b border-white/5">
                     <th className="text-left pb-3 text-white/40 text-xs font-semibold uppercase tracking-wider">Account</th>
@@ -298,7 +298,7 @@ export default function FinancePage() {
               onClick={() => setShowJournal(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[460px] bg-temple-deep border-l border-temple-border z-50 flex flex-col">
+              className="fixed right-0 top-0 h-full w-full max-w-[460px] bg-temple-deep border-l border-temple-border z-50 flex flex-col">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">Post Journal Entry</h2>
                 <button onClick={() => setShowJournal(false)} className="text-white/40 hover:text-white text-xl">✕</button>

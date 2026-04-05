@@ -31,7 +31,7 @@ export default function BudgetsPage() {
       </motion.div>
 
       {/* Placeholder summary cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {PLACEHOLDER_CARDS.map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
             className="glass rounded-2xl p-5 relative overflow-hidden">
@@ -50,7 +50,7 @@ export default function BudgetsPage() {
           <h2 className="text-white font-bold">Department Budgets</h2>
           <span className="text-xs text-white/30 bg-white/5 px-3 py-1 rounded-full">No data — pending setup</span>
         </div>
-        <table className="w-full">
+        <div className="overflow-x-auto"><table className="w-full">
           <thead>
             <tr className="border-b border-white/5">
               {['Department', 'Budget', 'Spent', 'Remaining', '% Used'].map(h => (
@@ -75,7 +75,7 @@ export default function BudgetsPage() {
               </motion.tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         <div className="p-5 border-t border-white/5 text-center text-white/30 text-xs">
           Budget module will be linked to finance accounts in the next release.
         </div>

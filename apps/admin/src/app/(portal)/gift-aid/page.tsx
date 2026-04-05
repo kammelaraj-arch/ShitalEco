@@ -182,7 +182,7 @@ export default function GiftAidPage() {
               <p>No declarations found.</p>
             </div>
           ) : (
-            <table className="w-full">
+            <div className="overflow-x-auto"><table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
                   {['Donor', 'Email', 'Postcode', 'Total Donations', 'Status', 'Date'].map(h => (
@@ -211,7 +211,7 @@ export default function GiftAidPage() {
                   </motion.tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </motion.div>
       )}

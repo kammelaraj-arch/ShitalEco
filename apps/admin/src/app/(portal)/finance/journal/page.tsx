@@ -105,7 +105,7 @@ export default function JournalPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-black text-white">Journal Entries</h1>
           <p className="text-white/40 mt-1">Double-entry bookkeeping ledger</p>
@@ -123,7 +123,7 @@ export default function JournalPage() {
 
       {/* Trial Balance summary */}
       {tb && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
             { label: 'Total Debits', value: tb.total_dr, color: 'from-red-600 to-rose-500', icon: '📤' },
             { label: 'Total Credits', value: tb.total_cr, color: 'from-green-600 to-emerald-500', icon: '📥' },
@@ -157,7 +157,7 @@ export default function JournalPage() {
             <p>No accounts found. Post a journal entry to get started.</p>
           </div>
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto"><table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
                 {['Code', 'Account Name', 'Type', 'Balance'].map(h => (
@@ -184,7 +184,7 @@ export default function JournalPage() {
                 </motion.tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </motion.div>
 
@@ -196,7 +196,7 @@ export default function JournalPage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col">
+              className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">Post Journal Entry</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>

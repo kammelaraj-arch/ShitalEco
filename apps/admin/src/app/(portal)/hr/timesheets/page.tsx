@@ -90,7 +90,7 @@ export default function TimesheetsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-black text-white">Timesheets</h1>
           <p className="text-white/40 mt-1">Track employee hours and project time</p>
@@ -109,7 +109,7 @@ export default function TimesheetsPage() {
       </AnimatePresence>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: 'Hours This Week', value: '—', icon: '⏱', color: 'from-blue-600 to-indigo-500' },
           { label: 'Hours This Month', value: '—', icon: '📅', color: 'from-amber-600 to-orange-500' },
@@ -133,7 +133,7 @@ export default function TimesheetsPage() {
           <h2 className="text-white font-bold">Weekly Overview</h2>
           <span className="text-xs text-white/30 bg-white/5 px-3 py-1 rounded-full">Current week</span>
         </div>
-        <table className="w-full">
+        <div className="overflow-x-auto"><table className="w-full">
           <thead>
             <tr className="border-b border-white/5">
               <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">Employee</th>
@@ -165,7 +165,7 @@ export default function TimesheetsPage() {
               </tr>
             )}
           </tbody>
-        </table>
+        </table></div>
       </motion.div>
 
       {/* Slide-over form */}
@@ -176,7 +176,7 @@ export default function TimesheetsPage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col">
+              className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">Log Time</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>

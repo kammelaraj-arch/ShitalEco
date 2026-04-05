@@ -432,7 +432,7 @@ export default function FunctionRegistryPage() {
               className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[540px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed right-0 top-0 h-full w-full max-w-[540px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <div>
                   <h2 className="text-white font-black text-base font-mono">{selected.function_name}</h2>
@@ -442,7 +442,7 @@ export default function FunctionRegistryPage() {
               </div>
               <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
                 {/* Meta */}
-                <div className="grid grid-cols-3 gap-3 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                   {[
                     ['Fabric', `${FABRIC_ICONS[selected.fabric] || '⚙️'} ${selected.fabric}`],
                     ['Version', selected.version],
@@ -524,7 +524,7 @@ export default function FunctionRegistryPage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">{editing ? 'Edit Function' : 'Register Function'}</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>
@@ -545,7 +545,7 @@ export default function FunctionRegistryPage() {
                   <textarea value={form.description || ''} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                     rows={2} className={inp + ' resize-none'} />
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
                     <label className={lbl}>Fabric</label>
                     <select value={form.fabric || 'general'} onChange={e => setForm(p => ({ ...p, fabric: e.target.value }))} className={inp}>
@@ -581,7 +581,7 @@ export default function FunctionRegistryPage() {
                     onChange={e => { try { setForm(p => ({ ...p, output_schema: JSON.parse(e.target.value) })) } catch { /* invalid json */ } }}
                     rows={3} className={inp + ' font-mono text-xs resize-none'} />
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {[
                     { key: 'human_in_loop', label: 'Human in Loop' },
                     { key: 'requires_auth', label: 'Requires Auth' },

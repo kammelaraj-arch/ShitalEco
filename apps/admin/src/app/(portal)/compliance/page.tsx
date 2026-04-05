@@ -65,7 +65,7 @@ export default function CompliancePage() {
 
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass rounded-2xl p-6">
         <h2 className="text-white font-bold text-lg mb-4">Risk Register</h2>
-        <table className="w-full">
+        <div className="overflow-x-auto"><table className="w-full">
           <thead>
             <tr className="border-b border-white/5">
               {['Risk Area', 'Severity', 'Mitigation', 'Owner'].map(h => (
@@ -85,7 +85,7 @@ export default function CompliancePage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </motion.div>
     </div>
   )

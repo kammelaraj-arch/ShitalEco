@@ -74,7 +74,7 @@ export default function KioskOrdersPage() {
         </div>
       ) : (
         <div className="glass rounded-2xl overflow-hidden border border-temple-border">
-          <table className="w-full">
+          <div className="overflow-x-auto"><table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
                 <th className="text-left px-5 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">Reference</th>
@@ -111,7 +111,7 @@ export default function KioskOrdersPage() {
                 </motion.tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
     </div>

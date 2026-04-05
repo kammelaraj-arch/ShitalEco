@@ -89,13 +89,13 @@ export default function DashboardPage() {
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-4 gap-5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="glass rounded-2xl p-6 animate-pulse h-36" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-4 gap-5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
           {statCards.map((stat, i) => (
             <motion.div
               key={stat.label}
@@ -116,7 +116,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
         {/* Revenue chart */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}

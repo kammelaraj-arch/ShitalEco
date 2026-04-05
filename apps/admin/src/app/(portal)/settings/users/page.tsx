@@ -317,7 +317,7 @@ export default function UsersPage() {
 
       {/* Users table */}
       <div className="glass rounded-2xl overflow-hidden">
-        <table className="w-full">
+        <div className="overflow-x-auto"><table className="w-full">
           <thead>
             <tr className="border-b border-white/5">
               {['User', 'Role', 'Branch', 'Sign-in Method', 'Last Login', 'Status', 'Actions'].map(h => (
@@ -409,7 +409,7 @@ export default function UsersPage() {
               ))
             )}
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       {/* Modals */}

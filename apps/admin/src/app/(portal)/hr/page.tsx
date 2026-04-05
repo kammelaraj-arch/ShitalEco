@@ -99,12 +99,12 @@ export default function HRPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-black text-white">Human Resources</h1>
           <p className="text-white/40 mt-1">Employees, Leave & Timesheets — live from database</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2 flex-wrap">
           <a href="/hr/leave"
             className="px-4 py-2.5 rounded-xl border border-white/10 text-white/70 text-sm font-semibold hover:bg-white/5 transition-all">
             Leave Requests
@@ -123,7 +123,7 @@ export default function HRPage() {
       {error && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: 'Total Employees', value: String(employees.length), icon: '👥', color: 'from-blue-600 to-indigo-500' },
           { label: 'Full-Time', value: String(fullTime), icon: '💼', color: 'from-green-600 to-emerald-500' },
@@ -144,7 +144,7 @@ export default function HRPage() {
       <div className="flex gap-3 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search employees…"
-          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 w-64" />
+          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 w-full sm:w-64" />
         <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}
           className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm outline-none">
           <option value="">All Departments</option>
@@ -163,6 +163,7 @@ export default function HRPage() {
             <p>{employees.length === 0 ? 'No employees yet — add your first team member.' : 'No employees match your search.'}</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
@@ -213,6 +214,7 @@ export default function HRPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </motion.div>
 
@@ -224,7 +226,7 @@ export default function HRPage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">New Employee</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>

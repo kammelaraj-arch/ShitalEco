@@ -175,7 +175,7 @@ export default function CatalogItemsPage() {
       <div className="flex gap-3 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search items…"
-          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 w-64" />
+          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 w-full sm:w-64" />
         <div className="flex gap-2 flex-wrap">
           {['ALL', ...CATEGORIES].map(c => (
             <button key={c} onClick={() => setCatFilter(c)}
@@ -192,7 +192,7 @@ export default function CatalogItemsPage() {
         <div className="text-center py-20 text-white/30"><p className="text-4xl mb-3">📦</p><p>No items found.</p></div>
       ) : (
         <div className="glass rounded-2xl overflow-hidden border border-temple-border">
-          <table className="w-full">
+          <div className="overflow-x-auto"><table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
                 {['Item', 'Category', 'Price', 'Channel', 'Schedule', 'Live', ''].map(h => (
@@ -256,7 +256,7 @@ export default function CatalogItemsPage() {
                 )
               })}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 
@@ -268,7 +268,7 @@ export default function CatalogItemsPage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">{editing ? 'Edit Item' : 'New Item'}</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>
@@ -281,7 +281,7 @@ export default function CatalogItemsPage() {
                   <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                     placeholder="e.g. General Donation" className={inp} />
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
                     <label className={label}>Gujarati</label>
                     <input value={form.name_gu} onChange={e => setForm(p => ({ ...p, name_gu: e.target.value }))} className={inp} placeholder="ગણેશ પૂજા" />
@@ -297,7 +297,7 @@ export default function CatalogItemsPage() {
                 </div>
 
                 {/* Category, Price, Emoji */}
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
                     <label className={label}>Category *</label>
                     <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}

@@ -137,7 +137,7 @@ export default function AuditPage() {
       {selected && (
         <>
           <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setSelected(null)} />
-          <div className="fixed right-0 top-0 h-full w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+          <div className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
             <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
               <h2 className="text-white font-black text-base font-mono">{selected.function_name}</h2>
               <button onClick={() => setSelected(null)} className="text-white/40 hover:text-white text-xl">✕</button>

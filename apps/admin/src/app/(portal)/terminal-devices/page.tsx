@@ -492,7 +492,7 @@ export default function TerminalDevicesPage() {
       </div>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: 'Total Devices', value: devices.length, icon: '🖥️', cls: 'from-amber-600 to-orange-500' },
           { label: 'Online Now',    value: devices.filter(d => d.status === 'online').length, icon: '🟢', cls: 'from-green-600 to-emerald-500' },
@@ -715,7 +715,7 @@ export default function TerminalDevicesPage() {
       {/* Setup guide */}
       <div className="glass rounded-2xl p-6">
         <h3 className="text-white font-black text-base mb-4">📋 Setup Guide</h3>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
             {
               step: '1', title: 'Register Stripe Location',
