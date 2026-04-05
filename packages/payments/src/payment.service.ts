@@ -316,6 +316,11 @@ export class PaymentService {
             where: { id: orderId },
             data: { status: 'COMPLETED', paymentProvider: 'STRIPE', paymentRef: intentId },
           })
+          // Also mark any linked donation as COMPLETED (quick-donation uses idempotencyKey = "qd-{orderId}")
+          await prisma.donation.updateMany({
+            where: { idempotencyKey: `qd-${orderId}` },
+            data: { status: 'COMPLETED', paymentRef: intentId },
+          })
         }
         break
       }
@@ -327,6 +332,11 @@ export class PaymentService {
         if (orderId !== undefined) {
           await prisma.order.updateMany({
             where: { id: orderId },
+            data: { status: 'FAILED' },
+          })
+          // Also mark any linked donation as FAILED
+          await prisma.donation.updateMany({
+            where: { idempotencyKey: `qd-${orderId}` },
             data: { status: 'FAILED' },
           })
         }

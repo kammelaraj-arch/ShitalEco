@@ -49,3 +49,4 @@ packages/db/generated/
 
 # Misc
 *.pem
+__pycache__/
