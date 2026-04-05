@@ -30,7 +30,18 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     import shital.capabilities.notifications.capabilities # noqa: F401
     import shital.capabilities.payments.capabilities     # noqa: F401
     from shital.core.dna.registry import DigitalDNA
-    logger.info("digital_dna_loaded", total_capabilities=len(DigitalDNA.all_capabilities()))
+    total_caps = len(DigitalDNA.all_capabilities())
+    logger.info("digital_dna_loaded", total_capabilities=total_caps)
+
+    # Sync Digital DNA capabilities to the DB function registry
+    try:
+        from shital.api.routers.functions import sync_from_digital_dna
+        result = await sync_from_digital_dna()
+        logger.info("function_registry_synced",
+                    synced=result["synced"], errors=len(result["errors"]))
+    except Exception as exc:
+        logger.error("function_registry_sync_failed", error=str(exc))
+
     yield
     logger.info("shital_shutdown")
 
@@ -114,6 +125,7 @@ _mount("shital.api.routers.hr",               "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
+_mount("shital.api.routers.functions",        "router")
 
 
 @app.get("/health", tags=["system"])

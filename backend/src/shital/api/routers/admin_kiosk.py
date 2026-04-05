@@ -13,6 +13,91 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/admin", tags=["admin-kiosk"])
 
 
+# ─── Dashboard Stats ─────────────────────────────────────────────────────
+
+@router.get("/stats")
+async def get_stats():
+    """Aggregate dashboard statistics — no auth required (public summary)."""
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+    from datetime import date
+
+    today = date.today()
+    async with SessionLocal() as db:
+        # Items
+        items_r = await db.execute(
+            text("SELECT COUNT(*) AS cnt FROM catalog_items WHERE deleted_at IS NULL")
+        )
+        total_items = items_r.mappings().first()["cnt"]
+
+        # Orders
+        orders_r = await db.execute(
+            text("SELECT COUNT(*) AS cnt, COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) AS rev FROM orders")
+        )
+        orow = orders_r.mappings().first()
+        total_orders = orow["cnt"]
+        total_revenue = float(orow["rev"] or 0)
+
+        # Today's orders
+        today_r = await db.execute(
+            text("SELECT COUNT(*) AS cnt FROM orders WHERE DATE(created_at) = :today"),
+            {"today": today},
+        )
+        today_orders = today_r.mappings().first()["cnt"]
+
+        # Monthly revenue (last 12 months)
+        monthly_r = await db.execute(text("""
+            SELECT TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') AS month,
+                   SUM(CAST(total_amount AS NUMERIC)) AS amount
+            FROM orders
+            WHERE created_at >= NOW() - INTERVAL '12 months'
+            GROUP BY DATE_TRUNC('month', created_at)
+            ORDER BY DATE_TRUNC('month', created_at)
+        """))
+        monthly = [{"month": r["month"], "amount": float(r["amount"] or 0)} for r in monthly_r.mappings()]
+
+        # Recent 5 orders
+        recent_r = await db.execute(text("""
+            SELECT reference, customer_name, total_amount, status, created_at
+            FROM orders ORDER BY created_at DESC LIMIT 5
+        """))
+        recent_orders = []
+        for r in recent_r.mappings():
+            d = dict(r)
+            if d.get("created_at") and hasattr(d["created_at"], "isoformat"):
+                d["created_at"] = d["created_at"].isoformat()
+            if d.get("total_amount"):
+                d["total_amount"] = float(d["total_amount"])
+            recent_orders.append(d)
+
+        # Employees (if table exists)
+        total_employees = 0
+        try:
+            emp_r = await db.execute(
+                text("SELECT COUNT(*) AS cnt FROM employees WHERE deleted_at IS NULL AND is_active = true")
+            )
+            total_employees = emp_r.mappings().first()["cnt"]
+        except Exception:
+            pass
+
+        # Live catalog items
+        live_r = await db.execute(
+            text("SELECT COUNT(*) AS cnt FROM catalog_items WHERE deleted_at IS NULL AND is_live = true")
+        )
+        live_items = live_r.mappings().first()["cnt"]
+
+    return {
+        "total_items": total_items,
+        "live_items": live_items,
+        "total_orders": total_orders,
+        "today_orders": today_orders,
+        "total_revenue": total_revenue,
+        "total_employees": total_employees,
+        "monthly_revenue": monthly,
+        "recent_orders": recent_orders,
+    }
+
+
 # ─── Temple Services ─────────────────────────────────────────────────────
 
 class ServiceBody(BaseModel):

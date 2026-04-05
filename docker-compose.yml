@@ -53,9 +53,10 @@ services:
     build:
       context: ./apps/admin
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/v1
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${API_URL:-http://backend:8000}
       NODE_ENV: production
     depends_on:
       - backend

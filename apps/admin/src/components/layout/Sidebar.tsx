@@ -11,6 +11,7 @@ const NAV_SECTIONS = [
     items: [
       { href: '/dashboard',         icon: '🏗️', label: 'Dashboard' },
       { href: '/ai',                icon: '🧠', label: 'Digital Brain' },
+      { href: '/ai/functions',      icon: '⚙️', label: 'Function Registry' },
     ],
   },
   {
