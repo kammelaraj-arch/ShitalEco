@@ -4,18 +4,20 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
 
-# Copy only kiosk's own package.json (no workspace needed — kiosk has no internal deps)
+# Copy only kiosk's own package.json (no workspace needed)
 COPY package.json ./
 
-# ELECTRON_SKIP_BINARY_DOWNLOAD avoids downloading the ~200MB Electron binary
-# which we never need for web/Docker builds
+# Skip ALL postinstall scripts:
+#  - ELECTRON_SKIP_BINARY_DOWNLOAD=1  → stops electron downloading 200MB binary
+#  - --ignore-scripts                 → skips @capacitor/android SDK setup etc.
+# Vite + React have no critical postinstall, so builds work fine.
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --no-frozen-lockfile --ignore-scripts
 
 # Copy source
 COPY . .
 
-# Build web-only bundle (Vite, no Electron)
+# Build web-only bundle
 ARG VITE_API_URL=/api/v1
 ARG VITE_BASE=/kiosk/
 ARG VITE_BRANCH_ID=main

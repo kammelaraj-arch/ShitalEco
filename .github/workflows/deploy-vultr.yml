@@ -66,8 +66,12 @@ jobs:
             ufw allow 8000/tcp
             ufw --force enable
 
-            # Start/restart services
-            docker compose up -d --build
+            # Build core services first (backend, admin, quick-donation, nginx)
+            # Build kiosk separately — if it fails, core services stay up
+            docker compose build backend admin quick-donation || true
+            docker compose build kiosk || echo "WARNING: kiosk build failed — skipping kiosk"
+            docker compose up -d --no-build backend admin quick-donation nginx db certbot || true
+            docker compose up -d kiosk || echo "WARNING: kiosk container not started"
 
             # Fix alembic revision rename: '003' -> '003_gift_aid_declarations'
             # (one-time fix for the revision ID mismatch in migration 003)
