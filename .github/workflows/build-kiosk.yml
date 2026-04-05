@@ -33,7 +33,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kiosk-windows
-          path: apps/kiosk/dist/*.exe
+          path: apps/kiosk/dist-electron/*.exe
           if-no-files-found: warn
 
   # ─── Linux x64 (Ubuntu/Debian) ──────────────────────────────────────────────
@@ -63,8 +63,8 @@ jobs:
         with:
           name: kiosk-linux-x64
           path: |
-            apps/kiosk/dist/*.deb
-            apps/kiosk/dist/*.AppImage
+            apps/kiosk/dist-electron/*.deb
+            apps/kiosk/dist-electron/*.AppImage
           if-no-files-found: warn
 
   # ─── Linux ARM64 (Raspberry Pi 4/5) ─────────────────────────────────────────
@@ -88,14 +88,14 @@ jobs:
           VITE_ELECTRON: "true"
           VITE_API_URL: "http://192.248.147.205:8000/api/v1"
           VITE_BRANCH_ID: "main"
-        run: npx electron-builder --linux --arm64
+        run: pnpm run build:electron:arm64
       - name: Upload Pi artifact
         uses: actions/upload-artifact@v4
         with:
           name: kiosk-raspberry-pi
           path: |
-            apps/kiosk/dist/*.deb
-            apps/kiosk/dist/*.AppImage
+            apps/kiosk/dist-electron/*.deb
+            apps/kiosk/dist-electron/*.AppImage
           if-no-files-found: warn
 
   # ─── Android APK (via Capacitor) ────────────────────────────────────────────

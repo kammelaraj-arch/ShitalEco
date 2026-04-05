@@ -21,7 +21,7 @@ ARG VITE_API_URL=/api/v1
 ARG VITE_BRANCH_ID=main
 ENV VITE_API_URL=${VITE_API_URL}
 ENV VITE_BRANCH_ID=${VITE_BRANCH_ID}
-RUN pnpm build
+RUN pnpm run build:web
 
 # ─── Stage 2: Serve with nginx ───
 FROM nginx:alpine AS production
