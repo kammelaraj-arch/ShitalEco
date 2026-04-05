@@ -94,13 +94,9 @@ jobs:
             docker image prune -f --filter "until=24h" 2>/dev/null || true
             docker builder prune -f --filter "until=24h" 2>/dev/null || true
 
-            # ── Recovery: ensure any stale lock files / crashed containers cleared
-            docker compose down --remove-orphans 2>/dev/null || true
-
             # ── Ensure DB and nginx are always running first ───────────────────
+            # Start DB/nginx first — keep serving whatever is cached while we rebuild
             docker compose up -d --no-build db certbot 2>/dev/null || true
-            sleep 5
-            # Start nginx — if no cached image, build it first
             docker compose up -d --no-build nginx 2>/dev/null || \
               (docker compose build nginx && docker compose up -d --no-build nginx) || true
 
