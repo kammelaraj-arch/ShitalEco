@@ -70,18 +70,26 @@ jobs:
 
             # Wait for backend
             echo "Waiting for backend..."
+            HEALTHY=0
             for i in $(seq 1 30); do
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
                 echo "Backend healthy!"
+                HEALTHY=1
                 break
               fi
               echo "  attempt $i/30..."
             done
 
+            if [ "$HEALTHY" = "0" ]; then
+              echo "Backend failed to start — showing logs:"
+              docker compose logs backend --tail=50
+              exit 1
+            fi
+
             # Patch schema and seed
-            curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched"
-            curl -sf -X POST "http://localhost:8000/api/v1/items/seed" && echo "Items seeded"
+            curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched" || echo "Schema patch failed"
+            curl -sf -X POST "http://localhost:8000/api/v1/items/seed" && echo "Items seeded" || echo "Seed failed (may already be seeded)"
 
             # Final health check
             curl -s http://localhost:8000/health
