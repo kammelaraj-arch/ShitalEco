@@ -159,39 +159,43 @@ async def schema_check():
 
 @router.get("/debug-conn")
 async def debug_conn():
-    """Raw asyncpg connect test — bypasses SQLAlchemy to diagnose SSL."""
+    """Raw asyncpg connect test — keyword args, bypasses URL parsing."""
     try:
         import asyncpg
         import ssl
-        import re
+        from urllib.parse import urlparse
         from shital.core.fabrics.config import settings
 
         raw_url = settings.DATABASE_URL
-        safe_url = re.sub(r':([^:@/][^@]*)@', ':***@', raw_url)
-
-        # Prepare clean asyncpg URL (strip scheme prefix and sslmode)
-        pg_url = raw_url
-        pg_url = pg_url.replace("postgresql+asyncpg://", "postgresql://")
-        pg_url = re.sub(r'[?&]sslmode=[^&]*', '', pg_url).rstrip('?&')
+        parsed = urlparse(raw_url.replace("postgresql+asyncpg://", "postgresql://"))
+        host = parsed.hostname or ""
+        port = parsed.port or 5432
+        user = parsed.username or ""
+        password = parsed.password or ""
+        database = (parsed.path or "").lstrip("/")
 
         errors: dict[str, str] = {}
 
-        for mode, ssl_val in [("ssl_true", True), ("ssl_none", None)]:
+        for mode in ["ssl_true", "ssl_cert_none"]:
             try:
-                if ssl_val is None:
+                if mode == "ssl_cert_none":
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False
                     ctx.verify_mode = ssl.CERT_NONE
-                    conn = await asyncpg.connect(pg_url, ssl=ctx, timeout=4)
+                    ssl_arg = ctx
                 else:
-                    conn = await asyncpg.connect(pg_url, ssl=ssl_val, timeout=4)
+                    ssl_arg = True
+                conn = await asyncpg.connect(
+                    host=host, port=port, user=user, password=password,
+                    database=database, ssl=ssl_arg, timeout=5,
+                )
                 v = await conn.fetchval("SELECT 1")
                 await conn.close()
-                return {"ok": True, "url": safe_url, "mode": mode, "result": v}
+                return {"ok": True, "host": host, "mode": mode, "result": v}
             except BaseException as e:
                 errors[mode] = f"{type(e).__name__}: {e}"
 
-        return {"ok": False, "url": safe_url, "errors": errors}
+        return {"ok": False, "host": host, "errors": errors}
     except BaseException as outer:
         return {"ok": False, "outer_error": f"{type(outer).__name__}: {outer}"}
 
