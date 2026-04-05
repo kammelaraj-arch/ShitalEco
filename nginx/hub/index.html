@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shital Temple — App Portal</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0d0404;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+
+  /* Subtle background pattern */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(185,28,28,0.18) 0%, transparent 70%),
+      radial-gradient(ellipse 60% 40% at 80% 80%, rgba(255,153,51,0.06) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .logo {
+    font-size: 3.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  h1 {
+    font-size: 2rem;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, #FF9933 0%, #e8732a 50%, #B91C1C 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.25rem;
+    text-align: center;
+  }
+
+  .subtitle {
+    color: rgba(255,255,255,0.35);
+    font-size: 0.9rem;
+    margin-bottom: 3rem;
+    text-align: center;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    width: 100%;
+    max-width: 780px;
+  }
+
+  .card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 1.25rem;
+    padding: 1.75rem 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .card:hover {
+    background: rgba(255,255,255,0.07);
+    border-color: rgba(255,255,255,0.16);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+  }
+
+  .card:hover::before { opacity: 1; }
+
+  .card-icon {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 0.875rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    background: var(--accent-bg);
+    flex-shrink: 0;
+  }
+
+  .card-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #fff;
+  }
+
+  .card-desc {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.4);
+    line-height: 1.5;
+    flex: 1;
+  }
+
+  .card-tag {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.6rem;
+    border-radius: 99px;
+    width: fit-content;
+    background: var(--accent-bg);
+    color: var(--accent-text);
+  }
+
+  /* Accent variants */
+  .orange  { --accent: #FF9933; --accent-bg: rgba(255,153,51,0.12); --accent-text: #FF9933; }
+  .crimson { --accent: #B91C1C; --accent-bg: rgba(185,28,28,0.15);  --accent-text: #f87171; }
+  .blue    { --accent: #3B82F6; --accent-bg: rgba(59,130,246,0.12); --accent-text: #60a5fa; }
+  .green   { --accent: #10B981; --accent-bg: rgba(16,185,129,0.12); --accent-text: #34d399; }
+  .purple  { --accent: #8B5CF6; --accent-bg: rgba(139,92,246,0.12); --accent-text: #a78bfa; }
+
+  .divider {
+    width: 100%;
+    max-width: 780px;
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    margin: 2rem 0 1.25rem;
+  }
+
+  .section-label {
+    width: 100%;
+    max-width: 780px;
+    color: rgba(255,255,255,0.2);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
+  }
+
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #10B981;
+    display: inline-block;
+    margin-right: 0.4rem;
+    box-shadow: 0 0 6px #10B981;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .footer {
+    margin-top: 2.5rem;
+    color: rgba(255,255,255,0.2);
+    font-size: 0.75rem;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="logo">🛕</div>
+<h1>Shital Temple</h1>
+<p class="subtitle">Staff Portal &amp; App Hub</p>
+
+<p class="section-label"><span class="status-dot"></span>Public Apps</p>
+<div class="grid">
+
+  <a href="/donate/" class="card orange">
+    <div class="card-icon">🙏</div>
+    <div class="card-title">Quick Donation</div>
+    <p class="card-desc">Touch-screen donation kiosk for walk-up devotees. Accept payments via card or cash.</p>
+    <span class="card-tag">Public Kiosk</span>
+  </a>
+
+  <a href="/kiosk/" class="card crimson">
+    <div class="card-icon">🖥️</div>
+    <div class="card-title">Temple Kiosk</div>
+    <p class="card-desc">Full-service temple kiosk — services, shop, bookings and donations in multiple languages.</p>
+    <span class="card-tag">Touch Screen</span>
+  </a>
+
+</div>
+
+<hr class="divider">
+<p class="section-label">Staff &amp; Admin</p>
+<div class="grid">
+
+  <a href="/admin/" class="card blue">
+    <div class="card-icon">⚙️</div>
+    <div class="card-title">Admin Portal</div>
+    <p class="card-desc">Full ERP — finance, HR, payroll, catalog, Gift Aid, compliance and AI-powered tools.</p>
+    <span class="card-tag">Staff Only</span>
+  </a>
+
+  <a href="/api/v1/docs" class="card green">
+    <div class="card-icon">📡</div>
+    <div class="card-title">API Explorer</div>
+    <p class="card-desc">Interactive REST API documentation. Browse and test all backend endpoints.</p>
+    <span class="card-tag">Developer</span>
+  </a>
+
+  <a href="/admin/ai/functions" class="card purple">
+    <div class="card-icon">🧠</div>
+    <div class="card-title">Digital Brain</div>
+    <p class="card-desc">AI Agent function registry, audit log and agentic workflow management.</p>
+    <span class="card-tag">AI / Admin</span>
+  </a>
+
+</div>
+
+<p class="footer">Shital Eco — Temple Management Platform &nbsp;·&nbsp; All systems operational</p>
+
+</body>
+</html>
