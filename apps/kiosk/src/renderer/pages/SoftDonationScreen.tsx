@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
-import { SOFT_DONATION_ITEMS, CatalogItem } from '../data/catalog'
+import { SOFT_DONATION_ITEMS, CatalogItem, filterActiveItems } from '../data/catalog'
 
 type FilterKey = 'ALL' | 'GRAINS' | 'PULSES' | 'OIL_ESSENTIALS'
 
@@ -26,9 +26,10 @@ export function SoftDonationScreen() {
   const basketTotal = items.reduce((s, i) => s + i.totalPrice, 0)
   const basketCount = items.reduce((s, i) => s + i.quantity, 0)
 
+  const activeItems = filterActiveItems(SOFT_DONATION_ITEMS)
   const filtered = filter === 'ALL'
-    ? SOFT_DONATION_ITEMS
-    : SOFT_DONATION_ITEMS.filter(i => i.category === filter)
+    ? activeItems
+    : activeItems.filter(i => i.category === filter)
 
   const getQty = (catalogId: string) => {
     const bi = items.find(i => i.referenceId === catalogId)

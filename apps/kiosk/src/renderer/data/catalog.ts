@@ -13,6 +13,26 @@ export interface CatalogItem {
   unit?: string
   imageColor: string
   image?: string   // stable Unsplash product photo URL
+  /** ISO date string (YYYY-MM-DD). Item is available on or after this date. */
+  startDate?: string
+  /** ISO date string (YYYY-MM-DD). Item is unavailable after this date. If unset, no end restriction. */
+  endDate?: string
+}
+
+/**
+ * Returns true if the item is currently available based on its startDate / endDate.
+ * If neither is set, the item is always available.
+ */
+export function isItemActive(item: CatalogItem, today = new Date()): boolean {
+  const todayStr = today.toISOString().slice(0, 10)
+  if (item.startDate && todayStr < item.startDate) return false
+  if (item.endDate   && todayStr > item.endDate)   return false
+  return true
+}
+
+/** Filter a catalog array to only currently-active items. */
+export function filterActiveItems(items: CatalogItem[]): CatalogItem[] {
+  return items.filter(item => isItemActive(item))
 }
 
 export interface ProjectInfo {

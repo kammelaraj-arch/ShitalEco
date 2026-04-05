@@ -715,7 +715,7 @@ export default function TerminalDevicesPage() {
       {/* Setup guide */}
       <div className="glass rounded-2xl p-6">
         <h3 className="text-white font-black text-base mb-4">📋 Setup Guide</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
             {
               step: '1', title: 'Register Stripe Location',

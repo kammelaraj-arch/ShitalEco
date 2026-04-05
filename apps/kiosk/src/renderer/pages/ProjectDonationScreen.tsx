@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
-import { BRICK_TIERS, PROJECTS, CatalogItem, ProjectInfo } from '../data/catalog'
+import { BRICK_TIERS, PROJECTS, CatalogItem, ProjectInfo, filterActiveItems } from '../data/catalog'
 
 interface BrickStyle {
   gradient: string
@@ -53,7 +53,8 @@ export function ProjectDonationScreen() {
   const project = PROJECTS.find(p => p.id === selectedProject)!
   const progress = Math.round((project.raised / project.goal) * 100)
 
-  const selectedTier = BRICK_TIERS.find(b => b.id === selectedBrick)
+  const activeBrickTiers = filterActiveItems(BRICK_TIERS)
+  const selectedTier = activeBrickTiers.find(b => b.id === selectedBrick)
 
   const handleAddToBasket = () => {
     if (!selectedTier) return
@@ -183,7 +184,7 @@ export function ProjectDonationScreen() {
       <div className="flex-1 overflow-y-auto p-4" style={{ background: th.mainBg, scrollbarWidth: 'none' }}>
         <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Choose Your Brick Tier</p>
         <div className="grid grid-cols-2 gap-3">
-          {BRICK_TIERS.map((brick, i) => {
+          {activeBrickTiers.map((brick, i) => {
             const style = BRICK_STYLES[brick.id] ?? BRICK_STYLES.brick_red
             const isSelected = selectedBrick === brick.id
             const isLarge = style.size === 'large'

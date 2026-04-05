@@ -29,12 +29,15 @@ interface Service {
   image_url: string | null
   is_active: boolean
   branch_id: string
+  start_date: string | null
+  end_date: string | null
 }
 
 const EMPTY: Omit<Service, 'id' | 'currency' | 'is_active'> = {
   name: '', name_gu: '', name_hi: '', description: '',
   category: 'PUJA', price: 0, duration: null, capacity: null,
   image_url: '', branch_id: 'main',
+  start_date: null, end_date: null,
 }
 
 export default function KioskServicesPage() {
@@ -70,7 +73,10 @@ export default function KioskServicesPage() {
     setForm({ name: s.name, name_gu: s.name_gu || '', name_hi: s.name_hi || '',
       description: s.description || '', category: s.category, price: s.price,
       duration: s.duration, capacity: s.capacity, image_url: s.image_url || '',
-      branch_id: s.branch_id })
+      branch_id: s.branch_id,
+      start_date: s.start_date ? s.start_date.slice(0, 10) : null,
+      end_date: s.end_date ? s.end_date.slice(0, 10) : null,
+    })
     setShowForm(true)
   }
 
@@ -114,7 +120,7 @@ export default function KioskServicesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-black text-white">Kiosk Services</h1>
           <p className="text-white/40 mt-1">Manage puja, havan, and other temple services shown on the kiosk</p>
@@ -175,6 +181,13 @@ export default function KioskServicesPage() {
                     {s.description && <p className="text-white/30 text-xs mt-0.5 truncate max-w-xs">{s.description}</p>}
                     {(s.name_gu || s.name_hi) && (
                       <p className="text-white/20 text-xs mt-0.5">{[s.name_gu, s.name_hi].filter(Boolean).join(' · ')}</p>
+                    )}
+                    {(s.start_date || s.end_date) && (
+                      <p className="text-amber-400/70 text-[11px] mt-0.5">
+                        {s.start_date && `From ${s.start_date.slice(0, 10)}`}
+                        {s.start_date && s.end_date && ' → '}
+                        {s.end_date && `Until ${s.end_date.slice(0, 10)}`}
+                      </p>
                     )}
                   </td>
                   <td className="px-5 py-4">
@@ -285,6 +298,23 @@ export default function KioskServicesPage() {
                   <input value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))}
                     placeholder="main"
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50" />
+                </div>
+                {/* Date restrictions */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5">Start Date</label>
+                    <input type="date" value={form.start_date || ''}
+                      onChange={e => setForm(p => ({ ...p, start_date: e.target.value || null }))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50" />
+                    <p className="text-white/25 text-[11px] mt-1">Leave blank = always available</p>
+                  </div>
+                  <div>
+                    <label className="block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5">End Date</label>
+                    <input type="date" value={form.end_date || ''}
+                      onChange={e => setForm(p => ({ ...p, end_date: e.target.value || null }))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50" />
+                    <p className="text-white/25 text-[11px] mt-1">Leave blank = no end restriction</p>
+                  </div>
                 </div>
                 {/* Image URL */}
                 <div>

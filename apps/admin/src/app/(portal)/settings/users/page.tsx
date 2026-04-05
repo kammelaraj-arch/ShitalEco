@@ -246,7 +246,7 @@ export default function UsersPage() {
     <div className="space-y-8 animate-fade-in">
 
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-black text-white">🔐 Users & Roles</h1>
           <p className="text-white/40 mt-1">Manage staff accounts and permission levels</p>
@@ -259,7 +259,7 @@ export default function UsersPage() {
       </div>
 
       {/* Role summary cards */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {byRole.filter(r => r.level >= 30).map((r, i) => (
           <motion.button key={r.id}
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
@@ -303,13 +303,13 @@ export default function UsersPage() {
       {/* Role legend */}
       <div className="glass rounded-2xl p-5">
         <h3 className="text-white font-black text-sm mb-3">Role Permission Levels</h3>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
           {ROLES.map(r => (
-            <div key={r.id} className="flex items-center gap-3 py-1.5 px-3 rounded-xl bg-white/2">
-              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: r.color }} />
-              <span className="font-bold text-xs" style={{ color: r.color }}>{r.label}</span>
-              <span className="text-white/30 text-xs flex-1">{r.desc}</span>
-              <span className="text-white/20 text-xs font-mono">L{r.level}</span>
+            <div key={r.id} className="flex items-start gap-2.5 py-2 px-3 rounded-xl bg-white/2">
+              <div className="w-2 h-2 rounded-full flex-shrink-0 mt-0.5" style={{ background: r.color }} />
+              <span className="font-bold text-xs flex-shrink-0 w-24" style={{ color: r.color }}>{r.label}</span>
+              <span className="text-white/30 text-xs leading-snug flex-1 min-w-0">{r.desc}</span>
+              <span className="text-white/20 text-xs font-mono flex-shrink-0">L{r.level}</span>
             </div>
           ))}
         </div>

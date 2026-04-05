@@ -88,10 +88,12 @@ export default function EmailTemplatesPage() {
   const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson-700/50 transition-colors'
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-96px)]">
+    <div className="flex flex-col md:flex-row gap-6 md:h-[calc(100vh-148px)]">
       {/* ── Template list ── */}
-      <div className="w-64 flex-shrink-0 space-y-2">
-        <h2 className="text-white font-black text-sm uppercase tracking-wider px-1 mb-3">Templates</h2>
+      <div className={`md:w-64 flex-shrink-0 space-y-2 ${selected ? 'hidden md:block' : ''}`}>
+        <div className="flex items-center justify-between md:block">
+          <h2 className="text-white font-black text-sm uppercase tracking-wider px-1 mb-3">Templates</h2>
+        </div>
         {loading ? (
           <p className="text-white/30 text-sm px-1">Loading…</p>
         ) : templates.map(t => (
@@ -108,9 +110,9 @@ export default function EmailTemplatesPage() {
       </div>
 
       {/* ── Editor ── */}
-      <div className="flex-1 min-w-0 flex flex-col glass rounded-2xl border border-temple-border overflow-hidden">
+      <div className={`flex-1 min-w-0 flex flex-col glass rounded-2xl border border-temple-border overflow-hidden min-h-[70vh] md:min-h-0 ${!selected ? 'md:flex hidden' : 'flex'}`}>
         {!selected ? (
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex-1 hidden md:flex items-center justify-center">
             <div className="text-center">
               <p className="text-4xl mb-3">📧</p>
               <p className="text-white/40">Select a template to edit</p>
@@ -119,15 +121,21 @@ export default function EmailTemplatesPage() {
         ) : (
           <>
             {/* Header */}
-            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between flex-shrink-0">
-              <div>
-                <h2 className="text-white font-black text-lg">{selected.name}</h2>
-                <p className="text-white/30 text-xs font-mono">{selected.template_key}</p>
+            <div className="px-4 md:px-6 py-4 border-b border-white/5 flex-shrink-0">
+              <div className="flex items-center gap-3 mb-3 md:mb-0">
+                <button onClick={() => setSelected(null)}
+                  className="md:hidden text-white/40 hover:text-white text-sm px-2 py-1 rounded-lg bg-white/5">
+                  ← Back
+                </button>
+                <div className="flex-1">
+                  <h2 className="text-white font-black text-lg">{selected.name}</h2>
+                  <p className="text-white/30 text-xs font-mono">{selected.template_key}</p>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
                 <input value={testEmail} onChange={e => setTestEmail(e.target.value)}
                   placeholder="test@example.com"
-                  className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-crimson-700/40 w-48" />
+                  className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-crimson-700/40 w-full sm:w-48" />
                 <button onClick={sendTest} disabled={testing}
                   className="px-4 py-2 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:text-white hover:bg-white/5 disabled:opacity-40">
                   {testing ? 'Sending…' : '📤 Test'}

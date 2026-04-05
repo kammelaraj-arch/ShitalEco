@@ -30,7 +30,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
 
           <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-          <main className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 flex flex-col">
+          <main className="flex-1 overflow-y-auto min-w-0 flex flex-col" style={{ overflowX: 'clip' }}>
             {/* Mobile top bar */}
             <div
               className="md:hidden flex items-center gap-3 px-4 py-3 flex-shrink-0 sticky top-0 z-30"
