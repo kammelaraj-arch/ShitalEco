@@ -159,7 +159,7 @@ async def schema_check():
 
 @router.get("/debug-conn")
 async def debug_conn():
-    """Raw asyncpg SSL triage — tests external (SSL) and internal (no SSL) hostnames."""
+    """Raw asyncpg SSL triage — TCP test + multiple SSL modes."""
     try:
         import asyncpg
         import ssl
@@ -169,41 +169,47 @@ async def debug_conn():
 
         raw_url = settings.DATABASE_URL
         parsed = urlparse(raw_url.replace("postgresql+asyncpg://", "postgresql://"))
-        ext_host = parsed.hostname or ""
+        host = parsed.hostname or ""
         port = parsed.port or 5432
         user = parsed.username or ""
         password = parsed.password or ""
         database = (parsed.path or "").lstrip("/")
 
-        # Internal hostname: strip .frankfurt-postgres.render.com (Render private network)
-        int_host = ext_host.replace(".frankfurt-postgres.render.com", "")
+        # Step 1: raw TCP test
+        tcp_ok = False
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=5
+            )
+            writer.close()
+            await writer.wait_closed()
+            tcp_ok = True
+        except BaseException as e:
+            return {"ok": False, "step": "tcp", "host": host, "port": port, "error": f"{type(e).__name__}: {e}"}
 
         results: dict[str, str] = {}
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
 
-        tests = [
-            ("internal_no_ssl", int_host, False),
-            ("external_ssl_true", ext_host, True),
-            ("external_ssl_none", ext_host, "ctx"),
-        ]
-        for mode, h, s in tests:
+        # Step 2: try various asyncpg SSL modes
+        for mode, ssl_arg in [
+            ("ssl_require_str", "require"),
+            ("ssl_true", True),
+            ("ssl_ctx_cert_none", ctx),
+        ]:
             try:
-                ssl_arg: object = s
-                if s == "ctx":
-                    ctx = ssl.create_default_context()
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
-                    ssl_arg = ctx
                 conn = await asyncpg.connect(
-                    host=h, port=port, user=user, password=password,
+                    host=host, port=port, user=user, password=password,
                     database=database, ssl=ssl_arg, timeout=5,
                 )
                 v = await conn.fetchval("SELECT 1")
                 await conn.close()
-                return {"ok": True, "mode": mode, "host": h, "result": v}
+                return {"ok": True, "tcp": tcp_ok, "mode": mode, "host": host, "result": v}
             except BaseException as e:
                 results[mode] = f"{type(e).__name__}: {str(e)[:120]}"
 
-        return {"ok": False, "ext_host": ext_host, "int_host": int_host, "results": results}
+        return {"ok": False, "tcp": tcp_ok, "host": host, "port": port, "results": results}
     except BaseException as outer:
         return {"ok": False, "outer_error": f"{type(outer).__name__}: {outer}"}
 
