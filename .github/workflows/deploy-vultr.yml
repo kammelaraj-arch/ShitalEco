@@ -25,8 +25,8 @@ jobs:
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
-          timeout: 300s
-          envs: GH_PAT,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
+          timeout: 900s
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
           script: |
             # NOTE: no set -e — we handle errors per-step to avoid full outage on partial failure
 
