@@ -1,0 +1,57 @@
+name: Deploy to Vultr
+
+on:
+  push:
+    branches: [claude/shital-erp-platform-iR2UF, main]
+  workflow_dispatch:  # allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy & verify on Vultr
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 300s
+          script: |
+            set -e
+            cd /opt/shitaleco
+
+            # Pull latest code
+            git fetch origin claude/shital-erp-platform-iR2UF
+            git reset --hard origin/claude/shital-erp-platform-iR2UF
+
+            # Open ports
+            ufw allow 22/tcp
+            ufw allow 80/tcp
+            ufw allow 443/tcp
+            ufw allow 8000/tcp
+            ufw --force enable
+
+            # Start/restart services
+            docker compose up -d --build
+
+            # Wait for backend
+            echo "Waiting for backend..."
+            for i in $(seq 1 30); do
+              sleep 5
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "Backend healthy!"
+                break
+              fi
+              echo "  attempt $i/30..."
+            done
+
+            # Patch schema and seed
+            curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched"
+            curl -sf -X POST "http://localhost:8000/api/v1/items/seed" && echo "Items seeded"
+
+            # Final health check
+            curl -s http://localhost:8000/health
+            echo ""
+            echo "Deploy complete!"
+            docker compose ps
