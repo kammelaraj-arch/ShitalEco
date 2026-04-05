@@ -95,7 +95,9 @@ jobs:
 
             # Patch schema and seed
             curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched" || echo "Schema patch failed"
-            curl -sf -X POST "http://localhost:8000/api/v1/items/seed" && echo "Items seeded" || echo "Seed failed (may already be seeded)"
+            echo "Seeding items..."
+            SEED_RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "http://localhost:8000/api/v1/items/seed")
+            echo "$SEED_RESP"
 
             # Final health check
             curl -s http://localhost:8000/health
