@@ -11,12 +11,15 @@ jobs:
     steps:
       - name: Deploy & verify on Vultr
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         with:
           host: 192.248.147.205
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
           timeout: 300s
+          envs: GH_PAT
           script: |
             set -e
 
@@ -30,7 +33,7 @@ jobs:
             if [ ! -d /opt/shitaleco/.git ]; then
               apt-get install -y git -q
               git clone --branch claude/shital-erp-platform-iR2UF \
-                https://github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco
+                https://${GH_PAT}@github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco
             fi
 
             cd /opt/shitaleco
