@@ -66,6 +66,70 @@ async def _patch_schema() -> None:
         "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS display_channel VARCHAR(20) NOT NULL DEFAULT 'both'",
         "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS is_live         BOOLEAN NOT NULL DEFAULT true",
         "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS name_te         VARCHAR(200) NOT NULL DEFAULT ''",
+        # Migration 012 — assets, bookings, documents tables
+        """CREATE TABLE IF NOT EXISTS assets (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id VARCHAR(100) NOT NULL DEFAULT 'main',
+            name VARCHAR(200) NOT NULL,
+            description TEXT DEFAULT '',
+            category VARCHAR(50) NOT NULL DEFAULT 'OTHER',
+            serial_number VARCHAR(100) DEFAULT '',
+            purchase_date DATE,
+            purchase_price NUMERIC(12,2) DEFAULT 0,
+            current_value NUMERIC(12,2) DEFAULT 0,
+            supplier VARCHAR(200) DEFAULT '',
+            warranty_expiry DATE,
+            location VARCHAR(200) DEFAULT '',
+            status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+            assigned_to VARCHAR(200) DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_assets_branch   ON assets(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_assets_category ON assets(category)",
+        """CREATE TABLE IF NOT EXISTS bookings (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id VARCHAR(100) NOT NULL DEFAULT 'main',
+            title VARCHAR(200) NOT NULL,
+            description TEXT DEFAULT '',
+            room VARCHAR(100) NOT NULL DEFAULT 'Main Hall',
+            booking_date DATE NOT NULL,
+            start_time VARCHAR(10) NOT NULL DEFAULT '09:00',
+            end_time VARCHAR(10) NOT NULL DEFAULT '10:00',
+            organiser_name VARCHAR(200) DEFAULT '',
+            organiser_email VARCHAR(200) DEFAULT '',
+            organiser_phone VARCHAR(50) DEFAULT '',
+            attendees INTEGER DEFAULT 0,
+            status VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED',
+            notes TEXT DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_bookings_branch ON bookings(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bookings_date   ON bookings(booking_date)",
+        """CREATE TABLE IF NOT EXISTS documents (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id VARCHAR(100) NOT NULL DEFAULT 'main',
+            title VARCHAR(200) NOT NULL,
+            description TEXT DEFAULT '',
+            category VARCHAR(50) NOT NULL DEFAULT 'GENERAL',
+            file_url TEXT DEFAULT '',
+            file_name VARCHAR(200) DEFAULT '',
+            file_size INTEGER DEFAULT 0,
+            mime_type VARCHAR(100) DEFAULT '',
+            uploaded_by VARCHAR(200) DEFAULT '',
+            version VARCHAR(20) DEFAULT '1.0',
+            review_due DATE,
+            tags TEXT DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_documents_branch   ON documents(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category)",
     ]
 
     async with SessionLocal() as db:
@@ -126,6 +190,9 @@ _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
 _mount("shital.api.routers.functions",        "router")
+_mount("shital.api.routers.assets",           "router")
+_mount("shital.api.routers.bookings_router",  "router")
+_mount("shital.api.routers.documents_router", "router")
 
 
 @app.get("/health", tags=["system"])
