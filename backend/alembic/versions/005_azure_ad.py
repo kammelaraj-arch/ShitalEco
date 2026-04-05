@@ -63,11 +63,17 @@ def upgrade() -> None:
             ))
 
     # Unique index on azure_oid (partial — NULLs are not equal)
-    conn.execute(text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_azure_oid
-        ON users(azure_oid)
-        WHERE azure_oid IS NOT NULL
-    """))
+    # Guarded with SAVEPOINT since users table may not exist
+    conn.execute(text("SAVEPOINT sp_users_idx"))
+    try:
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_azure_oid
+            ON users(azure_oid)
+            WHERE azure_oid IS NOT NULL
+        """))
+        conn.execute(text("RELEASE SAVEPOINT sp_users_idx"))
+    except Exception:
+        conn.execute(text("ROLLBACK TO SAVEPOINT sp_users_idx"))
 
 
 def downgrade() -> None:

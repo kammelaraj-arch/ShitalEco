@@ -15,14 +15,14 @@ depends_on = None
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    conn.execute(sa.text("ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS name_te VARCHAR(200) NOT NULL DEFAULT ''"))
+    conn.execute(sa.text("SAVEPOINT sp_ts_009"))
     try:
-        op.add_column('catalog_items', sa.Column('name_te', sa.String(200), server_default='', nullable=True))
+        conn.execute(sa.text("ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS name_te VARCHAR(200) NOT NULL DEFAULT ''"))
+        conn.execute(sa.text("RELEASE SAVEPOINT sp_ts_009"))
     except Exception:
-        pass
-    try:
-        op.add_column('temple_services', sa.Column('name_te', sa.String(200), server_default='', nullable=True))
-    except Exception:
-        pass
+        conn.execute(sa.text("ROLLBACK TO SAVEPOINT sp_ts_009"))
 
 
 def downgrade() -> None:

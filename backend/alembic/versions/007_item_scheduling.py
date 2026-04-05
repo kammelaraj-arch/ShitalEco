@@ -16,48 +16,24 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # available_from / available_until — null = always active
-    try:
-        op.add_column('catalog_items', sa.Column('available_from', sa.TIMESTAMP(timezone=True), nullable=True))
-    except Exception:
-        pass
-    try:
-        op.add_column('catalog_items', sa.Column('available_until', sa.TIMESTAMP(timezone=True), nullable=True))
-    except Exception:
-        pass
-    # display_channel — 'kiosk' | 'web' | 'both'
-    try:
-        op.add_column('catalog_items', sa.Column('display_channel', sa.String(20), nullable=False, server_default='both'))
-    except Exception:
-        pass
-    # branch_stock — JSONB map of branch_id -> stock qty, e.g. {"main": 10, "leicester": 5}
-    try:
-        op.add_column('catalog_items', sa.Column('branch_stock', postgresql.JSONB(), nullable=True, server_default='{}'))
-    except Exception:
-        pass
-    # is_live — quick "go live" toggle separate from is_active (is_active = enabled; is_live = visible now)
-    try:
-        op.add_column('catalog_items', sa.Column('is_live', sa.Boolean(), nullable=False, server_default='true'))
-    except Exception:
-        pass
+    # Use raw SQL with IF NOT EXISTS to avoid transaction abort on duplicate columns
+    conn = op.get_bind()
+    conn.execute(sa.text("ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_from  TIMESTAMPTZ"))
+    conn.execute(sa.text("ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_until TIMESTAMPTZ"))
+    conn.execute(sa.text("ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS display_channel VARCHAR(20) NOT NULL DEFAULT 'both'"))
+    conn.execute(sa.text("ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS branch_stock    JSONB NOT NULL DEFAULT '{}'"))
+    conn.execute(sa.text("ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_live         BOOLEAN NOT NULL DEFAULT true"))
 
-    # Same scheduling fields on temple_services
+    # Same scheduling fields on temple_services (guarded — table may not exist)
+    conn.execute(sa.text("SAVEPOINT sp_ts_007"))
     try:
-        op.add_column('temple_services', sa.Column('available_from', sa.TIMESTAMP(timezone=True), nullable=True))
+        conn.execute(sa.text("ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS available_from  TIMESTAMPTZ"))
+        conn.execute(sa.text("ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS available_until TIMESTAMPTZ"))
+        conn.execute(sa.text("ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS display_channel VARCHAR(20) NOT NULL DEFAULT 'both'"))
+        conn.execute(sa.text("ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS is_live         BOOLEAN NOT NULL DEFAULT true"))
+        conn.execute(sa.text("RELEASE SAVEPOINT sp_ts_007"))
     except Exception:
-        pass
-    try:
-        op.add_column('temple_services', sa.Column('available_until', sa.TIMESTAMP(timezone=True), nullable=True))
-    except Exception:
-        pass
-    try:
-        op.add_column('temple_services', sa.Column('display_channel', sa.String(20), nullable=False, server_default='both'))
-    except Exception:
-        pass
-    try:
-        op.add_column('temple_services', sa.Column('is_live', sa.Boolean(), nullable=False, server_default='true'))
-    except Exception:
-        pass
+        conn.execute(sa.text("ROLLBACK TO SAVEPOINT sp_ts_007"))
 
 
 def downgrade() -> None:
