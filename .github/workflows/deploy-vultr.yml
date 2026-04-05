@@ -68,6 +68,12 @@ jobs:
             # Start/restart services
             docker compose up -d --build
 
+            # Fix alembic revision rename: '003' -> '003_gift_aid_declarations'
+            # (one-time fix for the revision ID mismatch in migration 003)
+            docker compose exec -T db psql -U shitaleco_db_user -d shitaleco_db \
+              -c "UPDATE alembic_version SET version_num='003_gift_aid_declarations' WHERE version_num='003';" \
+              2>/dev/null || true
+
             # Wait for backend
             echo "Waiting for backend..."
             HEALTHY=0
