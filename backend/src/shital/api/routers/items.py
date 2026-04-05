@@ -769,7 +769,7 @@ async def seed_items(force: bool = False):
                         VALUES
                         (:id, :name, :name_gu, :name_hi, :description, :category, :price, 'GBP',
                          :unit, :emoji, :image_url, :gift_aid, true, 'GLOBAL', '',
-                         NULL, :sort_order, :metadata_json::jsonb, :now, :now)
+                         NULL, :sort_order, CAST(:metadata_json AS JSONB), :now, :now)
                     """),
                     {
                         "id": item_id,
