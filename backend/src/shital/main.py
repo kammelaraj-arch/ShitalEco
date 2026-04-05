@@ -42,6 +42,12 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     except Exception as exc:
         logger.error("function_registry_sync_failed", error=str(exc))
 
+    # Idempotent schema patch + catalog seed on every startup
+    try:
+        await _patch_schema()
+    except Exception as exc:
+        logger.error("startup_patch_failed", error=str(exc))
+
     yield
     logger.info("shital_shutdown")
 
