@@ -93,6 +93,11 @@ jobs:
               exit 1
             fi
 
+            # Show backend startup logs (includes alembic output)
+            echo "=== Backend logs (startup) ==="
+            docker compose logs backend --tail=40
+            echo "=== End backend logs ==="
+
             # Patch schema and seed
             curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched" || echo "Schema patch failed"
             echo "Seeding items..."
