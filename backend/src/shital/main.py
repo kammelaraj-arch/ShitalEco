@@ -151,6 +151,19 @@ async def _patch_schema() -> None:
             submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_gift_aid_submissions_date ON gift_aid_submissions(submitted_at)",
+        # API keys encrypted store
+        """CREATE TABLE IF NOT EXISTS api_keys_store (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            key_name    VARCHAR(100) UNIQUE NOT NULL,
+            encrypted_value TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            group_name  VARCHAR(50) NOT NULL DEFAULT 'OTHER',
+            is_sensitive BOOLEAN NOT NULL DEFAULT true,
+            has_value   BOOLEAN GENERATED ALWAYS AS (encrypted_value <> '') STORED,
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_by  VARCHAR(200) NOT NULL DEFAULT ''
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys_store(group_name)",
     ]
 
     async with SessionLocal() as db:
@@ -161,7 +174,56 @@ async def _patch_schema() -> None:
                 pass  # column already exists or table doesn't exist
         await db.commit()
     logger.info("schema_patch_done")
+    await _seed_api_key_metadata()
     await _seed_catalog()
+
+
+async def _seed_api_key_metadata() -> None:
+    """Upsert known API key descriptors (no values) so the admin UI always shows them."""
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+
+    KNOWN_KEYS = [
+        # (key_name, description, group_name, is_sensitive)
+        ("STRIPE_SECRET_KEY",         "Stripe secret key (sk_live_...)",                "Stripe",    True),
+        ("STRIPE_PUBLISHABLE_KEY",    "Stripe publishable key (pk_live_...)",           "Stripe",    False),
+        ("STRIPE_WEBHOOK_SECRET",     "Stripe webhook signing secret (whsec_...)",      "Stripe",    True),
+        ("STRIPE_TERMINAL_LOCATION_ID","Stripe Terminal location ID",                   "Stripe",    False),
+        ("ANTHROPIC_API_KEY",         "Anthropic / Claude API key",                     "AI",        True),
+        ("SENDGRID_API_KEY",          "SendGrid email API key",                         "Email",     True),
+        ("MS_CLIENT_ID",              "Microsoft Azure App (client) ID",                "Microsoft", False),
+        ("MS_TENANT_ID",              "Microsoft Azure Directory (tenant) ID",          "Microsoft", False),
+        ("MS_CLIENT_SECRET",          "Microsoft Azure client secret",                  "Microsoft", True),
+        ("GOOGLE_CLIENT_ID",          "Google OAuth client ID",                         "Google",    False),
+        ("GOOGLE_CLIENT_SECRET",      "Google OAuth client secret",                     "Google",    True),
+        ("META_WHATSAPP_TOKEN",       "Meta WhatsApp Business API token",               "WhatsApp",  True),
+        ("META_WHATSAPP_PHONE_ID",    "Meta WhatsApp phone number ID",                  "WhatsApp",  False),
+        ("META_WHATSAPP_VERIFY_TOKEN","Meta WhatsApp webhook verify token",             "WhatsApp",  True),
+        ("PAYPAL_CLIENT_ID",          "PayPal REST API client ID",                      "PayPal",    False),
+        ("PAYPAL_CLIENT_SECRET",      "PayPal REST API client secret",                  "PayPal",    True),
+        ("HMRC_GIFT_AID_USER_ID",     "HMRC Government Gateway user ID",                "HMRC",      True),
+        ("HMRC_GIFT_AID_PASSWORD",    "HMRC Government Gateway password",               "HMRC",      True),
+        ("HMRC_GIFT_AID_VENDOR_ID",   "HMRC software vendor ID",                        "HMRC",      False),
+        ("HMRC_GIFT_AID_CHARITY_HMO_REF","Charity HMRC reference number",              "HMRC",      False),
+        ("GETADDRESS_API_KEY",        "GetAddress.io UK postcode lookup API key",       "Other",     True),
+        ("MEILISEARCH_MASTER_KEY",    "MeiliSearch master key",                         "Other",     True),
+    ]
+
+    async with SessionLocal() as db:
+        for key_name, description, group_name, is_sensitive in KNOWN_KEYS:
+            try:
+                await db.execute(text("""
+                    INSERT INTO api_keys_store (key_name, description, group_name, is_sensitive)
+                    VALUES (:k, :d, :g, :s)
+                    ON CONFLICT (key_name) DO UPDATE
+                        SET description  = EXCLUDED.description,
+                            group_name   = EXCLUDED.group_name,
+                            is_sensitive = EXCLUDED.is_sensitive
+                """), {"k": key_name, "d": description, "g": group_name, "s": is_sensitive})
+            except Exception:
+                pass
+        await db.commit()
+    logger.info("api_key_metadata_seeded")
 
 
 async def _seed_catalog() -> None:
@@ -303,6 +365,7 @@ _mount("shital.api.routers.functions",        "router")
 _mount("shital.api.routers.assets",           "router")
 _mount("shital.api.routers.bookings_router",  "router")
 _mount("shital.api.routers.documents_router", "router")
+_mount("shital.api.routers.api_keys",         "router")
 
 
 @app.get("/health", tags=["system"])

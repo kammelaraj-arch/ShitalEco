@@ -159,7 +159,8 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
 async def stripe_connection_token():
     import stripe
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         token = stripe.terminal.ConnectionToken.create()
         return {"secret": token.secret}
@@ -179,7 +180,8 @@ class TerminalPaymentInput(BaseModel):
 async def create_terminal_payment_intent(body: TerminalPaymentInput):
     import stripe
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         intent = stripe.PaymentIntent.create(
             amount=body.amount_pence, currency=body.currency.lower(),
@@ -200,7 +202,8 @@ class ReaderActionInput(BaseModel):
 async def process_payment_on_reader(body: ReaderActionInput):
     import stripe
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         action = stripe.terminal.Reader.process_payment_intent(body.reader_id, payment_intent=body.payment_intent_id)
         return {"reader_id": body.reader_id, "status": action.action.status if action.action else "unknown"}
@@ -212,7 +215,8 @@ async def process_payment_on_reader(body: ReaderActionInput):
 async def cancel_reader_action(body: ReaderActionInput):
     import stripe
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         stripe.terminal.Reader.cancel_action(body.reader_id)
         return {"cancelled": True}
@@ -225,7 +229,8 @@ async def get_payment_intent_status(id: str):
     """Poll a PaymentIntent status — used by kiosk to detect card tap success."""
     import stripe
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         intent = stripe.PaymentIntent.retrieve(id)
         return {"status": intent.status, "id": intent.id}
@@ -237,7 +242,8 @@ async def get_payment_intent_status(id: str):
 async def list_terminal_readers(location_id: str = ""):
     import stripe
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         params: dict = {"limit": 20}
         if location_id:

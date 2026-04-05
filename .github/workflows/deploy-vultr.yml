@@ -17,13 +17,16 @@ jobs:
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
         with:
           host: 192.248.147.205
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
           timeout: 300s
-          envs: GH_PAT
+          envs: GH_PAT,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
           script: |
             # NOTE: no set -e — we handle errors per-step to avoid full outage on partial failure
 
@@ -61,6 +64,9 @@ jobs:
               printf 'STRIPE_SECRET_KEY=\n' >> .env
               printf 'STRIPE_PUBLISHABLE_KEY=\n' >> .env
               printf 'STRIPE_WEBHOOK_SECRET=\n' >> .env
+              printf 'MS_CLIENT_ID=\n' >> .env
+              printf 'MS_TENANT_ID=\n' >> .env
+              printf 'MS_CLIENT_SECRET=\n' >> .env
             fi
 
             # ── Inject secrets into .env (always update, never leave blank) ────
@@ -68,6 +74,9 @@ jobs:
             [ -n "$STRIPE_PUBLISHABLE_KEY" ] && sed -i "s|STRIPE_PUBLISHABLE_KEY=.*|STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}|" .env || true
             [ -n "$ANTHROPIC_API_KEY" ]    && sed -i "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}|" .env    || true
             [ -n "$SENDGRID_API_KEY" ]     && sed -i "s|SENDGRID_API_KEY=.*|SENDGRID_API_KEY=${SENDGRID_API_KEY}|" .env     || true
+            [ -n "$MS_CLIENT_ID" ]         && sed -i "s|MS_CLIENT_ID=.*|MS_CLIENT_ID=${MS_CLIENT_ID}|" .env               || true
+            [ -n "$MS_TENANT_ID" ]         && sed -i "s|MS_TENANT_ID=.*|MS_TENANT_ID=${MS_TENANT_ID}|" .env               || true
+            [ -n "$MS_CLIENT_SECRET" ]     && sed -i "s|MS_CLIENT_SECRET=.*|MS_CLIENT_SECRET=${MS_CLIENT_SECRET}|" .env   || true
 
             # ── Open ports ────────────────────────────────────────────────────
             ufw allow 22/tcp 2>/dev/null || true
