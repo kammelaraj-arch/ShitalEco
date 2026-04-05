@@ -15,12 +15,22 @@ logger = structlog.get_logger()
 
 
 class CreateEmployeeInput(BaseModel):
-    user_id: str
-    employee_number: str
-    job_title: str
-    department: str
-    start_date: str
-    employment_type: str  # FULL_TIME | PART_TIME | CONTRACTOR | VOLUNTEER
+    # Fields sent by admin UI
+    full_name: str = ""
+    email: str = ""
+    phone: str = ""
+    address: str = ""
+    role: str = ""                # alias for job_title
+    gross_salary: float = 0       # alias for salary
+    national_insurance: str = ""  # alias for ni_number
+
+    # Optional legacy / direct fields
+    user_id: str = ""
+    employee_number: str = ""
+    job_title: str = ""
+    department: str = "General"
+    start_date: str = ""
+    employment_type: str = "FULL_TIME"
     salary: str = "0"
     salary_period: str = "ANNUAL"
     ni_number: str = ""
@@ -58,16 +68,19 @@ async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[
     from sqlalchemy import text
     import uuid
 
-    async with SessionLocal() as db:
-        # Check employee number is unique
-        existing = await db.execute(
-            text("SELECT id FROM employees WHERE employee_number = :num AND deleted_at IS NULL"),
-            {"num": data.employee_number},
-        )
-        if existing.scalar():
-            from shital.core.fabrics.errors import ConflictError
-            raise ConflictError(f"Employee number {data.employee_number} already exists")
+    # Resolve aliases: form sends role/gross_salary/national_insurance
+    job_title     = data.job_title or data.role or "Staff"
+    salary        = str(data.gross_salary) if data.gross_salary else data.salary
+    ni_number     = data.ni_number or data.national_insurance
+    start_date    = data.start_date or date.today().isoformat()
 
+    # Auto-generate employee number if not provided
+    emp_number = data.employee_number
+    if not emp_number:
+        prefix = (data.full_name or "EMP").replace(" ", "").upper()[:3]
+        emp_number = f"{prefix}-{uuid.uuid4().hex[:6].upper()}"
+
+    async with SessionLocal() as db:
         emp_id = str(uuid.uuid4())
         now = datetime.utcnow()
         await db.execute(
@@ -75,24 +88,32 @@ async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[
                 INSERT INTO employees
                 (id, user_id, branch_id, employee_number, job_title, department,
                  start_date, employment_type, salary, salary_period, ni_number,
-                 tax_code, is_active, manager_id, created_at, updated_at)
+                 tax_code, is_active, manager_id,
+                 full_name, email, phone, address,
+                 created_at, updated_at)
                 VALUES (:id, :uid, :bid, :num, :title, :dept, :start, :type,
-                        :salary, :sp, :ni, :tc, true, :mgr, :now, :now)
+                        :salary, :sp, :ni, :tc, true, :mgr,
+                        :full_name, :email, :phone, :address,
+                        :now, :now)
             """),
             {
-                "id": emp_id, "uid": data.user_id, "bid": ctx.branch_id,
-                "num": data.employee_number, "title": data.job_title,
-                "dept": data.department, "start": data.start_date,
-                "type": data.employment_type, "salary": data.salary,
-                "sp": data.salary_period, "ni": data.ni_number or None,
+                "id": emp_id, "uid": data.user_id or None, "bid": ctx.branch_id,
+                "num": emp_number, "title": job_title,
+                "dept": data.department, "start": start_date,
+                "type": data.employment_type, "salary": salary,
+                "sp": data.salary_period, "ni": ni_number or None,
                 "tc": data.tax_code, "mgr": data.manager_id or None,
+                "full_name": data.full_name or None,
+                "email": data.email or None,
+                "phone": data.phone or None,
+                "address": data.address or None,
                 "now": now,
             },
         )
         await db.commit()
 
     logger.info("employee_created", employee_id=emp_id, **ctx.log_context)
-    return {"employee_id": emp_id, "employee_number": data.employee_number}
+    return {"employee_id": emp_id, "employee_number": emp_number}
 
 
 @capability(
@@ -135,11 +156,15 @@ async def list_employees(
     async with SessionLocal() as db:
         result = await db.execute(
             text(f"""
-                SELECT e.id, e.employee_number, e.job_title, e.department,
+                SELECT e.id, e.employee_number, e.job_title AS role, e.department,
                        e.employment_type, e.is_active, e.start_date,
-                       u.name, u.email
+                       COALESCE(e.full_name, u.name, '')        AS full_name,
+                       COALESCE(e.email,     u.email, '')       AS email,
+                       COALESCE(e.phone, '')                    AS phone,
+                       COALESCE(e.address, '')                  AS address,
+                       e.salary AS gross_salary
                 FROM employees e
-                JOIN users u ON u.id = e.user_id
+                LEFT JOIN users u ON u.id = e.user_id
                 WHERE {where}
                 ORDER BY e.id
                 LIMIT :limit

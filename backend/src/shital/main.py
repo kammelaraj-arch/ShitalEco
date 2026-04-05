@@ -164,6 +164,11 @@ async def _patch_schema() -> None:
             updated_by  VARCHAR(200) NOT NULL DEFAULT ''
         )""",
         "CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys_store(group_name)",
+        # HR — standalone employee fields (no user account required)
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS full_name VARCHAR(200)",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS email    VARCHAR(255)",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone    VARCHAR(50)",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS address  TEXT",
     ]
 
     async with SessionLocal() as db:
