@@ -215,6 +215,8 @@ export function HomeScreen() {
   const [showLanguagePicker, setShowLanguagePicker] = useState(false)
   const [customAmount, setCustomAmount] = useState('')
   const [customAdded, setCustomAdded] = useState(false)
+  // Debounce guard — prevents double-fire from pointerdown + click on touch devices
+  const lastTap = React.useRef<Record<string, number>>({})
 
   const itemCount = items.reduce((s, i) => s + i.quantity, 0)
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
@@ -256,6 +258,11 @@ export function HomeScreen() {
   })
 
   const handleAddCatalog = (item: DbItem) => {
+    // Debounce: ignore if this item was tapped within the last 600ms (pointerdown + click guard)
+    const now = Date.now()
+    if (lastTap.current[item.id] && now - lastTap.current[item.id] < 600) return
+    lastTap.current[item.id] = now
+
     addItem({
       type: item.category === 'SHOP' ? 'SERVICE' : 'DONATION',
       name: item.name,
@@ -274,6 +281,10 @@ export function HomeScreen() {
   }
 
   const handleAdd = (svc: Service) => {
+    const now = Date.now()
+    if (lastTap.current[svc.id] && now - lastTap.current[svc.id] < 600) return
+    lastTap.current[svc.id] = now
+
     const giftAidEligible = ['DONATION', 'GENERAL_DONATION', 'PROJECT_DONATION'].includes(svc.category)
     addItem({ type: svc.category.includes('DONATION') ? 'DONATION' : 'SERVICE', name: svc.name, quantity: 1, unitPrice: svc.price, totalPrice: svc.price, referenceId: svc.id, giftAidEligible, category: svc.category })
     setAdded(svc.id)
@@ -486,66 +497,66 @@ export function HomeScreen() {
                       {catalogItems.map((item, i) => {
                         const isAdded = added === item.id
                         return (
-                          <motion.button
+                          <motion.div
                             key={item.id}
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.025 }}
-                            onClick={() => handleAddCatalog(item)}
-                            className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
-                            style={{ touchAction: 'manipulation' }}
+                            className="relative"
                           >
-                            {/* Image area — per-item photo with emoji fallback */}
-                            <div
-                              className="relative overflow-hidden flex-shrink-0"
-                              style={{ height: 100, background: '#f3f4f6' }}
+                            <button
+                              type="button"
+                              onPointerDown={() => handleAddCatalog(item)}
+                              className="w-full relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                              style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
                             >
-                              {/* Emoji always present as fallback */}
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.55 }}>{item.emoji ?? '🙏'}</span>
+                              {/* Image area — per-item photo with emoji fallback */}
+                              <div
+                                className="relative overflow-hidden flex-shrink-0 pointer-events-none"
+                                style={{ height: 100, background: '#f3f4f6' }}
+                              >
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.55 }}>{item.emoji ?? '🙏'}</span>
+                                </div>
+                                <img
+                                  src={item.image_url || getCategoryImage(item.category)}
+                                  alt=""
+                                  className="absolute inset-0 w-full h-full object-cover"
+                                  onError={e => (e.currentTarget.style.display = 'none')}
+                                  loading="lazy"
+                                />
+                                {item.gift_aid_eligible && (
+                                  <span className="absolute top-2 right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500 text-white shadow-sm z-10">GA</span>
+                                )}
                               </div>
-                              {/* Per-item photo (falls back to category image) */}
-                              <img
-                                src={item.image_url || getCategoryImage(item.category)}
-                                alt=""
-                                className="absolute inset-0 w-full h-full object-cover"
-                                onError={e => (e.currentTarget.style.display = 'none')}
-                                loading="lazy"
-                              />
-                              {/* Gift Aid badge */}
-                              {item.gift_aid_eligible && (
-                                <span className="absolute top-2 right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500 text-white shadow-sm z-10">GA</span>
-                              )}
-                            </div>
 
-                            {/* Details */}
-                            <div className="p-3 flex-1 flex flex-col justify-between">
-                              <div>
-                                <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">
-                                  {getDbItemName(item, language)}
-                                </p>
-                                {item.unit && <p className="text-gray-400 text-xs mt-0.5">{item.unit}</p>}
+                              {/* Details */}
+                              <div className="p-3 flex-1 flex flex-col justify-between pointer-events-none">
+                                <div>
+                                  <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">
+                                    {getDbItemName(item, language)}
+                                  </p>
+                                  {item.unit && <p className="text-gray-400 text-xs mt-0.5">{item.unit}</p>}
+                                </div>
+                                <div className="flex items-center justify-between mt-2.5">
+                                  <p className="font-black text-lg text-gray-900">£{item.price}</p>
+                                  <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: isAdded ? '#22C55E' : th.langActive }}>
+                                    {isAdded ? '✓' : '+ Add'}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex items-center justify-between mt-2.5">
-                                <p className="font-black text-lg text-gray-900">£{item.price}</p>
-                                <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
-                              </div>
-                            </div>
 
-                            <AnimatePresence>
+                              {/* Added overlay */}
                               {isAdded && (
-                                <motion.div
-                                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                  className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
-                                >
+                                <div className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl pointer-events-none">
                                   <div className="text-center">
                                     <span className="text-4xl block">✓</span>
                                     <span className="text-sm font-bold text-green-700">Added!</span>
                                   </div>
-                                </motion.div>
+                                </div>
                               )}
-                            </AnimatePresence>
-                          </motion.button>
+                            </button>
+                          </motion.div>
                         )
                       })}
                     </div>
@@ -562,55 +573,55 @@ export function HomeScreen() {
                         const m = CATEGORY_META[svc.category] ?? CATEGORY_META.OTHER
                         const isAdded = added === svc.id
                         return (
-                          <motion.button
+                          <motion.div
                             key={svc.id}
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.03 }}
-                            onClick={() => handleAdd(svc)}
-                            className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
-                            style={{ touchAction: 'manipulation' }}
+                            className="relative"
                           >
-                            {/* Image area */}
-                            <div
-                              className="relative overflow-hidden flex-shrink-0"
-                              style={{ height: 100, background: `${m.color}25` }}
+                            <button
+                              type="button"
+                              onPointerDown={() => handleAdd(svc)}
+                              className="w-full relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                              style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
                             >
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.6 }}>{m.icon}</span>
+                              <div
+                                className="relative overflow-hidden flex-shrink-0 pointer-events-none"
+                                style={{ height: 100, background: `${m.color}25` }}
+                              >
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.6 }}>{m.icon}</span>
+                                </div>
+                                <img
+                                  src={getCategoryImage(svc.category)}
+                                  alt=""
+                                  className="absolute inset-0 w-full h-full object-cover"
+                                  onError={e => (e.currentTarget.style.display = 'none')}
+                                  loading="lazy"
+                                />
                               </div>
-                              <img
-                                src={getCategoryImage(svc.category)}
-                                alt=""
-                                className="absolute inset-0 w-full h-full object-cover"
-                                onError={e => (e.currentTarget.style.display = 'none')}
-                                loading="lazy"
-                              />
-                            </div>
 
-                            {/* Details */}
-                            <div className="p-3 flex-1 flex flex-col justify-between">
-                              <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">{getDbItemName(svc, language)}</p>
-                              <div className="flex items-center justify-between mt-2.5">
-                                <p className="font-black text-lg text-gray-900">£{svc.price}</p>
-                                <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
+                              <div className="p-3 flex-1 flex flex-col justify-between pointer-events-none">
+                                <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">{getDbItemName(svc, language)}</p>
+                                <div className="flex items-center justify-between mt-2.5">
+                                  <p className="font-black text-lg text-gray-900">£{svc.price}</p>
+                                  <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: isAdded ? '#22C55E' : th.langActive }}>
+                                    {isAdded ? '✓' : '+ Add'}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
 
-                            <AnimatePresence>
                               {isAdded && (
-                                <motion.div
-                                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                  className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
-                                >
+                                <div className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl pointer-events-none">
                                   <div className="text-center">
                                     <span className="text-4xl block">✓</span>
                                     <span className="text-sm font-bold text-green-700">Added!</span>
                                   </div>
-                                </motion.div>
+                                </div>
                               )}
-                            </AnimatePresence>
-                          </motion.button>
+                            </button>
+                          </motion.div>
                         )
                       })}
                     </div>
