@@ -467,33 +467,33 @@ export function HomeScreen() {
           </div>
 
           {/* Items grid — scrollable */}
-          <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}>
+          <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent', touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
             {loading ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-60">
                 <span className="text-4xl animate-spin">⏳</span>
                 <p className="text-sm font-medium text-gray-500">Loading...</p>
               </div>
             ) : (
-              <AnimatePresence mode="popLayout">
+              <AnimatePresence mode="wait">
                 {useDbCatalog ? (
                   catalogItems.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
+                    <div key="empty-db" className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
                       <span className="text-5xl">🛕</span>
                       <p className="text-sm font-medium text-gray-500">No items in this category</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div key={`grid-${activeNav}`} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {catalogItems.map((item, i) => {
                         const isAdded = added === item.id
                         return (
                           <motion.button
                             key={item.id}
-                            layout
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.025 }}
                             onClick={() => handleAddCatalog(item)}
                             className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                            style={{ touchAction: 'manipulation' }}
                           >
                             {/* Image area — per-item photo with emoji fallback */}
                             <div
@@ -552,24 +552,24 @@ export function HomeScreen() {
                   )
                 ) : (
                   filteredServices.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
+                    <div key="empty-svc" className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
                       <span className="text-5xl">🛕</span>
                       <p className="text-sm font-medium text-gray-500">No items in this category</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div key="grid-services" className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {filteredServices.map((svc, i) => {
                         const m = CATEGORY_META[svc.category] ?? CATEGORY_META.OTHER
                         const isAdded = added === svc.id
                         return (
                           <motion.button
                             key={svc.id}
-                            layout
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.03 }}
                             onClick={() => handleAdd(svc)}
                             className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                            style={{ touchAction: 'manipulation' }}
                           >
                             {/* Image area */}
                             <div
