@@ -20,7 +20,7 @@ export function ConfirmationScreen() {
 
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
   const branchName = branchId === 'main' ? 'Wembley' : branchId === 'leicester' ? 'Leicester'
-    : branchId === 'reading' ? 'Reading' : branchId === 'mk' ? 'Milton Keynes' : 'Shital Temple'
+    : branchId === 'reading' ? 'Reading' : branchId === 'mk' ? 'Milton Keynes' : 'Shital'
 
   const hasContact = contactInfo && !contactInfo.anonymous && (contactInfo.email || contactInfo.phone)
 
@@ -40,7 +40,7 @@ export function ConfirmationScreen() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         order_ref: orderRef, type, destination, total,
-        branch_name: `Shital Temple ${branchName}`,
+        branch_name: `Shital ${branchName}`,
         items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })),
       }),
     }).then(() => {
@@ -69,7 +69,7 @@ export function ConfirmationScreen() {
           order_ref: orderRef,
           type: isEmail ? 'email' : 'whatsapp',
           destination: receiptContact,
-          total, branch_name: `Shital Temple ${branchName}`,
+          total, branch_name: `Shital ${branchName}`,
           items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })),
         }),
       })
@@ -157,7 +157,7 @@ export function ConfirmationScreen() {
         {/* Hidden thermal receipt — only visible when printing */}
         <div className="print-receipt hidden" style={{ display: 'none' }}>
           <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: 8, marginBottom: 8 }}>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>🕉 Shital Temple</div>
+            <div style={{ fontSize: 18, fontWeight: 900 }}>🕉 Shital</div>
             <div style={{ fontSize: 11 }}>{branchName} · Registered UK Charity</div>
             <div style={{ fontSize: 10, marginTop: 2 }}>{new Date().toLocaleString('en-GB')}</div>
           </div>

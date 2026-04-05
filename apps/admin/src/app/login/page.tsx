@@ -63,7 +63,7 @@ export default function LoginPage() {
       }
       const data = await res.json()
       saveSession(data)
-      window.location.href = '/dashboard'
+      window.location.href = '/admin/dashboard'
     } catch (err: any) {
       if (err.name === 'TimeoutError' || err.name === 'AbortError') {
         setError('Server is taking too long to respond. Please try again in a moment.')
@@ -88,7 +88,7 @@ export default function LoginPage() {
       const { signInWithMicrosoft } = await import('@/lib/msal')
       const data = await signInWithMicrosoft()
       saveSession(data)
-      window.location.href = '/dashboard'
+      window.location.href = '/admin/dashboard'
     } catch (err: any) {
       if (err.name === 'TimeoutError' || err.name === 'AbortError') {
         setError('Server is taking too long to respond. Please try again.')
@@ -128,7 +128,7 @@ export default function LoginPage() {
             🕉️
           </div>
           <h1 className="text-white font-black text-2xl tracking-tight">Shital Admin</h1>
-          <p className="text-white/40 text-sm mt-1">Temple ERP Management Portal</p>
+          <p className="text-white/40 text-sm mt-1">ERP Management Portal</p>
         </div>
 
         {/* Card */}
@@ -260,7 +260,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs mt-6" style={{ color: 'rgba(255,255,255,0.2)' }}>
-          Shital Temple ERP • UK Registered Charity
+          Shital ERP • UK Registered Charity
         </p>
       </motion.div>
     </div>

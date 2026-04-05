@@ -40,7 +40,7 @@ export function IdleScreen() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
       >
-        Shital Temple
+        Shital
       </motion.h1>
 
       <motion.p
