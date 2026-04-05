@@ -160,48 +160,40 @@ async def schema_check():
 @router.get("/debug-conn")
 async def debug_conn():
     """Raw asyncpg connect test — bypasses SQLAlchemy to diagnose SSL."""
-    import asyncpg
-    import ssl
-    import re
-    from shital.core.fabrics.config import settings
-
-    raw_url = settings.DATABASE_URL
-    safe_url = re.sub(r':([^:@/][^@]*)@', ':***@', raw_url)
-
-    # Try 1: ssl=True
     try:
+        import asyncpg
+        import ssl
+        import re
+        from shital.core.fabrics.config import settings
+
+        raw_url = settings.DATABASE_URL
+        safe_url = re.sub(r':([^:@/][^@]*)@', ':***@', raw_url)
+
+        # Prepare clean asyncpg URL (strip scheme prefix and sslmode)
         pg_url = raw_url
-        for old, new in [("postgresql+asyncpg://", "postgresql://"), ("postgres://", "postgresql://")]:
-            pg_url = pg_url.replace(old, new)
-        # Strip sslmode param for asyncpg
+        pg_url = pg_url.replace("postgresql+asyncpg://", "postgresql://")
         pg_url = re.sub(r'[?&]sslmode=[^&]*', '', pg_url).rstrip('?&')
-        conn = await asyncpg.connect(pg_url, ssl=True, timeout=8)
-        v = await conn.fetchval("SELECT version()")
-        await conn.close()
-        return {"ok": True, "url": safe_url, "pg_version": v, "ssl": "True"}
-    except Exception as e1:
-        pass
 
-    # Try 2: SSLContext CERT_NONE
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        conn = await asyncpg.connect(pg_url, ssl=ctx, timeout=8)
-        v = await conn.fetchval("SELECT version()")
-        await conn.close()
-        return {"ok": True, "url": safe_url, "pg_version": v, "ssl": "SSLContext-CERT_NONE"}
-    except Exception as e2:
-        pass
+        errors: dict[str, str] = {}
 
-    # Try 3: no SSL
-    try:
-        conn = await asyncpg.connect(pg_url, ssl=False, timeout=8)
-        v = await conn.fetchval("SELECT version()")
-        await conn.close()
-        return {"ok": True, "url": safe_url, "pg_version": v, "ssl": "False"}
-    except Exception as e3:
-        return {"ok": False, "url": safe_url, "e1": str(e1), "e2": str(e2), "e3": str(e3)}
+        for mode, ssl_val in [("ssl_true", True), ("ssl_none", None)]:
+            try:
+                if ssl_val is None:
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    conn = await asyncpg.connect(pg_url, ssl=ctx, timeout=4)
+                else:
+                    conn = await asyncpg.connect(pg_url, ssl=ssl_val, timeout=4)
+                v = await conn.fetchval("SELECT 1")
+                await conn.close()
+                return {"ok": True, "url": safe_url, "mode": mode, "result": v}
+            except BaseException as e:
+                errors[mode] = f"{type(e).__name__}: {e}"
+
+        return {"ok": False, "url": safe_url, "errors": errors}
+    except BaseException as outer:
+        return {"ok": False, "outer_error": f"{type(outer).__name__}: {outer}"}
 
 
 @router.get("/")
