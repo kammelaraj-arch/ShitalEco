@@ -3,7 +3,7 @@ name: Deploy to Vultr
 on:
   push:
     branches: [claude/shital-erp-platform-iR2UF, main]
-  workflow_dispatch:  # allow manual trigger
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -41,20 +41,18 @@ jobs:
 
             # Create .env if missing
             if [ ! -f .env ]; then
-              cat > .env << 'ENVEOF'
-POSTGRES_DB=shitaleco_db
-POSTGRES_USER=shitaleco_db_user
-POSTGRES_PASSWORD=ShitalEco2024Prod!
-JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod
-APP_ENV=production
-CORS_ORIGINS=http://localhost:3001,http://localhost:3002
-API_URL=http://localhost:8000
-ANTHROPIC_API_KEY=
-SENDGRID_API_KEY=
-STRIPE_SECRET_KEY=
-STRIPE_PUBLISHABLE_KEY=
-STRIPE_WEBHOOK_SECRET=
-ENVEOF
+              printf 'POSTGRES_DB=shitaleco_db\n' > .env
+              printf 'POSTGRES_USER=shitaleco_db_user\n' >> .env
+              printf 'POSTGRES_PASSWORD=ShitalEco2024Prod!\n' >> .env
+              printf 'JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod\n' >> .env
+              printf 'APP_ENV=production\n' >> .env
+              printf 'CORS_ORIGINS=http://localhost:3001,http://localhost:3002\n' >> .env
+              printf 'API_URL=http://localhost:8000\n' >> .env
+              printf 'ANTHROPIC_API_KEY=\n' >> .env
+              printf 'SENDGRID_API_KEY=\n' >> .env
+              printf 'STRIPE_SECRET_KEY=\n' >> .env
+              printf 'STRIPE_PUBLISHABLE_KEY=\n' >> .env
+              printf 'STRIPE_WEBHOOK_SECRET=\n' >> .env
             fi
 
             # Open ports
