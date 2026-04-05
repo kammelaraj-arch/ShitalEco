@@ -50,9 +50,12 @@ RUN printf 'server {\n\
         add_header Cache-Control "public, immutable";\n\
     }\n\
 \n\
-    # SPA fallback\n\
+    # SPA fallback — never cache HTML so new bundles are always picked up\n\
     location / {\n\
         try_files $uri $uri/ /index.html;\n\
+        add_header Cache-Control "no-cache, no-store, must-revalidate";\n\
+        add_header Pragma "no-cache";\n\
+        add_header Expires "0";\n\
     }\n\
 \n\
     location /health {\n\
