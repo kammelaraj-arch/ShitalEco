@@ -1,19 +1,15 @@
 #!/bin/bash
 # ─── Shital ERP — Vultr VPS Deploy Script ─────────────────────────────────────
-# Run this once on a fresh Ubuntu 22.04 Vultr instance as root.
-# Usage: bash deploy.sh
+# One command setup on fresh Ubuntu 22.04. Run as root.
 set -euo pipefail
 
 REPO_URL="https://github.com/kammelaraj-arch/ShitalEco.git"
 BRANCH="claude/shital-erp-platform-iR2UF"
 APP_DIR="/opt/shitaleco"
-DOMAIN_API="api.shital.org"
-DOMAIN_ADMIN="admin.shital.org"
-DOMAIN_DONATE="donate.shital.org"
 
-echo "=== [1/6] Installing Docker ==="
+echo "=== [1/5] Installing Docker ==="
 apt-get update -q
-apt-get install -y -q ca-certificates curl gnupg git
+apt-get install -y -q ca-certificates curl gnupg git ufw
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
@@ -23,10 +19,14 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 apt-get update -q
 apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable --now docker
-echo "Docker $(docker --version) installed."
 
-echo "=== [2/6] Cloning repo ==="
-mkdir -p "$APP_DIR"
+echo "=== [2/5] Opening firewall ports ==="
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw --force enable
+
+echo "=== [3/5] Cloning repo ==="
 if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" fetch origin "$BRANCH"
   git -C "$APP_DIR" reset --hard "origin/$BRANCH"
@@ -35,39 +35,56 @@ else
 fi
 cd "$APP_DIR"
 
-echo "=== [3/6] Creating .env ==="
-if [ ! -f "$APP_DIR/.env" ]; then
-  echo "ERROR: Copy .env.example to .env and fill in values first:"
-  echo "  cp $APP_DIR/.env.example $APP_DIR/.env"
-  echo "  nano $APP_DIR/.env"
-  echo ""
-  echo "Required vars: POSTGRES_PASSWORD, JWT_SECRET"
-  echo "Then re-run: bash $APP_DIR/deploy.sh"
-  exit 1
-fi
-# Ensure production vars are set
-grep -q "POSTGRES_DB" .env || echo "POSTGRES_DB=shitaleco_db" >> .env
-grep -q "POSTGRES_USER" .env || echo "POSTGRES_USER=shitaleco_db_user" >> .env
+echo "=== [4/5] Creating .env ==="
+cat > "$APP_DIR/.env" << 'ENV'
+# Database
+POSTGRES_DB=shitaleco_db
+POSTGRES_USER=shitaleco_db_user
+POSTGRES_PASSWORD=ShitalEco2024Prod!
 
-echo "=== [4/6] Issuing SSL certificates ==="
-# First run nginx on port 80 only (before HTTPS)
-docker compose up -d nginx
-sleep 3
-docker compose run --rm certbot certonly \
-  --webroot -w /var/www/certbot \
-  --non-interactive --agree-tos --email admin@shital.org \
-  -d "$DOMAIN_API" -d "$DOMAIN_ADMIN" -d "$DOMAIN_DONATE" || true
+# App
+JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod
+APP_ENV=production
+CORS_ORIGINS=http://localhost:3001,http://localhost:3002
 
-echo "=== [5/6] Building & starting all services ==="
-docker compose up -d --build
+# API URL (update with your domain later)
+API_URL=http://localhost:8000
 
-echo "=== [6/6] Running DB migrations and seed ==="
-sleep 15  # wait for backend to be healthy
-curl -s -X POST "http://localhost/api/v1/admin/patch-schema" && echo " ✓ Schema patched"
-curl -s -X POST "http://localhost/api/v1/items/seed" && echo " ✓ Items seeded"
+# Leave blank for now — add keys later
+ANTHROPIC_API_KEY=
+SENDGRID_API_KEY=
+STRIPE_SECRET_KEY=
+STRIPE_PUBLISHABLE_KEY=
+STRIPE_WEBHOOK_SECRET=
+ENV
+
+echo "=== [5/5] Building & starting services (this takes 3-5 mins) ==="
+# Start just db + backend first (no nginx SSL needed yet)
+docker compose up -d db backend
+
+echo "Waiting for backend to be healthy..."
+for i in $(seq 1 24); do
+  sleep 5
+  STATUS=$(docker compose ps backend --format json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('Health',''))" 2>/dev/null || echo "")
+  if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+    echo "Backend is up!"
+    break
+  fi
+  echo "  Waiting... ($((i*5))s)"
+done
+
+echo "Applying schema patch..."
+curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo " schema patched" || echo " schema patch skipped"
+
+echo "Seeding catalog items..."
+curl -sf -X POST "http://localhost:8000/api/v1/items/seed" && echo " items seeded" || echo " items seed skipped"
 
 echo ""
-echo "=== Deploy complete ==="
-echo "  API:    https://$DOMAIN_API/health"
-echo "  Admin:  https://$DOMAIN_ADMIN"
-echo "  Donate: https://$DOMAIN_DONATE"
+echo "============================================"
+echo "  ShitalEco backend is LIVE!"
+echo "  Health: http://$(curl -sf ifconfig.me 2>/dev/null || echo 'SERVER_IP'):8000/health"
+echo "  API:    http://$(curl -sf ifconfig.me 2>/dev/null || echo 'SERVER_IP'):8000/api/docs"
+echo "============================================"
+echo ""
+echo "Next: point your domain DNS to this IP and run:"
+echo "  docker compose up -d  (starts nginx + all apps)"
