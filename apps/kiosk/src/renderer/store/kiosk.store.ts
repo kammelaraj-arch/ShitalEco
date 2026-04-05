@@ -1,6 +1,18 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
+/** Safe UUID generator — works on HTTP (no secure context) and HTTPS alike */
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  // Fallback UUID v4 for HTTP / non-secure contexts
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
 export type KioskTheme = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine'
 
 export const THEMES: Record<KioskTheme, {
@@ -250,7 +262,7 @@ export const useKioskStore = create<KioskState>()(
     if (existing) {
       return { items: state.items.map((i) => i.id === existing.id ? { ...i, quantity: i.quantity + item.quantity, totalPrice: (i.quantity + item.quantity) * i.unitPrice } : i) }
     }
-    return { items: [...state.items, { ...item, id: crypto.randomUUID() }] }
+    return { items: [...state.items, { ...item, id: generateId() }] }
   }),
   removeItem: (id) => set((state) => ({ items: state.items.filter((i) => i.id !== id) })),
   updateQuantity: (id, qty) => set((state) => ({
