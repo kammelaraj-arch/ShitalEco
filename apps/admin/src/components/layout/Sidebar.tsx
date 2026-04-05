@@ -69,13 +69,24 @@ const NAV_SECTIONS = [
   },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  open?: boolean
+  onClose?: () => void
+}
+
+export function Sidebar({ open = true, onClose }: SidebarProps) {
   const pathname = usePathname()
   const { branding } = useBranding()
 
   return (
     <aside
-      className="w-64 h-screen flex-shrink-0 flex flex-col sticky top-0 overflow-hidden"
+      className={clsx(
+        'w-64 h-screen flex-shrink-0 flex flex-col',
+        // Desktop: sticky in flow; Mobile: fixed overlay with slide transition
+        'fixed md:sticky top-0 left-0 z-50 md:z-auto',
+        'transition-transform duration-300 ease-in-out',
+        open ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+      )}
       style={{
         background: 'linear-gradient(180deg,#180a0a 0%,#0d0404 100%)',
         borderRight: '1px solid rgba(185,28,28,0.2)',
@@ -103,10 +114,19 @@ export function Sidebar() {
             🛕
           </div>
         )}
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-white font-black text-base leading-none truncate">{branding.orgName}</p>
           <p className="text-white/40 text-xs mt-0.5">{branding.orgSubtitle}</p>
         </div>
+        {/* Mobile close button */}
+        <button
+          className="md:hidden w-7 h-7 rounded-full flex items-center justify-center text-white/40 hover:text-white transition-colors flex-shrink-0"
+          style={{ background: 'rgba(255,255,255,0.06)' }}
+          onClick={onClose}
+          aria-label="Close menu"
+        >
+          ✕
+        </button>
       </div>
 
       {/* Navigation */}

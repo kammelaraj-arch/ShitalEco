@@ -364,12 +364,46 @@ export function HomeScreen() {
         </button>
       </header>
 
+      {/* ══ MOBILE NAV (portrait phones) ══════════════════════════════════════ */}
+      <div
+        className="sm:hidden flex-shrink-0 flex overflow-x-auto bg-white"
+        style={{ borderBottom: '2px solid #e5e7eb', WebkitOverflowScrolling: 'touch' }}
+      >
+        {NAV_SECTIONS.flatMap(s => s.items).map(item => {
+          const isActive = activeNav === item.id
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveNav(item.id)}
+              className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-2.5 transition-all active:scale-95 relative"
+              style={{ borderBottom: isActive ? `3px solid ${th.langActive}` : '3px solid transparent' }}
+            >
+              <span className="text-xl leading-none">{item.icon}</span>
+              <span
+                className="text-[10px] leading-tight font-semibold whitespace-nowrap"
+                style={{ color: isActive ? th.langActive : '#6b7280' }}
+              >
+                {getNavLabel(item, language)}
+              </span>
+            </button>
+          )
+        })}
+        <button
+          onClick={() => setScreen('idle')}
+          className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-2.5 ml-auto transition-all active:scale-95"
+          style={{ borderBottom: '3px solid transparent' }}
+        >
+          <span className="text-xl leading-none">🚪</span>
+          <span className="text-[10px] font-semibold text-gray-400 whitespace-nowrap">Exit</span>
+        </button>
+      </div>
+
       {/* ══ BODY ═══════════════════════════════════════════════════════════════ */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* ── SIDEBAR ──────────────────────────────────────────────────────── */}
+        {/* ── SIDEBAR — hidden on mobile, shown on sm+ ─────────────────────── */}
         <aside
-          className="flex-shrink-0 flex flex-col overflow-y-auto"
+          className="hidden sm:flex flex-shrink-0 flex-col overflow-y-auto"
           style={{
             width: 160,
             background: '#fff',
