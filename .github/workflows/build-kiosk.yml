@@ -21,7 +21,7 @@ jobs:
         run: npm install -g pnpm@9.4.0
       - name: Install dependencies
         working-directory: apps/kiosk
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
       - name: Build Windows installer
         working-directory: apps/kiosk
         env:
@@ -50,7 +50,7 @@ jobs:
         run: sudo apt-get install -y rpm fakeroot dpkg
       - name: Install pnpm deps
         working-directory: apps/kiosk
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
       - name: Build Linux x64
         working-directory: apps/kiosk
         env:
@@ -81,7 +81,7 @@ jobs:
         run: sudo apt-get install -y rpm fakeroot dpkg
       - name: Install pnpm deps
         working-directory: apps/kiosk
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
       - name: Build Linux ARM64 (Raspberry Pi)
         working-directory: apps/kiosk
         env:
