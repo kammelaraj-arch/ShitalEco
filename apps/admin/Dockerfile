@@ -1,20 +1,22 @@
 # Admin Portal — Next.js Multi-stage Docker build
 FROM node:20-alpine AS base
-RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
 WORKDIR /app
 
+# ── Install deps (cached layer — only rebuilds when package*.json changes) ──
 FROM base AS deps
-COPY package.json ./
-RUN pnpm install --no-frozen-lockfile
+COPY package.json package-lock.json ./
+RUN npm ci --legacy-peer-deps
 
+# ── Build ────────────────────────────────────────────────────────────────────
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_API_URL=/api/v1
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-RUN pnpm build
+RUN npm run build
 
+# ── Runtime ──────────────────────────────────────────────────────────────────
 FROM base AS runner
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
