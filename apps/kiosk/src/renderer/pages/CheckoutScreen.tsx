@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { useKioskStore, THEMES } from '../store/kiosk.store'
+import { useKioskStore, THEMES, generateId } from '../store/kiosk.store'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -26,7 +26,7 @@ export function CheckoutScreen() {
     try {
       // 1. Create basket (non-fatal — DB may not be available; payment still proceeds)
       setStage('Creating order…')
-      let basket_id = crypto.randomUUID()
+      let basket_id = generateId()
       try {
         const basketRes = await fetch(`${API_BASE}/kiosk/basket`, {
           method: 'POST',
