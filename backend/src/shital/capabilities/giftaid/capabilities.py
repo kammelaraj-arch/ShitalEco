@@ -50,67 +50,113 @@ class GiftAidSubmissionResult(BaseModel):
     errors: list[str] = []
 
 
-def _build_gift_aid_soap(submission: GiftAidSubmission, correlation_id: str) -> str:
-    """Build HMRC Charities Online SOAP envelope for Gift Aid R68 claim."""
+def _escape_xml(value: str) -> str:
+    """Escape special XML characters in text content."""
+    return (value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;"))
+
+
+def _build_govtalk_xml(submission: GiftAidSubmission, correlation_id: str) -> str:
+    """Build HMRC GovTalk XML envelope for Gift Aid R68 claim (Charities Online format).
+
+    Uses GovTalkMessage wrapper as required by HMRC — NOT SOAP.
+    Reference: https://www.gov.uk/government/publications/charities-online-gift-aid
+    """
     charity_ref = submission.charity_ref or settings.HMRC_GIFT_AID_CHARITY_HMO_REF
     claim_date = (submission.claim_to_date or date.today()).isoformat()
     total = sum(d.amount for d in submission.declarations)
+    vendor_id = settings.HMRC_GIFT_AID_VENDOR_ID or "0"
+    user_id = settings.HMRC_GIFT_AID_USER_ID
+    password = settings.HMRC_GIFT_AID_PASSWORD
 
     declarations_xml = "\n".join([
-        f"""        <Repayment>
-          <Donor>
-            <Fore>{d.first_name}</Fore>
-            <Sur>{d.last_name}</Sur>
-            <House>{d.house_name_or_number}</House>
-            <Postcode>{d.postcode}</Postcode>
-          </Donor>
-          <AggDonation>
-            <GiftAidDate>{d.donation_date.isoformat()}</GiftAidDate>
-            <Total>{d.amount:.2f}</Total>
-          </AggDonation>
-        </Repayment>"""
+        f"""            <Repayment>
+              <Donor>
+                <Fore>{_escape_xml(d.first_name)}</Fore>
+                <Sur>{_escape_xml(d.last_name)}</Sur>
+                <House>{_escape_xml(d.house_name_or_number)}</House>
+                <Postcode>{_escape_xml(d.postcode.upper().strip())}</Postcode>
+              </Donor>
+              <AggDonation>
+                <GiftAidDate>{d.donation_date.isoformat()}</GiftAidDate>
+                <Total>{d.amount:.2f}</Total>
+              </AggDonation>
+            </Repayment>"""
         for d in submission.declarations
     ])
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope
-  xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
-  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <SOAP-ENV:Header>
-    <GovTalkDetails xmlns="http://www.govtalk.gov.uk/CM/envelope">
-      <Keys>
-        <Key Type="CorrelationID">{correlation_id}</Key>
-      </Keys>
-      <Authentication>
-        <Method>clear</Method>
-        <Role>principal</Role>
-        <Value>{settings.HMRC_GIFT_AID_PASSWORD}</Value>
-      </Authentication>
-    </GovTalkDetails>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
+<GovTalkMessage xmlns="http://www.govtalk.gov.uk/CM/envelope">
+  <EnvelopeVersion>2.0</EnvelopeVersion>
+  <Header>
+    <MessageDetails>
+      <Class>CHARITIESR68</Class>
+      <Qualifier>request</Qualifier>
+      <Function>submit</Function>
+      <CorrelationID>{correlation_id}</CorrelationID>
+      <Transformation>XML</Transformation>
+      <GatewayTest>0</GatewayTest>
+    </MessageDetails>
+    <SenderDetails>
+      <IDAuthentication>
+        <SenderID>{_escape_xml(user_id)}</SenderID>
+        <Authentication>
+          <Method>clear</Method>
+          <Role>principal</Role>
+          <Value>{_escape_xml(password)}</Value>
+        </Authentication>
+      </IDAuthentication>
+      <EmailAddress></EmailAddress>
+    </SenderDetails>
+  </Header>
+  <GovTalkDetails>
+    <Keys/>
+    <ChannelRouting>
+      <Channel>
+        <URI>https://online.hmrc.gov.uk/charities</URI>
+        <Product>Shital Temple ERP</Product>
+        <Version>1.0</Version>
+      </Channel>
+    </ChannelRouting>
+  </GovTalkDetails>
+  <Body>
     <IRenvelope xmlns="http://www.govtalk.gov.uk/taxation/charities/r68/2">
       <IRheader>
         <Keys>
-          <Key Type="CharityRef">{charity_ref}</Key>
+          <Key Type="CharityRef">{_escape_xml(charity_ref)}</Key>
         </Keys>
         <PeriodEnd>{claim_date}</PeriodEnd>
         <DefaultCurrency>GBP</DefaultCurrency>
-        <IRmark Type="generic">HMRC</IRmark>
+        <IRmark Type="generic">generic</IRmark>
         <Sender>Charity</Sender>
       </IRheader>
       <R68>
         <AuthOfficialCorrelationID>{correlation_id}</AuthOfficialCorrelationID>
         <Claim>
-          <OfficialName>{charity_ref}</OfficialName>
+          <OfficialName>{_escape_xml(charity_ref)}</OfficialName>
           <Amount>{total:.2f}</Amount>
-          {declarations_xml}
+{declarations_xml}
         </Claim>
       </R68>
     </IRenvelope>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>"""
+  </Body>
+</GovTalkMessage>"""
+
+
+def build_gift_aid_xml_preview(submission: GiftAidSubmission, correlation_id: str = "PREVIEW") -> str:
+    """Public wrapper — returns the GovTalk XML that would be sent to HMRC (credentials masked)."""
+    xml = _build_govtalk_xml(submission, correlation_id)
+    # Mask the password in the preview
+    if settings.HMRC_GIFT_AID_PASSWORD:
+        xml = xml.replace(
+            _escape_xml(settings.HMRC_GIFT_AID_PASSWORD),
+            "***MASKED***",
+        )
+    return xml
 
 
 @capability(
@@ -134,18 +180,16 @@ async def submit_gift_aid_claim(
         else "https://test-transaction-engine.tax.service.gov.uk/submission"
     )
 
-    soap_body = _build_gift_aid_soap(submission, correlation_id)
+    govtalk_xml = _build_govtalk_xml(submission, correlation_id)
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 endpoint,
-                content=soap_body.encode("utf-8"),
+                content=govtalk_xml.encode("utf-8"),
                 headers={
                     "Content-Type": "text/xml; charset=utf-8",
-                    "SOAPAction": "submit",
-                    "GovTalk-UserID": settings.HMRC_GIFT_AID_USER_ID,
-                    "GovTalk-Password": settings.HMRC_GIFT_AID_PASSWORD,
+                    "Accept": "text/xml",
                 },
             )
 

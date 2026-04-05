@@ -130,6 +130,21 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_documents_branch   ON documents(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category)",
+        # Gift Aid submissions history table
+        """CREATE TABLE IF NOT EXISTS gift_aid_submissions (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            correlation_id VARCHAR(100) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'submitted',
+            declarations_count INTEGER NOT NULL DEFAULT 0,
+            total_donated NUMERIC(12,2) NOT NULL DEFAULT 0,
+            amount_claimed NUMERIC(12,2) NOT NULL DEFAULT 0,
+            hmrc_reference VARCHAR(200) DEFAULT '',
+            environment VARCHAR(10) NOT NULL DEFAULT 'test',
+            errors TEXT DEFAULT '',
+            submitted_by VARCHAR(200) DEFAULT '',
+            submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_gift_aid_submissions_date ON gift_aid_submissions(submitted_at)",
     ]
 
     async with SessionLocal() as db:
