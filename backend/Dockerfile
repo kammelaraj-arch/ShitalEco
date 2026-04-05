@@ -33,7 +33,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
-# Run migrations then start server (alembic failure is logged but non-fatal)
-CMD sh -c "alembic upgrade head 2>&1 || echo 'WARNING: alembic failed, starting anyway'; \
+# Run migrations then start server
+# Stamp base first so all migrations run from scratch (all use IF NOT EXISTS so safe to re-run)
+CMD sh -c "alembic stamp base 2>/dev/null; alembic upgrade head 2>&1 || echo 'WARNING: alembic failed'; \
     uvicorn shital.main:app --host 0.0.0.0 --port 8000 \
     --workers 4 --loop uvloop --http httptools"
