@@ -95,7 +95,7 @@ jobs:
 
             # Show backend startup logs (includes alembic output)
             echo "=== Backend logs (startup) ==="
-            docker compose logs backend --tail=40
+            docker compose logs backend --tail=150
             echo "=== End backend logs ==="
 
             # Patch schema and seed
