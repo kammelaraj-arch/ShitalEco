@@ -155,6 +155,95 @@ async def _patch_schema() -> None:
                 pass  # column already exists or table doesn't exist
         await db.commit()
     logger.info("schema_patch_done")
+    await _seed_catalog()
+
+
+async def _seed_catalog() -> None:
+    """Seed catalog_items with default items if the table is empty.
+    Idempotent — only inserts when zero rows exist in catalog_items.
+    """
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+
+    # Each tuple: (name, name_gu, name_hi, category, price, emoji, unit, gift_aid, sort_order, image_url)
+    SEED_ITEMS = [
+        # ── General Donations (gift-aid eligible preset amounts) ──────────────
+        ("Sadharana Dan £1",    "સાધારણ દાન £1",   "सामान्य दान £1",   "GENERAL_DONATION", 1,   "🙏", "",      True,  10, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),
+        ("Sadharana Dan £5",    "સાધારણ દાન £5",   "सामान्य दान £5",   "GENERAL_DONATION", 5,   "🙏", "",      True,  20, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),
+        ("Sadharana Dan £10",   "સાધારણ દાન £10",  "सामान्य दान £10",  "GENERAL_DONATION", 10,  "🙏", "",      True,  30, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),
+        ("Sadharana Dan £21",   "સાધારણ દાન £21",  "सामान्य दान £21",  "GENERAL_DONATION", 21,  "🪔", "",      True,  40, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),
+        ("Maha Puja Dan £51",   "મહા પૂજા દાન £51","महा पूजा दान £51", "GENERAL_DONATION", 51,  "🪔", "",      True,  50, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),
+        ("Swarna Dan £101",     "સ્વર્ણ દાન £101", "स्वर्ण दान £101",  "GENERAL_DONATION", 101, "✨", "",      True,  60, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),
+        ("Rajat Dan £251",      "રજત દાન £251",    "रजत दान £251",    "GENERAL_DONATION", 251, "👑", "",      True,  70, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),
+        # ── Soft / Food Donations (NOT gift-aid — physical goods) ─────────────
+        ("Rice Bag 10kg",       "ચોખા 10kg",        "चावल 10kg",        "SOFT_DONATION",    15,  "🌾", "10kg",  False, 10, "https://images.unsplash.com/photo-1586201375761-83865001e31c?w=400&h=250&fit=crop&q=80"),
+        ("Rice Bag 25kg",       "ચોખા 25kg",        "चावल 25kg",        "SOFT_DONATION",    35,  "🌾", "25kg",  False, 20, "https://images.unsplash.com/photo-1586201375761-83865001e31c?w=400&h=250&fit=crop&q=80"),
+        ("Basmati Rice 5kg",    "બાસમતી 5kg",       "बासमती 5kg",       "SOFT_DONATION",    18,  "🌾", "5kg",   False, 30, "https://images.unsplash.com/photo-1536304993881-ff86d42818ef?w=400&h=250&fit=crop&q=80"),
+        ("Atta (Wheat Flour) 10kg","આટો 10kg",      "आटा 10kg",         "SOFT_DONATION",    12,  "🌿", "10kg",  False, 40, "https://images.unsplash.com/photo-1588072432836-e10032774350?w=400&h=250&fit=crop&q=80"),
+        ("Atta 20kg",           "આટો 20kg",         "आटा 20kg",         "SOFT_DONATION",    22,  "🌿", "20kg",  False, 50, "https://images.unsplash.com/photo-1588072432836-e10032774350?w=400&h=250&fit=crop&q=80"),
+        ("Sunflower Oil 5L",    "સૂર્યમુખી તેલ 5L", "सूरजमुखी तेल 5L", "SOFT_DONATION",    8,   "🌻", "5L",    False, 60, "https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400&h=250&fit=crop&q=80"),
+        ("Mustard Oil 5L",      "સરસવ તેલ 5L",      "सरसों का तेल 5L",  "SOFT_DONATION",    9,   "🌼", "5L",    False, 70, "https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400&h=250&fit=crop&q=80"),
+        ("Sugar 5kg",           "ખાંડ 5kg",          "चीनी 5kg",         "SOFT_DONATION",    6,   "🍬", "5kg",   False, 80, "https://images.unsplash.com/photo-1559181567-c3190ca9959b?w=400&h=250&fit=crop&q=80"),
+        ("Salt 2kg",            "મીઠું 2kg",         "नमक 2kg",           "SOFT_DONATION",    2,   "🧂", "2kg",   False, 90, "https://images.unsplash.com/photo-1596097635121-14b63b7a0c19?w=400&h=250&fit=crop&q=80"),
+        ("Tea (Loose) 500g",    "ચા 500g",           "चाय 500g",          "SOFT_DONATION",    5,   "🍵", "500g",  False, 100,"https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=400&h=250&fit=crop&q=80"),
+        ("Chana Daal 5kg",      "ચણા દાળ 5kg",       "चना दाल 5kg",       "SOFT_DONATION",    10,  "🫘", "5kg",   False, 110,"https://images.unsplash.com/photo-1515543904379-3d757afe72e4?w=400&h=250&fit=crop&q=80"),
+        ("Toor Daal 5kg",       "તુવેર દાળ 5kg",     "तुअर दाल 5kg",      "SOFT_DONATION",    12,  "🫘", "5kg",   False, 120,"https://images.unsplash.com/photo-1515543904379-3d757afe72e4?w=400&h=250&fit=crop&q=80"),
+        ("Masoor Daal 5kg",     "મસૂર દાળ 5kg",      "मसूर दाल 5kg",      "SOFT_DONATION",    9,   "🫘", "5kg",   False, 130,"https://images.unsplash.com/photo-1515543904379-3d757afe72e4?w=400&h=250&fit=crop&q=80"),
+        # ── Project / Brick Donations (gift-aid eligible) ─────────────────────
+        ("Red Brick",           "લાલ ઈંટ",           "लाल ईंट",           "PROJECT_DONATION",  1,  "🧱", "",      True,  10, "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=400&h=250&fit=crop&q=80"),
+        ("Bronze Brick",        "કાંસ્ય ઈંટ",        "कांस्य ईंट",        "PROJECT_DONATION",  5,  "🧱", "",      True,  20, "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=400&h=250&fit=crop&q=80"),
+        ("Silver Brick",        "ચાંદી ઈંટ",         "चांदी ईंट",         "PROJECT_DONATION",  11, "🧱", "",      True,  30, "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=400&h=250&fit=crop&q=80"),
+        ("Gold Brick",          "સોના ઈંટ",          "सोना ईंट",          "PROJECT_DONATION",  51, "🧱", "",      True,  40, "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=400&h=250&fit=crop&q=80"),
+        ("Platinum Brick",      "પ્લૈટિનમ ઈંટ",     "प्लेटिनम ईंट",     "PROJECT_DONATION",  101,"🧱", "",      True,  50, "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=400&h=250&fit=crop&q=80"),
+        ("Diamond Brick",       "હીરા ઈંટ",          "हीरा ईंट",          "PROJECT_DONATION",  251,"💎", "",      True,  60, "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=400&h=250&fit=crop&q=80"),
+        ("Shree Brick",         "શ્રી ઈંટ",          "श्री ईंट",          "PROJECT_DONATION",  501,"🕉️","",      True,  70, "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=400&h=250&fit=crop&q=80"),
+        # ── Shop / Puja Items (NOT gift-aid) ──────────────────────────────────
+        ("Coconut (small)",     "નારિયળ (નાનો)",     "नारियल (छोटा)",     "SHOP",              1,  "🥥", "",      False, 10, "https://images.unsplash.com/photo-1580984969071-a8da5656c2fb?w=400&h=250&fit=crop&q=80"),
+        ("Coconut (large)",     "નારિયળ (મોટો)",     "नारियल (बड़ा)",     "SHOP",              2,  "🥥", "",      False, 20, "https://images.unsplash.com/photo-1580984969071-a8da5656c2fb?w=400&h=250&fit=crop&q=80"),
+        ("Incense Sticks Pack", "અગરબત્તી",          "अगरबत्ती",          "SHOP",              3,  "🕯️","pack",  False, 30, "https://images.unsplash.com/photo-1601315377985-f4e2a08bf4a0?w=400&h=250&fit=crop&q=80"),
+        ("Camphor Tabs",        "કાફૂર",             "कपूर",              "SHOP",              2,  "⬜","",      False, 40, "https://images.unsplash.com/photo-1599940824399-b87987ceb72a?w=400&h=250&fit=crop&q=80"),
+        ("Prasad Box (assorted)","પ્રસાદ",           "प्रसाद",            "SHOP",              5,  "🍮","",      False, 50, "https://images.unsplash.com/photo-1601050690597-df0568f70950?w=400&h=250&fit=crop&q=80"),
+        # ── Sponsorship ───────────────────────────────────────────────────────
+        ("Festival Sponsor",    "ઉત્સવ પ્રાયોજક",   "उत्सव प्रायोजक",   "SPONSORSHIP",       51, "📖", "",      True,  10, "https://images.unsplash.com/photo-1582845512747-e42001c95638?w=400&h=250&fit=crop&q=80"),
+        ("Langar Sponsor",      "લંગર પ્રાયોજક",    "लंगर प्रायोजक",    "SPONSORSHIP",       101,"🍲", "",      True,  20, "https://images.unsplash.com/photo-1582845512747-e42001c95638?w=400&h=250&fit=crop&q=80"),
+        ("Aarti Sponsor",       "આરતી પ્રાયોજક",    "आरती प्रायोजक",    "SPONSORSHIP",       21, "🪔", "",      True,  30, "https://images.unsplash.com/photo-1582845512747-e42001c95638?w=400&h=250&fit=crop&q=80"),
+    ]
+
+    async with SessionLocal() as db:
+        try:
+            # Only seed if table is completely empty
+            count_result = await db.execute(text("SELECT COUNT(*) FROM catalog_items WHERE deleted_at IS NULL"))
+            count = count_result.scalar() or 0
+            if count > 0:
+                logger.info("catalog_seed_skipped", existing_items=count)
+                return
+
+            for (name, name_gu, name_hi, category, price, emoji, unit, gift_aid, sort_order, image_url) in SEED_ITEMS:
+                await db.execute(text("""
+                    INSERT INTO catalog_items
+                        (id, name, name_gu, name_hi, name_te, description, category,
+                         price, currency, unit, emoji, image_url,
+                         gift_aid_eligible, is_active, scope, branch_id,
+                         stock_qty, sort_order, metadata_json,
+                         available_from, available_until, display_channel,
+                         branch_stock, is_live, created_at, updated_at)
+                    VALUES
+                        (gen_random_uuid(), :name, :name_gu, :name_hi, '', '',
+                         :category, :price, 'GBP', :unit, :emoji, :image_url,
+                         :gift_aid, true, 'GLOBAL', '',
+                         NULL, :sort_order, '{}',
+                         NULL, NULL, 'both',
+                         '{}', true, NOW(), NOW())
+                """), {
+                    "name": name, "name_gu": name_gu, "name_hi": name_hi,
+                    "category": category, "price": price, "unit": unit,
+                    "emoji": emoji, "image_url": image_url,
+                    "gift_aid": gift_aid, "sort_order": sort_order,
+                })
+            await db.commit()
+            logger.info("catalog_seed_done", items_inserted=len(SEED_ITEMS))
+        except Exception as exc:
+            logger.error("catalog_seed_failed", error=str(exc))
 
 
 app = FastAPI(
@@ -226,6 +315,13 @@ async def run_schema_patch() -> dict[str, Any]:
     """Run idempotent schema patcher on demand (safe to call multiple times)."""
     await _patch_schema()
     return {"patched": True}
+
+
+@app.post("/api/v1/admin/seed-catalog", tags=["admin"])
+async def run_catalog_seed() -> dict[str, Any]:
+    """Force re-seed catalog_items (only inserts if table is empty). Safe to call multiple times."""
+    await _seed_catalog()
+    return {"seeded": True}
 
 
 @app.get("/api/v1/dna", tags=["dna"])
