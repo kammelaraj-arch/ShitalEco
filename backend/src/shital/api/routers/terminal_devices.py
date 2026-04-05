@@ -343,9 +343,12 @@ async def sync_from_stripe(ctx: RequiredSpace, branch_id: str = "", location_id:
     import stripe
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
     from sqlalchemy import text
 
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe API key not configured. Set it in Admin → API Keys.")
 
     try:
         params: dict = {"limit": 100}
@@ -442,9 +445,10 @@ async def refresh_device_status(device_id: str, ctx: RequiredSpace):
     import stripe
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
     from sqlalchemy import text
 
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     now = datetime.utcnow()
 
     async with SessionLocal() as db:

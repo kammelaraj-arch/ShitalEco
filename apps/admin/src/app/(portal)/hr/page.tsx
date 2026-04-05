@@ -6,13 +6,14 @@ import { apiFetch } from '@/lib/api'
 interface Employee {
   id: string
   full_name: string
-  role: string
+  email: string
+  phone: string
+  role: string          // mapped from job_title
   department: string
   employment_type: string
-  status: string
+  is_active: boolean
   start_date: string
   gross_salary: number
-  email: string
 }
 
 interface CreateEmployeeForm {
@@ -59,8 +60,9 @@ export default function HRPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const data = await apiFetch<{ employees: Employee[] }>('/hr/employees?limit=200')
-      setEmployees(data.employees || [])
+      // list_employees returns { items: Employee[], next_cursor, count }
+      const data = await apiFetch<{ items: Employee[]; next_cursor: string | null; count: number }>('/hr/employees?limit=200')
+      setEmployees(data.items || [])
     } catch {
       setError('Failed to load employees')
     } finally { setLoading(false) }
@@ -167,7 +169,7 @@ export default function HRPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
-                {['Employee', 'Department', 'Type', 'Salary', 'Start Date', 'Status', ''].map(h => (
+                {['Employee', 'Contact', 'Department', 'Type', 'Salary', 'Start Date', 'Active', ''].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -188,6 +190,13 @@ export default function HRPage() {
                       </div>
                     </div>
                   </td>
+                  <td className="px-4 py-3">
+                    <div>
+                      {emp.email && <p className="text-white/60 text-xs">{emp.email}</p>}
+                      {emp.phone && <p className="text-white/40 text-xs">{emp.phone}</p>}
+                      {!emp.email && !emp.phone && <span className="text-white/20 text-xs">—</span>}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-white/60 text-sm">{emp.department || '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${TYPE_COLORS[emp.employment_type] || 'bg-white/5 text-white/40 border-white/10'}`}>
@@ -202,10 +211,10 @@ export default function HRPage() {
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
-                      emp.status === 'ACTIVE' || emp.status === 'Active'
+                      emp.is_active
                         ? 'bg-green-500/20 text-green-400 border-green-500/30'
                         : 'bg-white/5 text-white/40 border-white/10'
-                    }`}>{emp.status || 'Active'}</span>
+                    }`}>{emp.is_active ? 'Active' : 'Inactive'}</span>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <a href="/hr/leave" className="text-saffron-400 text-sm hover:text-saffron-300">Leave →</a>

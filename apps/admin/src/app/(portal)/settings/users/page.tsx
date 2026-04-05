@@ -1,8 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+import { apiFetch } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,22 +91,16 @@ function UserModal({ user, onClose, onSaved }: {
     setError(''); setSaving(true)
     try {
       if (isEdit) {
-        // Update role only (edit modal)
-        const res = await fetch(`${API}/users/${user!.id}/role`, {
+        await apiFetch(`/users/${user!.id}/role`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ role, branch_id: branchId || null }),
         })
-        if (!res.ok) throw new Error((await res.json()).detail)
       } else {
-        // Create new user
         if (!name.trim() || !email.trim()) { setError('Name and email are required'); setSaving(false); return }
-        const res = await fetch(`${API}/users/`, {
+        await apiFetch('/users/', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, email, role, branch_id: branchId || '', phone, password }),
         })
-        if (!res.ok) throw new Error((await res.json()).detail)
       }
       onSaved(); onClose()
     } catch (e: any) {
@@ -118,14 +111,13 @@ function UserModal({ user, onClose, onSaved }: {
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}>
-      <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9 }}
-        className="w-full max-w-md rounded-2xl overflow-hidden"
-        style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.08)' }}
-        onClick={e => e.stopPropagation()}>
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full max-w-[480px] z-50 flex flex-col overflow-hidden"
+        style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}>
 
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
           <div>
@@ -195,7 +187,7 @@ function UserModal({ user, onClose, onSaved }: {
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </>
   )
 }
 
@@ -217,8 +209,7 @@ export default function UsersPage() {
       if (filterRole) params.set('role', filterRole)
       if (search) params.set('search', search)
       params.set('active_only', showInactive ? 'false' : 'true')
-      const res = await fetch(`${API}/users/?${params}`)
-      const data = await res.json()
+      const data = await apiFetch<{ users: User[] }>(`/users/?${params}`)
       setUsers(data.users ?? [])
     } finally {
       setLoading(false)
@@ -228,13 +219,13 @@ export default function UsersPage() {
   useEffect(() => { load() }, [load])
 
   async function toggleActive(u: User) {
-    await fetch(`${API}/users/${u.id}/toggle-active`, { method: 'PUT' })
+    await apiFetch(`/users/${u.id}/toggle-active`, { method: 'PUT' })
     load()
   }
 
   async function deleteUser(u: User) {
     if (!confirm(`Remove ${u.name}? This cannot be undone.`)) return
-    await fetch(`${API}/users/${u.id}`, { method: 'DELETE' })
+    await apiFetch(`/users/${u.id}`, { method: 'DELETE' })
     load()
   }
 

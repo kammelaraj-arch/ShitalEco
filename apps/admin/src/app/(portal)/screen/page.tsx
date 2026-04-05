@@ -23,7 +23,7 @@ interface Profile {
 
 interface Playlist { id: string; name: string; item_count: number }
 
-function tok() { return typeof window !== 'undefined' ? localStorage.getItem('access_token') || '' : '' }
+function tok() { return typeof window !== 'undefined' ? sessionStorage.getItem('shital_access_token') || '' : '' }
 
 async function apiFetch(path: string, opts: RequestInit = {}) {
   const res = await fetch(API + path, {

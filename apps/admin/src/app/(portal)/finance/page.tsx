@@ -15,20 +15,30 @@ interface Account {
   is_active: boolean
 }
 
+interface TrialBalanceAccount {
+  code: string
+  name: string
+  type: string
+  debit: string
+  credit: string
+}
+
 interface TrialBalance {
-  entries: { account: string; dr: number; cr: number }[]
-  total_dr: number
-  total_cr: number
-  balanced: boolean
+  accounts: TrialBalanceAccount[]
+  total_debits: string
+  total_credits: string
+  is_balanced: boolean
   as_at: string
 }
 
 interface JournalEntry {
   description: string
+  date: string
   debit_account_id: string
   credit_account_id: string
-  amount: number
-  reference?: string
+  amount: string
+  reference: string
+  idempotency_key: string
 }
 
 const TYPE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -54,7 +64,9 @@ export default function FinancePage() {
 
   // ── Journal form ────────────────────────────────────────────────────────
   const [jForm, setJForm] = useState<JournalEntry>({
-    description: '', debit_account_id: '', credit_account_id: '', amount: 0, reference: '',
+    description: '', date: new Date().toISOString().slice(0, 10),
+    debit_account_id: '', credit_account_id: '', amount: '', reference: '',
+    idempotency_key: crypto.randomUUID(),
   })
   const [jSaving, setJSaving] = useState(false)
   const [jError, setJError] = useState('')
@@ -85,17 +97,31 @@ export default function FinancePage() {
   }, [tab, loadAccounts, loadTrialBalance])
 
   async function postJournal() {
-    if (!jForm.description || !jForm.debit_account_id || !jForm.credit_account_id || !jForm.amount) {
+    if (!jForm.description || !jForm.debit_account_id || !jForm.credit_account_id || !jForm.amount || !jForm.date) {
       setJError('All fields required'); return
     }
+    const amt = parseFloat(jForm.amount)
+    if (isNaN(amt) || amt <= 0) { setJError('Enter a valid amount'); return }
     setJSaving(true); setJError('')
     try {
-      await apiFetch('/finance/journal', {
-        method: 'POST',
-        body: JSON.stringify(jForm),
-      })
+      // Backend PostJournalInput expects: description, date, lines[], idempotency_key, reference
+      const body = {
+        description: jForm.description,
+        date: jForm.date,
+        reference: jForm.reference || '',
+        idempotency_key: jForm.idempotency_key,
+        lines: [
+          { account_id: jForm.debit_account_id,  description: jForm.description, debit: amt.toFixed(2),  credit: '0.00' },
+          { account_id: jForm.credit_account_id, description: jForm.description, debit: '0.00', credit: amt.toFixed(2) },
+        ],
+      }
+      await apiFetch('/finance/journal', { method: 'POST', body: JSON.stringify(body) })
       setShowJournal(false)
-      setJForm({ description: '', debit_account_id: '', credit_account_id: '', amount: 0, reference: '' })
+      setJForm({
+        description: '', date: new Date().toISOString().slice(0, 10),
+        debit_account_id: '', credit_account_id: '', amount: '', reference: '',
+        idempotency_key: crypto.randomUUID(),
+      })
       if (tab === 'accounts') loadAccounts()
     } catch (e: unknown) {
       setJError(e instanceof Error ? e.message : 'Failed to post journal')
@@ -229,39 +255,47 @@ export default function FinancePage() {
               <div className="overflow-x-auto"><table className="w-full">
                 <thead>
                   <tr className="border-b border-white/5">
+                    <th className="text-left pb-3 text-white/40 text-xs font-semibold uppercase tracking-wider">Code</th>
                     <th className="text-left pb-3 text-white/40 text-xs font-semibold uppercase tracking-wider">Account</th>
                     <th className="text-right pb-3 text-white/40 text-xs font-semibold uppercase tracking-wider">Debit (DR)</th>
                     <th className="text-right pb-3 text-white/40 text-xs font-semibold uppercase tracking-wider">Credit (CR)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(tb.entries || []).map((e, i) => (
-                    <tr key={i} className="border-b border-white/5">
-                      <td className="py-2.5 text-white text-sm">{e.account}</td>
-                      <td className="py-2.5 text-right font-mono text-sm text-white/70">
-                        {e.dr > 0 ? `£${e.dr.toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : '—'}
-                      </td>
-                      <td className="py-2.5 text-right font-mono text-sm text-white/70">
-                        {e.cr > 0 ? `£${e.cr.toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : '—'}
-                      </td>
-                    </tr>
-                  ))}
+                  {(tb.accounts || []).map((e, i) => {
+                    const dr = parseFloat(e.debit || '0')
+                    const cr = parseFloat(e.credit || '0')
+                    return (
+                      <tr key={i} className="border-b border-white/5">
+                        <td className="py-2.5 pr-3">
+                          <code className="text-saffron-400/80 text-xs bg-saffron-400/10 px-2 py-1 rounded">{e.code}</code>
+                        </td>
+                        <td className="py-2.5 text-white text-sm">{e.name}</td>
+                        <td className="py-2.5 text-right font-mono text-sm text-white/70">
+                          {dr > 0 ? `£${dr.toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : '—'}
+                        </td>
+                        <td className="py-2.5 text-right font-mono text-sm text-white/70">
+                          {cr > 0 ? `£${cr.toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-white/20">
-                    <td className="font-bold text-white pt-3">Total</td>
+                    <td className="font-bold text-white pt-3" colSpan={2}>Total</td>
                     <td className="text-right font-black text-saffron-400 pt-3 font-mono">
-                      £{(tb.total_dr || 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                      £{parseFloat(tb.total_debits || '0').toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                     </td>
                     <td className="text-right font-black text-saffron-400 pt-3 font-mono">
-                      £{(tb.total_cr || 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                      £{parseFloat(tb.total_credits || '0').toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                     </td>
                   </tr>
                 </tfoot>
               </table>
-              <div className={`mt-4 flex items-center gap-2 text-sm ${tb.balanced ? 'text-green-400' : 'text-red-400'}`}>
-                <span>{tb.balanced ? '✓' : '✗'}</span>
-                <span className="font-semibold">{tb.balanced ? 'Trial balance is balanced' : 'Trial balance is NOT balanced'}</span>
+              <div className={`mt-4 flex items-center gap-2 text-sm ${tb.is_balanced ? 'text-green-400' : 'text-red-400'}`}>
+                <span>{tb.is_balanced ? '✓' : '✗'}</span>
+                <span className="font-semibold">{tb.is_balanced ? 'Trial balance is balanced' : 'Trial balance is NOT balanced'}</span>
               </div>
             </>
           )}
@@ -324,15 +358,19 @@ export default function FinancePage() {
                     {accounts.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
                   </select>
                 </div>
+                <div>
+                  <label className={label}>Date *</label>
+                  <input type="date" value={jForm.date} onChange={e => setJForm(p => ({ ...p, date: e.target.value }))} className={inp} />
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={label}>Amount (£) *</label>
-                    <input type="number" min="0.01" step="0.01" value={jForm.amount || ''}
-                      onChange={e => setJForm(p => ({ ...p, amount: parseFloat(e.target.value) || 0 }))} className={inp} />
+                    <input type="number" min="0.01" step="0.01" value={jForm.amount}
+                      onChange={e => setJForm(p => ({ ...p, amount: e.target.value }))} className={inp} />
                   </div>
                   <div>
                     <label className={label}>Reference</label>
-                    <input value={jForm.reference || ''} onChange={e => setJForm(p => ({ ...p, reference: e.target.value }))}
+                    <input value={jForm.reference} onChange={e => setJForm(p => ({ ...p, reference: e.target.value }))}
                       placeholder="REF-001" className={inp} />
                   </div>
                 </div>

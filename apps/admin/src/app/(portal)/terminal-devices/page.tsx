@@ -1,8 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+import { apiFetch } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -119,14 +118,9 @@ function DeviceModal({
     setSaving(true)
     setError('')
     try {
-      const url = isEdit ? `${API}/terminal-devices/${device!.id}` : `${API}/terminal-devices/`
+      const url = isEdit ? `/terminal-devices/${device!.id}` : `/terminal-devices/`
       const method = isEdit ? 'PUT' : 'POST'
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      if (!res.ok) throw new Error(await res.text())
+      await apiFetch(url, { method, body: JSON.stringify(form) })
       onSaved()
       onClose()
     } catch (e: any) {
@@ -143,17 +137,15 @@ function DeviceModal({
   ]
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}
-    >
+    <>
       <motion.div
-        initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-        className="w-full max-w-xl rounded-2xl overflow-hidden"
-        style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.08)' }}
-        onClick={e => e.stopPropagation()}
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full max-w-[560px] z-50 flex flex-col overflow-hidden"
+        style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
@@ -165,7 +157,7 @@ function DeviceModal({
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto">
           {error && (
             <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>
           )}
@@ -256,7 +248,7 @@ function DeviceModal({
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </>
   )
 }
 
@@ -298,12 +290,10 @@ function AssignUserModal({
     setSaving(true)
     setError('')
     try {
-      const res = await fetch(`${API}/terminal-devices/${device.id}/assign`, {
+      await apiFetch(`/terminal-devices/${device.id}/assign`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, user_name: userName, user_email: userEmail }),
       })
-      if (!res.ok) throw new Error(await res.text())
       onSaved()
       onClose()
     } catch (e: any) {
@@ -314,23 +304,18 @@ function AssignUserModal({
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-        className="w-full max-w-sm rounded-2xl overflow-hidden"
-        style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.08)' }}
-        onClick={e => e.stopPropagation()}
-      >
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full max-w-sm z-50 flex flex-col overflow-hidden"
+        style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}>
         <div className="px-6 py-4 border-b border-white/5">
           <h2 className="text-white font-black">Assign Staff to Device</h2>
           <p className="text-white/40 text-xs mt-0.5">{device.label}</p>
         </div>
-        <div className="px-6 py-5 space-y-3">
+        <div className="px-6 py-5 space-y-3 flex-1 overflow-y-auto">
           {error && <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>}
           <Field label="User ID *" value={userId} onChange={setUserId} placeholder="UUID or staff ID" mono />
           <Field label="Full Name" value={userName} onChange={setUserName} placeholder="e.g. Priya Patel" />
@@ -343,7 +328,7 @@ function AssignUserModal({
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </>
   )
 }
 
@@ -364,9 +349,9 @@ function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
       const params = new URLSearchParams()
       if (branchId) params.set('branch_id', branchId)
       if (locationId) params.set('location_id', locationId)
-      const res = await fetch(`${API}/terminal-devices/sync-stripe?${params}`, { method: 'POST' })
-      if (!res.ok) throw new Error(await res.text())
-      const data = await res.json()
+      const data = await apiFetch<{ synced: number; created: number; updated: number }>(
+        `/terminal-devices/sync-stripe?${params}`, { method: 'POST' }
+      )
       setResult(data)
       onDone()
     } catch (e: any) {
@@ -377,23 +362,18 @@ function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-        className="w-full max-w-sm rounded-2xl overflow-hidden"
-        style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.08)' }}
-        onClick={e => e.stopPropagation()}
-      >
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full max-w-sm z-50 flex flex-col overflow-hidden"
+        style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}>
         <div className="px-6 py-4 border-b border-white/5">
           <h2 className="text-white font-black">⚡ Sync from Stripe</h2>
           <p className="text-white/40 text-xs mt-0.5">Pull registered readers from the Stripe API</p>
         </div>
-        <div className="px-6 py-5 space-y-3">
+        <div className="px-6 py-5 space-y-3 flex-1 overflow-y-auto">
           {error && <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>}
           {result && (
             <div className="bg-green-500/15 border border-green-500/20 text-green-400 text-sm px-4 py-3 rounded-xl">
@@ -411,7 +391,7 @@ function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </>
   )
 }
 
@@ -435,8 +415,7 @@ export default function TerminalDevicesPage() {
       if (filterBranch) params.set('branch_id', filterBranch)
       if (filterProvider) params.set('provider', filterProvider)
       params.set('active_only', showInactive ? 'false' : 'true')
-      const res = await fetch(`${API}/terminal-devices/?${params}`)
-      const data = await res.json()
+      const data = await apiFetch<{ devices: TerminalDevice[] }>(`/terminal-devices/?${params}`)
       setDevices(data.devices ?? [])
     } catch {
       setDevices([])
@@ -449,14 +428,14 @@ export default function TerminalDevicesPage() {
 
   async function deleteDevice(id: string) {
     if (!confirm('Deactivate this device? It can be re-enabled by editing.')) return
-    await fetch(`${API}/terminal-devices/${id}`, { method: 'DELETE' })
+    await apiFetch(`/terminal-devices/${id}`, { method: 'DELETE' })
     load()
   }
 
   async function refreshStatus(device: TerminalDevice) {
     setRefreshing(device.id)
     try {
-      await fetch(`${API}/terminal-devices/${device.id}/refresh-status`, { method: 'POST' })
+      await apiFetch(`/terminal-devices/${device.id}/refresh-status`, { method: 'POST' })
       load()
     } finally {
       setRefreshing(null)

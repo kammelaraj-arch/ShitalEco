@@ -41,7 +41,7 @@ function PinOverlay({ onVerified }: { onVerified: (pin: string) => void }) {
     if (pin.length < 4) { setError('PIN must be at least 4 digits'); return }
     setLoading(true); setError('')
     try {
-      const token = localStorage.getItem('access_token') || ''
+      const token = sessionStorage.getItem('shital_access_token') || ''
       const res = await fetch(`${API}/settings/api-keys/verify-pin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -109,7 +109,7 @@ function KeyRow({
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState('')
 
-  const token = typeof window !== 'undefined' ? (localStorage.getItem('access_token') || '') : ''
+  const token = typeof window !== 'undefined' ? (sessionStorage.getItem('shital_access_token') || '') : ''
 
   async function reveal() {
     setLoadingReveal(true); setErr('')
@@ -244,7 +244,7 @@ function ChangePinModal({ pin, onClose }: { pin: string; onClose: () => void }) 
     if (newPin !== confirm) { setErr('PINs do not match'); return }
     if (newPin.length < 4) { setErr('PIN must be at least 4 digits'); return }
     setLoading(true); setErr('')
-    const token = localStorage.getItem('access_token') || ''
+    const token = sessionStorage.getItem('shital_access_token') || ''
     try {
       const res = await fetch(`${API}/settings/api-keys/change-pin`, {
         method: 'POST',
@@ -310,7 +310,7 @@ export default function ApiKeysPage() {
   const [showChangePinModal, setShowChangePinModal] = useState(false)
   const [activeGroup, setActiveGroup] = useState<string>('all')
 
-  const token = typeof window !== 'undefined' ? (localStorage.getItem('access_token') || '') : ''
+  const token = typeof window !== 'undefined' ? (sessionStorage.getItem('shital_access_token') || '') : ''
 
   const loadKeys = useCallback(async () => {
     setLoading(true)

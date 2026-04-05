@@ -1,8 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+import { apiFetch } from '@/lib/api'
 
 const CATEGORIES = ['GENERAL_DONATION', 'SOFT_DONATION', 'PROJECT_DONATION', 'SHOP', 'SERVICE']
 const BRANCHES = ['main', 'leicester', 'reading', 'mk']
@@ -70,10 +69,7 @@ export default function CatalogItemsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const res = await fetch(`${API}/items/?active_only=false`, {
-        headers: { 'X-Space-Id': 'main', 'X-User-Id': 'admin' },
-      })
-      const data = await res.json()
+      const data = await apiFetch<{ items: Item[] }>('/items/?active_only=false')
       setItems(data.items || [])
     } catch { setError('Failed to load items') }
     finally { setLoading(false) }
@@ -104,7 +100,7 @@ export default function CatalogItemsPage() {
     if (!form.name.trim()) return
     setSaving(true)
     try {
-      const url = editing ? `${API}/items/${editing.id}` : `${API}/items/`
+      const url = editing ? `/items/${editing.id}` : `/items/`
       const method = editing ? 'PUT' : 'POST'
       const body = {
         ...form,
@@ -113,14 +109,7 @@ export default function CatalogItemsPage() {
         available_until: form.available_until || null,
         stock_qty: form.stock_qty ?? null,
       }
-      await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Space-Id': 'main', 'X-User-Id': 'admin',
-        },
-        body: JSON.stringify(body),
-      })
+      await apiFetch(url, { method, body: JSON.stringify(body) })
       setShowForm(false)
       await load()
     } catch { setError('Failed to save item') }
@@ -129,9 +118,8 @@ export default function CatalogItemsPage() {
 
   const toggleLive = async (item: Item) => {
     try {
-      await fetch(`${API}/items/${item.id}`, {
+      await apiFetch(`/items/${item.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Space-Id': 'main', 'X-User-Id': 'admin' },
         body: JSON.stringify({ is_live: !item.is_live }),
       })
       setItems(prev => prev.map(x => x.id === item.id ? { ...x, is_live: !x.is_live } : x))
