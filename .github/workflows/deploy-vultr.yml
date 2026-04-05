@@ -13,6 +13,10 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
         with:
           host: 192.248.147.205
           username: root
@@ -58,6 +62,12 @@ jobs:
               printf 'STRIPE_PUBLISHABLE_KEY=\n' >> .env
               printf 'STRIPE_WEBHOOK_SECRET=\n' >> .env
             fi
+
+            # ── Inject secrets into .env (always update, never leave blank) ────
+            [ -n "$STRIPE_SECRET_KEY" ]    && sed -i "s|STRIPE_SECRET_KEY=.*|STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}|" .env    || true
+            [ -n "$STRIPE_PUBLISHABLE_KEY" ] && sed -i "s|STRIPE_PUBLISHABLE_KEY=.*|STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}|" .env || true
+            [ -n "$ANTHROPIC_API_KEY" ]    && sed -i "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}|" .env    || true
+            [ -n "$SENDGRID_API_KEY" ]     && sed -i "s|SENDGRID_API_KEY=.*|SENDGRID_API_KEY=${SENDGRID_API_KEY}|" .env     || true
 
             # ── Open ports ────────────────────────────────────────────────────
             ufw allow 22/tcp 2>/dev/null || true
