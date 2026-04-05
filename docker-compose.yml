@@ -79,10 +79,11 @@ services:
   # ─── Kiosk (Vite SPA — web/Android/Electron shared renderer) ──────────────
   kiosk:
     build:
-      context: .                          # workspace root (pnpm monorepo)
-      dockerfile: apps/kiosk/Dockerfile
+      context: ./apps/kiosk          # standalone — no workspace deps needed
+      dockerfile: Dockerfile
       args:
-        VITE_API_URL: ${API_URL:-/api/v1}
+        VITE_API_URL: /api/v1
+        VITE_BASE: /kiosk/
         VITE_BRANCH_ID: ${BRANCH_ID:-main}
     restart: unless-stopped
     depends_on:

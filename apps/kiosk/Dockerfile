@@ -1,61 +1,63 @@
-# ─── Stage 1: Build ───
+# ─── Stage 1: Build ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
 
-# Copy workspace root files for dependency resolution
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
-COPY apps/kiosk/package.json apps/kiosk/
+# Copy only kiosk's own package.json (no workspace needed — kiosk has no internal deps)
+COPY package.json ./
 
-# Install dependencies
-RUN pnpm install --frozen-lockfile --filter @shital/kiosk... || pnpm install --filter @shital/kiosk...
+# ELECTRON_SKIP_BINARY_DOWNLOAD avoids downloading the ~200MB Electron binary
+# which we never need for web/Docker builds
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
+RUN pnpm install --no-frozen-lockfile
 
 # Copy source
-COPY apps/kiosk/ apps/kiosk/
+COPY . .
 
-WORKDIR /app/apps/kiosk
-
-# Build for production (web mode — no electron)
+# Build web-only bundle (Vite, no Electron)
 ARG VITE_API_URL=/api/v1
+ARG VITE_BASE=/kiosk/
 ARG VITE_BRANCH_ID=main
 ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_BASE=${VITE_BASE}
 ENV VITE_BRANCH_ID=${VITE_BRANCH_ID}
 RUN pnpm run build:web
 
-# ─── Stage 2: Serve with nginx ───
+# ─── Stage 2: Serve with nginx ────────────────────────────────────────────────
 FROM nginx:alpine AS production
 
 RUN rm /etc/nginx/conf.d/default.conf
 
-COPY --from=builder /app/apps/kiosk/dist /usr/share/nginx/html
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
-server {
-    listen 80;
-    server_name _;
-    root /usr/share/nginx/html;
-    index index.html;
-
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/javascript image/svg+xml;
-
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # SPA fallback
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /health {
-        return 200 '{"status":"healthy","service":"kiosk"}';
-        add_header Content-Type application/json;
-    }
-}
-EOF
+# SPA nginx config: serve the kiosk at '/' inside this container.
+# The reverse proxy (shital.conf) maps /kiosk/ -> http://kiosk:80/
+# Vite is built with base='/kiosk/' so asset paths already contain the prefix.
+RUN printf 'server {\n\
+    listen 80;\n\
+    server_name _;\n\
+    root /usr/share/nginx/html;\n\
+    index index.html;\n\
+\n\
+    gzip on;\n\
+    gzip_types text/plain text/css application/json application/javascript text/javascript image/svg+xml;\n\
+\n\
+    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {\n\
+        expires 1y;\n\
+        add_header Cache-Control "public, immutable";\n\
+    }\n\
+\n\
+    # SPA fallback\n\
+    location / {\n\
+        try_files $uri $uri/ /index.html;\n\
+    }\n\
+\n\
+    location /health {\n\
+        return 200 '"'"'{"status":"healthy","service":"kiosk"}'"'"';\n\
+        add_header Content-Type application/json;\n\
+    }\n\
+}\n' > /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
