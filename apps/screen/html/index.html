@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920">
+  <meta name="HandheldFriendly" content="true">
+  <title>Shital Temple — Smart Screen</title>
+  <link rel="stylesheet" href="assets/player.css">
+</head>
+<body>
+
+<!-- ── Decorative top bar ────────────────────────────────────────────────── -->
+<div id="top-bar"></div>
+
+<!-- ── Main content area ─────────────────────────────────────────────────── -->
+<div id="main-stage">
+
+  <!-- IMAGE -->
+  <div id="slide-image" class="slide">
+    <img id="img-el" src="" alt="">
+    <div class="slide-caption" id="img-caption"></div>
+  </div>
+
+  <!-- VIDEO / STREAM / BROADCAST -->
+  <div id="slide-video" class="slide">
+    <video id="video-el" autoplay playsinline muted></video>
+    <div class="slide-caption" id="video-caption"></div>
+  </div>
+
+  <!-- AUDIO (background audio with visualiser) -->
+  <div id="slide-audio" class="slide">
+    <audio id="audio-el" autoplay></audio>
+    <div id="audio-vis">
+      <div class="om-symbol">🕉️</div>
+      <div id="audio-title" class="audio-title"></div>
+      <div id="audio-bars">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- IMAGE + AUDIO parallel -->
+  <div id="slide-image-audio" class="slide">
+    <img id="img-audio-el" src="" alt="">
+    <audio id="audio2-el" autoplay loop></audio>
+    <div class="slide-caption" id="img-audio-caption"></div>
+  </div>
+
+  <!-- YOUTUBE embed -->
+  <div id="slide-youtube" class="slide">
+    <iframe id="yt-el" frameborder="0" allowfullscreen
+      allow="autoplay; encrypted-media; picture-in-picture"
+      src=""></iframe>
+  </div>
+
+  <!-- WEBSITE embed -->
+  <div id="slide-website" class="slide">
+    <iframe id="web-el" frameborder="0" src="about:blank" scrolling="no"></iframe>
+  </div>
+
+  <!-- TEMPLE FALLBACK (built-in when no profile / no content) -->
+  <div id="slide-temple" class="slide active">
+    <div id="temple-content">
+      <div id="temple-om">🕉️</div>
+      <div id="temple-name">Shital Hindu Temple</div>
+      <div id="temple-jai"></div>
+      <div id="temple-clock"></div>
+      <div id="temple-date"></div>
+      <div id="aarti-grid"></div>
+    </div>
+  </div>
+
+</div><!-- /#main-stage -->
+
+<!-- ── Slide progress dots ────────────────────────────────────────────────── -->
+<div id="slide-dots"></div>
+
+<!-- ── Seva ticker bar ───────────────────────────────────────────────────── -->
+<div id="ticker-bar">
+  <div id="ticker-label">SEVA</div>
+  <div id="ticker-track"><div id="ticker-inner"></div></div>
+</div>
+
+<!-- ── Bottom status bar ─────────────────────────────────────────────────── -->
+<div id="bottom-bar">
+  <span id="bottom-name">🕉 Shital Hindu Temple</span>
+  <span id="bottom-url">shital.org.uk</span>
+  <span id="bottom-clock2"></span>
+</div>
+
+<!-- ── Scripts ───────────────────────────────────────────────────────────── -->
+<script src="assets/jquery.min.js"></script>
+<script src="assets/hls.min.js"></script>
+<script src="assets/player.js"></script>
+</body>
+</html>

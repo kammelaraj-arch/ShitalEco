@@ -164,6 +164,64 @@ async def _patch_schema() -> None:
             updated_by  VARCHAR(200) NOT NULL DEFAULT ''
         )""",
         "CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys_store(group_name)",
+        # ── Smart Screen ─────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS screen_content_items (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id     VARCHAR(100) NOT NULL DEFAULT 'main',
+            title         VARCHAR(200) NOT NULL,
+            content_type  VARCHAR(30)  NOT NULL DEFAULT 'IMAGE',
+            media_url     TEXT         NOT NULL DEFAULT '',
+            audio_url     TEXT         NOT NULL DEFAULT '',
+            thumbnail_url TEXT         NOT NULL DEFAULT '',
+            duration_secs INTEGER      NOT NULL DEFAULT 10,
+            is_live       BOOLEAN      NOT NULL DEFAULT false,
+            youtube_id    VARCHAR(50)  NOT NULL DEFAULT '',
+            website_url   TEXT         NOT NULL DEFAULT '',
+            description   TEXT         NOT NULL DEFAULT '',
+            tags          TEXT         NOT NULL DEFAULT '',
+            created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at    TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_screen_content_branch ON screen_content_items(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_screen_content_type   ON screen_content_items(content_type)",
+        """CREATE TABLE IF NOT EXISTS screen_playlists (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id     VARCHAR(100) NOT NULL DEFAULT 'main',
+            name          VARCHAR(200) NOT NULL,
+            description   TEXT         NOT NULL DEFAULT '',
+            shuffle       BOOLEAN      NOT NULL DEFAULT false,
+            loop_playlist BOOLEAN      NOT NULL DEFAULT true,
+            created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at    TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_screen_playlists_branch ON screen_playlists(branch_id)",
+        """CREATE TABLE IF NOT EXISTS screen_playlist_items (
+            id              UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+            playlist_id     UUID    NOT NULL,
+            content_item_id UUID    NOT NULL,
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            duration_secs   INTEGER DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_screen_playlist_items_pl ON screen_playlist_items(playlist_id)",
+        """CREATE TABLE IF NOT EXISTS screen_profiles (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            name                VARCHAR(200) NOT NULL,
+            location            VARCHAR(200) NOT NULL DEFAULT '',
+            description         TEXT         NOT NULL DEFAULT '',
+            display_mode        VARCHAR(20)  NOT NULL DEFAULT 'playlist',
+            default_playlist_id UUID         DEFAULT NULL,
+            live_url            TEXT         NOT NULL DEFAULT '',
+            live_type           VARCHAR(20)  NOT NULL DEFAULT 'stream',
+            schedule_json       JSONB        NOT NULL DEFAULT '[]',
+            is_active           BOOLEAN      NOT NULL DEFAULT true,
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at          TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_screen_profiles_branch ON screen_profiles(branch_id)",
         # HR — standalone employee fields (no user account required)
         "ALTER TABLE employees ADD COLUMN IF NOT EXISTS full_name VARCHAR(200)",
         "ALTER TABLE employees ADD COLUMN IF NOT EXISTS email    VARCHAR(255)",
@@ -371,6 +429,7 @@ _mount("shital.api.routers.assets",           "router")
 _mount("shital.api.routers.bookings_router",  "router")
 _mount("shital.api.routers.documents_router", "router")
 _mount("shital.api.routers.api_keys",         "router")
+_mount("shital.api.routers.screen",           "router")
 
 
 @app.get("/health", tags=["system"])

@@ -58,6 +58,14 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    label: 'Smart Screen',
+    items: [
+      { href: '/screen',            icon: '📺', label: 'Screen Profiles' },
+      { href: '/screen/content',    icon: '🎬', label: 'Content Library' },
+      { href: '/screen/playlists',  icon: '▶️', label: 'Playlists' },
+    ],
+  },
+  {
     label: 'System',
     items: [
       { href: '/settings/branding',         icon: '🎨', label: 'Branding' },

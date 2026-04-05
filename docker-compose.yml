@@ -91,14 +91,11 @@ services:
     networks:
       - internal
 
-  # ─── Smart Screen (TV / Android TV display app) ────────────────────────────
+  # ─── Smart Screen (TV / Android TV — pure HTML/jQuery, no build step) ────────
   screen:
     build:
-      context: .                          # workspace root (pnpm monorepo)
-      dockerfile: apps/screen/Dockerfile
-      args:
-        VITE_API_URL: /api/v1
-        VITE_DONATE_URL: https://shital.org.uk/donate
+      context: ./apps/screen            # only needs the screen dir
+      dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       - backend
