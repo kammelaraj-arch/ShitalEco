@@ -107,7 +107,7 @@ export default function FunctionRegistryPage() {
   const [invokeInput, setInvokeInput] = useState('{}')
   const [invokeReason, setInvokeReason] = useState('')
   const [invoking, setInvoking] = useState(false)
-  const [invokeResult, setInvokeResult] = useState<unknown>(null)
+  const [invokeResult, setInvokeResult] = useState<Record<string, unknown> | null>(null)
 
   // Audit filters
   const [auditFn, setAuditFn] = useState('')
@@ -213,7 +213,7 @@ export default function FunctionRegistryPage() {
           agent_reasoning: invokeReason || null,
         }),
       })
-      setInvokeResult(result)
+      setInvokeResult(result as Record<string, unknown>)
       // Refresh counters
       loadFunctions()
     } catch (e) { setInvokeResult({ error: e instanceof Error ? e.message : 'Invoke failed' }) }

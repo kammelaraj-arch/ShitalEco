@@ -255,7 +255,7 @@ async def list_items(
         async with SessionLocal() as db:
             result = await db.execute(
                 text(f"""
-                    SELECT id, name, name_gu, name_hi, '' AS name_te, description, category,
+                    SELECT id, name, name_gu, name_hi, name_te, description, category,
                            price, currency, unit, emoji, image_url,
                            gift_aid_eligible, is_active, scope, branch_id,
                            stock_qty, sort_order, metadata_json,

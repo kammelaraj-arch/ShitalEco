@@ -21,6 +21,7 @@ interface Item {
   name: string
   name_gu: string
   name_hi: string
+  name_te: string
   description: string
   category: string
   price: number
@@ -43,7 +44,7 @@ interface Item {
 type FormState = Omit<Item, 'id' | 'price'> & { price: string }
 
 const EMPTY_FORM: FormState = {
-  name: '', name_gu: '', name_hi: '', description: '',
+  name: '', name_gu: '', name_hi: '', name_te: '', description: '',
   category: 'GENERAL_DONATION', price: '0', unit: '', emoji: '', image_url: '',
   gift_aid_eligible: false, is_active: true, is_live: true,
   scope: 'GLOBAL', branch_id: '',
@@ -84,7 +85,7 @@ export default function CatalogItemsPage() {
   const openEdit = (item: Item) => {
     setEditing(item)
     setForm({
-      name: item.name, name_gu: item.name_gu || '', name_hi: item.name_hi || '',
+      name: item.name, name_gu: item.name_gu || '', name_hi: item.name_hi || '', name_te: item.name_te || '',
       description: item.description || '', category: item.category,
       price: String(item.price), unit: item.unit || '', emoji: item.emoji || '', image_url: item.image_url || '',
       gift_aid_eligible: item.gift_aid_eligible, is_active: item.is_active,
@@ -280,7 +281,7 @@ export default function CatalogItemsPage() {
                   <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                     placeholder="e.g. General Donation" className={inp} />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className={label}>Gujarati</label>
                     <input value={form.name_gu} onChange={e => setForm(p => ({ ...p, name_gu: e.target.value }))} className={inp} placeholder="ગણેશ પૂજા" />
@@ -288,6 +289,10 @@ export default function CatalogItemsPage() {
                   <div>
                     <label className={label}>Hindi</label>
                     <input value={form.name_hi} onChange={e => setForm(p => ({ ...p, name_hi: e.target.value }))} className={inp} placeholder="गणेश पूजा" />
+                  </div>
+                  <div>
+                    <label className={label}>Telugu</label>
+                    <input value={form.name_te} onChange={e => setForm(p => ({ ...p, name_te: e.target.value }))} className={inp} placeholder="గణేష పూజ" />
                   </div>
                 </div>
 
