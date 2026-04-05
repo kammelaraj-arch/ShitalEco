@@ -727,71 +727,75 @@ async def kiosk_sponsorship(branch_id: str = "main"):
 @router.post("/seed")
 async def seed_items(force: bool = False):
     """Seed the catalog_items table with default items. Use force=true to replace existing data."""
+    import traceback
     from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
-    async with SessionLocal() as db:
-        # Check if table already has data
-        count_result = await db.execute(
-            text("SELECT COUNT(*) AS cnt FROM catalog_items WHERE deleted_at IS NULL")
-        )
-        count_row = count_result.mappings().first()
-        existing_count = count_row["cnt"] if count_row else 0
-
-        if existing_count > 0 and not force:
-            return {
-                "seeded": False,
-                "message": f"Table already contains {existing_count} items. Use force=true to replace.",
-                "existing_count": existing_count,
-            }
-
-        if force and existing_count > 0:
-            # Soft-delete all existing items
-            await db.execute(
-                text("UPDATE catalog_items SET deleted_at = NOW() WHERE deleted_at IS NULL")
+    try:
+        async with SessionLocal() as db:
+            # Check if table already has data
+            count_result = await db.execute(
+                text("SELECT COUNT(*) AS cnt FROM catalog_items WHERE deleted_at IS NULL")
             )
+            count_row = count_result.mappings().first()
+            existing_count = count_row["cnt"] if count_row else 0
+
+            if existing_count > 0 and not force:
+                return {
+                    "seeded": False,
+                    "message": f"Table already contains {existing_count} items. Use force=true to replace.",
+                    "existing_count": existing_count,
+                }
+
+            if force and existing_count > 0:
+                # Soft-delete all existing items
+                await db.execute(
+                    text("UPDATE catalog_items SET deleted_at = NOW() WHERE deleted_at IS NULL")
+                )
+                await db.commit()
+
+            now = datetime.utcnow()
+            inserted = 0
+
+            for item in _SEED_ITEMS:
+                item_id = str(uuid.uuid4())
+                meta = item.get("metadata_json", {})
+                await db.execute(
+                    text("""
+                        INSERT INTO catalog_items
+                        (id, name, name_gu, name_hi, description, category, price, currency,
+                         unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id,
+                         stock_qty, sort_order, metadata_json, created_at, updated_at)
+                        VALUES
+                        (:id, :name, :name_gu, :name_hi, :description, :category, :price, 'GBP',
+                         :unit, :emoji, :image_url, :gift_aid, true, 'GLOBAL', '',
+                         NULL, :sort_order, :metadata_json::jsonb, :now, :now)
+                    """),
+                    {
+                        "id": item_id,
+                        "name": item["name"],
+                        "name_gu": item.get("name_gu", ""),
+                        "name_hi": item.get("name_hi", ""),
+                        "description": item.get("description", ""),
+                        "category": item["category"],
+                        "price": item["price"],
+                        "unit": item.get("unit", ""),
+                        "emoji": item.get("emoji", ""),
+                        "image_url": item.get("image_url", ""),
+                        "gift_aid": item.get("gift_aid_eligible", False),
+                        "sort_order": item.get("sort_order", 0),
+                        "metadata_json": json.dumps(meta),
+                        "now": now,
+                    },
+                )
+                inserted += 1
+
             await db.commit()
 
-        now = datetime.utcnow()
-        inserted = 0
-
-        for item in _SEED_ITEMS:
-            item_id = str(uuid.uuid4())
-            meta = item.get("metadata_json", {})
-            await db.execute(
-                text("""
-                    INSERT INTO catalog_items
-                    (id, name, name_gu, name_hi, description, category, price, currency,
-                     unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id,
-                     stock_qty, sort_order, metadata_json, created_at, updated_at)
-                    VALUES
-                    (:id, :name, :name_gu, :name_hi, :description, :category, :price, 'GBP',
-                     :unit, :emoji, :image_url, :gift_aid, true, 'GLOBAL', '',
-                     NULL, :sort_order, :metadata_json::jsonb, :now, :now)
-                """),
-                {
-                    "id": item_id,
-                    "name": item["name"],
-                    "name_gu": item.get("name_gu", ""),
-                    "name_hi": item.get("name_hi", ""),
-                    "description": item.get("description", ""),
-                    "category": item["category"],
-                    "price": item["price"],
-                    "unit": item.get("unit", ""),
-                    "emoji": item.get("emoji", ""),
-                    "image_url": item.get("image_url", ""),
-                    "gift_aid": item.get("gift_aid_eligible", False),
-                    "sort_order": item.get("sort_order", 0),
-                    "metadata_json": json.dumps(meta),
-                    "now": now,
-                },
-            )
-            inserted += 1
-
-        await db.commit()
-
-    return {
-        "seeded": True,
-        "inserted": inserted,
-        "message": f"Successfully seeded {inserted} catalog items.",
-    }
+        return {
+            "seeded": True,
+            "inserted": inserted,
+            "message": f"Successfully seeded {inserted} catalog items.",
+        }
+    except Exception as exc:
+        return {"seeded": False, "error": str(exc), "trace": traceback.format_exc()}
