@@ -114,22 +114,30 @@ jobs:
         run: npm install -g pnpm@9.4.0
       - name: Install dependencies
         working-directory: apps/kiosk
-        run: pnpm install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
       - name: Build web assets for Capacitor
         working-directory: apps/kiosk
         env:
-          VITE_API_URL: "http://192.248.147.205:8000/api/v1"
+          VITE_API_URL: "http://192.248.147.205/api/v1"
           VITE_BRANCH_ID: "main"
         run: pnpm run build:web
-      - name: Sync Capacitor
+      - name: Add Android platform (generates android/ project)
         working-directory: apps/kiosk
-        run: npx cap sync android
+        run: npx cap add android
+      - name: Sync web assets into Android project
+        working-directory: apps/kiosk
+        run: npx cap sync android --inline
+      - name: Set Gradle permissions
+        working-directory: apps/kiosk/android
+        run: chmod +x gradlew
       - name: Build debug APK
         working-directory: apps/kiosk/android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
           name: kiosk-android
           path: apps/kiosk/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: warn
+          if-no-files-found: error
