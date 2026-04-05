@@ -159,10 +159,11 @@ async def schema_check():
 
 @router.get("/debug-conn")
 async def debug_conn():
-    """Raw asyncpg SSL triage — TCP + raw start_tls to expose actual TLS error."""
+    """Raw Postgres protocol test after TLS to see what server sends post-StartupMessage."""
     try:
         import asyncpg
         import ssl
+        import socket
         import asyncio
         from urllib.parse import urlparse
         from shital.core.fabrics.config import settings
@@ -177,43 +178,35 @@ async def debug_conn():
 
         results: dict[str, str] = {}
 
-        # Test 1: raw start_tls to see actual TLS error (not asyncpg's wrapper)
-        try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port), timeout=5
-            )
-            # Send PostgreSQL SSLRequest (length=8, code=80877103)
-            ssl_req = (8).to_bytes(4, 'big') + (80877103).to_bytes(4, 'big')
-            writer.write(ssl_req)
-            await writer.drain()
-            resp = await asyncio.wait_for(reader.read(1), timeout=3)
-            server_ssl_resp = resp.decode('ascii', errors='replace') if resp else 'empty'
-            results["pg_ssl_response"] = server_ssl_resp  # 'S'=ok, 'N'=no ssl, 'E'=error
-
-            if resp == b'S':
+        # Test 1: blocking socket — send SSLRequest + TLS + StartupMessage, read response
+        def blocking_pg_test() -> str:
+            try:
+                sock = socket.create_connection((host, port), timeout=5)
+                sock.sendall((8).to_bytes(4, 'big') + (80877103).to_bytes(4, 'big'))
+                resp = sock.recv(1)
+                if resp != b'S':
+                    sock.close()
+                    return f"server rejected SSL: {resp!r}"
                 ctx = ssl.create_default_context()
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
-                try:
-                    loop = asyncio.get_event_loop()
-                    new_transport = await asyncio.wait_for(
-                        loop.start_tls(writer.transport, writer._protocol, ctx,
-                                       server_side=False, server_hostname=host),
-                        timeout=5,
-                    )
-                    results["tls_handshake"] = "ok"
-                    new_transport.close()
-                except BaseException as tls_e:
-                    results["tls_handshake"] = f"{type(tls_e).__name__}: {str(tls_e)[:200]}"
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
-        except BaseException as e:
-            results["raw_tls_test"] = f"{type(e).__name__}: {str(e)[:120]}"
+                ssl_sock = ctx.wrap_socket(sock, server_hostname=host)
+                # Build StartupMessage (protocol 3.0)
+                msg = (b'\x00\x03\x00\x00' +
+                       b'user\x00' + user.encode() + b'\x00' +
+                       b'database\x00' + database.encode() + b'\x00\x00')
+                ssl_sock.sendall((len(msg) + 4).to_bytes(4, 'big') + msg)
+                ssl_sock.settimeout(3)
+                data = ssl_sock.recv(4096)
+                ssl_sock.close()
+                return f"startup_resp({len(data)}B)={data[:80].hex()}"
+            except Exception as e:
+                return f"{type(e).__name__}: {e}"
 
-        # Test 2: asyncpg with ssl='require' (asyncpg string mode)
+        loop = asyncio.get_event_loop()
+        results["blocking_pg"] = await loop.run_in_executor(None, blocking_pg_test)
+
+        # Test 2: asyncpg with ssl='require'
         try:
             conn = await asyncpg.connect(
                 host=host, port=port, user=user, password=password,
@@ -223,7 +216,7 @@ async def debug_conn():
             await conn.close()
             return {"ok": True, "mode": "asyncpg_require", "host": host, "result": v}
         except BaseException as e:
-            results["asyncpg_require"] = f"{type(e).__name__}: {str(e)[:120]}"
+            results["asyncpg_require"] = f"{type(e).__name__}: {str(e)[:150]}"
 
         return {"ok": False, "host": host, "port": port, "results": results}
     except BaseException as outer:
