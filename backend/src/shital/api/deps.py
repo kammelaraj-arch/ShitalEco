@@ -70,5 +70,6 @@ async def get_optional_space(
 
 
 CurrentSpace = Annotated[DigitalSpace, Depends(get_current_space)]
+RequiredSpace = Annotated[DigitalSpace, Depends(get_current_space)]
 OptionalSpace = Annotated[DigitalSpace | None, Depends(get_optional_space)]
 DB = Annotated[AsyncSession, Depends(get_db)]
