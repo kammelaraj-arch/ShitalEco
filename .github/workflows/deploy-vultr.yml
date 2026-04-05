@@ -143,6 +143,11 @@ jobs:
               echo "Seed: $SEED_RESP"
             fi
 
+            # ── STEP 8: Reload nginx to pick up new upstream IPs ─────────────
+            echo "=== Reloading nginx ==="
+            docker compose exec -T nginx nginx -s reload 2>/dev/null || \
+              docker compose restart nginx 2>/dev/null || true
+
             # ── Status summary ────────────────────────────────────────────────
             echo ""
             echo "=== Deploy complete ==="
