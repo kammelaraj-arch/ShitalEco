@@ -49,8 +49,9 @@ jobs:
               printf 'POSTGRES_PASSWORD=ShitalEco2024Prod!\n' >> .env
               printf 'JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod\n' >> .env
               printf 'APP_ENV=production\n' >> .env
-              printf 'CORS_ORIGINS=http://localhost:3001,http://localhost:3002\n' >> .env
-              printf 'API_URL=http://localhost:8000\n' >> .env
+              printf 'CORS_ORIGINS=http://localhost:3001,http://localhost:3002,http://localhost:3003\n' >> .env
+              printf 'API_URL=http://192.248.147.205:8000\n' >> .env
+              printf 'BRANCH_ID=main\n' >> .env
               printf 'ANTHROPIC_API_KEY=\n' >> .env
               printf 'SENDGRID_API_KEY=\n' >> .env
               printf 'STRIPE_SECRET_KEY=\n' >> .env

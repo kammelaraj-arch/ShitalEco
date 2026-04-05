@@ -1,0 +1,135 @@
+name: Build Kiosk Apps
+
+on:
+  push:
+    branches: [claude/shital-erp-platform-iR2UF, main]
+    paths:
+      - 'apps/kiosk/**'
+      - '.github/workflows/build-kiosk.yml'
+  workflow_dispatch:
+
+jobs:
+  # ─── Windows x64 installer ──────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install pnpm
+        run: npm install -g pnpm@9.4.0
+      - name: Install dependencies
+        working-directory: apps/kiosk
+        run: pnpm install
+      - name: Build Windows installer
+        working-directory: apps/kiosk
+        env:
+          VITE_ELECTRON: "true"
+          VITE_API_URL: "http://192.248.147.205:8000/api/v1"
+          VITE_BRANCH_ID: "main"
+        run: pnpm build
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiosk-windows
+          path: apps/kiosk/dist/*.exe
+          if-no-files-found: warn
+
+  # ─── Linux x64 (Ubuntu/Debian) ──────────────────────────────────────────────
+  build-linux-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install pnpm
+        run: npm install -g pnpm@9.4.0
+      - name: Install dependencies
+        run: sudo apt-get install -y rpm fakeroot dpkg
+      - name: Install pnpm deps
+        working-directory: apps/kiosk
+        run: pnpm install
+      - name: Build Linux x64
+        working-directory: apps/kiosk
+        env:
+          VITE_ELECTRON: "true"
+          VITE_API_URL: "http://192.248.147.205:8000/api/v1"
+          VITE_BRANCH_ID: "main"
+        run: pnpm build
+      - name: Upload Linux x64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiosk-linux-x64
+          path: |
+            apps/kiosk/dist/*.deb
+            apps/kiosk/dist/*.AppImage
+          if-no-files-found: warn
+
+  # ─── Linux ARM64 (Raspberry Pi 4/5) ─────────────────────────────────────────
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install pnpm
+        run: npm install -g pnpm@9.4.0
+      - name: Install cross-compile tools
+        run: sudo apt-get install -y rpm fakeroot dpkg
+      - name: Install pnpm deps
+        working-directory: apps/kiosk
+        run: pnpm install
+      - name: Build Linux ARM64 (Raspberry Pi)
+        working-directory: apps/kiosk
+        env:
+          VITE_ELECTRON: "true"
+          VITE_API_URL: "http://192.248.147.205:8000/api/v1"
+          VITE_BRANCH_ID: "main"
+        run: npx electron-builder --linux --arm64
+      - name: Upload Pi artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiosk-raspberry-pi
+          path: |
+            apps/kiosk/dist/*.deb
+            apps/kiosk/dist/*.AppImage
+          if-no-files-found: warn
+
+  # ─── Android APK (via Capacitor) ────────────────────────────────────────────
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install pnpm
+        run: npm install -g pnpm@9.4.0
+      - name: Install dependencies
+        working-directory: apps/kiosk
+        run: pnpm install
+      - name: Build web assets for Capacitor
+        working-directory: apps/kiosk
+        env:
+          VITE_API_URL: "http://192.248.147.205:8000/api/v1"
+          VITE_BRANCH_ID: "main"
+        run: pnpm run build:web
+      - name: Sync Capacitor
+        working-directory: apps/kiosk
+        run: npx cap sync android
+      - name: Build debug APK
+        working-directory: apps/kiosk/android
+        run: ./gradlew assembleDebug
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiosk-android
+          path: apps/kiosk/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn

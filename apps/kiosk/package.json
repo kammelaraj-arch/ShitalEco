@@ -3,14 +3,24 @@
   "version": "1.0.0",
   "type": "module",
   "private": true,
-  "description": "Shital Temple Self-Service Kiosk — McDonald's quality touch interface",
+  "description": "Shital Temple Self-Service Kiosk — runs on Web, Android, Windows, Linux/Pi",
   "main": "src/main/main.js",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:web": "vite",
     "build": "vite build && electron-builder",
+    "build:web": "vite build",
+    "build:electron": "VITE_ELECTRON=true vite build && electron-builder",
+    "build:electron:win": "VITE_ELECTRON=true vite build && electron-builder --win",
+    "build:electron:linux": "VITE_ELECTRON=true vite build && electron-builder --linux",
+    "build:electron:arm64": "VITE_ELECTRON=true vite build && electron-builder --linux --arm64",
+    "cap:sync": "npx cap sync",
+    "cap:android": "npx cap open android",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/core": "^6.0.0",
     "framer-motion": "^11.3.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
@@ -20,6 +30,7 @@
     "@stripe/stripe-js": "^4.1.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^6.0.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -36,8 +47,19 @@
   "build": {
     "appId": "org.shital.kiosk",
     "productName": "Shital Kiosk",
-    "win": { "target": "nsis" },
-    "linux": { "target": "deb" },
-    "kiosk": true
+    "directories": { "output": "dist-electron" },
+    "files": ["dist/**/*", "src/main/**/*"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "public/icon.png"
+    },
+    "linux": {
+      "target": [
+        { "target": "deb", "arch": ["x64", "arm64"] },
+        { "target": "AppImage", "arch": ["x64", "arm64"] }
+      ],
+      "icon": "public/icon.png"
+    },
+    "extraMetadata": { "main": "src/main/main.js" }
   }
 }
