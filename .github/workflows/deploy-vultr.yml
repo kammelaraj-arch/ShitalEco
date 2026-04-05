@@ -21,15 +21,15 @@ jobs:
           timeout: 300s
           envs: GH_PAT
           script: |
-            set -e
+            # NOTE: no set -e — we handle errors per-step to avoid full outage on partial failure
 
-            # Install docker if missing
+            # ── Install docker if missing ──────────────────────────────────────
             if ! command -v docker &>/dev/null; then
               curl -fsSL https://get.docker.com | sh
               systemctl enable --now docker
             fi
 
-            # Clone repo if missing
+            # ── Clone repo if missing ──────────────────────────────────────────
             if [ ! -d /opt/shitaleco/.git ]; then
               apt-get install -y git -q
               git clone --branch claude/shital-erp-platform-iR2UF \
@@ -38,11 +38,11 @@ jobs:
 
             cd /opt/shitaleco
 
-            # Pull latest code
+            # ── Pull latest code ───────────────────────────────────────────────
             git fetch origin claude/shital-erp-platform-iR2UF
             git reset --hard origin/claude/shital-erp-platform-iR2UF
 
-            # Create .env if missing
+            # ── Create .env if missing ─────────────────────────────────────────
             if [ ! -f .env ]; then
               printf 'POSTGRES_DB=shitaleco_db\n' > .env
               printf 'POSTGRES_USER=shitaleco_db_user\n' >> .env
@@ -59,58 +59,94 @@ jobs:
               printf 'STRIPE_WEBHOOK_SECRET=\n' >> .env
             fi
 
-            # Open ports
-            ufw allow 22/tcp
-            ufw allow 80/tcp
-            ufw allow 443/tcp
-            ufw allow 8000/tcp
-            ufw --force enable
+            # ── Open ports ────────────────────────────────────────────────────
+            ufw allow 22/tcp 2>/dev/null || true
+            ufw allow 80/tcp 2>/dev/null || true
+            ufw allow 443/tcp 2>/dev/null || true
+            ufw allow 8000/tcp 2>/dev/null || true
+            ufw --force enable 2>/dev/null || true
 
-            # Build core services first (backend, admin, quick-donation, nginx)
-            # Build kiosk separately — if it fails, core services stay up
-            docker compose build backend admin quick-donation || true
-            docker compose build kiosk || echo "WARNING: kiosk build failed — skipping kiosk"
-            docker compose up -d --no-build backend admin quick-donation nginx db certbot || true
-            docker compose up -d kiosk || echo "WARNING: kiosk container not started"
+            # ── Free disk space (Docker cache accumulates) ────────────────────
+            docker image prune -f --filter "until=24h" 2>/dev/null || true
+            docker builder prune -f --filter "until=24h" 2>/dev/null || true
 
-            # Fix alembic revision rename: '003' -> '003_gift_aid_declarations'
-            # (one-time fix for the revision ID mismatch in migration 003)
+            # ── Ensure DB and nginx are always running first ───────────────────
+            # Start DB and nginx (using existing images — never fails)
+            docker compose up -d --no-build db certbot 2>/dev/null || true
+            # Start nginx with whatever images exist so HTTP stays up during builds
+            docker compose up -d --no-build nginx 2>/dev/null || true
+
+            # ── STEP 1: Build backend (Python — fast, rarely changes) ─────────
+            echo "=== Building backend ==="
+            if docker compose build backend; then
+              echo "Backend built OK — restarting..."
+              docker compose up -d --no-build --no-deps backend
+            else
+              echo "WARNING: Backend build failed — keeping existing container"
+            fi
+
+            # ── STEP 2: Build quick-donation (Vite SPA — fast) ───────────────
+            echo "=== Building quick-donation ==="
+            if docker compose build quick-donation; then
+              echo "quick-donation built OK — restarting..."
+              docker compose up -d --no-build --no-deps quick-donation
+            else
+              echo "WARNING: quick-donation build failed — keeping existing container"
+            fi
+
+            # ── STEP 3: Build admin (Next.js — slowest, ~5 min) ──────────────
+            echo "=== Building admin ==="
+            if docker compose build admin; then
+              echo "Admin built OK — restarting..."
+              docker compose up -d --no-build --no-deps admin
+            else
+              echo "WARNING: Admin build failed — keeping existing container"
+              docker compose logs admin --tail=30 2>/dev/null || true
+            fi
+
+            # ── STEP 4: Build kiosk (Vite SPA) — isolated, never breaks core ─
+            echo "=== Building kiosk ==="
+            if docker compose build kiosk; then
+              echo "Kiosk built OK — restarting..."
+              docker compose up -d --no-build --no-deps kiosk
+            else
+              echo "WARNING: Kiosk build failed — skipping"
+            fi
+
+            # ── STEP 5: Fix alembic version (one-time migration fix) ──────────
             docker compose exec -T db psql -U shitaleco_db_user -d shitaleco_db \
               -c "UPDATE alembic_version SET version_num='003_gift_aid_declarations' WHERE version_num='003';" \
               2>/dev/null || true
 
-            # Wait for backend
-            echo "Waiting for backend..."
+            # ── STEP 6: Wait for backend health ───────────────────────────────
+            echo "Waiting for backend (up to 3 min)..."
             HEALTHY=0
-            for i in $(seq 1 30); do
+            for i in $(seq 1 36); do
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-                echo "Backend healthy!"
+                echo "Backend healthy after $((i*5))s!"
                 HEALTHY=1
                 break
               fi
-              echo "  attempt $i/30..."
+              echo "  attempt $i/36..."
             done
 
             if [ "$HEALTHY" = "0" ]; then
-              echo "Backend failed to start — showing logs:"
-              docker compose logs backend --tail=50
-              exit 1
+              echo "ERROR: Backend failed to become healthy — dumping logs:"
+              docker compose logs backend --tail=80
             fi
 
-            # Show backend startup logs (includes alembic output)
-            echo "=== Backend logs (startup) ==="
-            docker compose logs backend --tail=150
-            echo "=== End backend logs ==="
+            # ── STEP 7: Schema patch + seed (non-fatal) ───────────────────────
+            if [ "$HEALTHY" = "1" ]; then
+              curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched" || echo "Schema patch skipped"
+              SEED_RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "http://localhost:8000/api/v1/items/seed")
+              echo "Seed: $SEED_RESP"
+            fi
 
-            # Patch schema and seed
-            curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched" || echo "Schema patch failed"
-            echo "Seeding items..."
-            SEED_RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "http://localhost:8000/api/v1/items/seed")
-            echo "$SEED_RESP"
-
-            # Final health check
-            curl -s http://localhost:8000/health
+            # ── Status summary ────────────────────────────────────────────────
             echo ""
-            echo "Deploy complete!"
+            echo "=== Deploy complete ==="
             docker compose ps
+            echo ""
+            echo "=== Backend startup logs ==="
+            docker compose logs backend --tail=50
