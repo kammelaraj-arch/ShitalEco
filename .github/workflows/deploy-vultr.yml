@@ -47,18 +47,28 @@ jobs:
               systemctl enable --now docker
             fi
 
-            # ── Clone repo if missing ──────────────────────────────────────────
-            if [ ! -d /opt/shitaleco/.git ]; then
-              apt-get install -y git -q
-              git clone --branch claude/shital-erp-platform-iR2UF \
-                https://${GH_PAT}@github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco
-            fi
+            # ── WIPE EVERYTHING — fresh start ─────────────────────────────────
+            echo "=== WIPING SERVER — full clean deploy ==="
+            pkill -f "docker compose build" 2>/dev/null || true
+            pkill -f "docker buildx" 2>/dev/null || true
+            sleep 3
+
+            # Stop and remove all containers (keep DB data volume)
+            cd /opt/shitaleco 2>/dev/null && docker compose down --remove-orphans 2>/dev/null || true
+
+            # Remove all images and build cache
+            docker rmi $(docker images -q) 2>/dev/null || true
+            docker builder prune -af 2>/dev/null || true
+            docker system prune -f 2>/dev/null || true
+
+            # Delete and re-clone repo
+            rm -rf /opt/shitaleco
+            apt-get install -y git -q 2>/dev/null
+            git clone --branch claude/shital-erp-platform-iR2UF \
+              https://${GH_PAT}@github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco
+            echo "=== Wipe complete, fresh clone done ==="
 
             cd /opt/shitaleco
-
-            # ── Pull latest code ───────────────────────────────────────────────
-            git fetch origin claude/shital-erp-platform-iR2UF
-            git reset --hard origin/claude/shital-erp-platform-iR2UF
 
             # ── Create .env if missing ─────────────────────────────────────────
             if [ ! -f .env ]; then
@@ -95,20 +105,6 @@ jobs:
             ufw allow 443/tcp 2>/dev/null || true
             ufw allow 8000/tcp 2>/dev/null || true
             ufw --force enable 2>/dev/null || true
-
-            # ── OPTIONAL clean rebuild (only when triggered manually) ─────────
-            if [ "$CLEAN_BUILD" = "true" ]; then
-              echo "=== CLEAN BUILD requested — purging all images and cache ==="
-              pkill -f "docker compose build" 2>/dev/null || true
-              pkill -f "docker buildx" 2>/dev/null || true
-              sleep 2
-              docker compose stop 2>/dev/null || true
-              docker compose rm -f 2>/dev/null || true
-              docker rmi $(docker images -q) 2>/dev/null || true
-              docker builder prune -af 2>/dev/null || true
-              docker system prune -f 2>/dev/null || true
-              echo "=== Clean complete ==="
-            fi
 
             # ── Ensure infrastructure is running (DB, nginx) ──────────────────
             docker compose up -d --no-build db certbot 2>/dev/null || true
