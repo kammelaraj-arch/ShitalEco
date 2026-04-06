@@ -5,8 +5,8 @@ import { useDonationStore } from '../store/donation.store'
 const PRESET_AMOUNTS = [1, 2.5, 5, 10, 15, 20, 50]
 
 export function DonationScreen() {
-  const { setScreen, setAmount } = useDonationStore()
-  const [selectedAmount, setSelectedAmount] = useState<number | null>(null)
+  const { setScreen, setAmount, defaultAmount } = useDonationStore()
+  const [selectedAmount, setSelectedAmount] = useState<number | null>(defaultAmount)
   const [showKeypad, setShowKeypad] = useState(false)
   const [keypadValue, setKeypadValue] = useState('')
 
@@ -26,10 +26,8 @@ export function DonationScreen() {
     } else if (key === '.' && keypadValue === '') {
       setKeypadValue('0.')
     } else {
-      // Limit to 2 decimal places
       const parts = keypadValue.split('.')
       if (parts[1] && parts[1].length >= 2) return
-      // Limit to reasonable max (£9999)
       const next = keypadValue + key
       if (parseFloat(next) > 9999) return
       setKeypadValue(next)
@@ -59,16 +57,10 @@ export function DonationScreen() {
         className="px-8 pt-8 pb-4 flex-shrink-0"
       >
         <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => setScreen('idle')}
-            className="text-saffron-400/60 text-lg font-semibold active:scale-95 transition-transform"
-          >
-            ← Back
-          </button>
+          <h1 className="text-4xl font-black text-gold-gradient">Make a Donation</h1>
           <div className="text-saffron-400/40 text-sm">Shital Temple</div>
         </div>
-        <h1 className="text-4xl font-black text-gold-gradient">Make a Donation</h1>
-        <p className="text-saffron-400/60 text-lg mt-1">Select an amount or enter your own</p>
+        <p className="text-saffron-400/60 text-lg">Select an amount or enter your own</p>
       </motion.div>
 
       {/* Amount grid */}
@@ -94,9 +86,6 @@ export function DonationScreen() {
               `}
             >
               <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-sm text-saffron-300/60 font-medium mb-1">
-                  {amt <= 5 ? '' : amt <= 20 ? '' : ''}
-                </span>
                 <span>
                   {amt === 2.5 ? '£2.50' : `£${amt}`}
                 </span>
@@ -187,6 +176,12 @@ export function DonationScreen() {
         </button>
       </motion.div>
 
+      {/* Hidden admin button — double-tap top-right corner */}
+      <div
+        className="absolute top-0 right-0 w-20 h-20"
+        onDoubleClick={() => setScreen('admin')}
+      />
+
       {/* Custom Amount Keypad Modal */}
       <AnimatePresence>
         {showKeypad && (
@@ -205,7 +200,6 @@ export function DonationScreen() {
               className="w-full rounded-t-5xl p-8"
               style={{ background: '#2d1200' }}
             >
-              {/* Display */}
               <div className="text-center mb-6">
                 <p className="text-white/50 text-lg mb-2">Enter Amount</p>
                 <p className="text-6xl font-black text-gold-gradient">
@@ -213,7 +207,6 @@ export function DonationScreen() {
                 </p>
               </div>
 
-              {/* Keypad */}
               <div className="grid grid-cols-3 gap-3 mb-4">
                 {['1','2','3','4','5','6','7','8','9','.','0','backspace'].map((k) => (
                   <button
@@ -226,7 +219,6 @@ export function DonationScreen() {
                 ))}
               </div>
 
-              {/* Quick presets in keypad */}
               <div className="flex gap-2 mb-4">
                 {[25, 75, 100, 200].map((v) => (
                   <button
@@ -239,7 +231,6 @@ export function DonationScreen() {
                 ))}
               </div>
 
-              {/* Actions */}
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => { setKeypadValue(''); setShowKeypad(false) }}

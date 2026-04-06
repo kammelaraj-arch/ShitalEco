@@ -201,7 +201,7 @@ export function AdminScreen() {
 
           <div className="flex items-center justify-between mb-8">
             <h1 className="text-2xl font-black text-gray-900">Kiosk Login</h1>
-            <button onClick={() => setScreen('idle')}
+            <button onClick={() => setScreen('donate')}
               className="px-4 py-2 rounded-xl bg-gray-100 text-gray-600 font-semibold text-sm active:scale-95">
               ← Back
             </button>
@@ -299,7 +299,7 @@ export function AdminScreen() {
               className="px-4 py-2 rounded-xl bg-red-50 text-red-600 font-semibold text-sm active:scale-95">
               Logout
             </button>
-            <button onClick={() => setScreen('idle')}
+            <button onClick={() => setScreen('donate')}
               className="px-4 py-2 rounded-xl bg-gray-100 text-gray-600 font-semibold text-sm active:scale-95">
               ← Done
             </button>

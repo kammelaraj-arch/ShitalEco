@@ -1,7 +1,6 @@
 import React, { useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useDonationStore } from './store/donation.store'
-import { IdleScreen } from './pages/IdleScreen'
 import { DonationScreen } from './pages/DonationScreen'
 import { ProcessingScreen } from './pages/ProcessingScreen'
 import { TapScreen } from './pages/TapScreen'
@@ -16,7 +15,7 @@ export function QuickDonationApp() {
 
   const resetIdle = useCallback(() => {
     clearTimeout(idleTimeout)
-    if (screen !== 'idle') {
+    if (screen !== 'donate') {
       idleTimeout = setTimeout(() => reset(), IDLE_TIMEOUT_MS)
     }
   }, [screen, reset])
@@ -40,13 +39,12 @@ export function QuickDonationApp() {
 
   const renderScreen = () => {
     switch (screen) {
-      case 'idle':          return <IdleScreen key="idle" />
       case 'donate':        return <DonationScreen key="donate" />
       case 'processing':    return <ProcessingScreen key="processing" />
       case 'tap':           return <TapScreen key="tap" />
       case 'confirmation':  return <ConfirmationScreen key="confirmation" />
       case 'admin':         return <AdminScreen key="admin" />
-      default:              return <IdleScreen key="idle" />
+      default:              return <DonationScreen key="donate" />
     }
   }
 
