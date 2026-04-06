@@ -90,6 +90,11 @@ jobs:
             ufw allow 8000/tcp 2>/dev/null || true
             ufw --force enable 2>/dev/null || true
 
+            # ── Kill any lingering build processes from cancelled deploys ────────
+            pkill -f "docker compose build" 2>/dev/null || true
+            pkill -f "docker buildx"        2>/dev/null || true
+            sleep 3
+
             # ── Free disk space (Docker cache accumulates) ────────────────────
             docker image prune -f --filter "until=24h" 2>/dev/null || true
             docker builder prune -f --filter "until=24h" 2>/dev/null || true
