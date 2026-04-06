@@ -227,6 +227,49 @@ async def _patch_schema() -> None:
         "ALTER TABLE employees ADD COLUMN IF NOT EXISTS email    VARCHAR(255)",
         "ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone    VARCHAR(50)",
         "ALTER TABLE employees ADD COLUMN IF NOT EXISTS address  TEXT",
+        # Donations ledger
+        """CREATE TABLE IF NOT EXISTS donations (
+            id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id                 VARCHAR(200) NOT NULL DEFAULT '',
+            branch_id               VARCHAR(100) NOT NULL DEFAULT 'main',
+            amount                  NUMERIC(12,2) NOT NULL DEFAULT 0,
+            currency                VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            gift_aid_eligible       BOOLEAN      NOT NULL DEFAULT false,
+            gift_aid_declaration_id UUID         DEFAULT NULL,
+            gift_aid_amount         NUMERIC(12,2) NOT NULL DEFAULT 0,
+            purpose                 VARCHAR(200) NOT NULL DEFAULT 'General',
+            reference               VARCHAR(100) NOT NULL DEFAULT '',
+            payment_provider        VARCHAR(50)  NOT NULL DEFAULT 'cash',
+            payment_ref             VARCHAR(200) DEFAULT NULL,
+            status                  VARCHAR(20)  NOT NULL DEFAULT 'COMPLETED',
+            idempotency_key         VARCHAR(200) NOT NULL DEFAULT '',
+            created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at              TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_donations_branch   ON donations(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_donations_status   ON donations(status)",
+        "CREATE INDEX IF NOT EXISTS idx_donations_created  ON donations(created_at)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_donations_idempotency ON donations(idempotency_key)",
+        # Branches — managed via admin UI
+        """CREATE TABLE IF NOT EXISTS branches (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id     VARCHAR(50)  UNIQUE NOT NULL,
+            name          VARCHAR(200) NOT NULL,
+            city          VARCHAR(100) NOT NULL DEFAULT '',
+            postcode      VARCHAR(20)  NOT NULL DEFAULT '',
+            address       TEXT         NOT NULL DEFAULT '',
+            phone         VARCHAR(50)  NOT NULL DEFAULT '',
+            email         VARCHAR(200) NOT NULL DEFAULT '',
+            established   VARCHAR(10)  NOT NULL DEFAULT '',
+            is_active     BOOLEAN      NOT NULL DEFAULT true,
+            manager_name  VARCHAR(200) NOT NULL DEFAULT '',
+            manager_email VARCHAR(200) NOT NULL DEFAULT '',
+            notes         TEXT         NOT NULL DEFAULT '',
+            created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_branches_active ON branches(is_active)",
     ]
 
     async with SessionLocal() as db:
@@ -430,6 +473,7 @@ _mount("shital.api.routers.bookings_router",  "router")
 _mount("shital.api.routers.documents_router", "router")
 _mount("shital.api.routers.api_keys",         "router")
 _mount("shital.api.routers.screen",           "router")
+_mount("shital.api.routers.branches",         "router")
 
 
 @app.get("/health", tags=["system"])
