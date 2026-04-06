@@ -51,6 +51,7 @@ const NAV_SECTIONS = [
   {
     label: 'Kiosk',
     items: [
+      { href: '/kiosk/projects',    icon: '🏗️', label: 'Projects' },
       { href: '/kiosk/services',    icon: '🛕', label: 'Services' },
       { href: '/kiosk/items',       icon: '📦', label: 'Catalog Items' },
       { href: '/kiosk/orders',      icon: '🧾', label: 'Orders' },

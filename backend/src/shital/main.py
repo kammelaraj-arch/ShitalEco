@@ -223,10 +223,15 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_screen_profiles_branch ON screen_profiles(branch_id)",
         # HR — standalone employee fields (no user account required)
-        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS full_name VARCHAR(200)",
-        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS email    VARCHAR(255)",
-        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone    VARCHAR(50)",
-        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS address  TEXT",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS full_name             VARCHAR(200)",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS email                 VARCHAR(255)",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone                 VARCHAR(50)",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS address               TEXT",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo_url             TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS nationality            VARCHAR(100) NOT NULL DEFAULT ''",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS right_to_work_type    VARCHAR(50)  NOT NULL DEFAULT ''",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_number           VARCHAR(100) NOT NULL DEFAULT ''",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_expiry           DATE",
         # Donations ledger
         """CREATE TABLE IF NOT EXISTS donations (
             id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),

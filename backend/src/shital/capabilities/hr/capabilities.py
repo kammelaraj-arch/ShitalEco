@@ -37,6 +37,13 @@ class CreateEmployeeInput(BaseModel):
     tax_code: str = "1257L"
     manager_id: str = ""
 
+    # Photo & immigration
+    photo_url: str = ""
+    nationality: str = ""
+    right_to_work_type: str = ""   # e.g. British, ILR, Visa, Student
+    visa_number: str = ""
+    visa_expiry: str = ""          # ISO date
+
 
 class LeaveRequestInput(BaseModel):
     employee_id: str
@@ -90,10 +97,12 @@ async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[
                  start_date, employment_type, salary, salary_period, ni_number,
                  tax_code, is_active, manager_id,
                  full_name, email, phone, address,
+                 photo_url, nationality, right_to_work_type, visa_number, visa_expiry,
                  created_at, updated_at)
                 VALUES (:id, :uid, :bid, :num, :title, :dept, :start, :type,
                         :salary, :sp, :ni, :tc, true, :mgr,
                         :full_name, :email, :phone, :address,
+                        :photo_url, :nationality, :rtw_type, :visa_num, :visa_exp,
                         :now, :now)
             """),
             {
@@ -107,6 +116,11 @@ async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[
                 "email": data.email or None,
                 "phone": data.phone or None,
                 "address": data.address or None,
+                "photo_url": data.photo_url or None,
+                "nationality": data.nationality or None,
+                "rtw_type": data.right_to_work_type or None,
+                "visa_num": data.visa_number or None,
+                "visa_exp": data.visa_expiry or None,
                 "now": now,
             },
         )
