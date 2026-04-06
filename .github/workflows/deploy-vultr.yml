@@ -90,23 +90,24 @@ jobs:
             ufw allow 8000/tcp 2>/dev/null || true
             ufw --force enable 2>/dev/null || true
 
-            # ── Kill any lingering build processes from cancelled deploys ────────
+            # ── Kill any lingering build processes ────────────────────────────
             pkill -f "docker compose build" 2>/dev/null || true
             pkill -f "docker buildx"        2>/dev/null || true
             sleep 3
 
-            # ── Free disk space (Docker cache accumulates) ────────────────────
-            docker image prune -f --filter "until=24h" 2>/dev/null || true
-            docker builder prune -f --filter "until=24h" 2>/dev/null || true
+            # ── Full clean rebuild — remove all old images and build cache ────
+            echo "=== Full clean: stopping containers and removing images ==="
+            docker compose stop 2>/dev/null || true
+            docker compose rm -f 2>/dev/null || true
+            docker rmi $(docker images -q) 2>/dev/null || true
+            docker builder prune -af 2>/dev/null || true
+            docker system prune -f 2>/dev/null || true
+            echo "=== Clean complete — starting fresh build ==="
 
-            # ── RECOVERY FIRST: bring ALL services up with existing images ────
-            # This restores the site immediately if containers were stopped,
-            # before we start any slow builds.
-            echo "=== Recovery: starting all services with existing images ==="
-            docker compose up -d --no-build 2>/dev/null || true
-            sleep 10
-            echo "Container state after recovery:"
-            docker compose ps --format "table {{.Name}}\t{{.Status}}"
+            # ── Start DB first (data volume is preserved) ─────────────────────
+            docker compose up -d --no-build db certbot 2>/dev/null || true
+            docker compose pull nginx 2>/dev/null || true
+            docker compose up -d --no-build nginx 2>/dev/null || true
 
             # ── STEP 1: Build backend (Python — fast, rarely changes) ─────────
             echo "=== Building backend ==="
