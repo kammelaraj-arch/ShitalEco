@@ -94,11 +94,14 @@ jobs:
             docker image prune -f --filter "until=24h" 2>/dev/null || true
             docker builder prune -f --filter "until=24h" 2>/dev/null || true
 
-            # ── Ensure DB and nginx are always running first ───────────────────
-            # Start DB/nginx first — keep serving whatever is cached while we rebuild
-            docker compose up -d --no-build db certbot 2>/dev/null || true
-            docker compose up -d --no-build nginx 2>/dev/null || \
-              (docker compose build nginx && docker compose up -d --no-build nginx) || true
+            # ── RECOVERY FIRST: bring ALL services up with existing images ────
+            # This restores the site immediately if containers were stopped,
+            # before we start any slow builds.
+            echo "=== Recovery: starting all services with existing images ==="
+            docker compose up -d --no-build 2>/dev/null || true
+            sleep 10
+            echo "Container state after recovery:"
+            docker compose ps --format "table {{.Name}}\t{{.Status}}"
 
             # ── STEP 1: Build backend (Python — fast, rarely changes) ─────────
             echo "=== Building backend ==="
