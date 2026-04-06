@@ -296,6 +296,53 @@ async def _patch_schema() -> None:
         # Link catalog_items to a project (optional)
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS project_id VARCHAR(60) NOT NULL DEFAULT ''",
         "CREATE INDEX IF NOT EXISTS idx_catalog_items_project ON catalog_items(project_id)",
+        # ── Recurring Payments — financial obligations tracker ─────────────────
+        """CREATE TABLE IF NOT EXISTS recurring_payments (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id       VARCHAR(100) NOT NULL DEFAULT 'main',
+            name            VARCHAR(200) NOT NULL,
+            category        VARCHAR(50)  NOT NULL DEFAULT 'OTHER',
+            is_critical     BOOLEAN      NOT NULL DEFAULT false,
+            amount          NUMERIC(12,2) NOT NULL DEFAULT 0,
+            currency        VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            frequency       VARCHAR(20)  NOT NULL DEFAULT 'MONTHLY',
+            start_date      DATE         NOT NULL DEFAULT CURRENT_DATE,
+            end_date        DATE,
+            day_of_month    SMALLINT,
+            renewal_date    DATE,
+            notice_days     SMALLINT     NOT NULL DEFAULT 30,
+            payee           VARCHAR(200) NOT NULL DEFAULT '',
+            reference       VARCHAR(200) NOT NULL DEFAULT '',
+            notes           TEXT         NOT NULL DEFAULT '',
+            is_active       BOOLEAN      NOT NULL DEFAULT true,
+            created_by      VARCHAR(200) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at      TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_recurring_branch   ON recurring_payments(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_recurring_category ON recurring_payments(category)",
+        "CREATE INDEX IF NOT EXISTS idx_recurring_active   ON recurring_payments(is_active)",
+        """CREATE TABLE IF NOT EXISTS payment_schedule (
+            id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            recurring_payment_id UUID         NOT NULL,
+            branch_id            VARCHAR(100) NOT NULL DEFAULT 'main',
+            due_date             DATE         NOT NULL,
+            amount               NUMERIC(12,2) NOT NULL DEFAULT 0,
+            currency             VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            status               VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            paid_date            DATE,
+            paid_amount          NUMERIC(12,2),
+            paid_reference       VARCHAR(200) NOT NULL DEFAULT '',
+            paid_by              VARCHAR(200) NOT NULL DEFAULT '',
+            notes                TEXT         NOT NULL DEFAULT '',
+            created_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_pschedule_recurring ON payment_schedule(recurring_payment_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pschedule_branch    ON payment_schedule(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pschedule_due_date  ON payment_schedule(due_date)",
+        "CREATE INDEX IF NOT EXISTS idx_pschedule_status    ON payment_schedule(status)",
     ]
 
     async with SessionLocal() as db:
@@ -500,7 +547,8 @@ _mount("shital.api.routers.documents_router", "router")
 _mount("shital.api.routers.api_keys",         "router")
 _mount("shital.api.routers.screen",           "router")
 _mount("shital.api.routers.branches",         "router")
-_mount("shital.api.routers.projects",         "router")
+_mount("shital.api.routers.projects",             "router")
+_mount("shital.api.routers.recurring_payments",   "router")
 
 
 @app.get("/health", tags=["system"])
