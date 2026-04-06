@@ -31,6 +31,10 @@ export default function DonationsPage() {
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const today = new Date().toISOString().slice(0, 10)
+  const firstOfYear = `${new Date().getFullYear()}-01-01`
+  const [fromDate, setFromDate] = useState(firstOfYear)
+  const [toDate, setToDate] = useState(today)
 
   const [form, setForm] = useState({
     amount: '',
@@ -44,7 +48,7 @@ export default function DonationsPage() {
     setLoading(true); setError('')
     try {
       const data = await apiFetch<DonationSummary>(
-        '/finance/reports/donations?from_date=2020-01-01&to_date=2030-12-31'
+        `/finance/reports/donations?from_date=${fromDate}&to_date=${toDate}`
       )
       setSummary(data)
     } catch (e: unknown) {
@@ -52,7 +56,7 @@ export default function DonationsPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [fromDate, toDate])
 
   useEffect(() => { load() }, [load])
 
@@ -95,6 +99,26 @@ export default function DonationsPage() {
           <p className="text-white/40 mt-1">Track and manage all temple donations</p>
         </div>
         <button onClick={() => setShowForm(true)} className="btn-primary">+ New Donation</button>
+      </div>
+
+      {/* Date range filter */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div>
+          <label className={lbl}>From Date</label>
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={inp + ' w-44'} />
+        </div>
+        <div>
+          <label className={lbl}>To Date</label>
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={inp + ' w-44'} />
+        </div>
+        <button onClick={load} className="px-5 py-3 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90"
+          style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
+          Apply
+        </button>
+        <button onClick={() => { setFromDate('2020-01-01'); setToDate(today) }}
+          className="px-4 py-3 rounded-xl border border-white/10 text-white/50 text-sm font-semibold hover:bg-white/5 transition-all">
+          All Time
+        </button>
       </div>
 
       {/* Summary cards */}

@@ -1,8 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+import { apiFetch } from '@/lib/api'
 
 const CATEGORIES = ['PUJA', 'HAVAN', 'CLASS', 'HALL_HIRE', 'FESTIVAL', 'DONATION', 'OTHER']
 const CATEGORY_COLORS: Record<string, string> = {
@@ -55,8 +54,7 @@ export default function KioskServicesPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`${API}/kiosk/services?branch_id=main`)
-      const data = await res.json()
+      const data = await apiFetch<{ services: Service[] }>('/admin/services?include_inactive=true')
       setServices(data.services || [])
     } catch {
       setError('Failed to load services')
@@ -84,11 +82,10 @@ export default function KioskServicesPage() {
     if (!form.name.trim() || form.price < 0) return
     setSaving(true)
     try {
-      const url = editing ? `${API}/admin/services/${editing.id}` : `${API}/admin/services`
+      const url = editing ? `/admin/services/${editing.id}` : `/admin/services`
       const method = editing ? 'PUT' : 'POST'
-      await fetch(url, {
+      await apiFetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, price: Number(form.price) }),
       })
       setShowForm(false)
@@ -102,9 +99,8 @@ export default function KioskServicesPage() {
 
   const toggle = async (s: Service) => {
     try {
-      await fetch(`${API}/admin/services/${s.id}`, {
+      await apiFetch(`/admin/services/${s.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: !s.is_active }),
       })
       setServices(prev => prev.map(x => x.id === s.id ? { ...x, is_active: !x.is_active } : x))
