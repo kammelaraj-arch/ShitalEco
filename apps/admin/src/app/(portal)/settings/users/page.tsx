@@ -116,7 +116,7 @@ function UserModal({ user, onClose, onSaved }: {
         onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
       <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-        className="fixed right-0 top-0 h-full w-full max-w-[480px] z-50 flex flex-col overflow-hidden"
+        className="fixed right-0 top-0 h-full w-full sm:max-w-[480px] z-50 flex flex-col overflow-hidden"
         style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}>
 
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">

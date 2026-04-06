@@ -144,7 +144,7 @@ function DeviceModal({
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-        className="fixed right-0 top-0 h-full w-full max-w-[560px] z-50 flex flex-col overflow-hidden"
+        className="fixed right-0 top-0 h-full w-full sm:max-w-[560px] z-50 flex flex-col overflow-hidden"
         style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}
       >
         {/* Header */}
@@ -335,11 +335,18 @@ function AssignUserModal({
 // ─── Sync modal ───────────────────────────────────────────────────────────────
 
 function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [branches, setBranches] = useState<Array<{branch_id: string; name: string}>>([])
   const [branchId, setBranchId] = useState('')
   const [locationId, setLocationId] = useState(DEFAULT_LOCATION_ID)
   const [syncing, setSyncing] = useState(false)
   const [result, setResult] = useState<{ synced: number; created: number; updated: number } | null>(null)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    apiFetch<{ branches: Array<{branch_id: string; name: string}> }>('/branches')
+      .then(d => setBranches(d.branches || []))
+      .catch(() => {})
+  }, [])
 
   async function doSync() {
     setSyncing(true)
@@ -355,7 +362,12 @@ function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
       setResult(data)
       onDone()
     } catch (e: any) {
-      setError(e.message || 'Sync failed')
+      const msg: string = e.message || 'Sync failed'
+      if (msg.includes('401') || msg.includes('Not authenticated')) {
+        setError('Session expired — please refresh the page and log in again.')
+      } else {
+        setError(msg)
+      }
     } finally {
       setSyncing(false)
     }
@@ -367,26 +379,33 @@ function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
         onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
       <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-        className="fixed right-0 top-0 h-full w-full max-w-sm z-50 flex flex-col overflow-hidden"
+        className="fixed right-0 top-0 h-full w-full sm:max-w-sm z-50 flex flex-col overflow-hidden"
         style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}>
-        <div className="px-6 py-4 border-b border-white/5">
+        <div className="px-5 py-4 border-b border-white/5">
           <h2 className="text-white font-black">⚡ Sync from Stripe</h2>
           <p className="text-white/40 text-xs mt-0.5">Pull registered readers from the Stripe API</p>
         </div>
-        <div className="px-6 py-5 space-y-3 flex-1 overflow-y-auto">
+        <div className="px-5 py-5 space-y-3 flex-1 overflow-y-auto">
           {error && <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>}
           {result && (
             <div className="bg-green-500/15 border border-green-500/20 text-green-400 text-sm px-4 py-3 rounded-xl">
               ✓ Synced {result.synced} readers — {result.created} new, {result.updated} updated
             </div>
           )}
-          <Field label="Assign to Branch ID (optional)" value={branchId} onChange={setBranchId} placeholder="wembley" />
+          <div>
+            <label className="block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5">Assign to Branch (optional)</label>
+            <select value={branchId} onChange={e => setBranchId(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-saffron-400/50">
+              <option value="">Leave unassigned</option>
+              {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
+            </select>
+          </div>
           <Field label="Stripe Location ID (optional)" value={locationId} onChange={setLocationId} placeholder={DEFAULT_LOCATION_ID} mono />
-          <p className="text-white/25 text-xs">Leave blank to use defaults from server config. New readers will be marked unassigned if no branch is provided.</p>
+          <p className="text-white/25 text-xs">Leave location blank to use server default. Readers will be assigned to the selected branch.</p>
         </div>
-        <div className="flex gap-3 px-6 py-4 border-t border-white/5">
-          <button onClick={onClose} className="flex-1 py-2 rounded-xl bg-white/5 text-white/60 text-sm font-semibold">Close</button>
-          <button onClick={doSync} disabled={syncing} className="flex-1 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white text-sm font-black disabled:opacity-50">
+        <div className="flex gap-3 px-5 py-4 border-t border-white/5">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 text-white/60 text-sm font-semibold">Close</button>
+          <button onClick={doSync} disabled={syncing} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white text-sm font-black disabled:opacity-50">
             {syncing ? 'Syncing…' : 'Sync Now'}
           </button>
         </div>

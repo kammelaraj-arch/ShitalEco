@@ -3,8 +3,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 
-const CATEGORIES = ['GENERAL_DONATION', 'SOFT_DONATION', 'PROJECT_DONATION', 'SHOP', 'SERVICE']
-const BRANCHES = ['main', 'leicester', 'reading', 'mk']
+const CATEGORIES = ['GENERAL_DONATION', 'SOFT_DONATION', 'PROJECT_DONATION', 'SHOP', 'SERVICE', 'SPONSORSHIP']
+const BRANCH_STOCK_IDS = ['main', 'leicester', 'reading', 'mk']
 const BRANCH_LABELS: Record<string, string> = { main: 'Wembley', leicester: 'Leicester', reading: 'Reading', mk: 'Milton Keynes' }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -14,6 +14,9 @@ const CATEGORY_COLORS: Record<string, string> = {
   SHOP:             'bg-purple-500/20 text-purple-300 border-purple-500/30',
   SERVICE:          'bg-orange-500/20 text-orange-300 border-orange-500/30',
 }
+
+interface Branch { branch_id: string; name: string }
+interface Project { id: string; project_id: string; name: string; branch_id: string }
 
 interface Item {
   id: string
@@ -32,6 +35,7 @@ interface Item {
   is_live: boolean
   scope: string
   branch_id: string
+  project_id: string
   stock_qty: number | null
   sort_order: number
   available_from: string | null
@@ -46,7 +50,7 @@ const EMPTY_FORM: FormState = {
   name: '', name_gu: '', name_hi: '', name_te: '', description: '',
   category: 'GENERAL_DONATION', price: '0', unit: '', emoji: '', image_url: '',
   gift_aid_eligible: false, is_active: true, is_live: true,
-  scope: 'GLOBAL', branch_id: '',
+  scope: 'GLOBAL', branch_id: '', project_id: '',
   stock_qty: null, sort_order: 0,
   available_from: '', available_until: '',
   display_channel: 'both',
@@ -55,6 +59,8 @@ const EMPTY_FORM: FormState = {
 
 export default function CatalogItemsPage() {
   const [items, setItems] = useState<Item[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
@@ -63,14 +69,21 @@ export default function CatalogItemsPage() {
   const [editing, setEditing] = useState<Item | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [imageUploading, setImageUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const data = await apiFetch<{ items: Item[] }>('/items/?active_only=false')
-      setItems(data.items || [])
+      const [itemData, brData, prData] = await Promise.all([
+        apiFetch<{ items: Item[] }>('/items/?active_only=false'),
+        apiFetch<{ branches: Branch[] }>('/branches'),
+        apiFetch<{ projects: Project[] }>('/projects?include_inactive=true').catch(() => ({ projects: [] })),
+      ])
+      setItems(itemData.items || [])
+      setBranches(brData.branches || [])
+      setProjects(prData.projects || [])
     } catch { setError('Failed to load items') }
     finally { setLoading(false) }
   }, [])
@@ -87,6 +100,7 @@ export default function CatalogItemsPage() {
       gift_aid_eligible: item.gift_aid_eligible, is_active: item.is_active,
       is_live: item.is_live ?? true,
       scope: item.scope, branch_id: item.branch_id || '',
+      project_id: item.project_id || '',
       stock_qty: item.stock_qty, sort_order: item.sort_order || 0,
       available_from: item.available_from ? item.available_from.slice(0, 10) : '',
       available_until: item.available_until ? item.available_until.slice(0, 10) : '',
@@ -94,6 +108,16 @@ export default function CatalogItemsPage() {
       branch_stock: item.branch_stock || {},
     })
     setShowForm(true)
+  }
+
+  const remove = async (item: Item) => {
+    if (!confirm(`Delete "${item.name}"? Cannot be undone.`)) return
+    setDeleting(item.id)
+    try {
+      await apiFetch(`/items/${item.id}`, { method: 'DELETE' })
+      setItems(prev => prev.filter(x => x.id !== item.id))
+    } catch { setError('Failed to delete item') }
+    finally { setDeleting(null) }
   }
 
   const save = async () => {
@@ -236,9 +260,13 @@ export default function CatalogItemsPage() {
                         <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${item.is_live ? 'left-5' : 'left-0.5'}`} />
                       </button>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
                       <button onClick={() => openEdit(item)}
-                        className="text-white/40 hover:text-saffron-400 text-sm font-medium px-3 py-1">Edit</button>
+                        className="text-white/40 hover:text-saffron-400 text-sm font-medium px-2 py-1 mr-1">Edit</button>
+                      <button onClick={() => remove(item)} disabled={deleting === item.id}
+                        className="text-red-400/50 hover:text-red-400 text-sm px-2 py-1 disabled:opacity-30">
+                        {deleting === item.id ? '…' : 'Del'}
+                      </button>
                     </td>
                   </motion.tr>
                 )
@@ -256,7 +284,7 @@ export default function CatalogItemsPage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed right-0 top-0 h-full w-full sm:max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">{editing ? 'Edit Item' : 'New Item'}</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>
@@ -408,7 +436,27 @@ export default function CatalogItemsPage() {
                   </div>
                 </div>
 
-                {/* Scope / Branch */}
+                {/* Branch */}
+                <div>
+                  <label className={label}>Branch <span className="normal-case font-normal text-white/30">(if branch-specific)</span></label>
+                  <select value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))} className={inp}>
+                    <option value="">All branches (Global)</option>
+                    {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
+                  </select>
+                </div>
+
+                {/* Project (for PROJECT_DONATION) */}
+                {form.category === 'PROJECT_DONATION' && (
+                  <div>
+                    <label className={label}>Project</label>
+                    <select value={form.project_id} onChange={e => setForm(p => ({ ...p, project_id: e.target.value }))} className={inp}>
+                      <option value="">No project / General</option>
+                      {projects.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                {/* Scope / Sort */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={label}>Scope</label>
@@ -428,7 +476,7 @@ export default function CatalogItemsPage() {
                   <div>
                     <label className={label}>Stock per Branch</label>
                     <div className="grid grid-cols-2 gap-2">
-                      {BRANCHES.map(b => (
+                      {BRANCH_STOCK_IDS.map(b => (
                         <div key={b} className="flex items-center gap-2">
                           <span className="text-white/50 text-xs w-20 flex-shrink-0">{BRANCH_LABELS[b]}</span>
                           <input type="number" min="0"

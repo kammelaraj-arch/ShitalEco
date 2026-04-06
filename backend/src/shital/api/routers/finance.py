@@ -1,5 +1,7 @@
 """Finance router."""
-from fastapi import APIRouter
+from __future__ import annotations
+from typing import Any
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace
@@ -35,6 +37,95 @@ async def income_statement(ctx: CurrentSpace, from_date: str, to_date: str):
 @router.get("/reports/donations")
 async def donation_summary(ctx: CurrentSpace, from_date: str, to_date: str):
     return await get_donation_summary(ctx, from_date, to_date)
+
+
+@router.get("/donations")
+async def list_donations(
+    ctx: CurrentSpace,
+    from_date: str = "2020-01-01",
+    to_date: str = "2099-12-31",
+    limit: int = 200,
+) -> dict[str, Any]:
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            SELECT id, branch_id, amount, currency, purpose, payment_provider,
+                   payment_ref, gift_aid_eligible, gift_aid_amount, status,
+                   reference, created_at, updated_at
+            FROM donations
+            WHERE deleted_at IS NULL
+              AND created_at::date >= :from_date::date
+              AND created_at::date <= :to_date::date
+            ORDER BY created_at DESC
+            LIMIT :lim
+        """), {"from_date": from_date, "to_date": to_date, "lim": limit})
+        rows = result.mappings().all()
+    return {"donations": [dict(r) for r in rows]}
+
+
+class DonationUpdate(BaseModel):
+    amount: float | None = None
+    purpose: str | None = None
+    payment_provider: str | None = None
+    payment_ref: str | None = None
+    status: str | None = None
+    reference: str | None = None
+    donation_date: str | None = None  # ISO date to override created_at
+
+
+@router.put("/donations/{donation_id}")
+async def update_donation(
+    donation_id: str, body: DonationUpdate, ctx: CurrentSpace
+) -> dict[str, Any]:
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+    from datetime import datetime
+    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(status_code=403, detail="ADMIN required")
+    sets = []
+    params: dict[str, Any] = {"did": donation_id, "now": datetime.utcnow()}
+    if body.amount is not None:
+        sets.append("amount = :amount"); params["amount"] = body.amount
+    if body.purpose is not None:
+        sets.append("purpose = :purpose"); params["purpose"] = body.purpose
+    if body.payment_provider is not None:
+        sets.append("payment_provider = :pp"); params["pp"] = body.payment_provider
+    if body.payment_ref is not None:
+        sets.append("payment_ref = :pref"); params["pref"] = body.payment_ref
+    if body.status is not None:
+        sets.append("status = :status"); params["status"] = body.status
+    if body.reference is not None:
+        sets.append("reference = :ref"); params["ref"] = body.reference
+    if body.donation_date:
+        sets.append("created_at = :ddate"); params["ddate"] = body.donation_date
+    if not sets:
+        return {"ok": True}
+    sets.append("updated_at = :now")
+    async with SessionLocal() as db:
+        result = await db.execute(text(
+            f"UPDATE donations SET {', '.join(sets)} WHERE id = :did AND deleted_at IS NULL"
+        ), params)
+        await db.commit()
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Donation not found")
+    return {"ok": True}
+
+
+@router.delete("/donations/{donation_id}", status_code=204)
+async def delete_donation(donation_id: str, ctx: CurrentSpace) -> None:
+    from shital.core.fabrics.database import SessionLocal
+    from sqlalchemy import text
+    from datetime import datetime
+    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(status_code=403, detail="ADMIN required")
+    async with SessionLocal() as db:
+        result = await db.execute(text(
+            "UPDATE donations SET deleted_at = :now WHERE id = :did AND deleted_at IS NULL"
+        ), {"did": donation_id, "now": datetime.utcnow()})
+        await db.commit()
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Donation not found")
 
 
 @router.get("/accounts")

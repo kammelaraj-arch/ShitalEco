@@ -270,6 +270,27 @@ async def _patch_schema() -> None:
             updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_branches_active ON branches(is_active)",
+        # Fundraising projects — each project groups PROJECT_DONATION items
+        """CREATE TABLE IF NOT EXISTS projects (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id    VARCHAR(60) UNIQUE NOT NULL,
+            name          VARCHAR(200) NOT NULL,
+            description   TEXT NOT NULL DEFAULT '',
+            branch_id     VARCHAR(100) NOT NULL DEFAULT 'main',
+            goal_amount   NUMERIC(12,2) NOT NULL DEFAULT 0,
+            image_url     TEXT NOT NULL DEFAULT '',
+            start_date    DATE,
+            end_date      DATE,
+            is_active     BOOLEAN NOT NULL DEFAULT true,
+            sort_order    INTEGER NOT NULL DEFAULT 0,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_projects_branch ON projects(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_projects_active ON projects(is_active)",
+        # Link catalog_items to a project (optional)
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS project_id VARCHAR(60) NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS idx_catalog_items_project ON catalog_items(project_id)",
     ]
 
     async with SessionLocal() as db:
@@ -474,6 +495,7 @@ _mount("shital.api.routers.documents_router", "router")
 _mount("shital.api.routers.api_keys",         "router")
 _mount("shital.api.routers.screen",           "router")
 _mount("shital.api.routers.branches",         "router")
+_mount("shital.api.routers.projects",         "router")
 
 
 @app.get("/health", tags=["system"])

@@ -59,6 +59,7 @@ class ItemBase(BaseModel):
     is_active: bool = True
     scope: ItemScope = ItemScope.GLOBAL
     branch_id: str = ""
+    project_id: str = ""
     stock_qty: int | None = None
     sort_order: int = 0
     metadata_json: dict = {}
@@ -89,6 +90,7 @@ class ItemUpdate(BaseModel):
     is_active: bool | None = None
     scope: ItemScope | None = None
     branch_id: str | None = None
+    project_id: str | None = None
     stock_qty: int | None = None
     sort_order: int | None = None
     metadata_json: dict | None = None
@@ -461,13 +463,13 @@ async def create_item(body: ItemCreate, ctx: OptionalSpace):
             text("""
                 INSERT INTO catalog_items
                 (id, name, name_gu, name_hi, name_te, description, category, price, currency,
-                 unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id,
+                 unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id, project_id,
                  stock_qty, sort_order, metadata_json,
                  available_from, available_until, display_channel, branch_stock, is_live,
                  created_at, updated_at)
                 VALUES
                 (:id, :name, :name_gu, :name_hi, :name_te, :desc, :category, :price, :currency,
-                 :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id,
+                 :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id, :project_id,
                  :stock_qty, :sort_order, :metadata_json::jsonb,
                  :available_from, :available_until, :display_channel, :branch_stock::jsonb, :is_live,
                  :now, :now)
@@ -489,6 +491,7 @@ async def create_item(body: ItemCreate, ctx: OptionalSpace):
                 "is_active": body.is_active,
                 "scope": body.scope.value,
                 "branch_id": body.branch_id,
+                "project_id": body.project_id,
                 "stock_qty": body.stock_qty,
                 "sort_order": body.sort_order,
                 "metadata_json": json.dumps(body.metadata_json),
@@ -528,6 +531,7 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
         "is_active": body.is_active,
         "scope": body.scope.value if body.scope else None,
         "branch_id": body.branch_id,
+        "project_id": body.project_id,
         "stock_qty": body.stock_qty,
         "sort_order": body.sort_order,
         "available_from": body.available_from,

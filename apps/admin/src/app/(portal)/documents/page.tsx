@@ -244,7 +244,7 @@ export default function DocumentsPage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-full max-w-[500px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed right-0 top-0 h-full w-full sm:max-w-[500px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">Upload Document</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>
