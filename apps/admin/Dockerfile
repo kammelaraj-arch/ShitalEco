@@ -2,11 +2,10 @@
 FROM node:20-slim AS base
 WORKDIR /app
 
-# ── Install deps (cached layer — only rebuilds when package*.json changes) ──
+# ── Install deps — lockfile pre-generated on CI runner with swc resolved ──
 FROM base AS deps
-COPY package.json ./
-RUN npm install --legacy-peer-deps && \
-    npm install --no-save @next/swc-linux-x64-gnu@14.2.5 2>/dev/null || true
+COPY package.json package-lock.json ./
+RUN npm ci --legacy-peer-deps
 
 # ── Build ────────────────────────────────────────────────────────────────────
 FROM base AS builder
