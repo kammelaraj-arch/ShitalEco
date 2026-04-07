@@ -75,8 +75,9 @@ class SecretsManager:
     async def _load_all(cls) -> None:
         """Reload all keys from DB into the in-memory cache."""
         global _cache, _cache_ts
-        from shital.core.fabrics.database import SessionLocal
         from sqlalchemy import text
+
+        from shital.core.fabrics.database import SessionLocal
         try:
             async with SessionLocal() as db:
                 result = await db.execute(
@@ -110,8 +111,9 @@ class SecretsManager:
     @classmethod
     async def set(cls, key_name: str, value: str, updated_by: str = "admin") -> None:
         """Encrypt and persist a key to DB; invalidate the cache."""
-        from shital.core.fabrics.database import SessionLocal
         from sqlalchemy import text
+
+        from shital.core.fabrics.database import SessionLocal
         encrypted = _encrypt(value)
         async with SessionLocal() as db:
             await db.execute(
@@ -131,8 +133,9 @@ class SecretsManager:
     @classmethod
     async def list_keys(cls) -> list[dict[str, Any]]:
         """Return key metadata (never plaintext values)."""
-        from shital.core.fabrics.database import SessionLocal
         from sqlalchemy import text
+
+        from shital.core.fabrics.database import SessionLocal
         async with SessionLocal() as db:
             result = await db.execute(
                 text("""
@@ -149,8 +152,9 @@ class SecretsManager:
     @classmethod
     async def delete(cls, key_name: str) -> None:
         """Remove a key from DB; invalidate cache."""
-        from shital.core.fabrics.database import SessionLocal
         from sqlalchemy import text
+
+        from shital.core.fabrics.database import SessionLocal
         async with SessionLocal() as db:
             await db.execute(
                 text("DELETE FROM api_keys_store WHERE key_name = :k"),

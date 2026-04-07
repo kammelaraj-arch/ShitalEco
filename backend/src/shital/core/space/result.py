@@ -1,7 +1,9 @@
 """Result monad for type-safe error handling across all capabilities."""
 from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Generic, TypeVar, Callable, Awaitable
+from typing import Generic, TypeVar
 
 T = TypeVar("T")
 E = TypeVar("E", bound=Exception)

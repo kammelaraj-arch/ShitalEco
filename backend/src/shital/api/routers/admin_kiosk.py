@@ -3,9 +3,10 @@ Admin kiosk router — CRUD for temple services and order listing.
 Requires authentication (admin role).
 """
 from __future__ import annotations
+
+import uuid
 from datetime import datetime
 from typing import Any
-import uuid
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -18,9 +19,11 @@ router = APIRouter(prefix="/admin", tags=["admin-kiosk"])
 @router.get("/stats")
 async def get_stats():
     """Aggregate dashboard statistics — no auth required (public summary)."""
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import date
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     today = date.today()
     async with SessionLocal() as db:
@@ -117,8 +120,9 @@ class ServiceBody(BaseModel):
 
 @router.get("/services")
 async def list_services(branch_id: str = "", category: str = "", include_inactive: bool = True):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -143,8 +147,9 @@ async def list_services(branch_id: str = "", category: str = "", include_inactiv
 
 @router.post("/services", status_code=201)
 async def create_service(body: ServiceBody):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     service_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -171,8 +176,9 @@ async def create_service(body: ServiceBody):
 
 @router.put("/services/{service_id}")
 async def update_service(service_id: str, body: ServiceBody):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
     updates = body.model_dump(exclude_unset=True)
@@ -195,8 +201,9 @@ async def update_service(service_id: str, body: ServiceBody):
 
 @router.delete("/services/{service_id}")
 async def delete_service(service_id: str):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
     async with SessionLocal() as db:
@@ -212,8 +219,9 @@ async def delete_service(service_id: str):
 
 @router.get("/orders")
 async def list_orders(limit: int = 50, offset: int = 0, status: str = "", branch_id: str = ""):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = []
     params: dict[str, Any] = {"limit": limit, "offset": offset}

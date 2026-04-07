@@ -3,6 +3,7 @@ Cache fabric — Redis-backed async cache with JSON serialisation.
 Provides simple set/get/delete helpers for all capability modules.
 """
 from __future__ import annotations
+
 import json
 from typing import Any
 

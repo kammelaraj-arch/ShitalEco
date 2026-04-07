@@ -9,9 +9,10 @@ List endpoint (metadata only, no values) requires only a valid admin JWT.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
-from typing import Any
 
 from shital.api.deps import CurrentSpace
 
@@ -79,9 +80,10 @@ async def set_key_value(
     _require_admin(ctx)
     await _verify_pin_or_raise(x_admin_pin)
 
-    from shital.core.fabrics.secrets import SecretsManager, invalidate_cache
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
 
     # Update metadata fields if provided
     if body.description or body.group_name:

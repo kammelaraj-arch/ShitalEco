@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from shital.api.deps import RequiredSpace, OptionalSpace
+from shital.api.deps import OptionalSpace, RequiredSpace
 
 router = APIRouter(prefix="/terminal-devices", tags=["terminal-devices"])
 
@@ -86,8 +86,9 @@ async def list_devices(
     active_only: bool = True,
 ):
     """List all registered terminal devices with optional filters."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -127,8 +128,9 @@ async def list_devices(
 @router.get("/by-branch/{branch_id}")
 async def list_devices_for_branch(branch_id: str, ctx: OptionalSpace):
     """Public endpoint: list active devices for a branch (used by kiosk)."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -153,8 +155,9 @@ async def list_devices_for_branch(branch_id: str, ctx: OptionalSpace):
 
 @router.get("/{device_id}")
 async def get_device(device_id: str, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -177,8 +180,9 @@ async def get_device(device_id: str, ctx: RequiredSpace):
 @router.post("/")
 async def create_device(body: DeviceCreate, ctx: RequiredSpace):
     """Register a new terminal device and link it to a branch."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     device_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -225,8 +229,9 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
 
 @router.put("/{device_id}")
 async def update_device(device_id: str, body: DeviceUpdate, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     fields: dict[str, Any] = {}
     for field in (
@@ -271,8 +276,9 @@ async def update_device(device_id: str, body: DeviceUpdate, ctx: RequiredSpace):
 @router.post("/{device_id}/assign")
 async def assign_user_to_device(device_id: str, body: AssignUserInput, ctx: RequiredSpace):
     """Assign (or reassign) a staff user as the owner of this terminal."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
 
@@ -306,8 +312,9 @@ async def assign_user_to_device(device_id: str, body: AssignUserInput, ctx: Requ
 
 @router.delete("/{device_id}")
 async def delete_device(device_id: str, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
 
@@ -341,10 +348,11 @@ async def sync_from_stripe(ctx: RequiredSpace, branch_id: str = "", location_id:
     for the admin to fill in later).
     """
     import stripe
+    from sqlalchemy import text
+
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.database import SessionLocal
     from shital.core.fabrics.secrets import SecretsManager
-    from sqlalchemy import text
 
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     if not stripe.api_key:
@@ -443,10 +451,11 @@ async def sync_from_stripe(ctx: RequiredSpace, branch_id: str = "", location_id:
 async def refresh_device_status(device_id: str, ctx: RequiredSpace):
     """Fetch the latest status for one device from Stripe and save it."""
     import stripe
+    from sqlalchemy import text
+
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.database import SessionLocal
     from shital.core.fabrics.secrets import SecretsManager
-    from sqlalchemy import text
 
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     now = datetime.utcnow()

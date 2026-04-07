@@ -3,10 +3,11 @@ Smart Screen management router.
 Handles content library, playlists, profiles and live scheduling for TV displays.
 """
 from __future__ import annotations
-from datetime import datetime, date
+
+from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace, OptionalSpace
@@ -17,8 +18,9 @@ router = APIRouter(prefix="/screen", tags=["screen"])
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 async def _db_one(sql: str, params: dict) -> dict | None:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         r = await db.execute(text(sql), params)
         row = r.mappings().first()
@@ -26,8 +28,9 @@ async def _db_one(sql: str, params: dict) -> dict | None:
 
 
 async def _db_all(sql: str, params: dict | None = None) -> list[dict]:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         r = await db.execute(text(sql), params or {})
         rows = r.mappings().all()
@@ -35,8 +38,9 @@ async def _db_all(sql: str, params: dict | None = None) -> list[dict]:
 
 
 async def _db_exec(sql: str, params: dict) -> None:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         await db.execute(text(sql), params)
         await db.commit()
@@ -232,8 +236,9 @@ async def remove_playlist_item(pl_id: str, item_id: str, ctx: CurrentSpace) -> d
 @router.put("/playlists/{pl_id}/items/reorder")
 async def reorder_playlist(pl_id: str, body: list[dict], ctx: CurrentSpace) -> dict[str, Any]:
     """body: [{id: playlist_item_id, sort_order: int}]"""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         for item in body:
             await db.execute(

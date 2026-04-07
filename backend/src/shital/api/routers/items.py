@@ -8,20 +8,20 @@ import json
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from shital.api.deps import CurrentSpace, OptionalSpace
+from shital.api.deps import OptionalSpace
 
 router = APIRouter(prefix="/items", tags=["items"])
 
 
 # ─── Enums ────────────────────────────────────────────────────────────────────
 
-class ItemCategory(str, Enum):
+class ItemCategory(StrEnum):
     GENERAL_DONATION = "GENERAL_DONATION"
     SOFT_DONATION = "SOFT_DONATION"
     PROJECT_DONATION = "PROJECT_DONATION"
@@ -30,14 +30,14 @@ class ItemCategory(str, Enum):
     SPONSORSHIP = "SPONSORSHIP"
 
 
-class ItemScope(str, Enum):
+class ItemScope(StrEnum):
     GLOBAL = "GLOBAL"
     BRANCH = "BRANCH"
 
 
 # ─── Pydantic Models ──────────────────────────────────────────────────────────
 
-class DisplayChannel(str, Enum):
+class DisplayChannel(StrEnum):
     KIOSK = "kiosk"
     WEB = "web"
     BOTH = "both"
@@ -144,8 +144,9 @@ async def ping_items():
 @router.get("/schema-check")
 async def schema_check():
     """Return catalog_items column list from information_schema."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     try:
         async with SessionLocal() as db:
             r = await db.execute(text("""
@@ -163,11 +164,13 @@ async def schema_check():
 async def debug_conn():
     """Raw Postgres protocol test after TLS to see what server sends post-StartupMessage."""
     try:
-        import asyncpg
-        import ssl
-        import socket
         import asyncio
+        import socket
+        import ssl
         from urllib.parse import urlparse
+
+        import asyncpg
+
         from shital.core.fabrics.config import settings
 
         raw_url = settings.DATABASE_URL
@@ -233,8 +236,9 @@ async def list_items(
     scope: str = "",
     active_only: bool = True,
 ):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -291,8 +295,9 @@ async def list_items(
 @router.get("/kiosk/soft-donations")
 async def kiosk_soft_donations(branch_id: str = "main"):
     """Public: SOFT_DONATION items for a branch (global + branch-specific)."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -321,8 +326,9 @@ async def kiosk_soft_donations(branch_id: str = "main"):
 @router.get("/kiosk/projects")
 async def kiosk_projects(branch_id: str = "main"):
     """Public: PROJECT_DONATION items + project list."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -361,8 +367,9 @@ async def kiosk_projects(branch_id: str = "main"):
 @router.get("/kiosk/shop")
 async def kiosk_shop(branch_id: str = "main"):
     """Public: SHOP items for a branch."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -397,8 +404,9 @@ async def kiosk_shop(branch_id: str = "main"):
 @router.get("/kiosk/general-donations")
 async def kiosk_general_donations():
     """Public: GENERAL_DONATION preset items."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -424,8 +432,9 @@ async def kiosk_general_donations():
 
 @router.get("/{item_id}")
 async def get_item(item_id: str, ctx: OptionalSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -452,8 +461,9 @@ async def get_item(item_id: str, ctx: OptionalSpace):
 
 @router.post("/")
 async def create_item(body: ItemCreate, ctx: OptionalSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     item_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -510,8 +520,9 @@ async def create_item(body: ItemCreate, ctx: OptionalSpace):
 
 @router.put("/{item_id}")
 async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     # Build dynamic SET clause from non-None fields
     updates: dict[str, Any] = {}
@@ -580,8 +591,9 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
 @router.delete("/{item_id}")
 async def delete_item(item_id: str, ctx: OptionalSpace):
     """Soft delete — sets deleted_at timestamp."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
 
@@ -702,8 +714,9 @@ _SEED_ITEMS: list[dict] = [
 @router.get("/kiosk/sponsorship")
 async def kiosk_sponsorship(branch_id: str = "main"):
     """Public: SPONSORSHIP items."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     try:
         async with SessionLocal() as db:
             result = await db.execute(
@@ -732,8 +745,10 @@ async def kiosk_sponsorship(branch_id: str = "main"):
 async def seed_items(force: bool = False):
     """Seed the catalog_items table with default items. Use force=true to replace existing data."""
     import traceback
-    from shital.core.fabrics.database import SessionLocal
+
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:

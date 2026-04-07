@@ -2,6 +2,7 @@
 FastAPI dependency injection — current user, DigitalSpace context, DB session.
 """
 from __future__ import annotations
+
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status

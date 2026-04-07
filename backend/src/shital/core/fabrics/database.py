@@ -3,7 +3,8 @@ Database fabric — SQLAlchemy async engine and session management.
 Provides a shared async session for all capability modules.
 """
 from __future__ import annotations
-from typing import AsyncGenerator
+
+from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,

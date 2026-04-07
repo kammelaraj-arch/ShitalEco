@@ -3,10 +3,13 @@ Branches router — CRUD for temple branch locations.
 Requires SUPER_ADMIN or ADMIN role for write operations.
 """
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
-from fastapi import APIRouter, HTTPException, status
+
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
 from shital.api.deps import CurrentSpace, OptionalSpace
 
 router = APIRouter(prefix="/branches", tags=["branches"])
@@ -39,8 +42,9 @@ def _require_admin(ctx: CurrentSpace) -> None:
 
 @router.get("")
 async def list_branches(ctx: OptionalSpace) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(text(
             "SELECT * FROM branches ORDER BY established ASC, name ASC"
@@ -52,9 +56,12 @@ async def list_branches(ctx: OptionalSpace) -> dict[str, Any]:
 @router.post("", status_code=201)
 async def create_branch(body: BranchIn, ctx: CurrentSpace) -> dict[str, Any]:
     _require_admin(ctx)
-    import uuid, re
-    from shital.core.fabrics.database import SessionLocal
+    import re
+    import uuid
+
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     # Auto-generate branch_id from name if not set
     branch_id = re.sub(r'[^a-z0-9]', '_', body.name.lower())[:30].strip('_')
     now = datetime.utcnow()
@@ -86,8 +93,9 @@ async def create_branch(body: BranchIn, ctx: CurrentSpace) -> dict[str, Any]:
 @router.put("/{branch_id}")
 async def update_branch(branch_id: str, body: BranchIn, ctx: CurrentSpace) -> dict[str, Any]:
     _require_admin(ctx)
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     async with SessionLocal() as db:
         result = await db.execute(text("""
@@ -113,8 +121,9 @@ async def update_branch(branch_id: str, body: BranchIn, ctx: CurrentSpace) -> di
 @router.delete("/{branch_id}", status_code=204)
 async def delete_branch(branch_id: str, ctx: CurrentSpace) -> None:
     _require_admin(ctx)
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(
             text("DELETE FROM branches WHERE branch_id = :bid"),

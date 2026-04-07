@@ -3,13 +3,14 @@ Payroll Capabilities — UK PAYE, National Insurance, auto-enrolment pension.
 All calculations use 2024/25 tax year thresholds.
 """
 from __future__ import annotations
-from decimal import Decimal, ROUND_HALF_UP
+
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from pydantic import BaseModel
 import structlog
+from pydantic import BaseModel
 
-from shital.core.dna.registry import capability, Fabric
+from shital.core.dna.registry import Fabric, capability
 from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
@@ -186,10 +187,12 @@ async def calculate_payslip(ctx: DigitalSpace, data: PayslipCalculationInput) ->
 async def run_payroll(ctx: DigitalSpace, data: RunPayrollInput) -> dict[str, Any]:
     ctx.require_permission("payroll:run")
 
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import uuid
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     log = logger.bind(**ctx.log_context)
 

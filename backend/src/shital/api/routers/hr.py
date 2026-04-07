@@ -1,12 +1,22 @@
 """HR router."""
 from __future__ import annotations
+
 from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
 from shital.api.deps import CurrentSpace
 from shital.capabilities.hr.capabilities import (
-    create_employee, list_employees, request_leave, approve_leave, log_time, get_org_chart,
-    CreateEmployeeInput, LeaveRequestInput, TimeEntryInput,
+    CreateEmployeeInput,
+    LeaveRequestInput,
+    TimeEntryInput,
+    approve_leave,
+    create_employee,
+    get_org_chart,
+    list_employees,
+    log_time,
+    request_leave,
 )
 
 router = APIRouter(prefix="/hr", tags=["hr"])
@@ -44,9 +54,11 @@ class EmployeeUpdate(BaseModel):
 
 @router.put("/employees/{employee_id}")
 async def update_emp(employee_id: str, body: EmployeeUpdate, ctx: CurrentSpace) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     sets = []
     params: dict[str, Any] = {"eid": employee_id, "now": datetime.utcnow()}
     field_map = {
@@ -59,15 +71,20 @@ async def update_emp(employee_id: str, body: EmployeeUpdate, ctx: CurrentSpace) 
     }
     for col, val in field_map.items():
         if val is not None:
-            sets.append(f"{col} = :{col}"); params[col] = val
+            sets.append(f"{col} = :{col}")
+            params[col] = val
     if body.role is not None:
-        sets.append("job_title = :job_title"); params["job_title"] = body.role
+        sets.append("job_title = :job_title")
+        params["job_title"] = body.role
     if body.gross_salary is not None:
-        sets.append("salary = :salary"); params["salary"] = str(body.gross_salary)
+        sets.append("salary = :salary")
+        params["salary"] = str(body.gross_salary)
     if body.national_insurance is not None:
-        sets.append("ni_number = :ni_number"); params["ni_number"] = body.national_insurance
+        sets.append("ni_number = :ni_number")
+        params["ni_number"] = body.national_insurance
     if body.start_date is not None:
-        sets.append("start_date = :start_date"); params["start_date"] = body.start_date
+        sets.append("start_date = :start_date")
+        params["start_date"] = body.start_date
     if not sets:
         return {"ok": True}
     sets.append("updated_at = :now")
@@ -84,9 +101,11 @@ async def update_emp(employee_id: str, body: EmployeeUpdate, ctx: CurrentSpace) 
 @router.delete("/employees/{employee_id}", status_code=204)
 async def deactivate_emp(employee_id: str, ctx: CurrentSpace) -> None:
     """Soft-delete (deactivate) an employee."""
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         await db.execute(text(
             "UPDATE employees SET is_active = false, updated_at = :now WHERE id = :eid"

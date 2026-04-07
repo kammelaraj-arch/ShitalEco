@@ -39,8 +39,9 @@ async def list_users(
     search: str = "",
     active_only: bool = True,
 ):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -81,8 +82,9 @@ async def list_users(
 
 @router.get("/{user_id}")
 async def get_user(user_id: str, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -115,8 +117,9 @@ class UserCreate(BaseModel):
 
 @router.post("/")
 async def create_user(body: UserCreate, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     if body.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid role. Choose from: {', '.join(VALID_ROLES)}")
@@ -172,8 +175,9 @@ async def update_role(user_id: str, body: RoleUpdate, ctx: RequiredSpace):
     if body.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid role. Choose from: {', '.join(VALID_ROLES)}")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
     fields: dict[str, Any] = {"role": body.role, "updated_at": now, "id": user_id}
@@ -203,8 +207,9 @@ async def update_role(user_id: str, body: RoleUpdate, ctx: RequiredSpace):
 
 @router.put("/{user_id}/toggle-active")
 async def toggle_active(user_id: str, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
     async with SessionLocal() as db:
@@ -229,8 +234,9 @@ async def toggle_active(user_id: str, ctx: RequiredSpace):
 
 @router.delete("/{user_id}")
 async def delete_user(user_id: str, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
     async with SessionLocal() as db:

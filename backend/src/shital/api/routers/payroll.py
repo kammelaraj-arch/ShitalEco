@@ -1,9 +1,12 @@
 """Payroll router."""
 from fastapi import APIRouter
+
 from shital.api.deps import CurrentSpace
 from shital.capabilities.payroll.capabilities import (
-    calculate_payslip, run_payroll,
-    PayslipCalculationInput, RunPayrollInput,
+    PayslipCalculationInput,
+    RunPayrollInput,
+    calculate_payslip,
+    run_payroll,
 )
 
 router = APIRouter(prefix="/payroll", tags=["payroll"])
@@ -21,8 +24,9 @@ async def run(body: RunPayrollInput, ctx: CurrentSpace):
 
 @router.get("/runs")
 async def list_runs(ctx: CurrentSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(
             text("""

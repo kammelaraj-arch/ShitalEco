@@ -6,6 +6,7 @@ Generates a payment schedule (next 24 instances) on create/update.
 Critical obligations (RENT, LEASE, HMRC_*) get visual alerts in the UI.
 """
 from __future__ import annotations
+
 import calendar
 import uuid
 from datetime import date, timedelta
@@ -102,8 +103,9 @@ async def _generate_schedule(db: Any, payment_id: str, branch_id: str,
                               amount: float, currency: str, frequency: str,
                               start: date, day_of_month: int | None,
                               end: date | None) -> int:
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
     dates = _next_dates(start, frequency, day_of_month, end, count=24)
     now = datetime.utcnow()
     for d in dates:
@@ -134,8 +136,9 @@ def _parse_date(s: str) -> date | None:
 @router.get("/dashboard")
 async def dashboard(ctx: OptionalSpace) -> dict[str, Any]:
     """Alert dashboard: overdue, due soon, renewals."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     today = date.today().isoformat()
     in7   = (date.today() + timedelta(days=7)).isoformat()
     in30  = (date.today() + timedelta(days=30)).isoformat()
@@ -206,8 +209,9 @@ async def list_recurring(
     category: str = "",
     include_inactive: bool = False,
 ) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     today = date.today().isoformat()
 
     async with SessionLocal() as db:
@@ -251,9 +255,11 @@ async def list_recurring(
 
 @router.post("", status_code=201)
 async def create_recurring(body: RecurringPaymentIn, ctx: CurrentSpace) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     pid = str(uuid.uuid4())
     start = _parse_date(body.start_date) or date.today()
@@ -293,9 +299,11 @@ async def create_recurring(body: RecurringPaymentIn, ctx: CurrentSpace) -> dict[
 
 @router.put("/{payment_id}")
 async def update_recurring(payment_id: str, body: RecurringPaymentIn, ctx: CurrentSpace) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     start = _parse_date(body.start_date) or date.today()
     end   = _parse_date(body.end_date)
@@ -341,9 +349,11 @@ async def update_recurring(payment_id: str, body: RecurringPaymentIn, ctx: Curre
 
 @router.delete("/{payment_id}", status_code=204)
 async def delete_recurring(payment_id: str, ctx: CurrentSpace) -> None:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     async with SessionLocal() as db:
         result = await db.execute(text("""
@@ -366,8 +376,9 @@ async def delete_recurring(payment_id: str, ctx: CurrentSpace) -> None:
 
 @router.get("/{payment_id}/schedule")
 async def get_schedule(payment_id: str, ctx: OptionalSpace) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(text("""
             SELECT * FROM payment_schedule
@@ -380,10 +391,12 @@ async def get_schedule(payment_id: str, ctx: OptionalSpace) -> dict[str, Any]:
 
 @router.post("/{payment_id}/regenerate")
 async def regenerate_schedule(payment_id: str, ctx: CurrentSpace) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
-    now = datetime.utcnow()
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    datetime.utcnow()
     async with SessionLocal() as db:
         rp = await db.execute(text(
             "SELECT * FROM recurring_payments WHERE id = :pid AND deleted_at IS NULL"
@@ -413,9 +426,11 @@ async def regenerate_schedule(payment_id: str, ctx: CurrentSpace) -> dict[str, A
 
 @router.patch("/schedule/{schedule_id}/mark-paid")
 async def mark_paid(schedule_id: str, body: MarkPaidIn, ctx: CurrentSpace) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     async with SessionLocal() as db:
         result = await db.execute(text("""
@@ -438,9 +453,11 @@ async def mark_paid(schedule_id: str, body: MarkPaidIn, ctx: CurrentSpace) -> di
 
 @router.patch("/schedule/{schedule_id}/mark-skipped")
 async def mark_skipped(schedule_id: str, body: MarkSkippedIn, ctx: CurrentSpace) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     async with SessionLocal() as db:
         await db.execute(text("""
@@ -453,9 +470,11 @@ async def mark_skipped(schedule_id: str, body: MarkSkippedIn, ctx: CurrentSpace)
 
 @router.patch("/schedule/{schedule_id}/mark-pending")
 async def mark_pending(schedule_id: str, ctx: CurrentSpace) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     async with SessionLocal() as db:
         await db.execute(text("""

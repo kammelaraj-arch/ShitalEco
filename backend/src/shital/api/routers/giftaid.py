@@ -2,13 +2,14 @@
 Gift Aid router — admin endpoints for HMRC Gift Aid claim management.
 """
 from __future__ import annotations
+
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
-import uuid
 
 from shital.api.deps import CurrentSpace
 from shital.core.fabrics.config import settings
@@ -20,8 +21,9 @@ router = APIRouter(prefix="/gift-aid", tags=["gift-aid"])
 
 async def _ensure_submissions_table() -> None:
     """Idempotently create gift_aid_submissions table if missing."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     try:
         async with SessionLocal() as db:
             await db.execute(text("""
@@ -107,8 +109,9 @@ class StoreDeclarationInput(BaseModel):
 @router.post("/declarations")
 async def store_declaration(ctx: CurrentSpace, body: StoreDeclarationInput):
     """Store a Gift Aid declaration in the database."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     declaration_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -148,8 +151,9 @@ async def list_declarations(
     limit: int = 100,
 ):
     """List Gift Aid declarations (unsubmitted ones ready for HMRC batch)."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {"limit": limit}
@@ -199,11 +203,14 @@ class PreviewXmlInput(BaseModel):
 @router.post("/preview-xml")
 async def preview_xml(ctx: CurrentSpace, body: PreviewXmlInput):
     """Return the GovTalk XML that would be sent to HMRC (credentials masked for display)."""
+    from sqlalchemy import text
+
     from shital.capabilities.giftaid.capabilities import (
-        GiftAidSubmission, GiftAidDeclaration, build_gift_aid_xml_preview
+        GiftAidDeclaration,
+        GiftAidSubmission,
+        build_gift_aid_xml_preview,
     )
     from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
 
     try:
         async with SessionLocal() as db:
@@ -263,11 +270,14 @@ class SubmitToHMRCInput(BaseModel):
 @router.post("/submit-to-hmrc")
 async def submit_to_hmrc(ctx: CurrentSpace, body: SubmitToHMRCInput):
     """Submit a batch of Gift Aid declarations to HMRC Charities Online."""
+    from sqlalchemy import text
+
     from shital.capabilities.giftaid.capabilities import (
-        submit_gift_aid_claim, GiftAidSubmission, GiftAidDeclaration
+        GiftAidDeclaration,
+        GiftAidSubmission,
+        submit_gift_aid_claim,
     )
     from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
 
     await _ensure_submissions_table()
 
@@ -372,8 +382,9 @@ async def submit_to_hmrc(ctx: CurrentSpace, body: SubmitToHMRCInput):
 @router.get("/submissions")
 async def list_submissions(ctx: CurrentSpace, limit: int = 50):
     """List past Gift Aid submission attempts to HMRC."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     await _ensure_submissions_table()
 

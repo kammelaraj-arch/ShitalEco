@@ -1,14 +1,15 @@
 """Bookings router — room and hall booking management."""
 from __future__ import annotations
-from datetime import datetime
+
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace
 from shital.core.fabrics.database import SessionLocal
-from sqlalchemy import text
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 

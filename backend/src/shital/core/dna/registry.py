@@ -5,23 +5,25 @@ Like human DNA, this defines how every capability is built, governed, and operat
 It embeds standards, guardrails, RACI patterns, and reusable building blocks.
 """
 from __future__ import annotations
+
 import functools
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable, TypeVar, ParamSpec
+from enum import StrEnum
+from typing import Any, ParamSpec, TypeVar
 
 P = ParamSpec("P")
 T = TypeVar("T")
 
 
-class CapabilityStatus(str, Enum):
+class CapabilityStatus(StrEnum):
     ACTIVE = "active"
     DEPRECATED = "deprecated"
     EXPERIMENTAL = "experimental"
 
 
-class Fabric(str, Enum):
+class Fabric(StrEnum):
     """Foundation Fabrics — shared capabilities that power all digital products."""
     DATA = "data"
     INTEGRATION = "integration"

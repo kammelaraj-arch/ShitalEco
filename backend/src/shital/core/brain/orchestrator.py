@@ -5,15 +5,17 @@ Uses Claude with tool_use to discover capabilities from Digital DNA,
 orchestrate multi-step workflows, apply guardrails, and support human-in-the-loop.
 """
 from __future__ import annotations
+
 import json
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import anthropic
 import structlog
 
 from shital.core.dna.registry import DigitalDNA, Fabric
-from shital.core.space.context import DigitalSpace
 from shital.core.fabrics.config import settings
+from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
 

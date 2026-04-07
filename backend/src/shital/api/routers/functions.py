@@ -107,8 +107,9 @@ async def list_functions(
     Use ?search=donation&fabric=finance to find relevant functions.
     Returns input/output schemas so the AI knows how to call each function.
     """
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL", "is_active = true"]
     params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -163,8 +164,9 @@ async def list_functions(
 @router.get("/fabrics")
 async def list_fabrics():
     """Return all distinct fabrics with function counts — useful for AI category browsing."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(text("""
@@ -181,8 +183,9 @@ async def list_fabrics():
 @router.get("/{function_name}")
 async def get_function(function_name: str):
     """Get full details for one function — schemas, examples, usage stats."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -198,9 +201,11 @@ async def get_function(function_name: str):
 @router.post("/", status_code=201)
 async def create_function(body: FunctionCreate):
     """Register a new function in the catalogue."""
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import json
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     fn_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -270,9 +275,11 @@ async def create_function(body: FunctionCreate):
 @router.put("/{function_name}")
 async def update_function(function_name: str, body: FunctionUpdate):
     """Update a registered function's metadata or schemas."""
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import json
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     updates = body.model_dump(exclude_unset=True, exclude_none=True)
     if not updates:
@@ -310,8 +317,9 @@ async def update_function(function_name: str, body: FunctionUpdate):
 @router.delete("/{function_name}")
 async def delete_function(function_name: str):
     """Soft-delete a function from the registry (audit history is preserved)."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
     async with SessionLocal() as db:
@@ -341,9 +349,11 @@ async def invoke_function(function_name: str, body: InvokeRequest, request_id: s
     directly — this ensures every AI action is logged with full context
     (which query triggered it, why the AI chose this function, etc.).
     """
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import json
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     invocation_id = str(uuid.uuid4())
     start_ms = int(time.time() * 1000)
@@ -479,8 +489,9 @@ async def get_audit_log(
     Supports filtering by function, caller, status, AI session, etc.
     Records are never modified — full chain of custody guaranteed.
     """
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions: list[str] = []
     params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -534,8 +545,9 @@ async def get_audit_log(
 @router.get("/audit/{function_name}")
 async def get_function_audit(function_name: str, limit: int = 20):
     """Get recent audit log for a specific function."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -564,8 +576,9 @@ async def sync_from_digital_dna():
     Safe to call multiple times — uses INSERT … ON CONFLICT DO UPDATE.
     Called automatically on startup.
     """
-    from shital.core.dna.registry import DigitalDNA
     import json
+
+    from shital.core.dna.registry import DigitalDNA
 
     capabilities = DigitalDNA.all_capabilities()
     synced = 0
@@ -573,8 +586,9 @@ async def sync_from_digital_dna():
 
     for cap in capabilities:
         try:
-            from shital.core.fabrics.database import SessionLocal
             from sqlalchemy import text
+
+            from shital.core.fabrics.database import SessionLocal
 
             now = datetime.utcnow()
             fn_id = str(uuid.uuid4())

@@ -1,14 +1,20 @@
 """Finance router."""
 from __future__ import annotations
+
 from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace
 from shital.capabilities.finance.capabilities import (
-    get_trial_balance, post_journal_entry, record_donation,
-    get_income_statement, get_donation_summary,
-    PostJournalInput, DonationInput,
+    DonationInput,
+    PostJournalInput,
+    get_donation_summary,
+    get_income_statement,
+    get_trial_balance,
+    post_journal_entry,
+    record_donation,
 )
 
 router = APIRouter(prefix="/finance", tags=["finance"])
@@ -46,8 +52,9 @@ async def list_donations(
     to_date: str = "2099-12-31",
     limit: int = 200,
 ) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(text("""
             SELECT id, branch_id, amount, currency, purpose, payment_provider,
@@ -78,27 +85,36 @@ class DonationUpdate(BaseModel):
 async def update_donation(
     donation_id: str, body: DonationUpdate, ctx: CurrentSpace
 ) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
         raise HTTPException(status_code=403, detail="ADMIN required")
     sets = []
     params: dict[str, Any] = {"did": donation_id, "now": datetime.utcnow()}
     if body.amount is not None:
-        sets.append("amount = :amount"); params["amount"] = body.amount
+        sets.append("amount = :amount")
+        params["amount"] = body.amount
     if body.purpose is not None:
-        sets.append("purpose = :purpose"); params["purpose"] = body.purpose
+        sets.append("purpose = :purpose")
+        params["purpose"] = body.purpose
     if body.payment_provider is not None:
-        sets.append("payment_provider = :pp"); params["pp"] = body.payment_provider
+        sets.append("payment_provider = :pp")
+        params["pp"] = body.payment_provider
     if body.payment_ref is not None:
-        sets.append("payment_ref = :pref"); params["pref"] = body.payment_ref
+        sets.append("payment_ref = :pref")
+        params["pref"] = body.payment_ref
     if body.status is not None:
-        sets.append("status = :status"); params["status"] = body.status
+        sets.append("status = :status")
+        params["status"] = body.status
     if body.reference is not None:
-        sets.append("reference = :ref"); params["ref"] = body.reference
+        sets.append("reference = :ref")
+        params["ref"] = body.reference
     if body.donation_date:
-        sets.append("created_at = :ddate"); params["ddate"] = body.donation_date
+        sets.append("created_at = :ddate")
+        params["ddate"] = body.donation_date
     if not sets:
         return {"ok": True}
     sets.append("updated_at = :now")
@@ -114,9 +130,11 @@ async def update_donation(
 
 @router.delete("/donations/{donation_id}", status_code=204)
 async def delete_donation(donation_id: str, ctx: CurrentSpace) -> None:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import datetime
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
         raise HTTPException(status_code=403, detail="ADMIN required")
     async with SessionLocal() as db:
@@ -130,8 +148,9 @@ async def delete_donation(donation_id: str, ctx: CurrentSpace) -> None:
 
 @router.get("/accounts")
 async def list_accounts(ctx: CurrentSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(
             text("""

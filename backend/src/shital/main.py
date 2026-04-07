@@ -4,14 +4,15 @@ Assembles Digital DNA capabilities, Digital Space governance, Digital Brain AI,
 and all Foundation Fabrics into a unified agentic API.
 """
 from __future__ import annotations
+
 from contextlib import asynccontextmanager
 from typing import Any
 
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import ORJSONResponse
-import structlog
 
 from shital.core.fabrics.config import settings
 
@@ -21,14 +22,14 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     # Register all Digital DNA micro-capabilities
-    import shital.capabilities.finance.capabilities      # noqa: F401
-    import shital.capabilities.payroll.capabilities      # noqa: F401
-    import shital.capabilities.hr.capabilities           # noqa: F401
-    import shital.capabilities.assets.capabilities       # noqa: F401
-    import shital.capabilities.compliance.capabilities   # noqa: F401
-    import shital.capabilities.auth.capabilities         # noqa: F401
-    import shital.capabilities.notifications.capabilities # noqa: F401
-    import shital.capabilities.payments.capabilities     # noqa: F401
+    import shital.capabilities.assets.capabilities  # noqa: F401
+    import shital.capabilities.auth.capabilities  # noqa: F401
+    import shital.capabilities.compliance.capabilities  # noqa: F401
+    import shital.capabilities.finance.capabilities  # noqa: F401
+    import shital.capabilities.hr.capabilities  # noqa: F401
+    import shital.capabilities.notifications.capabilities  # noqa: F401
+    import shital.capabilities.payments.capabilities  # noqa: F401
+    import shital.capabilities.payroll.capabilities  # noqa: F401
     from shital.core.dna.registry import DigitalDNA
     total_caps = len(DigitalDNA.all_capabilities())
     logger.info("digital_dna_loaded", total_capabilities=total_caps)
@@ -54,8 +55,9 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
 
 async def _patch_schema() -> None:
     """Idempotent schema patcher — adds any columns migrations may have missed."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     patches = [
         # Migration 007 columns on catalog_items
@@ -359,10 +361,11 @@ async def _patch_schema() -> None:
 
 async def _seed_api_key_metadata() -> None:
     """Upsert known API key descriptors (no values) so the admin UI always shows them."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
-    KNOWN_KEYS = [
+    from shital.core.fabrics.database import SessionLocal
+
+    KNOWN_KEYS = [  # noqa: N806
         # (key_name, description, group_name, is_sensitive)
         ("STRIPE_SECRET_KEY",         "Stripe secret key (sk_live_...)",                "Stripe",    True),
         ("STRIPE_PUBLISHABLE_KEY",    "Stripe publishable key (pk_live_...)",           "Stripe",    False),
@@ -409,11 +412,12 @@ async def _seed_catalog() -> None:
     """Seed catalog_items with default items if the table is empty.
     Idempotent — only inserts when zero rows exist in catalog_items.
     """
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
+    from shital.core.fabrics.database import SessionLocal
+
     # Each tuple: (name, name_gu, name_hi, category, price, emoji, unit, gift_aid, sort_order, image_url)
-    SEED_ITEMS = [
+    SEED_ITEMS = [  # noqa: N806
         # ── General Donations (gift-aid eligible preset amounts) ──────────────
         ("Sadharana Dan £1",    "સાધારણ દાન £1",   "सामान्य दान £1",   "GENERAL_DONATION", 1,   "🙏", "",      True,  10, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),
         ("Sadharana Dan £5",    "સાધારણ દાન £5",   "सामान्य दान £5",   "GENERAL_DONATION", 5,   "🙏", "",      True,  20, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),

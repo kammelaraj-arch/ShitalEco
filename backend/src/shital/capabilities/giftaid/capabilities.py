@@ -3,18 +3,19 @@ Gift Aid capabilities — HMRC Gift Aid submission via SOAP API (Charities Onlin
 Also provides GetAddress.io postcode lookup proxy.
 """
 from __future__ import annotations
-from datetime import date, datetime
+
+import uuid
+from datetime import date
 from decimal import Decimal
 from typing import Any
-import uuid
 
 import httpx
-from pydantic import BaseModel
 import structlog
+from pydantic import BaseModel
 
-from shital.core.dna.registry import capability, Fabric
-from shital.core.space.context import DigitalSpace
+from shital.core.dna.registry import Fabric, capability
 from shital.core.fabrics.config import settings
+from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
 
@@ -69,7 +70,6 @@ def _build_govtalk_xml(submission: GiftAidSubmission, correlation_id: str) -> st
     charity_ref = submission.charity_ref or settings.HMRC_GIFT_AID_CHARITY_HMO_REF
     claim_date = (submission.claim_to_date or date.today()).isoformat()
     total = sum(d.amount for d in submission.declarations)
-    vendor_id = settings.HMRC_GIFT_AID_VENDOR_ID or "0"
     user_id = settings.HMRC_GIFT_AID_USER_ID
     password = settings.HMRC_GIFT_AID_PASSWORD
 

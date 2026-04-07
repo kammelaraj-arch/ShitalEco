@@ -2,18 +2,19 @@
 Auth Capabilities — login, register, JWT, MFA, RBAC.
 """
 from __future__ import annotations
+
 from datetime import datetime, timedelta
 from typing import Any
 
 import bcrypt
+import structlog
 from jose import JWTError, jwt
 from pydantic import BaseModel
-import structlog
 
-from shital.core.dna.registry import capability, Fabric
-from shital.core.space.context import DigitalSpace
+from shital.core.dna.registry import Fabric, capability
 from shital.core.fabrics.config import settings
-from shital.core.fabrics.constants import ROLE_HIERARCHY, PERMISSIONS
+from shital.core.fabrics.constants import PERMISSIONS
+from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
 
@@ -68,8 +69,9 @@ class VerifyTokenInput(BaseModel):
     tags=["auth"],
 )
 async def login_with_email(ctx: DigitalSpace, data: LoginInput) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     from shital.core.fabrics.errors import UnauthorizedError
 
     async with SessionLocal() as db:
@@ -123,10 +125,12 @@ async def login_with_email(ctx: DigitalSpace, data: LoginInput) -> dict[str, Any
     tags=["auth", "registration"],
 )
 async def register_devotee(ctx: DigitalSpace, data: RegisterInput) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
-    from shital.core.fabrics.errors import ConflictError
     import uuid
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.errors import ConflictError
 
     async with SessionLocal() as db:
         existing = await db.execute(

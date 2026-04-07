@@ -103,12 +103,12 @@ async def verify_azure_token(body: VerifyTokenInput):
     Validate a Microsoft ID token from MSAL, create or link the user in our DB,
     and return our own JWT access + refresh tokens.
     """
-    from jose import jwt as jose_jwt, JWTError
-    from shital.core.fabrics.database import SessionLocal
+    from jose import JWTError
+    from jose import jwt as jose_jwt
     from sqlalchemy import text
-    from shital.capabilities.auth.capabilities import (
-        _create_access_token, _create_refresh_token
-    )
+
+    from shital.capabilities.auth.capabilities import _create_access_token, _create_refresh_token
+    from shital.core.fabrics.database import SessionLocal
 
     if not settings.MS_CLIENT_ID:
         raise HTTPException(status_code=501, detail="Azure AD SSO is not configured on this server")
@@ -138,10 +138,6 @@ async def verify_azure_token(body: VerifyTokenInput):
 
     # ── 3. Validate the token signature + claims ──────────────────────────────
     tenant = settings.MS_TENANT_ID or "common"
-    valid_issuers = [
-        f"https://login.microsoftonline.com/{tenant}/v2.0",
-        f"https://sts.windows.net/{tenant}/",
-    ]
     if tenant == "common":
         # Multi-tenant: accept any issuer (validate iss manually if needed)
         algorithms = ["RS256"]

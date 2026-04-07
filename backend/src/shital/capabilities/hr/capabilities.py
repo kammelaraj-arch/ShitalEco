@@ -2,13 +2,14 @@
 HR Capabilities — Employee management, leave, timesheets.
 """
 from __future__ import annotations
+
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel
 import structlog
+from pydantic import BaseModel
 
-from shital.core.dna.registry import capability, Fabric
+from shital.core.dna.registry import Fabric, capability
 from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
@@ -71,9 +72,11 @@ class TimeEntryInput(BaseModel):
 async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[str, Any]:
     ctx.require_permission("hr:write")
 
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import uuid
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     # Resolve aliases: form sends role/gross_salary/national_insurance
     job_title     = data.job_title or data.role or "Staff"
@@ -148,8 +151,9 @@ async def list_employees(
 ) -> dict[str, Any]:
     ctx.require_permission("hr:read")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["e.branch_id = :bid", "e.deleted_at IS NULL"]
     params: dict[str, Any] = {"bid": ctx.branch_id, "limit": limit + 1}
@@ -202,10 +206,11 @@ async def list_employees(
     tags=["hr", "leave"],
 )
 async def request_leave(ctx: DigitalSpace, data: LeaveRequestInput) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import uuid
-    from datetime import timedelta
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     start = date.fromisoformat(data.start_date)
     end = date.fromisoformat(data.end_date)
@@ -243,8 +248,9 @@ async def request_leave(ctx: DigitalSpace, data: LeaveRequestInput) -> dict[str,
 async def approve_leave(ctx: DigitalSpace, leave_request_id: str) -> dict[str, Any]:
     ctx.require_permission("hr:write")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -272,9 +278,11 @@ async def approve_leave(ctx: DigitalSpace, leave_request_id: str) -> dict[str, A
     tags=["hr", "timesheet"],
 )
 async def log_time(ctx: DigitalSpace, data: TimeEntryInput) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import uuid
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         entry_id = str(uuid.uuid4())
@@ -307,8 +315,9 @@ async def log_time(ctx: DigitalSpace, data: TimeEntryInput) -> dict[str, Any]:
 async def get_org_chart(ctx: DigitalSpace) -> dict[str, Any]:
     ctx.require_permission("hr:read")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(

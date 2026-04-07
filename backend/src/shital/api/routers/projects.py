@@ -3,10 +3,13 @@ Projects router — fundraising projects (e.g. Temple Hall, Prayer Room).
 Each project can have catalog_items linked to it (brick donations etc).
 """
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
 from shital.api.deps import CurrentSpace, OptionalSpace
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -31,8 +34,9 @@ def _require_admin(ctx: CurrentSpace) -> None:
 
 @router.get("")
 async def list_projects(ctx: OptionalSpace, branch_id: str = "", include_inactive: bool = False) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         filters = []
         params: dict[str, Any] = {}
@@ -52,9 +56,12 @@ async def list_projects(ctx: OptionalSpace, branch_id: str = "", include_inactiv
 @router.post("", status_code=201)
 async def create_project(body: ProjectIn, ctx: CurrentSpace) -> dict[str, Any]:
     _require_admin(ctx)
-    import uuid, re
-    from shital.core.fabrics.database import SessionLocal
+    import re
+    import uuid
+
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     project_id = re.sub(r'[^a-z0-9]', '_', body.name.lower())[:40].strip('_')
     now = datetime.utcnow()
     async with SessionLocal() as db:
@@ -88,8 +95,9 @@ async def create_project(body: ProjectIn, ctx: CurrentSpace) -> dict[str, Any]:
 @router.put("/{project_id}")
 async def update_project(project_id: str, body: ProjectIn, ctx: CurrentSpace) -> dict[str, Any]:
     _require_admin(ctx)
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     async with SessionLocal() as db:
         result = await db.execute(text("""
@@ -116,8 +124,9 @@ async def update_project(project_id: str, body: ProjectIn, ctx: CurrentSpace) ->
 @router.delete("/{project_id}", status_code=204)
 async def delete_project(project_id: str, ctx: CurrentSpace) -> None:
     _require_admin(ctx)
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(
             text("DELETE FROM projects WHERE id = :pid OR project_id = :pid"),
@@ -131,8 +140,9 @@ async def delete_project(project_id: str, ctx: CurrentSpace) -> None:
 @router.get("/{project_id}/items")
 async def get_project_items(project_id: str, ctx: OptionalSpace) -> dict[str, Any]:
     """Get catalog items linked to this project."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(text("""
             SELECT id, name, name_gu, name_hi, name_te, description, category,

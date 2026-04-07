@@ -3,7 +3,8 @@ Email Templates — CRUD API for admin-editable email templates.
 Templates use Jinja2 syntax with variables like {{ order_ref }}, {{ customer_name }}.
 """
 from __future__ import annotations
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -28,8 +29,9 @@ class TemplateSendTest(BaseModel):
 
 @router.get("")
 async def list_templates():
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(text(
             "SELECT id, template_key, name, subject, variables, is_active, created_at, updated_at "
@@ -41,8 +43,9 @@ async def list_templates():
 
 @router.get("/{template_key}")
 async def get_template(template_key: str):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(
             text("SELECT * FROM email_templates WHERE template_key = :key"),
@@ -56,10 +59,11 @@ async def get_template(template_key: str):
 
 @router.put("/{template_key}")
 async def update_template(template_key: str, body: TemplateUpdate):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
-    updates: dict[str, Any] = {"key": template_key, "now": datetime.now(timezone.utc)}
+    from shital.core.fabrics.database import SessionLocal
+
+    updates: dict[str, Any] = {"key": template_key, "now": datetime.now(UTC)}
     set_parts: list[str] = ["updated_at = :now"]
 
     if body.name is not None:
@@ -94,9 +98,10 @@ async def update_template(template_key: str, body: TemplateUpdate):
 @router.post("/test-send")
 async def send_test_email(body: TemplateSendTest):
     """Render a template with provided variables and send a test email."""
-    from shital.core.fabrics.database import SessionLocal
-    from shital.core.fabrics.config import settings
     from sqlalchemy import text
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
