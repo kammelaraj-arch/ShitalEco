@@ -74,20 +74,20 @@ export default function FinancePage() {
   const loadAccounts = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const data = await apiFetch<{ accounts: Account[] }>('/finance/accounts')
+      const data = (await apiFetch('/finance/accounts')) as { accounts: Account[] }
       setAccounts(data.accounts || [])
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load accounts')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load accounts')
     } finally { setLoading(false) }
   }, [])
 
   const loadTrialBalance = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const data = await apiFetch<TrialBalance>('/finance/trial-balance')
+      const data = (await apiFetch('/finance/trial-balance')) as TrialBalance
       setTb(data)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load trial balance')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load trial balance')
     } finally { setLoading(false) }
   }, [])
 
@@ -96,7 +96,7 @@ export default function FinancePage() {
     else if (tab === 'trial-balance') loadTrialBalance()
   }, [tab, loadAccounts, loadTrialBalance])
 
-  async function postJournal() {
+  const postJournal = async () => {
     if (!jForm.description || !jForm.debit_account_id || !jForm.credit_account_id || !jForm.amount || !jForm.date) {
       setJError('All fields required'); return
     }
@@ -104,7 +104,6 @@ export default function FinancePage() {
     if (isNaN(amt) || amt <= 0) { setJError('Enter a valid amount'); return }
     setJSaving(true); setJError('')
     try {
-      // Backend PostJournalInput expects: description, date, lines[], idempotency_key, reference
       const body = {
         description: jForm.description,
         date: jForm.date,
@@ -123,8 +122,8 @@ export default function FinancePage() {
         idempotency_key: crypto.randomUUID(),
       })
       if (tab === 'accounts') loadAccounts()
-    } catch (e: unknown) {
-      setJError(e instanceof Error ? e.message : 'Failed to post journal')
+    } catch (err) {
+      setJError(err instanceof Error ? err.message : 'Failed to post journal')
     } finally { setJSaving(false) }
   }
 
