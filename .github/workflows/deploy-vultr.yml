@@ -136,6 +136,11 @@ jobs:
               systemctl enable --now docker
             fi
 
+            # Ensure docker compose v2 plugin is available
+            if ! docker compose version &>/dev/null; then
+              apt-get install -y docker-compose-plugin -q
+            fi
+
             # Pull latest code (for docker-compose.prod.yml + nginx config)
             if [ -d /opt/shitaleco ]; then
               cd /opt/shitaleco && git fetch origin && git reset --hard origin/claude/shital-erp-platform-iR2UF
