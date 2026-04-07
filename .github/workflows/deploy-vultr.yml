@@ -130,15 +130,10 @@ jobs:
           timeout: 300s
           envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
           script: |
-            # Install docker if missing
-            if ! command -v docker &>/dev/null; then
+            # Install/upgrade Docker with compose v2 support
+            if ! docker compose version &>/dev/null 2>&1; then
               curl -fsSL https://get.docker.com | sh
               systemctl enable --now docker
-            fi
-
-            # Ensure docker compose v2 plugin is available
-            if ! docker compose version &>/dev/null; then
-              apt-get install -y docker-compose-plugin -q
             fi
 
             # Pull latest code (for docker-compose.prod.yml + nginx config)
