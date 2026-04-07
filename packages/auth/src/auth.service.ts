@@ -75,7 +75,7 @@ export class AuthService {
     ipAddress?: string,
     userAgent?: string,
   ): Promise<Result<TokenPair>> {
-    const ctxLog = createContextLogger({ module: 'auth.service', userId: undefined })
+    const ctxLog = createContextLogger({ module: 'auth.service' })
 
     return tryAsync(async () => {
       const user = await prisma.user.findFirst({
