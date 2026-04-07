@@ -1,5 +1,5 @@
 # Admin Portal — Next.js Multi-stage Docker build
-FROM node:20-alpine AS base
+FROM node:20-slim AS base
 WORKDIR /app
 
 # ── Install deps (cached layer — only rebuilds when package*.json changes) ──
@@ -17,9 +17,10 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 RUN npm run build
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
-FROM base AS runner
+FROM node:20-slim AS runner
+WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
-RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
+RUN groupadd -g 1001 nodejs && useradd -u 1001 -g nodejs nextjs
 RUN mkdir -p ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
