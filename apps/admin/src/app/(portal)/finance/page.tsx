@@ -129,9 +129,9 @@ export default function FinancePage() {
   }
 
   // Group accounts by type for summary cards
-  const grouped = accounts.reduce<Record<string, Account[]>>((acc, a) => {
+  const grouped = accounts.reduce((acc: Record<string, Account[]>, a) => {
     acc[a.type] = acc[a.type] || []; acc[a.type].push(a); return acc
-  }, {})
+  }, {} as Record<string, Account[]>)
 
   const totalAssets   = (grouped.ASSET || []).reduce((s, a) => s + parseFloat(a.balance || '0'), 0)
   const totalIncome   = (grouped.INCOME || []).reduce((s, a) => s + parseFloat(a.balance || '0'), 0)

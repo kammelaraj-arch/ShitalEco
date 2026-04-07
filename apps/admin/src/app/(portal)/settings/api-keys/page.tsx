@@ -335,7 +335,7 @@ export default function ApiKeysPage() {
   }
 
   // Group keys
-  const grouped = keys.reduce<Record<string, ApiKey[]>>((acc, k) => {
+  const grouped = keys.reduce((acc: Record<string, ApiKey[]>, k) => {
     const g = k.group_name || 'Other'
     ;(acc[g] = acc[g] || []).push(k)
     return acc
