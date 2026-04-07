@@ -147,11 +147,13 @@ jobs:
           timeout: 300s
           envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
           script: |
-            # Ensure docker compose v2 is available
-            if ! docker compose version &>/dev/null 2>&1; then
+            # Ensure docker is installed and daemon is running
+            if ! command -v docker &>/dev/null; then
               curl -fsSL https://get.docker.com | sh
-              systemctl enable --now docker
             fi
+            systemctl enable docker
+            systemctl start docker || true
+            sleep 2
             docker compose version
 
             # Pull latest code (for docker-compose.prod.yml + nginx config)
