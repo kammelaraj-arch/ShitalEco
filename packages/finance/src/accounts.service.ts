@@ -11,7 +11,7 @@ import {
   ConflictError,
   PAGINATION,
 } from '@shital/config'
-import { prisma, type Account } from '@shital/db'
+import { prisma, type Account, AccountType } from '@shital/db'
 
 const createAccountSchema = z.object({
   code: z.string().min(1).max(20).regex(/^\d+$/, 'Account code must be numeric'),
@@ -67,7 +67,7 @@ export class AccountsService {
           type: data.type as Account['type'],
           branchId,
           currency: data.currency,
-          parentId: data.parentId,
+          parentId: data.parentId ?? null,
           balance: 0,
           isActive: true,
         },
@@ -98,7 +98,7 @@ export class AccountsService {
         where: {
           branchId,
           isActive: true,
-          ...(type !== undefined ? { type } : {}),
+          ...(type !== undefined ? { type: type as AccountType } : {}),
         },
         orderBy: [{ type: 'asc' }, { code: 'asc' }],
       })
