@@ -9,8 +9,6 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* .npmrc* ./
 COPY apps/admin/package.json ./apps/admin/
 RUN pnpm install --frozen-lockfile --filter @shital/admin... \
  || pnpm install --filter @shital/admin...
-# Guarantee native swc binary is present at the path Next.js requires
-RUN npm install --no-save @next/swc-linux-x64-gnu@14.2.5
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 FROM base AS builder
