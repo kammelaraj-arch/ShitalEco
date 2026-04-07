@@ -5,7 +5,8 @@ WORKDIR /app
 # ── Install deps (cached layer — only rebuilds when package*.json changes) ──
 FROM base AS deps
 COPY package.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps && \
+    npm install --no-save @next/swc-linux-x64-gnu@14.2.5 2>/dev/null || true
 
 # ── Build ────────────────────────────────────────────────────────────────────
 FROM base AS builder
