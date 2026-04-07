@@ -380,7 +380,7 @@ async def invoke_function(function_name: str, body: InvokeRequest, request_id: s
     try:
         from shital.core.dna.registry import DigitalDNA
         cap = DigitalDNA.get(function_name)
-        if cap and cap.fn:
+        if cap and cap.fn is not None:
             # Build a minimal DigitalSpace context
             from shital.core.space.context import DigitalSpace
             ctx = DigitalSpace(

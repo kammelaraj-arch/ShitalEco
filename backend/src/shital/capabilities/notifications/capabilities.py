@@ -49,16 +49,15 @@ async def send_email(ctx: DigitalSpace, data: EmailInput) -> dict[str, Any]:
         logger.warning("sendgrid_not_configured")
         return {"sent": False, "reason": "SendGrid not configured"}
 
+    content: list[dict[str, str]] = [{"type": "text/html", "value": data.html_body}]
+    if data.text_body:
+        content.append({"type": "text/plain", "value": data.text_body})
     payload = {
         "personalizations": [{"to": [{"email": data.to}]}],
         "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": "Shital Temple"},
         "subject": data.subject,
-        "content": [
-            {"type": "text/html", "value": data.html_body},
-        ],
+        "content": content,
     }
-    if data.text_body:
-        payload["content"].append({"type": "text/plain", "value": data.text_body})
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(

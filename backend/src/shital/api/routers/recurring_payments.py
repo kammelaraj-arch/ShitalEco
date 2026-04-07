@@ -12,7 +12,7 @@ import uuid
 from datetime import date, timedelta
 from typing import Any
 
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta  # type: ignore[import-untyped]
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 

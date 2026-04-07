@@ -164,7 +164,7 @@ def capability(
 
         @functools.wraps(fn)
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-            return await fn(*args, **kwargs)  # type: ignore[return-value]
+            return await fn(*args, **kwargs)  # type: ignore[misc,return-value]
 
         return wrapper  # type: ignore[return-value]
 

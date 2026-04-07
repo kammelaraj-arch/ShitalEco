@@ -146,7 +146,7 @@ async def get_asset_register(ctx: DigitalSpace, category: str = "") -> dict[str,
         years_owned = 0
         if purchase_date:
             pd = purchase_date if isinstance(purchase_date, date) else date.fromisoformat(str(purchase_date))
-            years_owned = (date.today() - pd).days / 365.25
+            years_owned = int((date.today() - pd).days / 365.25)
 
         annual_dep = (Decimal(str(r["purchase_price"] or 0)) * dep_rate).quantize(Decimal("0.01"))
 
