@@ -39,18 +39,6 @@ jobs:
         id: meta
         run: echo "sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      # ── Pre-generate admin package-lock.json on Linux runner ─────────────
-      # This ensures @next/swc-linux-x64-gnu is resolved and recorded in the
-      # lockfile. Docker uses npm ci which reads the lockfile — Next.js then
-      # finds swc and uses the native compiler instead of falling back.
-      - name: Generate admin package-lock.json with swc
-        run: |
-          cd apps/admin
-          rm -f package-lock.json  # remove pnpm-style lockfile
-          npm install --legacy-peer-deps
-          echo "Lockfile version: $(node -e "console.log(require('./package-lock.json').lockfileVersion)")"
-          ls node_modules/@next/swc-linux-x64-gnu/ 2>/dev/null && echo "✓ swc binary found" || echo "✗ swc binary NOT found"
-
       # ── Backend ────────────────────────────────────────────────────────────
       - name: Build & push backend
         uses: docker/build-push-action@v5
