@@ -1,25 +1,116 @@
-name: Deploy to Vultr
+name: Build & Deploy
 
 on:
   push:
     branches: [claude/shital-erp-platform-iR2UF, main]
   workflow_dispatch:
-    inputs:
-      clean_build:
-        description: 'Full clean rebuild (clears all Docker cache)'
-        required: false
-        default: 'false'
 
-# Only one deploy at a time — cancel any in-progress run if a new push comes in
 concurrency:
-  group: deploy-vultr
-  cancel-in-progress: true
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  REPO: kammelaraj-arch/shitaleco
 
 jobs:
+  # ── BUILD all images on GitHub's fast Linux runners ──────────────────────
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      sha: ${{ steps.meta.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Short SHA
+        id: meta
+        run: echo "sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      # ── Backend ────────────────────────────────────────────────────────────
+      - name: Build & push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO }}-backend:latest
+            ghcr.io/${{ env.REPO }}-backend:${{ steps.meta.outputs.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      # ── Admin (Next.js) ───────────────────────────────────────────────────
+      - name: Build & push admin
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/admin
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO }}-admin:latest
+            ghcr.io/${{ env.REPO }}-admin:${{ steps.meta.outputs.sha }}
+          build-args: NEXT_PUBLIC_API_URL=/api/v1
+          cache-from: type=gha,scope=admin
+          cache-to: type=gha,mode=max,scope=admin
+
+      # ── Quick Donation (Vite SPA) ─────────────────────────────────────────
+      - name: Build & push quick-donation
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/quick-donation/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO }}-quick-donation:latest
+            ghcr.io/${{ env.REPO }}-quick-donation:${{ steps.meta.outputs.sha }}
+          build-args: VITE_API_URL=/api/v1
+          cache-from: type=gha,scope=quick-donation
+          cache-to: type=gha,mode=max,scope=quick-donation
+
+      # ── Kiosk ─────────────────────────────────────────────────────────────
+      - name: Build & push kiosk
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/kiosk
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO }}-kiosk:latest
+            ghcr.io/${{ env.REPO }}-kiosk:${{ steps.meta.outputs.sha }}
+          build-args: |
+            VITE_API_URL=/api/v1
+            VITE_BASE=/kiosk/
+          cache-from: type=gha,scope=kiosk
+          cache-to: type=gha,mode=max,scope=kiosk
+
+      # ── Screen ────────────────────────────────────────────────────────────
+      - name: Build & push screen
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/screen
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO }}-screen:latest
+            ghcr.io/${{ env.REPO }}-screen:${{ steps.meta.outputs.sha }}
+          cache-from: type=gha,scope=screen
+          cache-to: type=gha,mode=max,scope=screen
+
+  # ── DEPLOY — pull pre-built images on the server ─────────────────────────
   deploy:
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy & verify on Vultr
+      - name: Deploy to Vultr
         uses: appleboy/ssh-action@v1.0.3
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -30,177 +121,83 @@ jobs:
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
-          CLEAN_BUILD: ${{ github.event.inputs.clean_build || 'false' }}
         with:
           host: 192.248.147.205
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
-          timeout: 900s
-          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,CLEAN_BUILD
+          timeout: 300s
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
           script: |
-            # NOTE: no set -e — we handle errors per-step to avoid full outage on partial failure
-
-            # ── Install docker if missing ──────────────────────────────────────
+            # Install docker if missing
             if ! command -v docker &>/dev/null; then
               curl -fsSL https://get.docker.com | sh
               systemctl enable --now docker
             fi
 
-            # ── WIPE EVERYTHING — fresh start ─────────────────────────────────
-            echo "=== WIPING SERVER — full clean deploy ==="
-            pkill -f "docker compose build" 2>/dev/null || true
-            pkill -f "docker buildx" 2>/dev/null || true
-            sleep 3
-
-            # Stop and remove all containers (keep DB data volume)
-            cd /opt/shitaleco 2>/dev/null && docker compose down --remove-orphans 2>/dev/null || true
-
-            # Remove all images and build cache
-            docker rmi $(docker images -q) 2>/dev/null || true
-            docker builder prune -af 2>/dev/null || true
-            docker system prune -f 2>/dev/null || true
-
-            # Delete and re-clone repo
-            rm -rf /opt/shitaleco
-            apt-get install -y git -q 2>/dev/null
-            git clone --branch claude/shital-erp-platform-iR2UF \
-              https://${GH_PAT}@github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco
-            echo "=== Wipe complete, fresh clone done ==="
-
+            # Pull latest code (for docker-compose.prod.yml + nginx config)
+            if [ -d /opt/shitaleco ]; then
+              cd /opt/shitaleco && git fetch origin && git reset --hard origin/claude/shital-erp-platform-iR2UF
+            else
+              apt-get install -y git -q
+              git clone --branch claude/shital-erp-platform-iR2UF \
+                https://${GH_PAT}@github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco
+            fi
             cd /opt/shitaleco
 
-            # ── Create .env if missing ─────────────────────────────────────────
+            # Create .env if missing
             if [ ! -f .env ]; then
-              printf 'POSTGRES_DB=shitaleco_db\n' > .env
-              printf 'POSTGRES_USER=shitaleco_db_user\n' >> .env
-              printf 'POSTGRES_PASSWORD=ShitalEco2024Prod!\n' >> .env
-              printf 'JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod\n' >> .env
-              printf 'APP_ENV=production\n' >> .env
-              printf 'CORS_ORIGINS=http://localhost:3001,http://localhost:3002,http://localhost:3003\n' >> .env
-              printf 'API_URL=http://192.248.147.205:8000\n' >> .env
-              printf 'BRANCH_ID=main\n' >> .env
-              printf 'ANTHROPIC_API_KEY=\n' >> .env
-              printf 'SENDGRID_API_KEY=\n' >> .env
-              printf 'STRIPE_SECRET_KEY=\n' >> .env
-              printf 'STRIPE_PUBLISHABLE_KEY=\n' >> .env
-              printf 'STRIPE_WEBHOOK_SECRET=\n' >> .env
-              printf 'MS_CLIENT_ID=\n' >> .env
-              printf 'MS_TENANT_ID=\n' >> .env
-              printf 'MS_CLIENT_SECRET=\n' >> .env
+              cat > .env <<'ENVEOF'
+            POSTGRES_DB=shitaleco_db
+            POSTGRES_USER=shitaleco_db_user
+            POSTGRES_PASSWORD=ShitalEco2024Prod!
+            JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod
+            APP_ENV=production
+            CORS_ORIGINS=http://localhost:3001,http://localhost:3002,http://localhost:3003
+            API_URL=http://192.248.147.205:8000
+            BRANCH_ID=main
+            ENVEOF
             fi
 
-            # ── Inject secrets into .env (always update) ───────────────────────
-            [ -n "$STRIPE_SECRET_KEY" ]      && sed -i "s|STRIPE_SECRET_KEY=.*|STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}|" .env      || true
-            [ -n "$STRIPE_PUBLISHABLE_KEY" ] && sed -i "s|STRIPE_PUBLISHABLE_KEY=.*|STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}|" .env || true
-            [ -n "$ANTHROPIC_API_KEY" ]      && sed -i "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}|" .env      || true
-            [ -n "$SENDGRID_API_KEY" ]       && sed -i "s|SENDGRID_API_KEY=.*|SENDGRID_API_KEY=${SENDGRID_API_KEY}|" .env        || true
-            [ -n "$MS_CLIENT_ID" ]           && sed -i "s|MS_CLIENT_ID=.*|MS_CLIENT_ID=${MS_CLIENT_ID}|" .env                    || true
-            [ -n "$MS_TENANT_ID" ]           && sed -i "s|MS_TENANT_ID=.*|MS_TENANT_ID=${MS_TENANT_ID}|" .env                    || true
-            [ -n "$MS_CLIENT_SECRET" ]       && sed -i "s|MS_CLIENT_SECRET=.*|MS_CLIENT_SECRET=${MS_CLIENT_SECRET}|" .env        || true
+            # Inject secrets
+            [ -n "$STRIPE_SECRET_KEY" ]      && sed -i "s|STRIPE_SECRET_KEY=.*|STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}|" .env      || echo "STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}" >> .env
+            [ -n "$STRIPE_PUBLISHABLE_KEY" ] && sed -i "s|STRIPE_PUBLISHABLE_KEY=.*|STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}|" .env || echo "STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}" >> .env
+            [ -n "$ANTHROPIC_API_KEY" ]      && sed -i "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}|" .env      || echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> .env
+            [ -n "$SENDGRID_API_KEY" ]       && sed -i "s|SENDGRID_API_KEY=.*|SENDGRID_API_KEY=${SENDGRID_API_KEY}|" .env        || echo "SENDGRID_API_KEY=${SENDGRID_API_KEY}" >> .env
+            [ -n "$MS_CLIENT_ID" ]           && sed -i "s|MS_CLIENT_ID=.*|MS_CLIENT_ID=${MS_CLIENT_ID}|" .env                    || echo "MS_CLIENT_ID=${MS_CLIENT_ID}" >> .env
+            [ -n "$MS_TENANT_ID" ]           && sed -i "s|MS_TENANT_ID=.*|MS_TENANT_ID=${MS_TENANT_ID}|" .env                    || echo "MS_TENANT_ID=${MS_TENANT_ID}" >> .env
+            [ -n "$MS_CLIENT_SECRET" ]       && sed -i "s|MS_CLIENT_SECRET=.*|MS_CLIENT_SECRET=${MS_CLIENT_SECRET}|" .env        || echo "MS_CLIENT_SECRET=${MS_CLIENT_SECRET}" >> .env
 
-            # ── Open ports ────────────────────────────────────────────────────
+            # Log in to GHCR using GH_PAT
+            echo "${GH_PAT}" | docker login ghcr.io -u kammelaraj-arch --password-stdin
+
+            # Open ports
             ufw allow 22/tcp 2>/dev/null || true
             ufw allow 80/tcp 2>/dev/null || true
-            ufw allow 443/tcp 2>/dev/null || true
             ufw allow 8000/tcp 2>/dev/null || true
             ufw --force enable 2>/dev/null || true
 
-            # ── Ensure infrastructure is running (DB, nginx) ──────────────────
-            docker compose up -d --no-build db certbot 2>/dev/null || true
-            docker compose pull nginx 2>/dev/null || true
-            docker compose up -d --no-build nginx 2>/dev/null || true
+            # Pull all pre-built images and restart
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
-            # ── STEP 1: Build backend (Python — uses pip cache layer) ─────────
-            echo "=== Building backend ==="
-            if docker compose build backend; then
-              echo "Backend built — restarting..."
-              docker compose up -d --no-build --no-deps backend
-              for i in $(seq 1 12); do
-                sleep 5
-                if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-                  echo "Backend healthy after $((i*5))s"
-                  break
-                fi
-                echo "  waiting... $((i*5))s"
-              done
-            else
-              echo "WARNING: Backend build failed — keeping existing container"
-              docker compose logs backend --tail=30
-            fi
-
-            # ── STEP 2: Build quick-donation (Vite SPA) ───────────────────────
-            echo "=== Building quick-donation ==="
-            if docker compose build quick-donation; then
-              docker compose up -d --no-build --no-deps quick-donation
-            else
-              echo "WARNING: quick-donation build failed"
-            fi
-
-            # ── STEP 3: Build admin (Next.js — uses node_modules cache) ───────
-            echo "=== Building admin ==="
-            if docker compose build admin; then
-              echo "Admin built — restarting..."
-              docker compose up -d --no-build --no-deps admin
-            else
-              echo "WARNING: Admin build failed — keeping existing container"
-              docker compose logs admin --tail=30 2>/dev/null || true
-            fi
-
-            # ── STEP 4: Build kiosk ───────────────────────────────────────────
-            echo "=== Building kiosk ==="
-            if docker compose build kiosk; then
-              docker compose up -d --no-build --no-deps kiosk
-            else
-              echo "WARNING: Kiosk build failed"
-            fi
-
-            # ── STEP 4b: Build smart screen ───────────────────────────────────
-            echo "=== Building screen ==="
-            if docker compose build screen; then
-              docker compose up -d --no-build --no-deps screen
-            else
-              echo "WARNING: Screen build failed"
-            fi
-
-            # ── STEP 5: Fix alembic version ───────────────────────────────────
-            docker compose exec -T db psql -U shitaleco_db_user -d shitaleco_db \
-              -c "UPDATE alembic_version SET version_num='003_gift_aid_declarations' WHERE version_num='003';" \
-              2>/dev/null || true
-
-            # ── STEP 6: Wait for backend health ───────────────────────────────
-            echo "Waiting for backend (up to 3 min)..."
-            HEALTHY=0
-            for i in $(seq 1 36); do
+            # Wait for backend health
+            echo "Waiting for backend..."
+            for i in $(seq 1 24); do
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-                echo "Backend healthy after $((i*5))s!"
-                HEALTHY=1
+                echo "Backend healthy after $((i*5))s"
                 break
               fi
-              echo "  attempt $i/36..."
+              echo "  attempt $i/24..."
             done
 
-            if [ "$HEALTHY" = "0" ]; then
-              echo "ERROR: Backend not healthy — logs:"
-              docker compose logs backend --tail=80
-            fi
+            # Schema patch + seed
+            curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched" || true
+            curl -s -X POST http://localhost:8000/api/v1/items/seed || true
 
-            # ── STEP 7: Schema patch + seed ───────────────────────────────────
-            if [ "$HEALTHY" = "1" ]; then
-              curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched" || echo "Schema patch skipped"
-              SEED_RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "http://localhost:8000/api/v1/items/seed")
-              echo "Seed: $SEED_RESP"
-            fi
+            # Reload nginx
+            docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || true
 
-            # ── STEP 8: Reload nginx ──────────────────────────────────────────
-            docker compose exec -T nginx nginx -s reload 2>/dev/null || \
-              docker compose restart nginx 2>/dev/null || true
-
-            # ── Status summary ────────────────────────────────────────────────
-            echo ""
             echo "=== Deploy complete ==="
-            docker compose ps
-            echo ""
-            echo "=== Backend logs ==="
-            docker compose logs backend --tail=30
+            docker compose -f docker-compose.prod.yml ps
