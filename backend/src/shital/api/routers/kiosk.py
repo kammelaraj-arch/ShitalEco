@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from shital.api.deps import OptionalSpace
@@ -146,7 +146,6 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
             raise HTTPException(status_code=400, detail="Basket is empty")
         total = float(str(row["total"] or 0))
     if total <= 0:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Basket is empty")
     order_id = str(uuid.uuid4())
     ref = f"ORD-{order_id[:8].upper()}"

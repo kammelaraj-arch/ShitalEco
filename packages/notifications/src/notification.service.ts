@@ -23,7 +23,7 @@ export class NotificationService {
           body: payload.body,
           type: payload.type,
           channel: payload.channel,
-          metadata: payload.metadata ?? {},
+          metadata: (payload.metadata ?? {}) as object,
         },
       })
 
