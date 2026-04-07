@@ -291,7 +291,7 @@ export default function FinancePage() {
                     </td>
                   </tr>
                 </tfoot>
-              </table>
+              </table></div>
               <div className={`mt-4 flex items-center gap-2 text-sm ${tb.is_balanced ? 'text-green-400' : 'text-red-400'}`}>
                 <span>{tb.is_balanced ? '✓' : '✗'}</span>
                 <span className="font-semibold">{tb.is_balanced ? 'Trial balance is balanced' : 'Trial balance is NOT balanced'}</span>
