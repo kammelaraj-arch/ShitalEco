@@ -60,6 +60,45 @@ async def _patch_schema() -> None:
     from shital.core.fabrics.database import SessionLocal
 
     patches = [
+        # ── Core tables (migration 001 — recreate if missing) ─────────────────
+        """CREATE TABLE IF NOT EXISTS users (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            email         VARCHAR(255) UNIQUE NOT NULL,
+            name          VARCHAR(200) NOT NULL DEFAULT '',
+            phone         VARCHAR(50),
+            role          VARCHAR(50)  NOT NULL DEFAULT 'DEVOTEE',
+            branch_id     VARCHAR(100),
+            password_hash TEXT,
+            is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+            mfa_enabled   BOOLEAN NOT NULL DEFAULT FALSE,
+            auth_provider VARCHAR(30) NOT NULL DEFAULT 'local',
+            azure_oid     VARCHAR(100),
+            azure_upn     VARCHAR(255),
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at    TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_users_email     ON users(email) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_users_role      ON users(role)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_azure_oid ON users(azure_oid) WHERE azure_oid IS NOT NULL",
+        """CREATE TABLE IF NOT EXISTS employees (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id        VARCHAR(100) NOT NULL DEFAULT 'main',
+            employee_number  VARCHAR(50)  NOT NULL DEFAULT '',
+            department       VARCHAR(100) NOT NULL DEFAULT '',
+            job_title        VARCHAR(200) NOT NULL DEFAULT '',
+            employment_type  VARCHAR(30)  NOT NULL DEFAULT 'FULL_TIME',
+            start_date       DATE,
+            end_date         DATE,
+            gross_salary     NUMERIC(12,2) NOT NULL DEFAULT 0,
+            national_insurance VARCHAR(20) NOT NULL DEFAULT '',
+            is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at       TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_employees_branch ON employees(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(is_active)",
         # Migration 007 columns on catalog_items
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_from  TIMESTAMPTZ",
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_until TIMESTAMPTZ",
