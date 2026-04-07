@@ -106,9 +106,26 @@ jobs:
           cache-from: type=gha,scope=screen
           cache-to: type=gha,mode=max,scope=screen
 
+  # ── PUBLISH packages as public so server can pull without auth ────────────
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Make all packages public
+        run: |
+          for pkg in shitaleco-backend shitaleco-admin shitaleco-quick-donation shitaleco-kiosk shitaleco-screen; do
+            curl -s -X PATCH \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/user/packages/container/${pkg}" \
+              -d '{"visibility":"public"}' | grep -o '"name":"[^"]*"\|"message":"[^"]*"' || true
+          done
+
   # ── DEPLOY — pull pre-built images on the server ─────────────────────────
   deploy:
-    needs: build
+    needs: publish
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to Vultr
@@ -130,11 +147,12 @@ jobs:
           timeout: 300s
           envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
           script: |
-            # Install/upgrade Docker with compose v2 support
+            # Ensure docker compose v2 is available
             if ! docker compose version &>/dev/null 2>&1; then
               curl -fsSL https://get.docker.com | sh
               systemctl enable --now docker
             fi
+            docker compose version
 
             # Pull latest code (for docker-compose.prod.yml + nginx config)
             if [ -d /opt/shitaleco ]; then
