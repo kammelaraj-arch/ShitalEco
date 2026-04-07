@@ -4,8 +4,8 @@ WORKDIR /app
 
 # ── Install deps (cached layer — only rebuilds when package*.json changes) ──
 FROM base AS deps
-COPY package.json package-lock.json ./
-RUN npm ci --legacy-peer-deps
+COPY package.json ./
+RUN npm install --legacy-peer-deps
 
 # ── Build ────────────────────────────────────────────────────────────────────
 FROM base AS builder
