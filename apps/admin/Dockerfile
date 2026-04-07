@@ -26,11 +26,11 @@ FROM node:20-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 RUN groupadd -g 1001 nodejs && useradd -u 1001 -g nodejs nextjs
-# Standalone output mirrors the monorepo workspace path: apps/admin/server.js
+# standalone/server.js is always at the root of the standalone output.
+# outputFileTracingRoot in next.config.mjs ensures 'next' is traced correctly.
 COPY --from=builder --chown=nextjs:nodejs /app/apps/admin/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/apps/admin/.next/static ./apps/admin/.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/apps/admin/public ./apps/admin/public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/admin/.next/static ./.next/static
 USER nextjs
 EXPOSE 3001
 ENV PORT=3001
-CMD ["node", "apps/admin/server.js"]
+CMD ["node", "server.js"]
