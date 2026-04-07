@@ -6,7 +6,7 @@ WORKDIR /app
 # ── Install deps ──────────────────────────────────────────────────────────────
 FROM base AS deps
 # Copy workspace root files so pnpm can resolve deps with the correct lockfile
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* .npmrc* ./
 COPY apps/admin/package.json ./apps/admin/
 RUN pnpm install --frozen-lockfile --filter @shital/admin... \
  || pnpm install --filter @shital/admin...
