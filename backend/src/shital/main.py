@@ -386,13 +386,15 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_pschedule_status    ON payment_schedule(status)",
     ]
 
-    async with SessionLocal() as db:
-        for sql in patches:
-            try:
+    # Each statement runs in its own transaction so one failure doesn't
+    # abort the entire batch (PostgreSQL aborts the txn on any error).
+    for sql in patches:
+        try:
+            async with SessionLocal() as db:
                 await db.execute(text(sql))
-            except Exception:
-                pass  # column already exists or table doesn't exist
-        await db.commit()
+                await db.commit()
+        except Exception:
+            pass  # column already exists / table missing — safe to skip
     logger.info("schema_patch_done")
     await _seed_api_key_metadata()
     await _seed_catalog()
