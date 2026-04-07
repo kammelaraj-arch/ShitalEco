@@ -116,7 +116,7 @@ async def update_project(project_id: str, body: ProjectIn, ctx: CurrentSpace) ->
             "now": now, "pid": project_id,
         })
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Project not found")
     return {"ok": True}
 
@@ -133,7 +133,7 @@ async def delete_project(project_id: str, ctx: CurrentSpace) -> None:
             {"pid": project_id}
         )
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Project not found")
 
 

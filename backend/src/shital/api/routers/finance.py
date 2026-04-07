@@ -123,7 +123,7 @@ async def update_donation(
             f"UPDATE donations SET {', '.join(sets)} WHERE id = :did AND deleted_at IS NULL"
         ), params)
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Donation not found")
     return {"ok": True}
 
@@ -142,7 +142,7 @@ async def delete_donation(donation_id: str, ctx: CurrentSpace) -> None:
             "UPDATE donations SET deleted_at = :now WHERE id = :did AND deleted_at IS NULL"
         ), {"did": donation_id, "now": datetime.utcnow()})
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Donation not found")
 
 

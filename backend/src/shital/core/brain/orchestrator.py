@@ -73,8 +73,8 @@ class DigitalBrain:
                 max_tokens=4096,
                 system=BRAIN_SYSTEM_PROMPT
                 + f"\n\nUser context: role={ctx.role}, branch={ctx.branch_id}",
-                messages=conversation,
-                tools=tools if tools else anthropic.NOT_GIVEN,
+                messages=conversation,  # type: ignore[arg-type]
+                tools=tools if tools else anthropic.NOT_GIVEN,  # type: ignore[arg-type]
             )
 
             # Collect assistant content
@@ -164,8 +164,8 @@ class DigitalBrain:
             model=self.model,
             max_tokens=4096,
             system=BRAIN_SYSTEM_PROMPT,
-            messages=messages,
-            tools=tools if tools else anthropic.NOT_GIVEN,
+            messages=messages,  # type: ignore[arg-type]
+            tools=tools if tools else anthropic.NOT_GIVEN,  # type: ignore[arg-type]
         ) as stream:
             for text in stream.text_stream:
                 yield text

@@ -198,7 +198,7 @@ async def get_compliance_dashboard(ctx: DigitalSpace) -> dict[str, Any]:
             """),
             {"bid": ctx.branch_id, "today": date.today()},
         )
-        td = trustee_stats.mappings().first() or {}
+        td: dict = dict(trustee_stats.mappings().first() or {})
 
         recent_audit = await db.execute(
             text("""

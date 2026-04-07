@@ -329,7 +329,7 @@ async def update_recurring(payment_id: str, body: RecurringPaymentIn, ctx: Curre
             "ref": body.reference, "notes": body.notes,
             "active": body.is_active, "now": now, "pid": payment_id,
         })
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Recurring payment not found")
 
         # Drop all future PENDING schedule entries, regenerate
@@ -361,7 +361,7 @@ async def delete_recurring(payment_id: str, ctx: CurrentSpace) -> None:
             SET deleted_at = :now, is_active = false, updated_at = :now
             WHERE id = :pid AND deleted_at IS NULL
         """), {"pid": payment_id, "now": now})
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Not found")
         # Void pending future schedule entries
         await db.execute(text("""
@@ -446,7 +446,7 @@ async def mark_paid(schedule_id: str, body: MarkPaidIn, ctx: CurrentSpace) -> di
             "notes": body.notes, "now": now, "sid": schedule_id,
         })
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Schedule entry not found")
     return {"ok": True}
 

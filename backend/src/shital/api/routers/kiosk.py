@@ -142,6 +142,8 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
     async with SessionLocal() as db:
         items_result = await db.execute(text("SELECT SUM(total_price) AS total FROM basket_items WHERE basket_id = :bid"), {"bid": body.basket_id})
         row = items_result.mappings().first()
+        if row is None:
+            raise HTTPException(status_code=400, detail="Basket is empty")
         total = float(str(row["total"] or 0))
     if total <= 0:
         from fastapi import HTTPException

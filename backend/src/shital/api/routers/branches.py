@@ -113,7 +113,7 @@ async def update_branch(branch_id: str, body: BranchIn, ctx: CurrentSpace) -> di
             "notes": body.notes, "now": now, "bid": branch_id,
         })
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Branch not found")
     return {"ok": True}
 
@@ -130,5 +130,5 @@ async def delete_branch(branch_id: str, ctx: CurrentSpace) -> None:
             {"bid": branch_id}
         )
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Branch not found")

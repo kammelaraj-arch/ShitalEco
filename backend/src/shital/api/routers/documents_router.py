@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -27,7 +28,7 @@ class DocumentIn(BaseModel):
     tags: str = ""
 
 
-def _serialize(rows: list) -> list:
+def _serialize(rows: Sequence) -> list:
     out = []
     for r in rows:
         d = dict(r)

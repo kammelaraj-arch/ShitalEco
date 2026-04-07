@@ -151,7 +151,8 @@ async def list_functions(
             text(f"SELECT COUNT(*) AS cnt FROM function_registry WHERE {where}"),
             params,
         )
-        total = count_r.mappings().first()["cnt"]
+        _count_row = count_r.mappings().first()
+        total = _count_row["cnt"] if _count_row is not None else 0
 
     return {
         "functions": [_row(r) for r in rows],
@@ -308,7 +309,7 @@ async def update_function(function_name: str, body: FunctionUpdate):
             params,
         )
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail=f"Function '{function_name}' not found")
 
     return {"function_name": function_name, "updated": True}
@@ -332,7 +333,7 @@ async def delete_function(function_name: str):
             {"now": now, "name": function_name},
         )
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail=f"Function '{function_name}' not found")
 
     return {"function_name": function_name, "deleted": True}
@@ -532,7 +533,8 @@ async def get_audit_log(
             text(f"SELECT COUNT(*) AS cnt FROM function_invocations {where}"),
             params,
         )
-        total = count_r.mappings().first()["cnt"]
+        _count_row = count_r.mappings().first()
+        total = _count_row["cnt"] if _count_row is not None else 0
 
     return {
         "invocations": [_row(r) for r in rows],

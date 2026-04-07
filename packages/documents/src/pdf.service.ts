@@ -1,8 +1,7 @@
 import puppeteer from 'puppeteer'
 import Handlebars from 'handlebars'
 import { readFile } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import {
   tryAsync,
   type Result,
@@ -12,7 +11,6 @@ import {
 
 const log = createContextLogger({ module: 'pdf.service' })
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
 const TEMPLATES_DIR = join(__dirname, 'templates')
 
 const BUILT_IN_TEMPLATES = ['payslip', 'donation-receipt', 'gift-aid-certificate'] as const

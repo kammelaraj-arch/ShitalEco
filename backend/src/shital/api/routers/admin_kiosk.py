@@ -247,6 +247,7 @@ async def list_orders(limit: int = 50, offset: int = 0, status: str = "", branch
         )
         rows = result.mappings().all()
         count_result = await db.execute(text(f"SELECT COUNT(*) AS cnt FROM orders {where}"), params)
-        total = count_result.mappings().first()["cnt"]
+        _count_row = count_result.mappings().first()
+        total = _count_row["cnt"] if _count_row is not None else 0
 
     return {"orders": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}

@@ -582,7 +582,7 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
             updates,
         )
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Item not found")
 
     return {"id": item_id, "updated": True}
@@ -607,7 +607,7 @@ async def delete_item(item_id: str, ctx: OptionalSpace):
             {"now": now, "id": item_id},
         )
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Item not found")
 
     return {"id": item_id, "deleted": True}

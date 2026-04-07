@@ -93,7 +93,7 @@ async def update_emp(employee_id: str, body: EmployeeUpdate, ctx: CurrentSpace) 
             f"UPDATE employees SET {', '.join(sets)} WHERE id = :eid"
         ), params)
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Employee not found")
     return {"ok": True}
 

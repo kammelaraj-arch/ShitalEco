@@ -333,7 +333,7 @@ async def get_org_chart(ctx: DigitalSpace) -> dict[str, Any]:
         )
         rows = result.mappings().all()
 
-    employees = {r["id"]: dict(r) | {"reports": []} for r in rows}
+    employees: dict = {r["id"]: dict(r) | {"reports": []} for r in rows}
     roots = []
 
     for emp in employees.values():
