@@ -170,8 +170,7 @@ class SecretsManager:
 
     @classmethod
     async def verify_pin(cls, pin: str) -> bool:
-        from passlib.context import CryptContext
-        ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        import bcrypt as _bcrypt
         if _cache_expired():
             await cls._load_all()
         stored_hash = _cache.get(cls._PIN_KEY, "")
@@ -182,13 +181,12 @@ class SecretsManager:
                 return True
             return False
         try:
-            return ctx.verify(pin, stored_hash)
+            return _bcrypt.checkpw(pin.encode(), stored_hash.encode())
         except Exception:
             return False
 
     @classmethod
     async def set_pin(cls, new_pin: str) -> None:
-        from passlib.context import CryptContext
-        ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-        hashed = ctx.hash(new_pin)
+        import bcrypt as _bcrypt
+        hashed = _bcrypt.hashpw(new_pin.encode(), _bcrypt.gensalt(12)).decode()
         await cls.set(cls._PIN_KEY, hashed, "system")
