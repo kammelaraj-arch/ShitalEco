@@ -99,7 +99,7 @@ export default function RecurringPaymentsPage() {
   const openEdit = (p: RecurringPayment) => {
     setEditing(p)
     setForm({
-      name: p.name, category: p.category, is_critical: p.is_critical as unknown as string,
+      name: p.name, category: p.category, is_critical: String(p.is_critical),
       amount: String(p.amount), currency: p.currency, frequency: p.frequency,
       branch_id: p.branch_id,
       start_date: p.start_date ? p.start_date.slice(0,10) : '',
@@ -108,7 +108,7 @@ export default function RecurringPaymentsPage() {
       renewal_date: p.renewal_date ? p.renewal_date.slice(0,10) : '',
       notice_days: String(p.notice_days),
       payee: p.payee, reference: p.reference, notes: p.notes,
-      is_active: p.is_active as unknown as string,
+      is_active: String(p.is_active),
     } as typeof EMPTY)
     setShowForm(true)
   }
@@ -122,8 +122,8 @@ export default function RecurringPaymentsPage() {
         amount: parseFloat(form.amount) || 0,
         day_of_month: form.day_of_month ? parseInt(form.day_of_month as string) : null,
         notice_days: parseInt(form.notice_days as string) || 30,
-        is_critical: CRITICAL_CATS.has(form.category) || (form.is_critical as unknown as boolean),
-        is_active: form.is_active as unknown as boolean,
+        is_critical: CRITICAL_CATS.has(form.category) || form.is_critical === 'true',
+        is_active: form.is_active === 'true',
       }
       if (editing) {
         await apiFetch(`/recurring-payments/${editing.id}`, { method:'PUT', body: JSON.stringify(body) })
@@ -504,7 +504,7 @@ export default function RecurringPaymentsPage() {
                     <select value={form.category}
                       onChange={e => setForm(p => ({
                         ...p, category: e.target.value,
-                        is_critical: CRITICAL_CATS.has(e.target.value) as unknown as string,
+                        is_critical: String(CRITICAL_CATS.has(e.target.value)),
                       }))} className={inp}>
                       {CATEGORIES.map(c=><option key={c} value={c}>{c.replace(/_/g,' ')}</option>)}
                     </select>
@@ -584,7 +584,7 @@ export default function RecurringPaymentsPage() {
                 </div>
 
                 <div className="flex items-center gap-3 bg-white/5 rounded-xl p-3">
-                  <button onClick={()=>setForm(p=>({...p,is_critical:(!p.is_critical) as unknown as string}))}
+                  <button onClick={()=>setForm(p=>({...p,is_critical:String(p.is_critical !== 'true')}))}
                     className={`w-11 h-6 rounded-full transition-all flex-shrink-0 relative ${form.is_critical ? 'bg-red-500' : 'bg-white/10'}`}>
                     <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${form.is_critical ? 'left-5' : 'left-0.5'}`} />
                   </button>
