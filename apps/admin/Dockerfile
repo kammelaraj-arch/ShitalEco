@@ -15,7 +15,6 @@ RUN npm install --no-save @next/swc-linux-x64-gnu@14.2.5
 # ── Build ─────────────────────────────────────────────────────────────────────
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/admin/node_modules ./apps/admin/node_modules
 COPY apps/admin ./apps/admin
 WORKDIR /app/apps/admin
 ENV NEXT_TELEMETRY_DISABLED=1
