@@ -46,8 +46,9 @@ jobs:
       - name: Generate admin package-lock.json with swc
         run: |
           cd apps/admin
+          rm -f package-lock.json  # remove pnpm-style lockfile
           npm install --legacy-peer-deps
-          echo "Packages in lockfile: $(node -e "const l=require('./package-lock.json');console.log(Object.keys(l.packages).length)")"
+          echo "Lockfile version: $(node -e "console.log(require('./package-lock.json').lockfileVersion)")"
           ls node_modules/@next/swc-linux-x64-gnu/ 2>/dev/null && echo "✓ swc binary found" || echo "✗ swc binary NOT found"
 
       # ── Backend ────────────────────────────────────────────────────────────
