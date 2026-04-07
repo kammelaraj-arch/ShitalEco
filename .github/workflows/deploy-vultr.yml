@@ -106,26 +106,22 @@ jobs:
           cache-from: type=gha,scope=screen
           cache-to: type=gha,mode=max,scope=screen
 
-  # ── PUBLISH packages as public so server can pull without auth ────────────
-  publish:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-    steps:
-      - name: Make all packages public
+      # ── Make all packages public so server can pull without auth ──────────
+      - name: Make packages public
         run: |
           for pkg in shitaleco-backend shitaleco-admin shitaleco-quick-donation shitaleco-kiosk shitaleco-screen; do
+            echo -n "Making ${pkg} public: "
             curl -s -X PATCH \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
               "https://api.github.com/user/packages/container/${pkg}" \
-              -d '{"visibility":"public"}' | grep -o '"name":"[^"]*"\|"message":"[^"]*"' || true
+              -d '{"visibility":"public"}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('name', d.get('message', 'unknown')))" || true
           done
 
   # ── DEPLOY — pull pre-built images on the server ─────────────────────────
   deploy:
-    needs: publish
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to Vultr
@@ -188,9 +184,6 @@ jobs:
             [ -n "$MS_CLIENT_ID" ]           && sed -i "s|MS_CLIENT_ID=.*|MS_CLIENT_ID=${MS_CLIENT_ID}|" .env                    || echo "MS_CLIENT_ID=${MS_CLIENT_ID}" >> .env
             [ -n "$MS_TENANT_ID" ]           && sed -i "s|MS_TENANT_ID=.*|MS_TENANT_ID=${MS_TENANT_ID}|" .env                    || echo "MS_TENANT_ID=${MS_TENANT_ID}" >> .env
             [ -n "$MS_CLIENT_SECRET" ]       && sed -i "s|MS_CLIENT_SECRET=.*|MS_CLIENT_SECRET=${MS_CLIENT_SECRET}|" .env        || echo "MS_CLIENT_SECRET=${MS_CLIENT_SECRET}" >> .env
-
-            # Log in to GHCR using GH_PAT
-            echo "${GH_PAT}" | docker login ghcr.io -u kammelaraj-arch --password-stdin
 
             # Open ports
             ufw allow 22/tcp 2>/dev/null || true
