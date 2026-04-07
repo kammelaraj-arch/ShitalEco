@@ -100,6 +100,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma client
+        run: pnpm --filter @shital/db exec prisma generate
+
       - name: TypeScript check
         run: pnpm typecheck
 
