@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+import { BranchSelect } from '@/components/ui/SearchSelect'
 
 const CATEGORIES = ['PUJA', 'HAVAN', 'CLASS', 'HALL_HIRE', 'FESTIVAL', 'DONATION', 'OTHER']
 const CATEGORY_COLORS: Record<string, string> = {
@@ -291,9 +292,12 @@ export default function KioskServicesPage() {
                 {/* Branch */}
                 <div>
                   <label className="block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5">Branch</label>
-                  <input value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))}
-                    placeholder="main"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50" />
+                  <BranchSelect
+                    value={form.branch_id}
+                    onChange={v => setForm(p => ({ ...p, branch_id: v }))}
+                    placeholder="All branches (Global)"
+                    allowAny
+                  />
                 </div>
                 {/* Date restrictions */}
                 <div className="grid grid-cols-2 gap-3">

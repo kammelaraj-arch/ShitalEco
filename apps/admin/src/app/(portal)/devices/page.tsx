@@ -1,7 +1,8 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+import { BranchSelect, SearchSelect } from '@/components/ui/SearchSelect'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface KioskDevice {
@@ -17,6 +18,7 @@ interface KioskDevice {
   peak_end: string
   off_peak_playlist_id: string | null
   default_donate_amount: number
+  card_reader_id: string | null
   serial_number: string
   ip_address: string
   device_token: string
@@ -24,6 +26,15 @@ interface KioskDevice {
   notes: string
   created_at: string
   updated_at: string
+}
+
+interface CardReader {
+  id: string
+  label: string
+  branch_id: string
+  provider: string
+  status: string
+  is_active: boolean
 }
 
 interface Branch { id: string; branch_id: string; name: string; city: string }
@@ -38,6 +49,7 @@ const EMPTY_FORM = {
   branch_id: 'main', location: '', status: 'ACTIVE' as DeviceStatus,
   screen_profile_id: '', peak_start: '09:00', peak_end: '21:00',
   off_peak_playlist_id: '', default_donate_amount: 5,
+  card_reader_id: '',
   serial_number: '', ip_address: '', notes: '',
 }
 
@@ -58,74 +70,13 @@ const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 tex
 const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5'
 const row = 'grid grid-cols-2 gap-3'
 
-// ── Search-select dropdown helper ─────────────────────────────────────────────
-function SearchSelect<T extends { label: string; value: string }>({
-  options, value, onChange, placeholder,
-}: { options: T[]; value: string; onChange: (v: string) => void; placeholder: string }) {
-  const [q, setQ] = useState('')
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  const current = options.find(o => o.value === value)
-  const filtered = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()))
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => { setOpen(!open); setQ('') }}
-        className={`${inp} text-left flex items-center justify-between`}
-        style={{ color: current ? '#fff' : 'rgba(255,255,255,0.3)' }}
-      >
-        <span>{current?.label || placeholder}</span>
-        <span className="text-white/30 text-xs">{open ? '▲' : '▼'}</span>
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-            className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 overflow-hidden"
-            style={{ background: '#1C0A0A', maxHeight: 220, overflowY: 'auto' }}
-          >
-            <div className="p-2 border-b border-white/10">
-              <input
-                autoFocus
-                value={q} onChange={e => setQ(e.target.value)}
-                placeholder="Search…"
-                className="w-full bg-white/5 rounded-lg px-3 py-1.5 text-white text-xs outline-none"
-              />
-            </div>
-            {filtered.length === 0 ? (
-              <p className="px-3 py-2 text-white/30 text-xs">No results</p>
-            ) : filtered.map(o => (
-              <button
-                key={o.value} type="button"
-                onClick={() => { onChange(o.value); setOpen(false) }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-white/5 transition-colors"
-                style={{ color: o.value === value ? '#F59E0B' : '#fff' }}
-              >
-                {o.label}
-              </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  )
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function DevicesPage() {
   const [devices, setDevices]           = useState<KioskDevice[]>([])
   const [branches, setBranches]         = useState<Branch[]>([])
   const [profiles, setProfiles]         = useState<ScreenProfile[]>([])
   const [playlists, setPlaylists]       = useState<Playlist[]>([])
+  const [cardReaders, setCardReaders]   = useState<CardReader[]>([])
   const [loading, setLoading]           = useState(true)
   const [drawerOpen, setDrawerOpen]     = useState(false)
   const [editing, setEditing]           = useState<KioskDevice | null>(null)
@@ -144,16 +95,18 @@ export default function DevicesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [devData, brData, profData, plData] = await Promise.all([
+      const [devData, brData, profData, plData, crData] = await Promise.all([
         apiFetch<{ devices: KioskDevice[] }>('/kiosk-devices'),
         apiFetch<{ branches: Branch[] }>('/branches').catch(() => ({ branches: [] })),
         apiFetch<{ profiles: ScreenProfile[] }>('/screen/profiles').catch(() => ({ profiles: [] })),
         apiFetch<{ playlists: Playlist[] }>('/screen/playlists').catch(() => ({ playlists: [] })),
+        apiFetch<{ devices: CardReader[] }>('/terminal-devices/?active_only=true').catch(() => ({ devices: [] })),
       ])
       setDevices(devData.devices || [])
       setBranches(brData.branches || [])
       setProfiles(profData.profiles || [])
       setPlaylists(plData.playlists || [])
+      setCardReaders(crData.devices || [])
     } catch (e: unknown) {
       setError(String(e))
     }
@@ -185,6 +138,7 @@ export default function DevicesPage() {
       peak_start: d.peak_start, peak_end: d.peak_end,
       off_peak_playlist_id: d.off_peak_playlist_id || '',
       default_donate_amount: d.default_donate_amount,
+      card_reader_id: d.card_reader_id || '',
       serial_number: d.serial_number, ip_address: d.ip_address, notes: d.notes,
     })
     setError('')
@@ -201,10 +155,11 @@ export default function DevicesPage() {
         screen_profile_id: form.screen_profile_id || null,
         off_peak_playlist_id: form.off_peak_playlist_id || null,
       }
+      const bodyWithReader = { ...body, card_reader_id: form.card_reader_id || null }
       if (editing) {
-        await apiFetch<{ ok: boolean }>(`/kiosk-devices/${editing.id}`, { method: 'PUT', body: JSON.stringify(body) })
+        await apiFetch<{ ok: boolean }>(`/kiosk-devices/${editing.id}`, { method: 'PUT', body: JSON.stringify(bodyWithReader) })
       } else {
-        const created = await apiFetch<{ ok: boolean; id: string; device_token: string }>('/kiosk-devices', { method: 'POST', body: JSON.stringify(body) })
+        const created = await apiFetch<{ ok: boolean; id: string; device_token: string }>('/kiosk-devices', { method: 'POST', body: JSON.stringify(bodyWithReader) })
         if (created.device_token) {
           setTokenMap(m => ({ ...m, [created.id]: created.device_token }))
         }
@@ -256,6 +211,12 @@ export default function DevicesPage() {
   const branchName = (id: string) => branches.find(b => b.branch_id === id || b.id === id)?.name || id
 
   const branchOptions = branches.map(b => ({ value: b.branch_id || b.id, label: `${b.name} — ${b.city}` }))
+  const cardReaderOptions = [
+    { value: '', label: '— None (no card reader) —' },
+    ...cardReaders
+      .filter(r => r.is_active && (!form.branch_id || r.branch_id === form.branch_id))
+      .map(r => ({ value: r.id, label: `${r.label} (${r.provider.replace('_', ' ')})` })),
+  ]
   const profileOptions = [
     { value: '', label: '— None —' },
     ...profiles.filter(p => !form.branch_id || p.branch_id === form.branch_id)
@@ -369,6 +330,11 @@ export default function DevicesPage() {
                     {d.device_type === 'QUICK_DONATION' && (
                       <span className="text-[10px] font-medium px-2 py-1 rounded-lg" style={{ background: 'rgba(245,158,11,0.12)', color: '#FCD34D' }}>
                         💷 Default £{d.default_donate_amount}
+                      </span>
+                    )}
+                    {d.card_reader_id && (cardReaders.find(r => r.id === d.card_reader_id)) && (
+                      <span className="text-[10px] font-medium px-2 py-1 rounded-lg" style={{ background: 'rgba(99,102,241,0.12)', color: '#A5B4FC' }}>
+                        💳 {cardReaders.find(r => r.id === d.card_reader_id)?.label}
                       </span>
                     )}
                     <span className="text-[10px] font-medium px-2 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.4)' }}>
@@ -496,13 +462,28 @@ export default function DevicesPage() {
                 {/* ── Branch ─────────────────────────────────────────── */}
                 <div>
                   <p className={lbl}>Branch *</p>
-                  <SearchSelect
-                    options={branchOptions.length ? branchOptions : [{ value: 'main', label: 'Main (Wembley)' }]}
+                  <BranchSelect
                     value={form.branch_id}
-                    onChange={v => setForm(f => ({ ...f, branch_id: v, screen_profile_id: '', off_peak_playlist_id: '' }))}
+                    onChange={v => setForm(f => ({ ...f, branch_id: v, screen_profile_id: '', off_peak_playlist_id: '', card_reader_id: '' }))}
                     placeholder="Search branch…"
                   />
                 </div>
+
+                {/* ── Card Reader ─────────────────────────────────────── */}
+                {(form.device_type === 'KIOSK' || form.device_type === 'QUICK_DONATION') && (
+                  <div>
+                    <p className={lbl}>Card Reader</p>
+                    <SearchSelect
+                      options={cardReaderOptions}
+                      value={form.card_reader_id}
+                      onChange={v => setForm(f => ({ ...f, card_reader_id: v }))}
+                      placeholder="— None (no card reader) —"
+                    />
+                    {cardReaderOptions.length <= 1 && (
+                      <p className="text-white/30 text-[10px] mt-1">No active card readers for this branch. Register one in Card Readers first.</p>
+                    )}
+                  </div>
+                )}
 
                 <div className={row}>
                   <div>

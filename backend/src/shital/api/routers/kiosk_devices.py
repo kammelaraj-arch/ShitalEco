@@ -55,6 +55,8 @@ class DeviceIn(BaseModel):
     off_peak_playlist_id: str | None = None
     # Quick Donation
     default_donate_amount: float = 5.0
+    # Card reader assignment (FK → terminal_devices.id)
+    card_reader_id: str | None = None
     # Hardware info
     serial_number: str = ""
     ip_address: str = ""
@@ -178,12 +180,12 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             INSERT INTO kiosk_devices
                 (id, name, description, device_type, branch_id, location, status,
                  screen_profile_id, peak_start, peak_end, off_peak_playlist_id,
-                 default_donate_amount, serial_number, ip_address,
+                 default_donate_amount, card_reader_id, serial_number, ip_address,
                  device_token, notes, created_at, updated_at)
             VALUES
                 (:id, :name, :desc, :dtype, :bid, :loc, :status,
                  :prof_id, :peak_s, :peak_e, :offpeak_pl,
-                 :dda, :serial, :ip,
+                 :dda, :card_rid, :serial, :ip,
                  :token, :notes, :now, :now)
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
@@ -192,6 +194,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "peak_s": body.peak_start, "peak_e": body.peak_end,
             "offpeak_pl": body.off_peak_playlist_id,
             "dda": body.default_donate_amount,
+            "card_rid": body.card_reader_id,
             "serial": body.serial_number, "ip": body.ip_address,
             "token": token, "notes": body.notes, "now": now,
         })
@@ -218,6 +221,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 branch_id = :bid, location = :loc, status = :status,
                 screen_profile_id = :prof_id, peak_start = :peak_s, peak_end = :peak_e,
                 off_peak_playlist_id = :offpeak_pl, default_donate_amount = :dda,
+                card_reader_id = :card_rid,
                 serial_number = :serial, ip_address = :ip,
                 notes = :notes, updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
@@ -228,6 +232,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "peak_s": body.peak_start, "peak_e": body.peak_end,
             "offpeak_pl": body.off_peak_playlist_id,
             "dda": body.default_donate_amount,
+            "card_rid": body.card_reader_id,
             "serial": body.serial_number, "ip": body.ip_address,
             "notes": body.notes, "now": now,
         })

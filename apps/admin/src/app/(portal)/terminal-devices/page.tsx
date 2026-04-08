@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+import { BranchSelect } from '@/components/ui/SearchSelect'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,7 +30,7 @@ interface TerminalDevice {
 
 interface FormState {
   branch_id: string
-  branch_name: string
+  branch_name: string  // derived from branch selection, kept for backwards compat
   label: string
   provider: string
   stripe_reader_id: string
@@ -186,10 +187,18 @@ function DeviceModal({
           {/* Label */}
           <Field label="Device Label *" value={form.label} onChange={v => set('label', v)} placeholder="e.g. Wembley Kiosk 1" />
 
-          {/* Branch */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Branch ID *" value={form.branch_id} onChange={v => set('branch_id', v)} placeholder="wembley" />
-            <Field label="Branch Name" value={form.branch_name} onChange={v => set('branch_name', v)} placeholder="Wembley Temple" />
+          {/* Branch — search & select */}
+          <div>
+            <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider mb-2">Branch *</label>
+            <BranchSelect
+              value={form.branch_id}
+              onChange={(branchId, branch) => setForm(f => ({
+                ...f,
+                branch_id: branchId,
+                branch_name: branch?.name ?? f.branch_name,
+              }))}
+              placeholder="Search branch…"
+            />
           </div>
 
           {/* Provider-specific IDs */}

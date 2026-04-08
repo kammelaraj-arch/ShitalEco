@@ -100,23 +100,31 @@ jobs:
             done
 
             # ── Build all images on the server ────────────────────────────────
-            echo "=== Building backend ==="
-            docker build -t ghcr.io/kammelaraj-arch/shitaleco-backend:latest ./backend
+            GIT_SHA=$(git rev-parse HEAD)
+            echo "=== Building backend (${GIT_SHA}) ==="
+            docker build -t ghcr.io/kammelaraj-arch/shitaleco-backend:latest \
+              --build-arg GIT_SHA="${GIT_SHA}" ./backend
 
             echo "=== Building quick-donation ==="
             docker build -t ghcr.io/kammelaraj-arch/shitaleco-quick-donation:latest \
-              -f apps/quick-donation/Dockerfile --build-arg VITE_API_URL=/api/v1 .
+              -f apps/quick-donation/Dockerfile \
+              --build-arg VITE_API_URL=/api/v1 \
+              --build-arg GIT_SHA="${GIT_SHA}" .
 
             echo "=== Building kiosk ==="
             docker build -t ghcr.io/kammelaraj-arch/shitaleco-kiosk:latest \
-              --build-arg VITE_API_URL=/api/v1 --build-arg VITE_BASE=/kiosk/ ./apps/kiosk
+              --build-arg VITE_API_URL=/api/v1 --build-arg VITE_BASE=/kiosk/ \
+              --build-arg GIT_SHA="${GIT_SHA}" ./apps/kiosk
 
             echo "=== Building screen ==="
-            docker build -t ghcr.io/kammelaraj-arch/shitaleco-screen:latest ./apps/screen
+            docker build -t ghcr.io/kammelaraj-arch/shitaleco-screen:latest \
+              --build-arg GIT_SHA="${GIT_SHA}" ./apps/screen
 
             echo "=== Building admin ==="
             docker build -t ghcr.io/kammelaraj-arch/shitaleco-admin:latest \
-              -f apps/admin/Dockerfile --build-arg NEXT_PUBLIC_API_URL=/api/v1 .
+              -f apps/admin/Dockerfile \
+              --build-arg NEXT_PUBLIC_API_URL=/api/v1 \
+              --build-arg GIT_SHA="${GIT_SHA}" .
 
             # ── Start all services ────────────────────────────────────────────
             docker compose -f docker-compose.prod.yml up -d --remove-orphans

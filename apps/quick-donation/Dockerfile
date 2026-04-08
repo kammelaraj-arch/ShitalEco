@@ -12,6 +12,10 @@ COPY apps/quick-donation/package.json apps/quick-donation/
 # Install dependencies
 RUN pnpm install --frozen-lockfile --filter @shital/quick-donation... || pnpm install --filter @shital/quick-donation...
 
+# Bust cache on every new commit so source changes are always picked up
+ARG GIT_SHA=dev
+RUN echo "Building commit ${GIT_SHA}"
+
 # Copy source code
 COPY apps/quick-donation/ apps/quick-donation/
 

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+import { SearchSelect } from '@/components/ui/SearchSelect'
 
 const CATEGORIES = ['GENERAL_DONATION', 'SOFT_DONATION', 'PROJECT_DONATION', 'SHOP', 'SERVICE', 'SPONSORSHIP']
 const BRANCH_STOCK_IDS = ['main', 'leicester', 'reading', 'mk']
@@ -439,10 +440,15 @@ export default function CatalogItemsPage() {
                 {/* Branch */}
                 <div>
                   <label className={label}>Branch <span className="normal-case font-normal text-white/30">(if branch-specific)</span></label>
-                  <select value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))} className={inp}>
-                    <option value="">All branches (Global)</option>
-                    {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
-                  </select>
+                  <SearchSelect
+                    options={[
+                      { value: '', label: 'All branches (Global)' },
+                      ...branches.map(b => ({ value: b.branch_id, label: b.name })),
+                    ]}
+                    value={form.branch_id}
+                    onChange={v => setForm(p => ({ ...p, branch_id: v }))}
+                    placeholder="All branches (Global)"
+                  />
                 </div>
 
                 {/* Project (for PROJECT_DONATION) */}

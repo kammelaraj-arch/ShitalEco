@@ -14,6 +14,10 @@ COPY package.json ./
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN pnpm install --no-frozen-lockfile --ignore-scripts
 
+# Bust cache on every new commit so source changes are always picked up
+ARG GIT_SHA=dev
+RUN echo "Building commit ${GIT_SHA}"
+
 # Copy source
 COPY . .
 

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+import { BranchSelect } from '@/components/ui/SearchSelect'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -172,9 +173,13 @@ function UserModal({ user, onClose, onSaved }: {
           </div>
 
           <div>
-            <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Branch ID <span className="text-white/20 font-normal">(optional)</span></label>
-            <input value={branchId} onChange={e => setBranchId(e.target.value)} placeholder="e.g. wembley"
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-saffron-400/40" />
+            <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Branch <span className="text-white/20 font-normal normal-case">(optional)</span></label>
+            <BranchSelect
+              value={branchId}
+              onChange={v => setBranchId(v)}
+              placeholder="— No branch (global) —"
+              allowAny
+            />
           </div>
         </div>
 
