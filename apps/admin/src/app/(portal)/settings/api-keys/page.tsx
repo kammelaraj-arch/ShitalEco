@@ -300,6 +300,95 @@ function ChangePinModal({ pin, onClose }: { pin: string; onClose: () => void }) 
   )
 }
 
+// ── Add New Key modal ─────────────────────────────────────────────────────────
+
+function AddKeyModal({ pin, onClose, onSaved }: { pin: string; onClose: () => void; onSaved: () => void }) {
+  const [keyName, setKeyName] = useState('')
+  const [value, setValue] = useState('')
+  const [description, setDescription] = useState('')
+  const [groupName, setGroupName] = useState('Other')
+  const [isSensitive, setIsSensitive] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const token = typeof window !== 'undefined' ? (sessionStorage.getItem('shital_access_token') || '') : ''
+
+  async function handleSave() {
+    if (!keyName.trim()) { setErr('Key name is required'); return }
+    if (!value.trim()) { setErr('Value is required'); return }
+    const name = keyName.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+    setSaving(true); setErr('')
+    try {
+      const res = await fetch(`${API}/settings/api-keys/${name}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Admin-Pin': pin },
+        body: JSON.stringify({ value: value.trim(), description: description.trim(), group_name: groupName }),
+      })
+      const data = await res.json()
+      if (data.updated) { onSaved(); onClose() }
+      else setErr(data.detail || 'Save failed')
+    } catch { setErr('Network error') }
+    finally { setSaving(false) }
+  }
+
+  const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-red-700/40'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}>
+      <div className="glass rounded-3xl p-8 w-full max-w-md space-y-5" style={{ border: '1px solid rgba(185,28,28,0.3)' }}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-white font-black text-lg">Add New API Key</h2>
+          <button onClick={onClose} className="text-white/40 hover:text-white text-xl">×</button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-white/50 text-xs font-bold uppercase tracking-wider mb-1 block">Key Name</label>
+            <input className={inp} placeholder="e.g. MY_API_KEY" value={keyName}
+              onChange={e => setKeyName(e.target.value)} autoFocus />
+            <p className="text-white/20 text-xs mt-1">Auto-uppercased, spaces → underscores</p>
+          </div>
+          <div>
+            <label className="text-white/50 text-xs font-bold uppercase tracking-wider mb-1 block">Value</label>
+            <input className={inp} type={isSensitive ? 'password' : 'text'} placeholder="Enter key value"
+              value={value} onChange={e => setValue(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-white/50 text-xs font-bold uppercase tracking-wider mb-1 block">Description</label>
+            <input className={inp} placeholder="What this key is for" value={description}
+              onChange={e => setDescription(e.target.value)} />
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-white/50 text-xs font-bold uppercase tracking-wider mb-1 block">Group</label>
+              <select className={inp} value={groupName} onChange={e => setGroupName(e.target.value)}>
+                {['Stripe','AI','Email','Microsoft','Google','WhatsApp','PayPal','HMRC','Other'].map(g => (
+                  <option key={g} value={g} style={{ background: '#1a1a1a' }}>{g}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="text-white/50 text-xs font-bold uppercase tracking-wider mb-1 block">Sensitive</label>
+              <div className="flex items-center gap-2 mt-2.5">
+                <input type="checkbox" checked={isSensitive} onChange={e => setIsSensitive(e.target.checked)}
+                  className="w-4 h-4 accent-red-700" />
+                <span className="text-white/50 text-sm">Hide value</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        {err && <p className="text-red-400 text-sm">{err}</p>}
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 rounded-2xl text-sm font-bold text-white/50 border border-white/10">Cancel</button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 py-3 rounded-2xl text-sm font-black text-white disabled:opacity-40"
+            style={{ background: 'linear-gradient(135deg, #b91c1c, #991b1b)' }}>
+            {saving ? 'Saving…' : 'Add Key'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ApiKeysPage() {
@@ -308,6 +397,7 @@ export default function ApiKeysPage() {
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [loading, setLoading] = useState(false)
   const [showChangePinModal, setShowChangePinModal] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
   const [activeGroup, setActiveGroup] = useState<string>('all')
 
   const token = typeof window !== 'undefined' ? (sessionStorage.getItem('shital_access_token') || '') : ''
@@ -360,12 +450,21 @@ export default function ApiKeysPage() {
           </p>
         </div>
         {unlocked && (
-          <button
-            onClick={() => setShowChangePinModal(true)}
-            className="flex-shrink-0 px-4 py-2 rounded-xl text-sm font-bold text-white/60 border border-white/10 hover:border-white/20 transition-colors"
-          >
-            Change PIN
-          </button>
+          <div className="flex gap-2 flex-shrink-0">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="px-4 py-2 rounded-xl text-sm font-black text-white transition-colors"
+              style={{ background: 'linear-gradient(135deg, #b91c1c, #991b1b)' }}
+            >
+              + Add Key
+            </button>
+            <button
+              onClick={() => setShowChangePinModal(true)}
+              className="px-4 py-2 rounded-xl text-sm font-bold text-white/60 border border-white/10 hover:border-white/20 transition-colors"
+            >
+              Change PIN
+            </button>
+          </div>
         )}
       </div>
 
@@ -449,6 +548,11 @@ export default function ApiKeysPage() {
             </section>
           ))
         )
+      )}
+
+      {/* Add Key modal */}
+      {showAddModal && (
+        <AddKeyModal pin={pin} onClose={() => setShowAddModal(false)} onSaved={loadKeys} />
       )}
 
       {/* Change PIN modal */}
