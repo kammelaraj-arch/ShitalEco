@@ -384,6 +384,32 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_pschedule_branch    ON payment_schedule(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_pschedule_due_date  ON payment_schedule(due_date)",
         "CREATE INDEX IF NOT EXISTS idx_pschedule_status    ON payment_schedule(status)",
+        # ── Kiosk / Display Devices ────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS kiosk_devices (
+            id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id             VARCHAR(100) NOT NULL DEFAULT 'main',
+            name                  VARCHAR(200) NOT NULL,
+            description           TEXT NOT NULL DEFAULT '',
+            device_type           VARCHAR(30) NOT NULL DEFAULT 'KIOSK',
+            location              VARCHAR(200) NOT NULL DEFAULT '',
+            status                VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+            screen_profile_id     UUID,
+            peak_start            VARCHAR(5) NOT NULL DEFAULT '09:00',
+            peak_end              VARCHAR(5) NOT NULL DEFAULT '21:00',
+            off_peak_playlist_id  UUID,
+            default_donate_amount NUMERIC(8,2) NOT NULL DEFAULT 5,
+            serial_number         VARCHAR(100) NOT NULL DEFAULT '',
+            ip_address            VARCHAR(50) NOT NULL DEFAULT '',
+            device_token          VARCHAR(100) UNIQUE NOT NULL DEFAULT '',
+            last_seen_at          TIMESTAMPTZ,
+            notes                 TEXT NOT NULL DEFAULT '',
+            created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at            TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_kiosk_devices_branch ON kiosk_devices(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_kiosk_devices_type   ON kiosk_devices(device_type)",
+        "CREATE INDEX IF NOT EXISTS idx_kiosk_devices_token  ON kiosk_devices(device_token)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -605,6 +631,7 @@ _mount("shital.api.routers.screen",           "router")
 _mount("shital.api.routers.branches",         "router")
 _mount("shital.api.routers.projects",             "router")
 _mount("shital.api.routers.recurring_payments",   "router")
+_mount("shital.api.routers.kiosk_devices",        "router")
 
 
 @app.get("/health", tags=["system"])

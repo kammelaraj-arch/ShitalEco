@@ -56,7 +56,8 @@ const NAV_SECTIONS = [
       { href: '/kiosk/services',    icon: '🛕', label: 'Services' },
       { href: '/kiosk/items',       icon: '📦', label: 'Catalog Items' },
       { href: '/kiosk/orders',      icon: '🧾', label: 'Orders' },
-      { href: '/terminal-devices',  icon: '💳', label: 'Terminal Devices' },
+      { href: '/devices',           icon: '🖥️', label: 'Devices' },
+      { href: '/terminal-devices',  icon: '💳', label: 'Card Readers' },
     ],
   },
   {
