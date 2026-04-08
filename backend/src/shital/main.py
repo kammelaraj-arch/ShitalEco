@@ -461,6 +461,14 @@ async def _seed_catalog() -> None:
 
     # Each tuple: (name, name_gu, name_hi, category, price, emoji, unit, gift_aid, sort_order, image_url)
     SEED_ITEMS = [  # noqa: N806
+        # ── Quick Donation tiles (tap-and-go amounts, per branch/device) ─────
+        ("Quick Dan £3",   "ઝડપ દાન £3",  "त्वरित दान £3",  "QUICK_DONATION", 3,   "🙏", "",  True,  10, ""),
+        ("Quick Dan £5",   "ઝડપ દાન £5",  "त्वरित दान £5",  "QUICK_DONATION", 5,   "🙏", "",  True,  20, ""),
+        ("Quick Dan £8",   "ઝડપ દાન £8",  "त्वरित दान £8",  "QUICK_DONATION", 8,   "🪔", "",  True,  30, ""),
+        ("Quick Dan £11",  "ઝડપ દાન £11", "त्वरित दान £11", "QUICK_DONATION", 11,  "🪔", "",  True,  40, ""),
+        ("Quick Dan £15",  "ઝડપ દાન £15", "त्वरित दान £15", "QUICK_DONATION", 15,  "✨", "",  True,  50, ""),
+        ("Quick Dan £21",  "ઝડપ દાન £21", "त्वरित दान £21", "QUICK_DONATION", 21,  "✨", "",  True,  60, ""),
+        ("Quick Dan £25",  "ઝડપ દાન £25", "त्वरित दान £25", "QUICK_DONATION", 25,  "👑", "",  True,  70, ""),
         # ── General Donations (gift-aid eligible preset amounts) ──────────────
         ("Sadharana Dan £1",    "સાધારણ દાન £1",   "सामान्य दान £1",   "GENERAL_DONATION", 1,   "🙏", "",      True,  10, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),
         ("Sadharana Dan £5",    "સાધારણ દાન £5",   "सामान्य दान £5",   "GENERAL_DONATION", 5,   "🙏", "",      True,  20, "https://images.unsplash.com/photo-1567363421635-a35ed38eba9e?w=400&h=250&fit=crop&q=80"),

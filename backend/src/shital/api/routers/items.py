@@ -23,6 +23,7 @@ router = APIRouter(prefix="/items", tags=["items"])
 
 class ItemCategory(StrEnum):
     GENERAL_DONATION = "GENERAL_DONATION"
+    QUICK_DONATION = "QUICK_DONATION"
     SOFT_DONATION = "SOFT_DONATION"
     PROJECT_DONATION = "PROJECT_DONATION"
     SHOP = "SHOP"
