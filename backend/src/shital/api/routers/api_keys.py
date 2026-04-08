@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from shital.api.deps import CurrentSpace
 
 router = APIRouter(prefix="/settings/api-keys", tags=["api-keys"])
+settings_router = APIRouter(prefix="/settings", tags=["settings"])
 
 _ALLOWED_ROLES = {"SUPER_ADMIN", "ADMIN"}
 
@@ -152,3 +153,28 @@ async def change_pin(body: ChangePinInput, ctx: CurrentSpace) -> dict[str, Any]:
                             detail="PIN must be at least 4 digits")
     await SecretsManager.set_pin(body.new_pin)
     return {"changed": True}
+
+
+# ── Address provider setting ───────────────────────────────────────────────────
+
+class AddressProviderInput(BaseModel):
+    provider: str   # "getaddress" | "ideal_postcodes"
+
+
+@settings_router.get("/address-provider")
+async def get_address_provider(ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    from shital.core.fabrics.secrets import SecretsManager
+    provider = await SecretsManager.get("ADDRESS_LOOKUP_PROVIDER", fallback="getaddress")
+    return {"provider": provider or "getaddress"}
+
+
+@settings_router.post("/address-provider")
+async def set_address_provider(body: AddressProviderInput, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    if body.provider not in ("getaddress", "ideal_postcodes"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="provider must be 'getaddress' or 'ideal_postcodes'")
+    from shital.core.fabrics.secrets import SecretsManager
+    await SecretsManager.set("ADDRESS_LOOKUP_PROVIDER", body.provider, updated_by=ctx.user_email)
+    return {"ok": True, "provider": body.provider}

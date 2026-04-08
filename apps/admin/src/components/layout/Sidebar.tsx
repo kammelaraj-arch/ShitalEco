@@ -75,6 +75,7 @@ const NAV_SECTIONS = [
       { href: '/settings/branches',         icon: '🌿', label: 'Branches' },
       { href: '/settings/users',            icon: '🔐', label: 'Users & Roles' },
       { href: '/settings/azure-ad',         icon: '🔷', label: 'Azure AD / SSO' },
+      { href: '/settings/address-lookup',   icon: '📮', label: 'Address Lookup' },
       { href: '/settings/api-keys',         icon: '🔑', label: 'API Keys' },
     ],
   },

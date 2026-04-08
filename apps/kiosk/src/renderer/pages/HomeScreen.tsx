@@ -657,7 +657,7 @@ export function HomeScreen() {
         <button
           onClick={handleAddCustom}
           disabled={!customAmount || parseFloat(customAmount) <= 0}
-          className="px-6 py-2.5 rounded-xl text-white font-black text-base transition-all active:scale-95 disabled:opacity-40 flex-shrink-0 shadow-md"
+          className="px-10 py-4 rounded-2xl text-white font-black text-xl transition-all active:scale-95 disabled:opacity-40 flex-shrink-0 shadow-lg"
           style={{ background: customAdded ? '#22C55E' : th.langActive }}
         >
           {customAdded ? '✓ Added' : '+ Add'}

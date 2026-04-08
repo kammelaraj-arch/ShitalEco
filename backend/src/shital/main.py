@@ -428,8 +428,10 @@ async def _seed_api_key_metadata() -> None:
         ("HMRC_GIFT_AID_PASSWORD",    "HMRC Government Gateway password",               "HMRC",      True),
         ("HMRC_GIFT_AID_VENDOR_ID",   "HMRC software vendor ID",                        "HMRC",      False),
         ("HMRC_GIFT_AID_CHARITY_HMO_REF","Charity HMRC reference number",              "HMRC",      False),
-        ("GETADDRESS_API_KEY",        "GetAddress.io UK postcode lookup API key",       "Other",     True),
-        ("MEILISEARCH_MASTER_KEY",    "MeiliSearch master key",                         "Other",     True),
+        ("GETADDRESS_API_KEY",        "GetAddress.io UK postcode lookup API key",       "Address",   True),
+        ("IDEAL_POSTCODES_API_KEY",  "Ideal Postcodes UK address lookup API key",      "Address",   True),
+        ("ADDRESS_LOOKUP_PROVIDER",  "Active address lookup provider (getaddress or ideal_postcodes)", "Address", False),
+        ("MEILISEARCH_MASTER_KEY",   "MeiliSearch master key",                         "Other",     True),
     ]
 
     async with SessionLocal() as db:
@@ -590,6 +592,7 @@ _mount("shital.api.routers.assets",           "router")
 _mount("shital.api.routers.bookings_router",  "router")
 _mount("shital.api.routers.documents_router", "router")
 _mount("shital.api.routers.api_keys",         "router")
+_mount("shital.api.routers.api_keys",         "settings_router")
 _mount("shital.api.routers.screen",           "router")
 _mount("shital.api.routers.branches",         "router")
 _mount("shital.api.routers.projects",             "router")

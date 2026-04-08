@@ -1,7 +1,35 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
-import { BRICK_TIERS, PROJECTS, CatalogItem, ProjectInfo, filterActiveItems } from '../data/catalog'
+import { BRICK_TIERS, CatalogItem, filterActiveItems } from '../data/catalog'
+
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+interface ApiProject {
+  id: string
+  project_id: string
+  name: string
+  description: string
+  goal_amount: number
+  image_url: string
+  sort_order: number
+  is_active: boolean
+}
+
+interface ApiItem {
+  id: string
+  name: string
+  name_gu: string
+  name_hi: string
+  description: string
+  category: string
+  price: number
+  emoji: string
+  gift_aid_eligible: boolean
+  is_active: boolean
+  sort_order: number
+}
 
 interface BrickStyle {
   gradient: string
@@ -13,6 +41,14 @@ interface BrickStyle {
 }
 
 const BRICK_STYLES: Record<string, BrickStyle> = {
+  tier0: { gradient: 'linear-gradient(135deg,#EF4444,#DC2626)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#EF444450', ring: '#EF4444' },
+  tier1: { gradient: 'linear-gradient(135deg,#D97706,#B45309)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#D9770650', ring: '#D97706' },
+  tier2: { gradient: 'linear-gradient(135deg,#9CA3AF,#6B7280)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#9CA3AF50', ring: '#9CA3AF' },
+  tier3: { gradient: 'linear-gradient(135deg,#F59E0B,#D97706)', textColor: '#1C0000', badgeBg: 'rgba(255,255,255,0.3)', glow: '#F59E0B70', ring: '#F59E0B', size: 'large' },
+  tier4: { gradient: 'linear-gradient(135deg,#06B6D4,#0891B2)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#06B6D450', ring: '#06B6D4', size: 'large' },
+  tier5: { gradient: 'linear-gradient(135deg,#8B5CF6,#7C3AED)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#8B5CF670', ring: '#8B5CF6', size: 'large' },
+  tier6: { gradient: 'linear-gradient(135deg,#EC4899,#8B5CF6,#06B6D4)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#EC489970', ring: '#EC4899', size: 'large' },
+  // Legacy ids from hardcoded BRICK_TIERS
   brick_red:      { gradient: 'linear-gradient(135deg,#EF4444,#DC2626)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#EF444450', ring: '#EF4444' },
   brick_bronze:   { gradient: 'linear-gradient(135deg,#D97706,#B45309)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#D9770650', ring: '#D97706' },
   brick_silver:   { gradient: 'linear-gradient(135deg,#9CA3AF,#6B7280)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#9CA3AF50', ring: '#9CA3AF' },
@@ -22,13 +58,31 @@ const BRICK_STYLES: Record<string, BrickStyle> = {
   brick_shree:    { gradient: 'linear-gradient(135deg,#EC4899,#8B5CF6,#06B6D4)', textColor: '#fff', badgeBg: 'rgba(255,255,255,0.2)', glow: '#EC489970', ring: '#EC4899', size: 'large' },
 }
 
-function getGiftAidValue(price: number) {
-  return (price * 0.25).toFixed(2)
+const TIER_KEYS = ['tier0','tier1','tier2','tier3','tier4','tier5','tier6']
+
+function getBrickStyle(item: CatalogItem, index: number): BrickStyle {
+  if (BRICK_STYLES[item.id]) return BRICK_STYLES[item.id]
+  return BRICK_STYLES[TIER_KEYS[index % TIER_KEYS.length]] ?? BRICK_STYLES.tier0
 }
 
-function getGiftAidTotal(price: number) {
-  return (price * 1.25).toFixed(2)
+function apiItemToDisplay(item: ApiItem): CatalogItem {
+  return {
+    id: item.id,
+    name: item.name,
+    nameGu: item.name_gu || item.name,
+    nameHi: item.name_hi || item.name,
+    icon: item.emoji || '🧱',
+    emoji: item.emoji || '🧱',
+    price: Number(item.price),
+    category: item.category,
+    giftAidEligible: item.gift_aid_eligible,
+    description: item.description,
+    imageColor: '#EF4444',
+  }
 }
+
+function getGiftAidValue(price: number) { return (price * 0.25).toFixed(2) }
+function getGiftAidTotal(price: number) { return (price * 1.25).toFixed(2) }
 
 function getBrickName(item: CatalogItem, lang: string) {
   if (lang === 'gu') return item.nameGu
@@ -36,40 +90,86 @@ function getBrickName(item: CatalogItem, lang: string) {
   return item.name
 }
 
-function getProjectName(p: ProjectInfo, lang: string) {
-  if (lang === 'gu') return p.nameGu
-  return p.name
-}
-
+// ── Component ──────────────────────────────────────────────────────────────────
 export function ProjectDonationScreen() {
-  const { language, setScreen, addItem, items, updateQuantity, removeItem, theme } = useKioskStore()
+  const { language, setScreen, addItem, items, updateQuantity, theme } = useKioskStore()
   const th = THEMES[theme]
-  const [selectedProject, setSelectedProject] = useState<string>(PROJECTS[0].id)
+
+  const [projects, setProjects] = useState<ApiProject[]>([])
+  const [loadingProjects, setLoadingProjects] = useState(true)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [projectItems, setProjectItems] = useState<CatalogItem[]>([])
+  const [loadingItems, setLoadingItems] = useState(false)
   const [selectedBrick, setSelectedBrick] = useState<string | null>(null)
   const [qty, setQty] = useState(1)
 
   const basketCount = items.reduce((s, i) => s + i.quantity, 0)
   const basketTotal = items.reduce((s, i) => s + i.totalPrice, 0)
-  const project = PROJECTS.find(p => p.id === selectedProject)!
-  const progress = Math.round((project.raised / project.goal) * 100)
+  const selectedTier = projectItems.find(b => b.id === selectedBrick)
 
-  const activeBrickTiers = filterActiveItems(BRICK_TIERS)
-  const selectedTier = activeBrickTiers.find(b => b.id === selectedBrick)
+  // ── Load projects on mount ────────────────────────────────────────────────
+  useEffect(() => {
+    async function load() {
+      setLoadingProjects(true)
+      try {
+        const res = await fetch(`${API_BASE}/projects`)
+        const data = await res.json()
+        const projs: ApiProject[] = data.projects || []
+        setProjects(projs)
+        if (projs.length > 0) {
+          setSelectedProjectId(projs[0].project_id)
+        }
+      } catch {
+        setProjects([])
+      }
+      setLoadingProjects(false)
+    }
+    load()
+  }, [])
 
+  // ── Load items when project changes ──────────────────────────────────────
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setProjectItems(filterActiveItems(BRICK_TIERS))
+      return
+    }
+    async function loadItems() {
+      setLoadingItems(true)
+      setSelectedBrick(null)
+      try {
+        const res = await fetch(`${API_BASE}/projects/${selectedProjectId}/items`)
+        const data = await res.json()
+        const apiItems: ApiItem[] = (data.items || []).filter((i: ApiItem) => i.is_active)
+        if (apiItems.length > 0) {
+          setProjectItems(apiItems.map(apiItemToDisplay))
+        } else {
+          // No items in DB — fallback to brick tiers
+          setProjectItems(filterActiveItems(BRICK_TIERS))
+        }
+      } catch {
+        setProjectItems(filterActiveItems(BRICK_TIERS))
+      }
+      setLoadingItems(false)
+    }
+    loadItems()
+  }, [selectedProjectId])
+
+  // ── Handle add to basket ──────────────────────────────────────────────────
   const handleAddToBasket = () => {
-    if (!selectedTier) return
-    const existing = items.find(i => i.referenceId === `${selectedProject}_${selectedTier.id}`)
+    if (!selectedTier || !selectedProjectId) return
+    const projectName = projects.find(p => p.project_id === selectedProjectId)?.name || selectedProjectId
+    const existing = items.find(i => i.referenceId === `${selectedProjectId}_${selectedTier.id}`)
     if (existing) {
       updateQuantity(existing.id, existing.quantity + qty)
     } else {
       addItem({
         type: 'DONATION',
-        name: `${selectedTier.name} — ${project.name}`,
-        nameGu: `${selectedTier.nameGu} — ${project.nameGu}`,
+        name: `${selectedTier.name} — ${projectName}`,
+        nameGu: `${selectedTier.nameGu} — ${projectName}`,
         quantity: qty,
         unitPrice: selectedTier.price,
         totalPrice: selectedTier.price * qty,
-        referenceId: `${selectedProject}_${selectedTier.id}`,
+        referenceId: `${selectedProjectId}_${selectedTier.id}`,
         giftAidEligible: true,
       })
     }
@@ -98,7 +198,6 @@ export function ProjectDonationScreen() {
           </h1>
           <p className="text-xs" style={{ color: th.headerSub }}>🏗️ Build Something Lasting</p>
         </div>
-        {/* Gift Aid eligible badge */}
         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl" style={{ background: '#DCFCE7', border: '1.5px solid #86EFAC' }}>
           <span className="text-green-600 font-black text-sm">✓</span>
           <span className="text-green-700 font-bold text-xs">Gift Aid</span>
@@ -117,146 +216,165 @@ export function ProjectDonationScreen() {
         )}
       </header>
 
-      {/* Project tabs */}
+      {/* Project cards — horizontal scroll ──────────────────────────────────── */}
       <div
-        className="flex-shrink-0 px-3 py-2"
-        style={{ background: th.sectionHeaderBg, borderBottom: '1px solid rgba(0,0,0,0.06)' }}
+        className="flex-shrink-0 px-3 py-3"
+        style={{ background: th.sectionHeaderBg, borderBottom: '1px solid rgba(0,0,0,0.07)' }}
       >
-        <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-          {PROJECTS.map(p => (
-            <button
-              key={p.id}
-              onClick={() => setSelectedProject(p.id)}
-              className="flex-shrink-0 flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-left transition-all active:scale-95 min-w-[90px]"
-              style={{
-                background: selectedProject === p.id ? th.langActive : `${th.langActive}12`,
-                color: selectedProject === p.id ? '#fff' : th.sectionTitleColor,
-                boxShadow: selectedProject === p.id ? `0 2px 8px ${th.langActive}40` : 'none',
-              }}
-            >
-              <span className="text-xl">{p.emoji}</span>
-              <span className="text-xs font-bold leading-tight text-center line-clamp-2">{getProjectName(p, language)}</span>
-              {/* Mini progress */}
-              <div className="w-full h-1 rounded-full bg-black/20 mt-0.5">
-                <div
-                  className="h-1 rounded-full"
-                  style={{
-                    width: `${Math.round((p.raised / p.goal) * 100)}%`,
-                    background: selectedProject === p.id ? '#fff' : th.langActive,
-                  }}
-                />
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
+        <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: th.sectionTitleColor, opacity: 0.5 }}>
+          {language === 'gu' ? 'પ્રોજેક્ટ પસંદ કરો' : language === 'hi' ? 'प्रोजेक्ट चुनें' : 'Select Project'}
+        </p>
 
-      {/* Selected project info */}
-      <div
-        className="flex-shrink-0 px-4 py-3"
-        style={{ background: `${th.langActive}10`, borderBottom: '1px solid rgba(0,0,0,0.06)' }}
-      >
-        <div className="flex items-center gap-3 mb-2">
-          <span className="text-3xl">{project.emoji}</span>
-          <div className="flex-1">
-            <h2 className="font-black text-base" style={{ color: th.sectionTitleColor }}>{getProjectName(project, language)}</h2>
-            <p className="text-xs text-gray-500">{project.description}</p>
+        {loadingProjects ? (
+          <div className="flex gap-3 overflow-x-hidden pb-1">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex-shrink-0 w-44 h-28 rounded-2xl animate-pulse" style={{ background: 'rgba(0,0,0,0.08)' }} />
+            ))}
           </div>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-gray-600 mb-1">
-          <span className="font-bold text-green-700">£{project.raised.toLocaleString()} raised</span>
-          <span>of</span>
-          <span className="font-bold">£{project.goal.toLocaleString()} goal</span>
-          <span className="ml-auto font-black" style={{ color: th.langActive }}>{progress}%</span>
-        </div>
-        <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
-          <motion.div
-            initial={{ width: 0 }}
-            animate={{ width: `${progress}%` }}
-            transition={{ duration: 0.8, ease: 'easeOut' }}
-            className="h-3 rounded-full"
-            style={{ background: `linear-gradient(to right, ${th.basketBtn}, ${th.langActive})` }}
-          />
-        </div>
-      </div>
-
-      {/* Brick tier grid */}
-      <div className="flex-1 overflow-y-auto p-4" style={{ background: th.mainBg, scrollbarWidth: 'none' }}>
-        <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Choose Your Brick Tier</p>
-        <div className="grid grid-cols-2 gap-3">
-          {activeBrickTiers.map((brick, i) => {
-            const style = BRICK_STYLES[brick.id] ?? BRICK_STYLES.brick_red
-            const isSelected = selectedBrick === brick.id
-            const isLarge = style.size === 'large'
-            return (
-              <motion.button
-                key={brick.id}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-                onClick={() => setSelectedBrick(isSelected ? null : brick.id)}
-                className={`relative overflow-hidden rounded-2xl p-4 text-left transition-all active:scale-95 ${isLarge ? 'col-span-1' : ''}`}
-                style={{
-                  background: style.gradient,
-                  boxShadow: isSelected ? `0 0 0 3px ${style.ring}, 0 8px 24px ${style.glow}` : `0 4px 12px ${style.glow}`,
-                  border: isSelected ? `3px solid ${style.ring}` : '3px solid transparent',
-                }}
-              >
-                {/* Shine overlay */}
-                <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none rounded-2xl" />
-
-                {/* Shimmer for gold+ */}
-                {isLarge && (
-                  <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-2xl">
-                    <motion.div
-                      animate={{ x: ['−100%', '200%'] }}
-                      transition={{ duration: 2.5, repeat: Infinity, ease: 'linear', repeatDelay: 1 }}
-                      className="absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12"
-                    />
-                  </div>
-                )}
-
-                {/* Content */}
-                <div className="relative z-10">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-2xl">{brick.emoji}</span>
-                    {/* Gift Aid check */}
-                    <span
-                      className="text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1"
-                      style={{ background: 'rgba(34,197,94,0.25)', color: '#15803D' }}
-                    >
-                      ✓ Gift Aid
-                    </span>
-                  </div>
-                  <p className="font-black text-base mb-0.5" style={{ color: style.textColor }}>
-                    {getBrickName(brick, language)}
-                  </p>
-                  <p className="font-black text-2xl" style={{ color: style.textColor }}>£{brick.price}</p>
-
-                  {/* Gift Aid value */}
+        ) : projects.length === 0 ? (
+          <p className="text-xs text-gray-400 py-2">No projects available — contact admin.</p>
+        ) : (
+          <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+            {projects.map(p => {
+              const active = selectedProjectId === p.project_id
+              return (
+                <motion.button
+                  key={p.project_id}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => setSelectedProjectId(p.project_id)}
+                  className="flex-shrink-0 w-48 rounded-2xl p-3 text-left transition-all"
+                  style={{
+                    background: active ? `${th.langActive}18` : 'rgba(0,0,0,0.05)',
+                    border: active ? `2px solid ${th.langActive}` : '2px solid rgba(0,0,0,0.08)',
+                    boxShadow: active ? `0 4px 16px ${th.langActive}30` : 'none',
+                  }}
+                >
+                  {/* Image or emoji header */}
                   <div
-                    className="mt-2 rounded-xl px-2 py-1.5 text-xs"
-                    style={{ background: style.badgeBg }}
+                    className="w-full h-20 rounded-xl mb-2 flex items-center justify-center overflow-hidden"
+                    style={{ background: active ? `${th.langActive}20` : 'rgba(0,0,0,0.06)' }}
                   >
-                    <p style={{ color: style.textColor }} className="opacity-80">Worth with Gift Aid:</p>
-                    <p className="font-black text-sm" style={{ color: style.textColor }}>
-                      £{getGiftAidTotal(brick.price)} (+£{getGiftAidValue(brick.price)})
-                    </p>
+                    {p.image_url ? (
+                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover rounded-xl" />
+                    ) : (
+                      <span className="text-4xl">🏗️</span>
+                    )}
                   </div>
-
-                  {isSelected && (
-                    <div className="mt-2 flex items-center justify-center gap-1 text-xs font-bold" style={{ color: style.textColor }}>
-                      ✓ Selected
+                  <p className="font-black text-sm leading-snug" style={{ color: active ? th.langActive : th.sectionTitleColor }}>
+                    {p.name}
+                  </p>
+                  {p.description ? (
+                    <p className="text-xs mt-0.5 line-clamp-1" style={{ color: th.sectionTitleColor, opacity: 0.5 }}>
+                      {p.description}
+                    </p>
+                  ) : null}
+                  {p.goal_amount > 0 && (
+                    <p className="text-xs mt-1 font-bold" style={{ color: active ? th.langActive : '#6B7280' }}>
+                      Goal: £{Number(p.goal_amount).toLocaleString()}
+                    </p>
+                  )}
+                  {active && (
+                    <div className="flex items-center gap-1 mt-1">
+                      <div className="w-2 h-2 rounded-full" style={{ background: th.langActive }} />
+                      <span className="text-xs font-black" style={{ color: th.langActive }}>Selected</span>
                     </div>
                   )}
-                </div>
-              </motion.button>
-            )
-          })}
-        </div>
+                </motion.button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
-      {/* Quantity & Add to basket panel */}
+      {/* Brick tier grid ──────────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto p-4" style={{ background: th.mainBg, scrollbarWidth: 'none' }}>
+        {loadingItems ? (
+          <div className="grid grid-cols-2 gap-3">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="h-40 rounded-2xl animate-pulse" style={{ background: 'rgba(0,0,0,0.08)' }} />
+            ))}
+          </div>
+        ) : (
+          <>
+            <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Choose Your Donation Tier</p>
+            <div className="grid grid-cols-2 gap-3">
+              {projectItems.map((brick, i) => {
+                const style = getBrickStyle(brick, i)
+                const isSelected = selectedBrick === brick.id
+                const isLarge = style.size === 'large'
+                return (
+                  <motion.button
+                    key={brick.id}
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    onClick={() => setSelectedBrick(isSelected ? null : brick.id)}
+                    className="relative overflow-hidden rounded-2xl p-4 text-left transition-all active:scale-95"
+                    style={{
+                      background: style.gradient,
+                      boxShadow: isSelected ? `0 0 0 3px ${style.ring}, 0 8px 24px ${style.glow}` : `0 4px 12px ${style.glow}`,
+                      border: isSelected ? `3px solid ${style.ring}` : '3px solid transparent',
+                    }}
+                  >
+                    {/* Shine */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none rounded-2xl" />
+
+                    {/* Shimmer for large tiers */}
+                    {isLarge && (
+                      <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-2xl">
+                        <motion.div
+                          animate={{ x: ['−100%', '200%'] }}
+                          transition={{ duration: 2.5, repeat: Infinity, ease: 'linear', repeatDelay: 1 }}
+                          className="absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12"
+                        />
+                      </div>
+                    )}
+
+                    <div className="relative z-10">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-2xl">{brick.emoji}</span>
+                        {brick.giftAidEligible && (
+                          <span
+                            className="text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1"
+                            style={{ background: 'rgba(34,197,94,0.25)', color: '#15803D' }}
+                          >
+                            ✓ Gift Aid
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-black text-base mb-0.5" style={{ color: style.textColor }}>
+                        {getBrickName(brick, language)}
+                      </p>
+                      <p className="font-black text-2xl" style={{ color: style.textColor }}>£{brick.price}</p>
+
+                      {brick.giftAidEligible && (
+                        <div
+                          className="mt-2 rounded-xl px-2 py-1.5 text-xs"
+                          style={{ background: style.badgeBg }}
+                        >
+                          <p style={{ color: style.textColor }} className="opacity-80">Worth with Gift Aid:</p>
+                          <p className="font-black text-sm" style={{ color: style.textColor }}>
+                            £{getGiftAidTotal(brick.price)} (+£{getGiftAidValue(brick.price)})
+                          </p>
+                        </div>
+                      )}
+
+                      {isSelected && (
+                        <div className="mt-2 flex items-center justify-center gap-1 text-xs font-bold" style={{ color: style.textColor }}>
+                          ✓ Selected
+                        </div>
+                      )}
+                    </div>
+                  </motion.button>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Quantity & Add to basket ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedBrick && selectedTier && (
           <motion.div
@@ -274,7 +392,6 @@ export function ProjectDonationScreen() {
                   HMRC adds £{getGiftAidValue(selectedTier.price * qty)} with Gift Aid
                 </p>
               </div>
-              {/* Qty stepper */}
               <div className="flex items-center gap-1 rounded-xl overflow-hidden border" style={{ borderColor: `${th.langActive}40` }}>
                 <button
                   onClick={() => setQty(Math.max(1, qty - 1))}

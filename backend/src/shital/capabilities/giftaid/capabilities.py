@@ -252,17 +252,63 @@ async def _postcodes_io_fallback(postcode: str, reason: str = "") -> dict[str, A
     return {"postcode": postcode, "addresses": [], "error": reason}
 
 
+async def _ideal_postcodes_lookup(postcode: str, api_key: str) -> dict[str, Any]:
+    """Look up UK addresses via Ideal Postcodes API."""
+    clean = postcode.strip().upper().replace(" ", "")
+    url = f"https://api.ideal-postcodes.co.uk/v1/postcodes/{clean}?api_key={api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url)
+        if resp.status_code == 404:
+            return {"postcode": clean, "addresses": [], "error": "Postcode not found"}
+        if resp.status_code in (400, 402):
+            return await _postcodes_io_fallback(postcode, reason=f"ideal-postcodes HTTP {resp.status_code}")
+        if resp.status_code in (401, 403):
+            return await _postcodes_io_fallback(postcode, reason="ideal-postcodes key invalid or limit reached")
+        if resp.status_code != 200:
+            return await _postcodes_io_fallback(postcode, reason=f"ideal-postcodes HTTP {resp.status_code}")
+
+        data = resp.json()
+        addresses = []
+        for r in (data.get("result") or []):
+            parts = [
+                r.get("line_1", ""), r.get("line_2", ""), r.get("line_3", ""),
+                r.get("post_town", ""), r.get("county", ""), r.get("postcode", clean),
+            ]
+            formatted = ", ".join(p for p in parts if p)
+            if formatted:
+                addresses.append(formatted)
+        if not addresses:
+            return await _postcodes_io_fallback(postcode, reason="ideal-postcodes returned empty")
+        return {"postcode": clean, "addresses": addresses, "source": "ideal_postcodes"}
+    except Exception as exc:
+        return await _postcodes_io_fallback(postcode, reason=str(exc))
+
+
 @capability(
     name="lookup_postcode",
-    description="Look up UK addresses by postcode using GetAddress.io. Returns list of formatted addresses.",
+    description="Look up UK addresses by postcode using the configured provider (GetAddress.io or Ideal Postcodes). Returns list of formatted addresses.",
     fabric=Fabric.PAYMENTS,
     requires=[],
     tags=["address", "gift_aid"],
 )
 async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
-    """Proxy GetAddress.io lookup — returns formatted address list."""
-    if not settings.GETADDRESS_API_KEY:
-        # Return mock addresses for development
+    """Proxy postcode lookup — provider determined by ADDRESS_LOOKUP_PROVIDER setting."""
+    from shital.core.fabrics.secrets import SecretsManager
+
+    provider = await SecretsManager.get("ADDRESS_LOOKUP_PROVIDER", fallback="") or "getaddress"
+
+    # ── Ideal Postcodes ──────────────────────────────────────────────────────
+    if provider == "ideal_postcodes":
+        api_key = await SecretsManager.get("IDEAL_POSTCODES_API_KEY", fallback="")
+        if not api_key:
+            # Key not set — fall back to postcodes.io
+            return await _postcodes_io_fallback(postcode, reason="IDEAL_POSTCODES_API_KEY not set")
+        return await _ideal_postcodes_lookup(postcode, api_key)
+
+    # ── GetAddress.io (default) ──────────────────────────────────────────────
+    api_key = await SecretsManager.get("GETADDRESS_API_KEY", fallback="") or settings.GETADDRESS_API_KEY
+    if not api_key:
         return {
             "postcode": postcode.upper().strip(),
             "addresses": [
@@ -275,8 +321,7 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
 
     # getAddress.io requires lowercase postcode with NO space (e.g. "hp79nq")
     clean = postcode.strip().lower().replace(" ", "")
-    # Without expand=true, addresses are already formatted strings — simpler and more reliable
-    url = f"https://api.getaddress.io/find/{clean}?api-key={settings.GETADDRESS_API_KEY}"
+    url = f"https://api.getaddress.io/find/{clean}?api-key={api_key}"
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -285,8 +330,6 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
         if resp.status_code == 400:
             return {"postcode": postcode, "addresses": [], "error": "Invalid postcode format"}
         if resp.status_code in (401, 403, 404):
-            # 401 = bad key, 403 = no permission, 404 = not found or key issue
-            # Always fall back to postcodes.io so the user gets something useful
             return await _postcodes_io_fallback(postcode, reason=f"getAddress HTTP {resp.status_code}")
         if resp.status_code in (402, 429):
             return await _postcodes_io_fallback(postcode, reason="getAddress limit reached")
@@ -294,20 +337,15 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
             return await _postcodes_io_fallback(postcode, reason=f"getAddress HTTP {resp.status_code}")
 
         data = resp.json()
-        # Non-expanded format: each address is a comma-separated string like
-        # "10 Watkin Terrace, , , , , Northampton, Northamptonshire"
-        # Append the postcode and strip empty parts.
         pc = postcode.upper().strip()
         raw = data.get("addresses", [])
         addresses = []
         for a in raw:
             if isinstance(a, str):
-                # Clean up empty segments and append postcode
                 parts = [p.strip() for p in a.split(",") if p.strip()]
                 parts.append(pc)
                 addresses.append(", ".join(parts))
             elif isinstance(a, dict):
-                # expand=true dict fallback
                 parts = [
                     a.get("line_1", ""), a.get("line_2", ""), a.get("line_3", ""),
                     a.get("town_or_city", ""), a.get("county", ""), pc,
