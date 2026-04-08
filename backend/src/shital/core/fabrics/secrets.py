@@ -142,7 +142,7 @@ class SecretsManager:
                     SELECT key_name, description, group_name, is_sensitive,
                            has_value, updated_at, updated_by
                     FROM api_keys_store
-                    WHERE key_name NOT LIKE '__%%'
+                    WHERE LEFT(key_name, 2) != '__'
                     ORDER BY group_name, key_name
                 """)
             )
