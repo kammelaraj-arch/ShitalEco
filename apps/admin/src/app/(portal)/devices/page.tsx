@@ -201,11 +201,13 @@ export default function DevicesPage() {
         screen_profile_id: form.screen_profile_id || null,
         off_peak_playlist_id: form.off_peak_playlist_id || null,
       }
-      const res = editing
-        ? await apiFetch<{ ok: boolean; device_token?: string }>(`/kiosk-devices/${editing.id}`, { method: 'PUT', body: JSON.stringify(body) })
-        : await apiFetch<{ ok: boolean; id: string; device_token: string }>('/kiosk-devices', { method: 'POST', body: JSON.stringify(body) })
-      if (!editing && 'device_token' in res && res.device_token) {
-        setTokenMap(m => ({ ...m, [(res as { id: string }).id]: res.device_token! }))
+      if (editing) {
+        await apiFetch<{ ok: boolean }>(`/kiosk-devices/${editing.id}`, { method: 'PUT', body: JSON.stringify(body) })
+      } else {
+        const created = await apiFetch<{ ok: boolean; id: string; device_token: string }>('/kiosk-devices', { method: 'POST', body: JSON.stringify(body) })
+        if (created.device_token) {
+          setTokenMap(m => ({ ...m, [created.id]: created.device_token }))
+        }
       }
       await load()
       setDrawerOpen(false)
