@@ -18,8 +18,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace, OptionalSpace
+from shital.core.fabrics.database import SessionLocal
 
 router = APIRouter(prefix="/kiosk-devices", tags=["kiosk-devices"])
 
@@ -59,10 +61,6 @@ class DeviceIn(BaseModel):
     notes: str = ""
 
 
-class DeviceUpdate(DeviceIn):
-    name: str | None = None             # type: ignore[assignment]
-
-
 # ── List ──────────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -74,8 +72,6 @@ async def list_devices(
     include_inactive: bool = True,
 ) -> dict[str, Any]:
     _require_admin(ctx)
-    from sqlalchemy import text
-    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -114,8 +110,6 @@ async def list_devices(
         for k, v in d.items():
             if hasattr(v, "isoformat"):
                 d[k] = v.isoformat()
-            elif v is not None:
-                d[k] = v
         devices.append(d)
 
     return {"devices": devices, "total": len(devices)}
@@ -126,8 +120,6 @@ async def list_devices(
 @router.get("/{device_id}")
 async def get_device(device_id: str, ctx: CurrentSpace) -> dict[str, Any]:
     _require_admin(ctx)
-    from sqlalchemy import text
-    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -149,9 +141,6 @@ async def get_device(device_id: str, ctx: CurrentSpace) -> dict[str, Any]:
 @router.get("/by-token/{token}")
 async def get_device_by_token(token: str, ctx: OptionalSpace) -> dict[str, Any]:
     """Public endpoint — device fetches its own config using its token."""
-    from sqlalchemy import text
-    from shital.core.fabrics.database import SessionLocal
-
     async with SessionLocal() as db:
         result = await db.execute(
             text("""
@@ -179,9 +168,6 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"device_type must be one of {DEVICE_TYPES}")
     if body.status not in STATUSES:
         raise HTTPException(status_code=400, detail=f"status must be one of {STATUSES}")
-
-    from sqlalchemy import text
-    from shital.core.fabrics.database import SessionLocal
 
     device_id = str(uuid.uuid4())
     token = _gen_token()
@@ -224,9 +210,6 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
     if body.status not in STATUSES:
         raise HTTPException(status_code=400, detail=f"status must be one of {STATUSES}")
 
-    from sqlalchemy import text
-    from shital.core.fabrics.database import SessionLocal
-
     now = datetime.utcnow()
     async with SessionLocal() as db:
         result = await db.execute(text("""
@@ -261,8 +244,6 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
 async def regen_token(device_id: str, ctx: CurrentSpace) -> dict[str, Any]:
     """Issue a new device token — invalidates the old one immediately."""
     _require_admin(ctx)
-    from sqlalchemy import text
-    from shital.core.fabrics.database import SessionLocal
 
     new_token = _gen_token()
     async with SessionLocal() as db:
@@ -282,8 +263,6 @@ async def regen_token(device_id: str, ctx: CurrentSpace) -> dict[str, Any]:
 @router.delete("/{device_id}", status_code=204)
 async def delete_device(device_id: str, ctx: CurrentSpace) -> None:
     _require_admin(ctx)
-    from sqlalchemy import text
-    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
