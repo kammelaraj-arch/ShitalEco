@@ -302,26 +302,32 @@ function ChangePinModal({ pin, onClose }: { pin: string; onClose: () => void }) 
 
 // ── Add New Key modal ─────────────────────────────────────────────────────────
 
-function AddKeyModal({ pin, onClose, onSaved }: { pin: string; onClose: () => void; onSaved: () => void }) {
+function AddKeyModal({ pin, onClose, onSaved, existingGroups }: { pin: string; onClose: () => void; onSaved: () => void; existingGroups: string[] }) {
   const [keyName, setKeyName] = useState('')
   const [value, setValue] = useState('')
   const [description, setDescription] = useState('')
   const [groupName, setGroupName] = useState('Other')
+  const [customGroup, setCustomGroup] = useState('')
+  const [useCustomGroup, setUseCustomGroup] = useState(false)
   const [isSensitive, setIsSensitive] = useState(true)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const token = typeof window !== 'undefined' ? (sessionStorage.getItem('shital_access_token') || '') : ''
 
+  const allGroups = [...new Set([...GROUP_ORDER, ...existingGroups])]
+  const resolvedGroup = useCustomGroup ? customGroup.trim() || 'Other' : groupName
+
   async function handleSave() {
     if (!keyName.trim()) { setErr('Key name is required'); return }
     if (!value.trim()) { setErr('Value is required'); return }
+    if (useCustomGroup && !customGroup.trim()) { setErr('Group name is required'); return }
     const name = keyName.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
     setSaving(true); setErr('')
     try {
       const res = await fetch(`${API}/settings/api-keys/${name}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Admin-Pin': pin },
-        body: JSON.stringify({ value: value.trim(), description: description.trim(), group_name: groupName }),
+        body: JSON.stringify({ value: value.trim(), description: description.trim(), group_name: resolvedGroup }),
       })
       const data = await res.json()
       if (data.updated) { onSaved(); onClose() }
@@ -356,22 +362,37 @@ function AddKeyModal({ pin, onClose, onSaved }: { pin: string; onClose: () => vo
             <input className={inp} placeholder="What this key is for" value={description}
               onChange={e => setDescription(e.target.value)} />
           </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="text-white/50 text-xs font-bold uppercase tracking-wider mb-1 block">Group</label>
+          <div>
+            <label className="text-white/50 text-xs font-bold uppercase tracking-wider mb-1 block">Group</label>
+            <div className="flex gap-2 mb-2">
+              <button onClick={() => setUseCustomGroup(false)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${!useCustomGroup ? 'text-white' : 'text-white/40'}`}
+                style={!useCustomGroup ? { background: 'rgba(185,28,28,0.25)', border: '1px solid rgba(185,28,28,0.4)' } : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                Existing
+              </button>
+              <button onClick={() => setUseCustomGroup(true)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${useCustomGroup ? 'text-white' : 'text-white/40'}`}
+                style={useCustomGroup ? { background: 'rgba(185,28,28,0.25)', border: '1px solid rgba(185,28,28,0.4)' } : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                + New Group
+              </button>
+            </div>
+            {useCustomGroup ? (
+              <input className={inp} placeholder="e.g. Twilio, AWS, Custom" value={customGroup}
+                onChange={e => setCustomGroup(e.target.value)} autoFocus />
+            ) : (
               <select className={inp} value={groupName} onChange={e => setGroupName(e.target.value)}>
-                {['Stripe','AI','Email','Microsoft','Google','WhatsApp','PayPal','HMRC','Other'].map(g => (
+                {allGroups.map(g => (
                   <option key={g} value={g} style={{ background: '#1a1a1a' }}>{g}</option>
                 ))}
               </select>
-            </div>
-            <div className="flex-1">
-              <label className="text-white/50 text-xs font-bold uppercase tracking-wider mb-1 block">Sensitive</label>
-              <div className="flex items-center gap-2 mt-2.5">
-                <input type="checkbox" checked={isSensitive} onChange={e => setIsSensitive(e.target.checked)}
-                  className="w-4 h-4 accent-red-700" />
-                <span className="text-white/50 text-sm">Hide value</span>
-              </div>
+            )}
+          </div>
+          <div>
+            <label className="text-white/50 text-xs font-bold uppercase tracking-wider mb-1 block">Sensitive</label>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" checked={isSensitive} onChange={e => setIsSensitive(e.target.checked)}
+                className="w-4 h-4 accent-red-700" />
+              <span className="text-white/50 text-sm">Hide value (recommended for secrets)</span>
             </div>
           </div>
         </div>
@@ -552,7 +573,7 @@ export default function ApiKeysPage() {
 
       {/* Add Key modal */}
       {showAddModal && (
-        <AddKeyModal pin={pin} onClose={() => setShowAddModal(false)} onSaved={loadKeys} />
+        <AddKeyModal pin={pin} onClose={() => setShowAddModal(false)} onSaved={loadKeys} existingGroups={allGroups} />
       )}
 
       {/* Change PIN modal */}
