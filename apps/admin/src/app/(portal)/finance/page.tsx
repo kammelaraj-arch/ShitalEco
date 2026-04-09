@@ -3,6 +3,17 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 
+/** Safe UUID — works on HTTP (no secure context required) */
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return generateUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Account {
@@ -66,7 +77,7 @@ export default function FinancePage() {
   const [jForm, setJForm] = useState<JournalEntry>({
     description: '', date: new Date().toISOString().slice(0, 10),
     debit_account_id: '', credit_account_id: '', amount: '', reference: '',
-    idempotency_key: crypto.randomUUID(),
+    idempotency_key: generateUUID(),
   })
   const [jSaving, setJSaving] = useState(false)
   const [jError, setJError] = useState('')
@@ -119,7 +130,7 @@ export default function FinancePage() {
       setJForm({
         description: '', date: new Date().toISOString().slice(0, 10),
         debit_account_id: '', credit_account_id: '', amount: '', reference: '',
-        idempotency_key: crypto.randomUUID(),
+        idempotency_key: generateUUID(),
       })
       if (tab === 'accounts') loadAccounts()
     } catch (err) {

@@ -3,6 +3,16 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
 interface Branch { branch_id: string; name: string }
 
 interface Donation {
@@ -117,7 +127,7 @@ export default function DonationsPage() {
             purpose: form.purpose,
             payment_provider: form.payment_provider,
             payment_ref: form.payment_ref,
-            idempotency_key: crypto.randomUUID(),
+            idempotency_key: generateUUID(),
           }),
         })
       }
