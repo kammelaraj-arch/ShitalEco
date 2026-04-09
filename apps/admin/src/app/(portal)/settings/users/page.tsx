@@ -201,6 +201,7 @@ function UserModal({ user, onClose, onSaved }: {
 export default function UsersPage() {
   const [users, setUsers]           = useState<User[]>([])
   const [loading, setLoading]       = useState(true)
+  const [loadError, setLoadError]   = useState('')
   const [filterRole, setFilterRole] = useState('')
   const [search, setSearch]         = useState('')
   const [showInactive, setShowInactive] = useState(false)
@@ -209,6 +210,7 @@ export default function UsersPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError('')
     try {
       const params = new URLSearchParams()
       if (filterRole) params.set('role', filterRole)
@@ -216,6 +218,8 @@ export default function UsersPage() {
       params.set('active_only', showInactive ? 'false' : 'true')
       const data = await apiFetch<{ users: User[] }>(`/users/?${params}`)
       setUsers(data.users ?? [])
+    } catch (e: any) {
+      setLoadError(e.message || 'Failed to load users')
     } finally {
       setLoading(false)
     }
@@ -324,6 +328,11 @@ export default function UsersPage() {
           <tbody>
             {loading ? (
               <tr><td colSpan={7} className="px-6 py-16 text-center text-white/20 text-sm">Loading users…</td></tr>
+            ) : loadError ? (
+              <tr><td colSpan={7} className="px-6 py-16 text-center">
+                <p className="text-red-400 text-sm font-semibold">{loadError}</p>
+                <button onClick={load} className="mt-3 px-4 py-2 rounded-xl bg-white/5 text-white/50 text-sm">Retry</button>
+              </td></tr>
             ) : users.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-6 py-20 text-center">

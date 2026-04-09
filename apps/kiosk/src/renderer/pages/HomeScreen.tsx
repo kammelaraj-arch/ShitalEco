@@ -729,6 +729,9 @@ export function HomeScreen() {
         visible={keyboardOpen}
         onDone={() => setKeyboardOpen(false)}
         accent={th.langActive}
+        actionLabel={customAdded ? '✓ Added' : '+ Add to Basket'}
+        onAction={() => { handleAddCustom(); setKeyboardOpen(false) }}
+        actionDisabled={!customAmount || parseFloat(customAmount) <= 0}
       />
     </div>
   )

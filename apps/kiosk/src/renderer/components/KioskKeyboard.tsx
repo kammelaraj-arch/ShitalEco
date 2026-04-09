@@ -31,6 +31,10 @@ export interface KioskKeyboardProps {
   onDone?: () => void
   /** accent colour for the Done key and active states */
   accent?: string
+  /** If set, an action button (e.g. "+ Add") is shown above the keys */
+  actionLabel?: string
+  onAction?: () => void
+  actionDisabled?: boolean
 }
 
 // ── Layout maps ────────────────────────────────────────────────────────────────
@@ -120,6 +124,9 @@ export function KioskKeyboard({
   visible = true,
   onDone,
   accent = '#FF9933',
+  actionLabel,
+  onAction,
+  actionDisabled,
 }: KioskKeyboardProps) {
   const handleKey = useCallback((key: string) => {
     switch (key) {
@@ -159,6 +166,19 @@ export function KioskKeyboard({
           }}
         >
           <div className={`mx-auto px-3 py-3 flex flex-col gap-2 ${isNumeric ? 'max-w-xs' : 'max-w-2xl'}`}>
+            {/* Action button row above the keys */}
+            {actionLabel && onAction && (
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.96 }}
+                onPointerDown={onAction}
+                disabled={actionDisabled}
+                className="w-full rounded-2xl font-black text-white text-2xl py-4 disabled:opacity-40 shadow-lg"
+                style={{ background: actionDisabled ? '#9ca3af' : accent, letterSpacing: '-0.5px', boxShadow: actionDisabled ? 'none' : `0 4px 20px ${accent}66` }}
+              >
+                {actionLabel}
+              </motion.button>
+            )}
             {rows.map((row, ri) => (
               <div key={ri} className="flex gap-2">
                 {row.map(key => (

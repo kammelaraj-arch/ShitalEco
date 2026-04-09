@@ -74,6 +74,7 @@ async def _patch_schema() -> None:
             auth_provider VARCHAR(30) NOT NULL DEFAULT 'local',
             azure_oid     VARCHAR(100),
             azure_upn     VARCHAR(255),
+            last_login_at TIMESTAMPTZ,
             created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             deleted_at    TIMESTAMPTZ
@@ -99,6 +100,11 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_employees_branch ON employees(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(is_active)",
+        # Add missing columns to users table on existing deployments
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS azure_oid     VARCHAR(100)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS azure_upn     VARCHAR(255)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(30) NOT NULL DEFAULT 'local'",
         # Migration 007 columns on catalog_items
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_from  TIMESTAMPTZ",
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_until TIMESTAMPTZ",
