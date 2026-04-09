@@ -798,7 +798,7 @@ export function BasketScreen() {
               }
             >
               {hasEligible && <div className="text-[10px] font-semibold opacity-60 mb-0.5">Without Gift Aid</div>}
-              <div>Confirm &amp; Pay · £{total.toFixed(2)}</div>
+              <div>Pay · £{total.toFixed(2)}</div>
             </button>
           )}
 
@@ -811,7 +811,7 @@ export function BasketScreen() {
             >
               <div className="flex items-center justify-center gap-1 mb-0.5">
                 <span className="text-base">🇬🇧</span>
-                <span className="text-xs text-green-200">Boost with Gift Aid</span>
+                <span className="text-xs text-green-200">Boost with Gift Aid (£{giftAidBonus.toFixed(2)} for free)</span>
               </div>
               <div>Temple gets £{(total + giftAidBonus).toFixed(2)}</div>
             </button>
