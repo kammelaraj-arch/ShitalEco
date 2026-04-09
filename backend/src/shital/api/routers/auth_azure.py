@@ -114,7 +114,6 @@ async def verify_azure_token(body: VerifyTokenInput):
 
     from shital.capabilities.auth.capabilities import _create_access_token, _create_refresh_token
     from shital.core.fabrics.database import SessionLocal
-
     from shital.core.fabrics.secrets import SecretsManager
     ms_client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
     ms_tenant_id = await SecretsManager.get("MS_TENANT_ID") or settings.MS_TENANT_ID

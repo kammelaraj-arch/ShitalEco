@@ -26,9 +26,6 @@ importers:
 
   apps/admin:
     dependencies:
-      '@azure/msal-browser':
-        specifier: ^3.23.0
-        version: 3.30.0
       '@tanstack/react-query':
         specifier: ^5.51.0
         version: 5.96.1(react@19.2.4)
@@ -555,16 +552,8 @@ packages:
     resolution: {integrity: sha512-fCqPIfOcLE+CGqGPd66c8bZpwAji98tZ4JI9i/mlTNTlsIWslCfpg48s/ypyLxZTump5sypjrKn2/kY7q8oAbA==}
     engines: {node: '>=20.0.0'}
 
-  '@azure/msal-browser@3.30.0':
-    resolution: {integrity: sha512-I0XlIGVdM4E9kYP5eTjgW8fgATdzwxJvQ6bm2PNiHaZhEuUz47NYw1xHthC9R+lXz4i9zbShS0VdLyxd7n0GGA==}
-    engines: {node: '>=0.8.0'}
-
   '@azure/msal-browser@5.6.3':
     resolution: {integrity: sha512-sTjMtUm+bJpENU/1WlRzHEsgEHppZDZ1EtNyaOODg/sQBtMxxJzGB+MOCM+T2Q5Qe1fKBrdxUmjyRxm0r7Ez9w==}
-    engines: {node: '>=0.8.0'}
-
-  '@azure/msal-common@14.16.1':
-    resolution: {integrity: sha512-nyxsA6NA4SVKh5YyRpbSXiMr7oQbwark7JU9LMeg6tJYTSPyAGkdx61wPT4gyxZfxlSxMMEyAsWaubBlNyIa1w==}
     engines: {node: '>=0.8.0'}
 
   '@azure/msal-common@16.4.1':
@@ -4471,15 +4460,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@azure/msal-browser@3.30.0':
-    dependencies:
-      '@azure/msal-common': 14.16.1
-
   '@azure/msal-browser@5.6.3':
     dependencies:
       '@azure/msal-common': 16.4.1
-
-  '@azure/msal-common@14.16.1': {}
 
   '@azure/msal-common@16.4.1': {}
 

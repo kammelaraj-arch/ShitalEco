@@ -16,9 +16,12 @@ from shital.api.deps import CurrentSpace, OptionalSpace
 
 
 def _safe(v: Any) -> Any:
-    if isinstance(v, Decimal): return float(v)
-    if isinstance(v, UUID): return str(v)
-    if hasattr(v, 'isoformat'): return v.isoformat()
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, UUID):
+        return str(v)
+    if hasattr(v, 'isoformat'):
+        return v.isoformat()
     return v
 
 router = APIRouter(prefix="/branches", tags=["branches"])
