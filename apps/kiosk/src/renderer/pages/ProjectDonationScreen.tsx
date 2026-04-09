@@ -100,12 +100,10 @@ export function ProjectDonationScreen() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [projectItems, setProjectItems] = useState<CatalogItem[]>([])
   const [loadingItems, setLoadingItems] = useState(false)
-  const [selectedBrick, setSelectedBrick] = useState<string | null>(null)
-  const [qty, setQty] = useState(1)
+  const [addedBrick, setAddedBrick] = useState<string | null>(null)
 
   const basketCount = items.reduce((s, i) => s + i.quantity, 0)
   const basketTotal = items.reduce((s, i) => s + i.totalPrice, 0)
-  const selectedTier = projectItems.find(b => b.id === selectedBrick)
 
   // ── Load projects on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -154,27 +152,27 @@ export function ProjectDonationScreen() {
     loadItems()
   }, [selectedProjectId])
 
-  // ── Handle add to basket ──────────────────────────────────────────────────
-  const handleAddToBasket = () => {
-    if (!selectedTier || !selectedProjectId) return
+  // ── Handle add to basket — called directly on brick tap ──────────────────
+  const handleBrickTap = (brick: CatalogItem) => {
+    if (!selectedProjectId) return
     const projectName = projects.find(p => p.project_id === selectedProjectId)?.name || selectedProjectId
-    const existing = items.find(i => i.referenceId === `${selectedProjectId}_${selectedTier.id}`)
+    const existing = items.find(i => i.referenceId === `${selectedProjectId}_${brick.id}`)
     if (existing) {
-      updateQuantity(existing.id, existing.quantity + qty)
+      updateQuantity(existing.id, existing.quantity + 1)
     } else {
       addItem({
         type: 'DONATION',
-        name: `${selectedTier.name} — ${projectName}`,
-        nameGu: `${selectedTier.nameGu} — ${projectName}`,
-        quantity: qty,
-        unitPrice: selectedTier.price,
-        totalPrice: selectedTier.price * qty,
-        referenceId: `${selectedProjectId}_${selectedTier.id}`,
+        name: `${brick.name} — ${projectName}`,
+        nameGu: `${brick.nameGu} — ${projectName}`,
+        quantity: 1,
+        unitPrice: brick.price,
+        totalPrice: brick.price,
+        referenceId: `${selectedProjectId}_${brick.id}`,
         giftAidEligible: true,
       })
     }
-    setSelectedBrick(null)
-    setQty(1)
+    setAddedBrick(brick.id)
+    setTimeout(() => setAddedBrick(null), 900)
   }
 
   return (
@@ -303,7 +301,8 @@ export function ProjectDonationScreen() {
             <div className="grid grid-cols-2 gap-3">
               {projectItems.map((brick, i) => {
                 const style = getBrickStyle(brick, i)
-                const isSelected = selectedBrick === brick.id
+                const isAdded = addedBrick === brick.id
+                const inBasket = items.find(it => it.referenceId === `${selectedProjectId}_${brick.id}`)
                 const isLarge = style.size === 'large'
                 return (
                   <motion.button
@@ -311,12 +310,12 @@ export function ProjectDonationScreen() {
                     initial={{ opacity: 0, y: 14 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
-                    onClick={() => setSelectedBrick(isSelected ? null : brick.id)}
+                    onClick={() => handleBrickTap(brick)}
                     className="relative overflow-hidden rounded-2xl p-4 text-left transition-all active:scale-95"
                     style={{
                       background: style.gradient,
-                      boxShadow: isSelected ? `0 0 0 3px ${style.ring}, 0 8px 24px ${style.glow}` : `0 4px 12px ${style.glow}`,
-                      border: isSelected ? `3px solid ${style.ring}` : '3px solid transparent',
+                      boxShadow: `0 4px 12px ${style.glow}`,
+                      border: '3px solid transparent',
                     }}
                   >
                     {/* Shine */}
@@ -332,6 +331,21 @@ export function ProjectDonationScreen() {
                         />
                       </div>
                     )}
+
+                    {/* Added flash overlay */}
+                    <AnimatePresence>
+                      {isAdded && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="absolute inset-0 rounded-2xl flex items-center justify-center z-20 pointer-events-none"
+                          style={{ background: 'rgba(0,0,0,0.45)' }}
+                        >
+                          <span className="text-white font-black text-xl">✓ Added!</span>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
                     <div className="relative z-10">
                       <div className="flex items-center justify-between mb-2">
@@ -362,9 +376,9 @@ export function ProjectDonationScreen() {
                         </div>
                       )}
 
-                      {isSelected && (
-                        <div className="mt-2 flex items-center justify-center gap-1 text-xs font-bold" style={{ color: style.textColor }}>
-                          ✓ Selected
+                      {inBasket && !isAdded && (
+                        <div className="mt-2 flex items-center gap-1 text-xs font-bold" style={{ color: style.textColor }}>
+                          <span className="opacity-80">In basket: {inBasket.quantity}×</span>
                         </div>
                       )}
                     </div>
@@ -375,50 +389,6 @@ export function ProjectDonationScreen() {
           </>
         )}
       </div>
-
-      {/* Add to basket panel — slides up above bottom bar when brick selected */}
-      <AnimatePresence>
-        {selectedBrick && selectedTier && (
-          <motion.div
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 100, opacity: 0 }}
-            className="flex-shrink-0 px-4 pt-3 pb-4 border-t"
-            style={{ background: th.headerBg, borderColor: 'rgba(255,153,51,0.2)' }}
-          >
-            <div className="flex items-center gap-4 mb-3">
-              <div className="flex-1">
-                <p className="text-xs text-gray-400 font-medium">Selected:</p>
-                <p className="font-black" style={{ color: th.headerText }}>{selectedTier.name} — £{selectedTier.price}</p>
-                <p className="text-xs" style={{ color: '#22C55E' }}>
-                  HMRC adds £{getGiftAidValue(selectedTier.price * qty)} with Gift Aid
-                </p>
-              </div>
-              <div className="flex items-center gap-1 rounded-xl overflow-hidden border" style={{ borderColor: `${th.langActive}40` }}>
-                <button
-                  onClick={() => setQty(Math.max(1, qty - 1))}
-                  className="w-11 h-11 font-black text-lg flex items-center justify-center transition-all active:scale-95 hover:bg-black/10"
-                  style={{ color: th.headerText }}
-                >−</button>
-                <span className="w-10 text-center font-black text-base" style={{ color: th.headerText }}>{qty}</span>
-                <button
-                  onClick={() => setQty(qty + 1)}
-                  className="w-11 h-11 font-black text-lg flex items-center justify-center transition-all active:scale-95 hover:bg-black/10"
-                  style={{ color: th.headerText }}
-                >+</button>
-              </div>
-            </div>
-
-            <button
-              onClick={handleAddToBasket}
-              className="w-full py-4 rounded-2xl text-white font-black text-lg transition-all active:scale-[0.98] shadow-lg"
-              style={{ background: `linear-gradient(135deg,${th.basketBtn},${th.basketBtnHover})`, boxShadow: `0 6px 20px ${th.basketBtn}50` }}
-            >
-              Add £{(selectedTier.price * qty).toFixed(2)} to Basket →
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* ══ BOTTOM BAR — always visible, matches HomeScreen ══════════════════════ */}
       <div
