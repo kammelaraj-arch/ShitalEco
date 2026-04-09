@@ -51,12 +51,71 @@ async function lookupPostcode(postcode: string): Promise<string[]> {
   return MOCK_ADDRESSES[prefix] ?? MOCK_ADDRESSES.DEFAULT
 }
 
+// ─── Field input: native on mobile, tap-to-keyboard on kiosk ─────────────────
+interface FieldInputProps {
+  isMobile: boolean
+  value: string
+  onChange: (v: string) => void
+  onTap: () => void
+  placeholder: string
+  type?: 'text' | 'email' | 'tel' | 'postcode'
+  isActive: boolean
+  isValid: boolean
+  accent: string
+  multiline?: boolean
+}
+function FieldInput({ isMobile, value, onChange, onTap, placeholder, type = 'text', isActive, isValid, accent, multiline }: FieldInputProps) {
+  const borderColor = isActive ? accent : isValid ? '#22C55E' : '#E5E7EB'
+  const boxShadow = isActive ? `0 0 0 3px ${accent}25` : 'none'
+  const base = 'w-full px-4 rounded-2xl border-2 bg-white text-base font-medium min-h-[52px] outline-none'
+  if (isMobile) {
+    const inputType = type === 'postcode' ? 'text' : type
+    if (multiline) {
+      return (
+        <textarea
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          rows={3}
+          className={`${base} py-3 resize-none`}
+          style={{ borderColor, background: '#fff' }}
+        />
+      )
+    }
+    return (
+      <input
+        type={inputType}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoComplete="off"
+        className={`${base} py-3.5 ${type === 'postcode' ? 'uppercase' : ''}`}
+        style={{ borderColor, background: '#fff' }}
+      />
+    )
+  }
+  return (
+    <div
+      onClick={onTap}
+      className={`${base} py-3.5 cursor-pointer flex items-center`}
+      style={{ borderColor, boxShadow }}
+    >
+      {value
+        ? <span className="text-gray-900 leading-relaxed">{value}</span>
+        : <span className="text-gray-400">{placeholder}</span>
+      }
+    </div>
+  )
+}
+
 // ─── Main GiftAidScreen ───────────────────────────────────────────────────────
 export function GiftAidScreen() {
   const {
     items, setScreen, setGiftAidDeclaration, setContactInfo, setPendingPayment, language, theme, formTextConfig,
   } = useKioskStore()
   const th = THEMES[theme]
+  // On small screens use native browser keyboard; on kiosk use custom overlay keyboard
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const hasNamedDonations = items.some(i => REQUIRES_NAMED_CONTACT.has(i.category ?? ''))
 
   const eligibleTotal = items
@@ -236,25 +295,15 @@ export function GiftAidScreen() {
               {/* Full Name */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Full Name *</label>
-                <div
-                  onClick={() => openKb('name', fullName)}
-                  className="w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium cursor-pointer flex items-center min-h-[52px]"
-                  style={{ borderColor: activeField === 'name' ? th.langActive : fullName.length > 1 ? '#22C55E' : '#E5E7EB', background: '#fff', boxShadow: activeField === 'name' ? `0 0 0 3px ${th.langActive}25` : 'none' }}
-                >
-                  {fullName ? <span className="text-gray-900">{fullName}</span> : <span className="text-gray-400">Tap to enter full name</span>}
-                </div>
+                <FieldInput isMobile={isMobile} value={fullName} onChange={v => { setFullName(v); setKbValue(v) }} onTap={() => openKb('name', fullName)} placeholder="Tap to enter full name" isActive={activeField === 'name'} isValid={fullName.length > 1} accent={th.langActive} />
               </div>
 
               {/* Postcode lookup */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Postcode *</label>
                 <div className="flex gap-2">
-                  <div
-                    onClick={() => openKb('postcode', postcode)}
-                    className="flex-1 px-4 py-3.5 rounded-2xl border-2 text-base font-medium cursor-pointer flex items-center min-h-[52px] uppercase"
-                    style={{ borderColor: activeField === 'postcode' ? th.langActive : postcode.length > 2 ? '#22C55E' : '#E5E7EB', background: '#fff', boxShadow: activeField === 'postcode' ? `0 0 0 3px ${th.langActive}25` : 'none' }}
-                  >
-                    {postcode || <span className="text-gray-400 normal-case">e.g. HA9 0EW</span>}
+                  <div className="flex-1">
+                    <FieldInput isMobile={isMobile} value={postcode} onChange={v => { setPostcode(v.toUpperCase()); setKbValue(v.toUpperCase()) }} onTap={() => openKb('postcode', postcode)} placeholder="e.g. HA9 0EW" type="postcode" isActive={activeField === 'postcode'} isValid={postcode.length > 2} accent={th.langActive} />
                   </div>
                   <button
                     onClick={handleLookup}
@@ -286,13 +335,7 @@ export function GiftAidScreen() {
               {/* Selected / manual address */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Address *</label>
-                <div
-                  onClick={() => openKb('address', address)}
-                  className="w-full px-4 py-3 rounded-2xl border-2 text-sm font-medium cursor-pointer min-h-[72px] leading-relaxed"
-                  style={{ borderColor: activeField === 'address' ? th.langActive : address.length > 3 ? '#22C55E' : '#E5E7EB', background: '#fff', boxShadow: activeField === 'address' ? `0 0 0 3px ${th.langActive}25` : 'none' }}
-                >
-                  {address ? <span className="text-gray-900">{address}</span> : <span className="text-gray-400">Select from above or tap to enter</span>}
-                </div>
+                <FieldInput isMobile={isMobile} value={address} onChange={v => { setAddress(v); setKbValue(v) }} onTap={() => openKb('address', address)} placeholder="Select from above or tap to enter" isActive={activeField === 'address'} isValid={address.length > 3} accent={th.langActive} multiline />
               </div>
 
               {/* Contact — email or phone toggle */}
@@ -314,21 +357,9 @@ export function GiftAidScreen() {
                   ))}
                 </div>
                 {contactMode === 'email' ? (
-                  <div
-                    onClick={() => openKb('email', email)}
-                    className="w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium cursor-pointer flex items-center min-h-[52px]"
-                    style={{ borderColor: activeField === 'email' ? th.langActive : email.includes('@') ? '#22C55E' : '#E5E7EB', background: '#fff', boxShadow: activeField === 'email' ? `0 0 0 3px ${th.langActive}25` : 'none' }}
-                  >
-                    {email || <span className="text-gray-400">Tap to enter email</span>}
-                  </div>
+                  <FieldInput isMobile={isMobile} value={email} onChange={v => { setEmail(v); setKbValue(v) }} onTap={() => openKb('email', email)} placeholder="Tap to enter email" type="email" isActive={activeField === 'email'} isValid={email.includes('@')} accent={th.langActive} />
                 ) : (
-                  <div
-                    onClick={() => openKb('phone', phone)}
-                    className="w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium cursor-pointer flex items-center min-h-[52px]"
-                    style={{ borderColor: activeField === 'phone' ? th.langActive : phone.length > 7 ? '#22C55E' : '#E5E7EB', background: '#fff', boxShadow: activeField === 'phone' ? `0 0 0 3px ${th.langActive}25` : 'none' }}
-                  >
-                    {phone || <span className="text-gray-400">Tap to enter phone</span>}
-                  </div>
+                  <FieldInput isMobile={isMobile} value={phone} onChange={v => { setPhone(v); setKbValue(v) }} onTap={() => openKb('phone', phone)} placeholder="Tap to enter phone" type="tel" isActive={activeField === 'phone'} isValid={phone.length > 7} accent={th.langActive} />
                 )}
               </div>
 
@@ -458,13 +489,7 @@ export function GiftAidScreen() {
                           : <span className="text-gray-300 font-normal normal-case">(optional)</span>
                         }
                       </label>
-                      <div
-                        onClick={() => openKb('noname', noFormName)}
-                        className="w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium cursor-pointer flex items-center min-h-[52px]"
-                        style={{ borderColor: activeField === 'noname' ? th.langActive : noFormName.length > 1 ? '#22C55E' : '#E5E7EB', background: '#fff', boxShadow: activeField === 'noname' ? `0 0 0 3px ${th.langActive}25` : 'none' }}
-                      >
-                        {noFormName || <span className="text-gray-400">Tap to enter full name</span>}
-                      </div>
+                      <FieldInput isMobile={isMobile} value={noFormName} onChange={v => { setNoFormName(v); setKbValue(v) }} onTap={() => openKb('noname', noFormName)} placeholder="Tap to enter full name" isActive={activeField === 'noname'} isValid={noFormName.length > 1} accent={th.langActive} />
                     </div>
 
                     {/* Email */}
@@ -476,13 +501,7 @@ export function GiftAidScreen() {
                           : <span className="text-gray-300 font-normal normal-case">(optional)</span>
                         }
                       </label>
-                      <div
-                        onClick={() => openKb('noemail', noFormEmail)}
-                        className="w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium cursor-pointer flex items-center min-h-[52px]"
-                        style={{ borderColor: activeField === 'noemail' ? th.langActive : noFormEmail.includes('@') ? '#22C55E' : '#E5E7EB', background: '#fff', boxShadow: activeField === 'noemail' ? `0 0 0 3px ${th.langActive}25` : 'none' }}
-                      >
-                        {noFormEmail || <span className="text-gray-400">Tap to enter email</span>}
-                      </div>
+                      <FieldInput isMobile={isMobile} value={noFormEmail} onChange={v => { setNoFormEmail(v); setKbValue(v) }} onTap={() => openKb('noemail', noFormEmail)} placeholder="Tap to enter email" type="email" isActive={activeField === 'noemail'} isValid={noFormEmail.includes('@')} accent={th.langActive} />
                     </div>
 
                     {/* Phone */}
@@ -494,13 +513,7 @@ export function GiftAidScreen() {
                           : <span className="text-gray-300 font-normal normal-case">(optional)</span>
                         }
                       </label>
-                      <div
-                        onClick={() => openKb('nophone', noFormPhone)}
-                        className="w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium cursor-pointer flex items-center min-h-[52px]"
-                        style={{ borderColor: activeField === 'nophone' ? th.langActive : noFormPhone.trim().length > 7 ? '#22C55E' : '#E5E7EB', background: '#fff', boxShadow: activeField === 'nophone' ? `0 0 0 3px ${th.langActive}25` : 'none' }}
-                      >
-                        {noFormPhone || <span className="text-gray-400">Tap to enter phone</span>}
-                      </div>
+                      <FieldInput isMobile={isMobile} value={noFormPhone} onChange={v => { setNoFormPhone(v); setKbValue(v) }} onTap={() => openKb('nophone', noFormPhone)} placeholder="Tap to enter phone" type="tel" isActive={activeField === 'nophone'} isValid={noFormPhone.trim().length > 7} accent={th.langActive} />
                     </div>
 
                     {/* GDPR + T&C — only shown if any data entered */}
@@ -567,23 +580,24 @@ export function GiftAidScreen() {
         </AnimatePresence>
       </div>
 
-      {/* On-screen keyboard — slides up from bottom when any field is tapped */}
-      <KioskKeyboard
-        value={kbValue}
-        onChange={handleKbChange}
-        mode={kbMode}
-        visible={activeField !== null}
-        onDone={() => {
-          // For postcode: close keyboard then auto-trigger address lookup
-          if (activeField === 'postcode' && postcode.trim().length >= 3) {
-            closeKb()
-            handleLookup()
-          } else {
-            closeKb()
-          }
-        }}
-        accent="#22C55E"
-      />
+      {/* On-screen keyboard — kiosk only; mobile uses native browser keyboard */}
+      {!isMobile && (
+        <KioskKeyboard
+          value={kbValue}
+          onChange={handleKbChange}
+          mode={kbMode}
+          visible={activeField !== null}
+          onDone={() => {
+            if (activeField === 'postcode' && postcode.trim().length >= 3) {
+              closeKb()
+              handleLookup()
+            } else {
+              closeKb()
+            }
+          }}
+          accent="#22C55E"
+        />
+      )}
     </div>
   )
 }
