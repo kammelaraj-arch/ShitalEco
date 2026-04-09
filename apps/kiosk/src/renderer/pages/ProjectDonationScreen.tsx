@@ -101,7 +101,7 @@ function getBrickName(item: CatalogItem, lang: string) {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 export function ProjectDonationScreen() {
-  const { language, setScreen, addItem, items, updateQuantity, resetKiosk, theme } = useKioskStore()
+  const { language, setScreen, addItem, items, updateQuantity, resetKiosk, theme, setHomeActiveNav } = useKioskStore()
   const th = THEMES[theme]
 
   const [projects, setProjects] = useState<ApiProject[]>([])
@@ -212,6 +212,7 @@ export function ProjectDonationScreen() {
   const handleSidebarNav = (id: string) => {
     if (id === 'project_donation') return // already here
     if (id === 'soft_donation') { setScreen('soft-donation'); return }
+    setHomeActiveNav(id)
     setScreen('home')
   }
 

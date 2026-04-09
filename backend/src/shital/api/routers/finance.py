@@ -72,6 +72,13 @@ async def list_donations(
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+    from datetime import date as _date, datetime as _dt
+    try:
+        fd = _date.fromisoformat(from_date)
+        td = _date.fromisoformat(to_date)
+    except ValueError:
+        fd = _date(2020, 1, 1)
+        td = _date(2099, 12, 31)
     async with SessionLocal() as db:
         result = await db.execute(text("""
             SELECT id::text, branch_id, amount, currency, purpose, payment_provider,
@@ -79,11 +86,15 @@ async def list_donations(
                    reference, created_at, updated_at
             FROM donations
             WHERE deleted_at IS NULL
-              AND created_at >= :from_dt::timestamptz
-              AND created_at < (:to_dt::date + INTERVAL '1 day')::timestamptz
+              AND created_at >= :from_dt
+              AND created_at < :to_dt
             ORDER BY created_at DESC
             LIMIT :lim
-        """), {"from_dt": from_date, "to_dt": to_date, "lim": limit})
+        """), {
+            "from_dt": _dt.combine(fd, _dt.min.time()),
+            "to_dt": _dt.combine(td, _dt.max.time()).replace(microsecond=0),
+            "lim": limit,
+        })
         rows = result.mappings().all()
     return {"donations": [_row(r) for r in rows]}
 

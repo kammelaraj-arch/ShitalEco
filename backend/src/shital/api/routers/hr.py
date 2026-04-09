@@ -77,11 +77,11 @@ async def update_emp(employee_id: str, body: EmployeeUpdate, ctx: CurrentSpace) 
         sets.append("job_title = :job_title")
         params["job_title"] = body.role
     if body.gross_salary is not None:
-        sets.append("salary = :salary")
-        params["salary"] = str(body.gross_salary)
+        sets.append("gross_salary = :gross_salary")
+        params["gross_salary"] = body.gross_salary
     if body.national_insurance is not None:
-        sets.append("ni_number = :ni_number")
-        params["ni_number"] = body.national_insurance
+        sets.append("national_insurance = :national_insurance")
+        params["national_insurance"] = body.national_insurance
     if body.start_date is not None:
         sets.append("start_date = :start_date")
         params["start_date"] = body.start_date

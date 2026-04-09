@@ -155,6 +155,18 @@ async def change_pin(body: ChangePinInput, ctx: CurrentSpace) -> dict[str, Any]:
     return {"changed": True}
 
 
+# ── Reset PIN to default (SUPER_ADMIN only) ───────────────────────────────────
+
+@router.post("/reset-pin")
+async def reset_pin(ctx: CurrentSpace) -> dict[str, Any]:
+    if ctx.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="SUPER_ADMIN role required to reset PIN")
+    from shital.core.fabrics.secrets import SecretsManager
+    await SecretsManager.set_pin("1234")
+    return {"ok": True, "message": "PIN has been reset to 1234"}
+
+
 # ── Address provider setting ───────────────────────────────────────────────────
 
 class AddressProviderInput(BaseModel):

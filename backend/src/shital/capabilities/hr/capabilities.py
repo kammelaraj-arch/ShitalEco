@@ -96,33 +96,33 @@ async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[
         await db.execute(
             text("""
                 INSERT INTO employees
-                (id, user_id, branch_id, employee_number, job_title, department,
-                 start_date, employment_type, salary, salary_period, ni_number,
-                 tax_code, is_active, manager_id,
+                (id, branch_id, employee_number, job_title, department,
+                 start_date, employment_type, gross_salary, national_insurance,
+                 is_active,
                  full_name, email, phone, address,
                  photo_url, nationality, right_to_work_type, visa_number, visa_expiry,
                  created_at, updated_at)
-                VALUES (:id, :uid, :bid, :num, :title, :dept, :start, :type,
-                        :salary, :sp, :ni, :tc, true, :mgr,
+                VALUES (:id, :bid, :num, :title, :dept, :start, :type,
+                        :gross_salary, :ni, true,
                         :full_name, :email, :phone, :address,
                         :photo_url, :nationality, :rtw_type, :visa_num, :visa_exp,
                         :now, :now)
             """),
             {
-                "id": emp_id, "uid": data.user_id or None, "bid": ctx.branch_id,
+                "id": emp_id, "bid": ctx.branch_id,
                 "num": emp_number, "title": job_title,
                 "dept": data.department, "start": start_date,
-                "type": data.employment_type, "salary": salary,
-                "sp": data.salary_period, "ni": ni_number or None,
-                "tc": data.tax_code, "mgr": data.manager_id or None,
+                "type": data.employment_type,
+                "gross_salary": float(salary) if salary else 0.0,
+                "ni": ni_number or '',
                 "full_name": data.full_name or None,
                 "email": data.email or None,
                 "phone": data.phone or None,
                 "address": data.address or None,
-                "photo_url": data.photo_url or None,
-                "nationality": data.nationality or None,
-                "rtw_type": data.right_to_work_type or None,
-                "visa_num": data.visa_number or None,
+                "photo_url": data.photo_url or '',
+                "nationality": data.nationality or '',
+                "rtw_type": data.right_to_work_type or '',
+                "visa_num": data.visa_number or '',
                 "visa_exp": data.visa_expiry or None,
                 "now": now,
             },
@@ -176,15 +176,18 @@ async def list_employees(
             text(f"""
                 SELECT e.id, e.employee_number, e.job_title AS role, e.department,
                        e.employment_type, e.is_active, e.start_date,
-                       COALESCE(e.full_name, u.name, '')        AS full_name,
-                       COALESCE(e.email,     u.email, '')       AS email,
-                       COALESCE(e.phone, '')                    AS phone,
-                       COALESCE(e.address, '')                  AS address,
-                       e.salary AS gross_salary
+                       COALESCE(e.full_name, '')  AS full_name,
+                       COALESCE(e.email, '')      AS email,
+                       COALESCE(e.phone, '')      AS phone,
+                       COALESCE(e.address, '')    AS address,
+                       e.gross_salary,
+                       COALESCE(e.photo_url, '')         AS photo_url,
+                       COALESCE(e.nationality, '')       AS nationality,
+                       COALESCE(e.right_to_work_type,'') AS right_to_work_type,
+                       e.visa_expiry
                 FROM employees e
-                LEFT JOIN users u ON u.id = e.user_id
                 WHERE {where}
-                ORDER BY e.id
+                ORDER BY e.full_name, e.id
                 LIMIT :limit
             """),
             params,

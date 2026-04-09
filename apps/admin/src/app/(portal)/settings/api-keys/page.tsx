@@ -36,6 +36,28 @@ function PinOverlay({ onVerified }: { onVerified: (pin: string) => void }) {
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [resetDone, setResetDone] = useState(false)
+
+  async function handleReset() {
+    setResetting(true); setError('')
+    try {
+      const token = sessionStorage.getItem('shital_access_token') || ''
+      const res = await fetch(`${API}/settings/api-keys/reset-pin`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setResetDone(true)
+        setError('')
+      } else {
+        setError(data.detail || 'Reset failed. SUPER_ADMIN role required.')
+      }
+    } catch {
+      setError('Unable to reset PIN')
+    } finally { setResetting(false) }
+  }
 
   async function handleVerify() {
     if (pin.length < 4) { setError('PIN must be at least 4 digits'); return }
@@ -78,6 +100,7 @@ function PinOverlay({ onVerified }: { onVerified: (pin: string) => void }) {
           autoFocus
         />
         {error && <p className="text-red-400 text-sm">{error}</p>}
+        {resetDone && <p className="text-green-400 text-sm">PIN reset to 1234. You can now log in.</p>}
         <button
           onClick={handleVerify}
           disabled={loading}
@@ -86,7 +109,13 @@ function PinOverlay({ onVerified }: { onVerified: (pin: string) => void }) {
         >
           {loading ? 'Verifying…' : 'Unlock'}
         </button>
-        <p className="text-white/25 text-xs">Default PIN: 1234 (change after first login)</p>
+        <button
+          onClick={handleReset}
+          disabled={resetting}
+          className="text-white/30 text-xs underline hover:text-white/60 transition-colors disabled:opacity-40"
+        >
+          {resetting ? 'Resetting…' : 'Forgot PIN? Reset to 1234 (SUPER_ADMIN only)'}
+        </button>
       </div>
     </div>
   )

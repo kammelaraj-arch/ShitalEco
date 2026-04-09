@@ -201,9 +201,9 @@ function LanguagePicker({ onClose }: { onClose: () => void }) {
 
 // ─── Main HomeScreen ──────────────────────────────────────────────────────────
 export function HomeScreen() {
-  const { language, setScreen, addItem, items, theme, resetKiosk, branchId } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav } = useKioskStore()
   const th = THEMES[theme]
-  const [activeNav, setActiveNav] = useState('donations')
+  const [activeNav, setActiveNav] = useState(() => homeActiveNav || 'donations')
   const [services, setServices] = useState<Service[]>([])
   const [softDonations, setSoftDonations] = useState<DbItem[]>([])
   const [brickTiers, setBrickTiers] = useState<DbItem[]>([])
@@ -217,6 +217,8 @@ export function HomeScreen() {
   const [customAmount, setCustomAmount] = useState('')
   const [customAdded, setCustomAdded] = useState(false)
   const [keyboardOpen, setKeyboardOpen] = useState(false)
+  // Clear the store's homeActiveNav after consuming it on mount
+  useEffect(() => { if (homeActiveNav) setHomeActiveNav('') }, []) // eslint-disable-line react-hooks/exhaustive-deps
   // Debounce guard — prevents double-fire from pointerdown + click on touch devices
   const lastTap = React.useRef<Record<string, number>>({})
 

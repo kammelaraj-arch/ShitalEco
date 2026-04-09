@@ -75,7 +75,7 @@ export default function HRPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const data = await apiFetch<{ items: Employee[]; next_cursor: string | null; count: number }>('/hr/employees?limit=200&is_active=false')
+      const data = await apiFetch<{ items: Employee[]; next_cursor: string | null; count: number }>('/hr/employees?limit=200')
       setEmployees(data.items || [])
     } catch {
       setError('Failed to load employees')

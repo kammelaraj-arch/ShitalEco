@@ -171,6 +171,7 @@ export interface BasketItem {
 
 interface KioskState {
   screen: KioskScreen
+  homeActiveNav: string
   language: Language
   basketId: string | null
   items: BasketItem[]
@@ -204,6 +205,7 @@ interface KioskState {
   setContactInfo: (info: KioskState['contactInfo']) => void
   setPendingPayment: (v: boolean) => void
   setScreen: (screen: KioskScreen) => void
+  setHomeActiveNav: (nav: string) => void
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
   setBranchId: (id: string) => void
@@ -223,6 +225,7 @@ export const useKioskStore = create<KioskState>()(
   persist(
     (set, get) => ({
   screen: 'idle',
+  homeActiveNav: 'donations',
   language: 'en',
   basketId: null,
   items: [],
@@ -250,6 +253,7 @@ export const useKioskStore = create<KioskState>()(
   setContactInfo: (contactInfo) => set({ contactInfo }),
   setPendingPayment: (pendingPayment) => set({ pendingPayment }),
   setScreen: (screen) => set({ screen }),
+  setHomeActiveNav: (homeActiveNav) => set({ homeActiveNav }),
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
   setBranchId: (branchId) => set({ branchId }),
