@@ -628,35 +628,44 @@ class ReceiptInput(BaseModel):
     total: float = 0.0
     items: list[dict[str, Any]] = []
     branch_name: str = "Shital Temple"
+    customer_name: str = ""
 
 
 @router.post("/receipt")
 async def send_receipt(body: ReceiptInput):
-    """Send email or WhatsApp receipt after payment. Uses DB-stored email template."""
+    """Send email or WhatsApp receipt after payment. Uses DB-stored email/WhatsApp template."""
+    import logging
     from datetime import date as _date
 
     from shital.core.fabrics.config import settings
+
+    _log = logging.getLogger("shital.receipt")
 
     if not body.destination.strip():
         return {"sent": False, "error": "No destination provided"}
 
     variables = {
         "order_ref":     body.order_ref,
-        "customer_name": "",
+        "customer_name": body.customer_name or "",
         "total":         body.total,
         "items":         body.items,
         "branch_name":   body.branch_name,
         "date":          _date.today().strftime("%-d %B %Y"),
     }
 
-    if body.type == "email" and settings.SENDGRID_API_KEY:
+    # ── Email via SendGrid ────────────────────────────────────────────────────
+    if body.type == "email":
+        if not settings.SENDGRID_API_KEY:
+            _log.warning("receipt_skipped: SENDGRID_API_KEY not configured")
+            return {"sent": False, "error": "Email not configured — set SENDGRID_API_KEY in API keys settings"}
+
         try:
             from sqlalchemy import text
 
             from shital.api.routers.email_templates import render_template
             from shital.core.fabrics.database import SessionLocal
 
-            # Load template from DB; fall back to plain text
+            # Load template from DB
             template: dict | None = None
             try:
                 async with SessionLocal() as db:
@@ -666,20 +675,55 @@ async def send_receipt(body: ReceiptInput):
                     row = result.mappings().first()
                     if row:
                         template = dict(row)
-            except Exception:
-                pass
+            except Exception as db_err:
+                _log.error("receipt_template_load_failed: %s", db_err)
 
             if template:
                 subject, html_body, text_body = render_template(template, variables)
             else:
-                # Minimal fallback
-                items_text = "\n".join(
-                    f"  • {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}"
+                # Inline fallback when table not yet populated
+                items_lines = "".join(
+                    f"<tr><td style='padding:8px 0;font-size:14px;'>{i.get('name','Item')} ×{i.get('quantity',1)}</td>"
+                    f"<td align='right' style='padding:8px 0;font-size:14px;font-weight:700;'>£{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}</td></tr>"
                     for i in body.items
-                ) or "  • Temple donation"
-                subject = f"Receipt from {body.branch_name} — {body.order_ref}"
-                html_body = f"<p>Thank you! Order: <strong>{body.order_ref}</strong><br>Total: £{body.total:.2f}</p><p>Jay Shri Krishna 🙏</p>"
-                text_body = f"Thank you for your donation!\n\nOrder: {body.order_ref}\n{items_text}\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}"
+                ) or "<tr><td colspan='2' style='padding:8px 0;'>Temple Donation</td></tr>"
+                subject = f"Your Donation Receipt — {body.branch_name} ({body.order_ref})"
+                html_body = f"""
+<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;">
+  <div style="background:linear-gradient(135deg,#FF9933,#FF6600);padding:24px;border-radius:12px 12px 0 0;text-align:center;">
+    <div style="font-size:28px;">🕉</div>
+    <div style="color:white;font-size:22px;font-weight:900;">Shital Temple</div>
+    <div style="color:rgba(255,255,255,0.85);font-size:13px;">{body.branch_name}</div>
+  </div>
+  <div style="background:#22C55E;padding:10px;text-align:center;">
+    <span style="color:white;font-weight:700;">✓ Donation Confirmed — Thank You!</span>
+  </div>
+  <div style="background:#fff;border:1px solid #eee;padding:28px;border-radius:0 0 12px 12px;">
+    {"<p style='font-size:17px;font-weight:700;'>Dear " + body.customer_name + ",</p>" if body.customer_name else ""}
+    <p style="color:#555;">Thank you for your generous donation to {body.branch_name}.</p>
+    <div style="background:#FFF8F0;border-left:4px solid #FF9933;padding:16px;border-radius:6px;margin:20px 0;">
+      <div style="font-size:11px;color:#999;text-transform:uppercase;letter-spacing:1px;">Order Reference</div>
+      <div style="font-size:20px;font-weight:900;letter-spacing:3px;font-family:monospace;">{body.order_ref}</div>
+      <div style="font-size:12px;color:#999;margin-top:4px;">{variables['date']}</div>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr><th align="left" style="font-size:11px;color:#999;text-transform:uppercase;padding-bottom:8px;">Donation</th>
+          <th align="right" style="font-size:11px;color:#999;text-transform:uppercase;padding-bottom:8px;">Amount</th></tr>
+      {items_lines}
+      <tr><td style="padding-top:14px;font-size:16px;font-weight:900;">Total</td>
+          <td align="right" style="padding-top:14px;font-size:20px;font-weight:900;color:#FF6600;">£{body.total:.2f}</td></tr>
+    </table>
+    <p style="color:#888;font-size:13px;margin-top:24px;">🎁 If you are a UK taxpayer, we can claim Gift Aid on your donation at no cost to you.</p>
+    <p style="color:#FF9933;font-size:18px;font-weight:900;text-align:center;">🙏 Jay Shri Krishna</p>
+  </div>
+</div>"""
+                text_body = (
+                    f"Shital Temple — {body.branch_name}\n\n"
+                    f"Thank you{', ' + body.customer_name if body.customer_name else ''}!\n\n"
+                    f"Order: {body.order_ref}\nDate: {variables['date']}\n\n"
+                    + "\n".join(f"- {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}" for i in body.items)
+                    + f"\n\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}"
+                )
 
             import httpx
             content = [{"type": "text/html", "value": html_body}]
@@ -697,32 +741,75 @@ async def send_receipt(body: ReceiptInput):
                 },
                 timeout=10,
             )
-            return {"sent": resp.status_code in (200, 202), "method": "sendgrid"}
+            sent = resp.status_code in (200, 202)
+            if not sent:
+                _log.error("sendgrid_error: %s %s", resp.status_code, resp.text[:200])
+            return {"sent": sent, "method": "sendgrid", "status_code": resp.status_code}
         except Exception as e:
+            _log.error("receipt_email_exception: %s", e)
             return {"sent": False, "error": str(e)}
 
-    if body.type in ("sms", "whatsapp") and settings.META_WHATSAPP_TOKEN and settings.META_WHATSAPP_PHONE_ID:
+    # ── WhatsApp via Meta Cloud API ───────────────────────────────────────────
+    if body.type in ("sms", "whatsapp"):
+        if not (settings.META_WHATSAPP_TOKEN and settings.META_WHATSAPP_PHONE_ID):
+            _log.warning("receipt_skipped: META_WHATSAPP_TOKEN or META_WHATSAPP_PHONE_ID not configured")
+            return {"sent": False, "error": "WhatsApp not configured — set META_WHATSAPP_TOKEN and META_WHATSAPP_PHONE_ID"}
+
         try:
+            from sqlalchemy import text
+
+            from shital.api.routers.email_templates import render_template
+            from shital.core.fabrics.database import SessionLocal
+
+            # Load WhatsApp template from DB
+            wa_template: dict | None = None
+            try:
+                async with SessionLocal() as db:
+                    result = await db.execute(
+                        text("SELECT text_body FROM email_templates WHERE template_key = 'whatsapp_receipt' AND is_active"),
+                    )
+                    row = result.mappings().first()
+                    if row and row["text_body"]:
+                        wa_template = {"subject": "", "html_body": "", "text_body": row["text_body"]}
+            except Exception:
+                pass
+
+            if wa_template:
+                _, _, message = render_template(wa_template, variables)
+            else:
+                items_text = "\n".join(
+                    f"• {i.get('name','Item')} ×{i.get('quantity',1)} — £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}"
+                    for i in body.items
+                ) or "• Temple Donation"
+                message = (
+                    f"🕉 *Shital Temple Receipt*\n*{body.branch_name}*\n\n"
+                    f"✅ Thank you{', ' + body.customer_name if body.customer_name else ''}!\n\n"
+                    f"📋 *Order:* {body.order_ref}\n📅 *Date:* {variables['date']}\n\n"
+                    f"{items_text}\n\n"
+                    f"💰 *Total: £{body.total:.2f}*\n\n"
+                    f"🙏 *Jay Shri Krishna*\n_{body.branch_name} — Registered UK Charity_"
+                )
+
             import httpx
-            items_text = "\n".join(
-                f"• {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}"
-                for i in body.items
-            ) or "• Temple donation"
-            message = f"Thank you! 🙏\n\nOrder: {body.order_ref}\n{items_text}\nTotal: £{body.total:.2f}\n\nJay Shri Krishna\n{body.branch_name}"
             phone = body.destination.replace(" ", "").replace("+", "")
             if phone.startswith("0"):
                 phone = "44" + phone[1:]
+
             resp = await httpx.AsyncClient().post(
                 f"https://graph.facebook.com/v19.0/{settings.META_WHATSAPP_PHONE_ID}/messages",
                 headers={"Authorization": f"Bearer {settings.META_WHATSAPP_TOKEN}"},
                 json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": message}},
                 timeout=10,
             )
-            return {"sent": resp.status_code == 200, "method": "whatsapp"}
+            sent = resp.status_code == 200
+            if not sent:
+                _log.error("whatsapp_error: %s %s", resp.status_code, resp.text[:200])
+            return {"sent": sent, "method": "whatsapp", "status_code": resp.status_code}
         except Exception as e:
+            _log.error("receipt_whatsapp_exception: %s", e)
             return {"sent": False, "error": str(e)}
 
-    return {"sent": True, "method": "logged", "note": "SendGrid/WhatsApp not configured"}
+    return {"sent": False, "method": "none", "error": f"Unsupported type '{body.type}' or service not configured"}
 
 
 BRANCHES = [

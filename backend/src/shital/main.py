@@ -435,6 +435,20 @@ async def _patch_schema() -> None:
             WHERE rn > 1
         )
         """,
+        # ── Email / WhatsApp receipt templates ────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS email_templates (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            template_key VARCHAR(100) UNIQUE NOT NULL,
+            name         VARCHAR(200) NOT NULL DEFAULT '',
+            subject      TEXT NOT NULL DEFAULT '',
+            html_body    TEXT NOT NULL DEFAULT '',
+            text_body    TEXT NOT NULL DEFAULT '',
+            variables    JSONB NOT NULL DEFAULT '[]',
+            is_active    BOOLEAN NOT NULL DEFAULT true,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_email_templates_key ON email_templates(template_key)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -449,6 +463,7 @@ async def _patch_schema() -> None:
     logger.info("schema_patch_done")
     await _seed_api_key_metadata()
     await _seed_catalog()
+    await _seed_email_templates()
 
 
 async def _seed_api_key_metadata() -> None:
@@ -597,6 +612,166 @@ async def _seed_catalog() -> None:
             logger.info("catalog_seed_done", items_inserted=len(SEED_ITEMS))
         except Exception as exc:
             logger.error("catalog_seed_failed", error=str(exc))
+
+
+async def _seed_email_templates() -> None:
+    """Upsert default email/WhatsApp receipt templates. Safe to re-run — uses ON CONFLICT DO NOTHING."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    DONATION_RECEIPT_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:24px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.10);">
+  <!-- Header -->
+  <tr>
+    <td style="background:linear-gradient(135deg,#FF9933 0%,#FF6600 100%);padding:32px 40px;text-align:center;">
+      <div style="font-size:36px;margin-bottom:8px;">🕉</div>
+      <div style="color:#ffffff;font-size:26px;font-weight:900;letter-spacing:1px;">Shital Temple</div>
+      <div style="color:rgba(255,255,255,0.85);font-size:14px;margin-top:4px;">{{ branch_name }}</div>
+    </td>
+  </tr>
+  <!-- Confirmed bar -->
+  <tr>
+    <td style="background:#22C55E;padding:10px 40px;text-align:center;">
+      <span style="color:#ffffff;font-weight:700;font-size:14px;letter-spacing:0.5px;">✓ Donation Confirmed — Thank You!</span>
+    </td>
+  </tr>
+  <!-- Body -->
+  <tr>
+    <td style="padding:36px 40px;">
+      {% if customer_name %}<p style="font-size:18px;font-weight:700;color:#1a1a1a;margin:0 0 8px 0;">Dear {{ customer_name }},</p>{% endif %}
+      <p style="color:#555555;font-size:15px;line-height:1.6;margin:0 0 28px 0;">Thank you for your generous donation to <strong>{{ branch_name }}</strong>. Your contribution directly supports our temple community, seva programmes, and charitable activities.</p>
+      <!-- Order reference box -->
+      <div style="background:#FFF8F0;border-left:5px solid #FF9933;padding:18px 22px;border-radius:8px;margin-bottom:28px;">
+        <div style="font-size:11px;color:#999999;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Order Reference</div>
+        <div style="font-size:22px;font-weight:900;color:#1a1a1a;letter-spacing:3px;font-family:'Courier New',monospace;">{{ order_ref }}</div>
+        <div style="font-size:12px;color:#999999;margin-top:6px;">{{ date }}</div>
+      </div>
+      <!-- Items table -->
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;border-collapse:collapse;">
+        <tr>
+          <th align="left" style="font-size:11px;text-transform:uppercase;color:#999999;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #f0f0f0;">Donation</th>
+          <th align="center" style="font-size:11px;text-transform:uppercase;color:#999999;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #f0f0f0;">Qty</th>
+          <th align="right" style="font-size:11px;text-transform:uppercase;color:#999999;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #f0f0f0;">Amount</th>
+        </tr>
+        {% for item in items %}
+        <tr>
+          <td style="padding:12px 0;font-size:14px;color:#1a1a1a;border-bottom:1px solid #f5f5f5;">{{ item.name }}</td>
+          <td align="center" style="padding:12px 0;font-size:14px;color:#666666;border-bottom:1px solid #f5f5f5;">{{ item.quantity }}</td>
+          <td align="right" style="padding:12px 0;font-size:14px;color:#1a1a1a;font-weight:600;border-bottom:1px solid #f5f5f5;">£{{ "%.2f"|format((item.unitPrice or 0)|float * (item.quantity or 1)|int) }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="3" style="padding:12px 0;font-size:14px;color:#555555;border-bottom:1px solid #f5f5f5;">Temple Donation</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td colspan="2" style="padding:16px 0 0 0;font-size:16px;font-weight:900;color:#1a1a1a;">Total Donated</td>
+          <td align="right" style="padding:16px 0 0 0;font-size:22px;font-weight:900;color:#FF6600;">£{{ "%.2f"|format(total|float) }}</td>
+        </tr>
+      </table>
+      <hr style="border:none;border-top:1px solid #f0f0f0;margin:24px 0;">
+      <!-- Gift Aid notice -->
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:18px 22px;margin-bottom:28px;">
+        <div style="font-size:13px;font-weight:700;color:#15803d;margin-bottom:6px;">🎁 Gift Aid — Boost Your Donation by 25%</div>
+        <div style="font-size:13px;color:#166534;line-height:1.6;">If you are a UK taxpayer, the temple can claim Gift Aid on your donation at no extra cost to you. Please speak to a temple administrator or visit our website to add Gift Aid to this donation.</div>
+      </div>
+      <p style="color:#888888;font-size:13px;line-height:1.7;margin:0 0 24px 0;">Please retain this email as confirmation of your donation. This receipt is for your records only and is not a Gift Aid declaration.</p>
+      <p style="color:#FF9933;font-size:20px;font-weight:900;text-align:center;margin:0;">🙏 Jay Shri Krishna</p>
+    </td>
+  </tr>
+  <!-- Footer -->
+  <tr>
+    <td style="background:#f9f9f9;border-top:1px solid #eeeeee;padding:22px 40px;text-align:center;">
+      <p style="color:#999999;font-size:12px;margin:0 0 4px 0;font-weight:600;">{{ branch_name }} · Registered UK Charity</p>
+      <p style="color:#bbbbbb;font-size:11px;margin:0;">You received this email because you donated at our kiosk terminal. This is not a tax document.</p>
+    </td>
+  </tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+    DONATION_RECEIPT_TEXT = """Shital Temple — {{ branch_name }}
+Receipt Confirmation
+
+{% if customer_name %}Dear {{ customer_name }},{% endif %}
+
+Thank you for your generous donation!
+
+Order Reference: {{ order_ref }}
+Date: {{ date }}
+
+Donations:
+{% for item in items %}- {{ item.name }} x{{ item.quantity }} = £{{ "%.2f"|format((item.unitPrice or 0)|float * (item.quantity or 1)|int) }}
+{% else %}- Temple Donation
+{% endfor %}
+Total: £{{ "%.2f"|format(total|float) }}
+
+🙏 Jay Shri Krishna
+
+{{ branch_name }}
+Registered UK Charity
+
+This receipt is for your records only."""
+
+    DONATION_RECEIPT_SUBJECT = "Your Donation Receipt — {{ branch_name }} ({{ order_ref }})"
+
+    WHATSAPP_RECEIPT_TEXT = """🕉 *Shital Temple Receipt*
+*{{ branch_name }}*
+
+✅ Thank you{% if customer_name %}, {{ customer_name }}{% endif %}!
+
+📋 *Order:* {{ order_ref }}
+📅 *Date:* {{ date }}
+
+{% for item in items %}• {{ item.name }} ×{{ item.quantity }} — £{{ "%.2f"|format((item.unitPrice or 0)|float * (item.quantity or 1)|int) }}
+{% else %}• Temple Donation
+{% endfor %}
+💰 *Total Donated: £{{ "%.2f"|format(total|float) }}*
+
+🎁 *Gift Aid:* If you are a UK taxpayer, we can claim an extra 25p for every £1 you donate at no cost to you. Ask a temple administrator to add Gift Aid.
+
+🙏 *Jay Shri Krishna*
+_{{ branch_name }} — Registered UK Charity_"""
+
+    templates = [
+        {
+            "key": "donation_receipt",
+            "name": "Donation Receipt — Email",
+            "subject": DONATION_RECEIPT_SUBJECT,
+            "html_body": DONATION_RECEIPT_HTML,
+            "text_body": DONATION_RECEIPT_TEXT,
+            "variables": '["order_ref","customer_name","total","items","branch_name","date"]',
+        },
+        {
+            "key": "whatsapp_receipt",
+            "name": "Donation Receipt — WhatsApp",
+            "subject": "",
+            "html_body": "",
+            "text_body": WHATSAPP_RECEIPT_TEXT,
+            "variables": '["order_ref","customer_name","total","items","branch_name","date"]',
+        },
+    ]
+
+    async with SessionLocal() as db:
+        for t in templates:
+            try:
+                await db.execute(text("""
+                    INSERT INTO email_templates (template_key, name, subject, html_body, text_body, variables, is_active)
+                    VALUES (:key, :name, :subject, :html_body, :text_body, :variables::jsonb, true)
+                    ON CONFLICT (template_key) DO NOTHING
+                """), t)
+            except Exception:
+                pass
+        await db.commit()
+    logger.info("email_templates_seeded")
 
 
 app = FastAPI(

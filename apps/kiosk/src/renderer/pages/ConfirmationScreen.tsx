@@ -46,6 +46,7 @@ export function ConfirmationScreen() {
       body: JSON.stringify({
         order_ref: orderRef, type, destination, total,
         branch_name: `Shital ${branchName}`,
+        customer_name: contactInfo?.anonymous ? '' : (contactInfo?.name || ''),
         items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })),
       }),
     }).then(() => {
@@ -75,6 +76,7 @@ export function ConfirmationScreen() {
           type: isEmail ? 'email' : 'whatsapp',
           destination: receiptContact,
           total, branch_name: `Shital ${branchName}`,
+          customer_name: contactInfo?.anonymous ? '' : (contactInfo?.name || ''),
           items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })),
         }),
       })
