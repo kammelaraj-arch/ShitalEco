@@ -633,11 +633,19 @@ class ReceiptInput(BaseModel):
 
 @router.post("/receipt")
 async def send_receipt(body: ReceiptInput):
-    """Send email or WhatsApp receipt after payment. Uses DB-stored email/WhatsApp template."""
+    """Send email or WhatsApp receipt after payment.
+    Email priority: Office 365 SMTP (OFFICE365_PASSWORD set) → SendGrid fallback.
+    Credentials are loaded from the encrypted API Keys store (Admin → Settings → API Keys).
+    """
+    import asyncio
     import logging
+    import smtplib
+    import ssl
     from datetime import date as _date
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
 
-    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
 
     _log = logging.getLogger("shital.receipt")
 
@@ -653,89 +661,137 @@ async def send_receipt(body: ReceiptInput):
         "date":          _date.today().strftime("%-d %B %Y"),
     }
 
-    # ── Email via SendGrid ────────────────────────────────────────────────────
-    if body.type == "email":
-        if not settings.SENDGRID_API_KEY:
-            _log.warning("receipt_skipped: SENDGRID_API_KEY not configured")
-            return {"sent": False, "error": "Email not configured — set SENDGRID_API_KEY in API keys settings"}
+    # ── Helper: load donation_receipt template from DB ────────────────────────
+    async def _load_email_template() -> dict | None:
+        from sqlalchemy import text
 
+        from shital.core.fabrics.database import SessionLocal
         try:
-            from sqlalchemy import text
+            async with SessionLocal() as db:
+                result = await db.execute(
+                    text("SELECT subject, html_body, text_body FROM email_templates WHERE template_key = 'donation_receipt' AND is_active"),
+                )
+                row = result.mappings().first()
+                return dict(row) if row else None
+        except Exception as db_err:
+            _log.error("receipt_template_load_failed: %s", db_err)
+            return None
 
-            from shital.api.routers.email_templates import render_template
-            from shital.core.fabrics.database import SessionLocal
-
-            # Load template from DB
-            template: dict | None = None
-            try:
-                async with SessionLocal() as db:
-                    result = await db.execute(
-                        text("SELECT subject, html_body, text_body FROM email_templates WHERE template_key = 'donation_receipt' AND is_active"),
-                    )
-                    row = result.mappings().first()
-                    if row:
-                        template = dict(row)
-            except Exception as db_err:
-                _log.error("receipt_template_load_failed: %s", db_err)
-
-            if template:
-                subject, html_body, text_body = render_template(template, variables)
-            else:
-                # Inline fallback when table not yet populated
-                items_lines = "".join(
-                    f"<tr><td style='padding:8px 0;font-size:14px;'>{i.get('name','Item')} ×{i.get('quantity',1)}</td>"
-                    f"<td align='right' style='padding:8px 0;font-size:14px;font-weight:700;'>£{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}</td></tr>"
-                    for i in body.items
-                ) or "<tr><td colspan='2' style='padding:8px 0;'>Temple Donation</td></tr>"
-                subject = f"Your Donation Receipt — {body.branch_name} ({body.order_ref})"
-                html_body = f"""
-<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;">
-  <div style="background:linear-gradient(135deg,#FF9933,#FF6600);padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-    <div style="font-size:28px;">🕉</div>
+    # ── Helper: build inline fallback email content ───────────────────────────
+    def _build_fallback_email() -> tuple[str, str, str]:
+        items_lines = "".join(
+            f"<tr><td style='padding:8px 0;font-size:14px;border-bottom:1px solid #f0f0f0;'>{i.get('name','Item')} ×{i.get('quantity',1)}</td>"
+            f"<td align='right' style='padding:8px 0;font-size:14px;font-weight:700;border-bottom:1px solid #f0f0f0;'>£{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}</td></tr>"
+            for i in body.items
+        ) or "<tr><td colspan='2' style='padding:8px 0;'>Temple Donation</td></tr>"
+        subj = f"Your Donation Receipt — {body.branch_name} ({body.order_ref})"
+        greeting = f"<p style='font-size:17px;font-weight:700;'>Dear {body.customer_name},</p>" if body.customer_name else ""
+        html = f"""<!DOCTYPE html><html><body style="margin:0;font-family:Arial,sans-serif;background:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:20px 0;"><tr><td align="center">
+<table width="560" style="max-width:560px;background:white;border-radius:12px;overflow:hidden;">
+  <tr><td style="background:linear-gradient(135deg,#FF9933,#FF6600);padding:28px;text-align:center;">
+    <div style="font-size:30px;">🕉</div>
     <div style="color:white;font-size:22px;font-weight:900;">Shital Temple</div>
     <div style="color:rgba(255,255,255,0.85);font-size:13px;">{body.branch_name}</div>
-  </div>
-  <div style="background:#22C55E;padding:10px;text-align:center;">
+  </td></tr>
+  <tr><td style="background:#22C55E;padding:10px;text-align:center;">
     <span style="color:white;font-weight:700;">✓ Donation Confirmed — Thank You!</span>
-  </div>
-  <div style="background:#fff;border:1px solid #eee;padding:28px;border-radius:0 0 12px 12px;">
-    {"<p style='font-size:17px;font-weight:700;'>Dear " + body.customer_name + ",</p>" if body.customer_name else ""}
-    <p style="color:#555;">Thank you for your generous donation to {body.branch_name}.</p>
+  </td></tr>
+  <tr><td style="padding:28px;">
+    {greeting}
+    <p style="color:#555;font-size:14px;">Thank you for your generous donation to {body.branch_name}.</p>
     <div style="background:#FFF8F0;border-left:4px solid #FF9933;padding:16px;border-radius:6px;margin:20px 0;">
       <div style="font-size:11px;color:#999;text-transform:uppercase;letter-spacing:1px;">Order Reference</div>
       <div style="font-size:20px;font-weight:900;letter-spacing:3px;font-family:monospace;">{body.order_ref}</div>
       <div style="font-size:12px;color:#999;margin-top:4px;">{variables['date']}</div>
     </div>
     <table width="100%" cellpadding="0" cellspacing="0">
-      <tr><th align="left" style="font-size:11px;color:#999;text-transform:uppercase;padding-bottom:8px;">Donation</th>
-          <th align="right" style="font-size:11px;color:#999;text-transform:uppercase;padding-bottom:8px;">Amount</th></tr>
+      <tr><th align="left" style="font-size:11px;color:#999;text-transform:uppercase;padding-bottom:8px;border-bottom:2px solid #f0f0f0;">Donation</th>
+          <th align="right" style="font-size:11px;color:#999;text-transform:uppercase;padding-bottom:8px;border-bottom:2px solid #f0f0f0;">Amount</th></tr>
       {items_lines}
-      <tr><td style="padding-top:14px;font-size:16px;font-weight:900;">Total</td>
+      <tr><td style="padding-top:14px;font-size:16px;font-weight:900;">Total Donated</td>
           <td align="right" style="padding-top:14px;font-size:20px;font-weight:900;color:#FF6600;">£{body.total:.2f}</td></tr>
     </table>
-    <p style="color:#888;font-size:13px;margin-top:24px;">🎁 If you are a UK taxpayer, we can claim Gift Aid on your donation at no cost to you.</p>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px;margin:20px 0;">
+      <div style="font-size:13px;font-weight:700;color:#15803d;">🎁 Gift Aid</div>
+      <div style="font-size:13px;color:#166534;">If you are a UK taxpayer, we can claim Gift Aid on your donation at no extra cost to you.</div>
+    </div>
     <p style="color:#FF9933;font-size:18px;font-weight:900;text-align:center;">🙏 Jay Shri Krishna</p>
-  </div>
-</div>"""
-                text_body = (
-                    f"Shital Temple — {body.branch_name}\n\n"
-                    f"Thank you{', ' + body.customer_name if body.customer_name else ''}!\n\n"
-                    f"Order: {body.order_ref}\nDate: {variables['date']}\n\n"
-                    + "\n".join(f"- {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}" for i in body.items)
-                    + f"\n\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}"
-                )
+  </td></tr>
+  <tr><td style="background:#f9f9f9;padding:16px;text-align:center;font-size:12px;color:#999;">
+    {body.branch_name} · Registered UK Charity
+  </td></tr>
+</table></td></tr></table></body></html>"""
+        text = (
+            f"Shital Temple — {body.branch_name}\n\n"
+            + (f"Dear {body.customer_name},\n\n" if body.customer_name else "")
+            + f"Thank you for your generous donation!\n\nOrder: {body.order_ref}\nDate: {variables['date']}\n\n"
+            + "\n".join(f"- {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}" for i in body.items)
+            + f"\n\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}"
+        )
+        return subj, html, text
 
+    # ── Email ─────────────────────────────────────────────────────────────────
+    if body.type == "email":
+        # Credentials loaded from API Keys DB store (Admin → Settings → API Keys)
+        office365_email    = await SecretsManager.get("OFFICE365_EMAIL",    fallback="noreply@shital.org.uk")
+        office365_password = await SecretsManager.get("OFFICE365_PASSWORD", fallback="")
+        sendgrid_key       = await SecretsManager.get("SENDGRID_API_KEY",   fallback="")
+
+        if not office365_password and not sendgrid_key:
+            _log.warning("receipt_skipped: no email provider configured")
+            return {"sent": False, "error": "Email not configured — add OFFICE365_PASSWORD (or SENDGRID_API_KEY) in Admin → Settings → API Keys"}
+
+        # Build content
+        try:
+            from shital.api.routers.email_templates import render_template
+            tpl = await _load_email_template()
+            if tpl:
+                subject, html_body, text_body = render_template(tpl, variables)
+            else:
+                subject, html_body, text_body = _build_fallback_email()
+        except Exception as e:
+            _log.error("receipt_render_failed: %s", e)
+            subject, html_body, text_body = _build_fallback_email()
+
+        # ── Office 365 SMTP (primary) ─────────────────────────────────────────
+        if office365_password:
+            def _smtp_send() -> None:
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"]    = f"Shital Temple <{office365_email}>"
+                msg["To"]      = body.destination
+                if text_body:
+                    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+                msg.attach(MIMEText(html_body, "html", "utf-8"))
+                ctx = ssl.create_default_context()
+                with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
+                    srv.ehlo()
+                    srv.starttls(context=ctx)
+                    srv.login(office365_email, office365_password)
+                    srv.sendmail(office365_email, body.destination, msg.as_string())
+
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, _smtp_send)
+                _log.info("receipt_sent_office365 to=%s ref=%s", body.destination, body.order_ref)
+                return {"sent": True, "method": "office365"}
+            except Exception as e:
+                _log.error("office365_smtp_error: %s", e)
+                return {"sent": False, "error": f"Office 365 SMTP error: {e}"}
+
+        # ── SendGrid fallback ─────────────────────────────────────────────────
+        try:
             import httpx
             content = [{"type": "text/html", "value": html_body}]
             if text_body:
                 content.append({"type": "text/plain", "value": text_body})
-
             resp = await httpx.AsyncClient().post(
                 "https://api.sendgrid.com/v3/mail/send",
-                headers={"Authorization": f"Bearer {settings.SENDGRID_API_KEY}"},
+                headers={"Authorization": f"Bearer {sendgrid_key}"},
                 json={
                     "personalizations": [{"to": [{"email": body.destination}]}],
-                    "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": body.branch_name},
+                    "from": {"email": office365_email, "name": body.branch_name},
                     "subject": subject,
                     "content": content,
                 },
@@ -746,14 +802,17 @@ async def send_receipt(body: ReceiptInput):
                 _log.error("sendgrid_error: %s %s", resp.status_code, resp.text[:200])
             return {"sent": sent, "method": "sendgrid", "status_code": resp.status_code}
         except Exception as e:
-            _log.error("receipt_email_exception: %s", e)
+            _log.error("sendgrid_exception: %s", e)
             return {"sent": False, "error": str(e)}
 
     # ── WhatsApp via Meta Cloud API ───────────────────────────────────────────
     if body.type in ("sms", "whatsapp"):
-        if not (settings.META_WHATSAPP_TOKEN and settings.META_WHATSAPP_PHONE_ID):
-            _log.warning("receipt_skipped: META_WHATSAPP_TOKEN or META_WHATSAPP_PHONE_ID not configured")
-            return {"sent": False, "error": "WhatsApp not configured — set META_WHATSAPP_TOKEN and META_WHATSAPP_PHONE_ID"}
+        wa_token    = await SecretsManager.get("META_WHATSAPP_TOKEN",    fallback="")
+        wa_phone_id = await SecretsManager.get("META_WHATSAPP_PHONE_ID", fallback="")
+
+        if not (wa_token and wa_phone_id):
+            _log.warning("receipt_skipped: WhatsApp not configured")
+            return {"sent": False, "error": "WhatsApp not configured — add META_WHATSAPP_TOKEN and META_WHATSAPP_PHONE_ID in Admin → Settings → API Keys"}
 
         try:
             from sqlalchemy import text
@@ -761,7 +820,6 @@ async def send_receipt(body: ReceiptInput):
             from shital.api.routers.email_templates import render_template
             from shital.core.fabrics.database import SessionLocal
 
-            # Load WhatsApp template from DB
             wa_template: dict | None = None
             try:
                 async with SessionLocal() as db:
@@ -796,8 +854,8 @@ async def send_receipt(body: ReceiptInput):
                 phone = "44" + phone[1:]
 
             resp = await httpx.AsyncClient().post(
-                f"https://graph.facebook.com/v19.0/{settings.META_WHATSAPP_PHONE_ID}/messages",
-                headers={"Authorization": f"Bearer {settings.META_WHATSAPP_TOKEN}"},
+                f"https://graph.facebook.com/v19.0/{wa_phone_id}/messages",
+                headers={"Authorization": f"Bearer {wa_token}"},
                 json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": message}},
                 timeout=10,
             )

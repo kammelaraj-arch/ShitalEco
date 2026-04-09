@@ -39,9 +39,13 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
 
-    # SendGrid
+    # SendGrid (legacy fallback)
     SENDGRID_API_KEY: str = ""
-    SENDGRID_FROM_EMAIL: str = "noreply@shital.org"
+    SENDGRID_FROM_EMAIL: str = "noreply@shital.org.uk"
+
+    # Office 365 SMTP (primary email — overrides SendGrid when password set)
+    OFFICE365_EMAIL: str = "noreply@shital.org.uk"
+    OFFICE365_PASSWORD: str = ""
 
     # Meta WhatsApp
     META_WHATSAPP_TOKEN: str = ""
