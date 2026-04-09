@@ -352,6 +352,7 @@ export default function DevicesPage() {
                       <button
                         onClick={() => copy(revealedToken || d.device_token, `copy-${d.id}`)}
                         className="text-[10px] text-white/40 hover:text-amber-300 transition-colors flex-shrink-0"
+                        title="Copy token"
                       >
                         {copied === `copy-${d.id}` ? '✓' : '📋'}
                       </button>
@@ -364,6 +365,21 @@ export default function DevicesPage() {
                         {regenning === d.id ? '…' : '🔄'}
                       </button>
                     </div>
+                    {/* Copy Device URL — for KIOSK + QUICK_DONATION */}
+                    {(d.device_type === 'KIOSK' || d.device_type === 'QUICK_DONATION') && (
+                      <button
+                        onClick={() => {
+                          const base = window.location.origin
+                          const path = d.device_type === 'QUICK_DONATION' ? '/donate/' : '/kiosk/'
+                          const token = revealedToken || d.device_token
+                          copy(`${base}${path}?token=${token}`, `url-${d.id}`)
+                        }}
+                        className="mt-2 w-full py-1.5 rounded-lg text-[10px] font-bold transition-colors flex items-center justify-center gap-1"
+                        style={{ background: 'rgba(255,153,51,0.12)', color: copied === `url-${d.id}` ? '#22C55E' : '#FF9933', border: '1px solid rgba(255,153,51,0.2)' }}
+                      >
+                        {copied === `url-${d.id}` ? '✓ URL Copied!' : '📱 Copy Device URL'}
+                      </button>
+                    )}
                   </div>
 
                   {/* Actions */}
