@@ -211,6 +211,8 @@ class ReaderActionInput(BaseModel):
 
 @router.post("/terminal/process-payment")
 async def process_payment_on_reader(body: ReaderActionInput):
+    if not body.reader_id or not body.reader_id.strip():
+        return {"error": "No card reader configured. Please assign a Stripe Terminal reader in Admin → Devices."}
     import stripe
 
     from shital.core.fabrics.config import settings

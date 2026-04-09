@@ -30,6 +30,10 @@ export function ProcessingScreen() {
 
   async function processPayment() {
     setError('')
+    if (!stripeReaderId || !stripeReaderId.trim()) {
+      setError('No card reader configured. Please go to Admin and assign a Stripe Terminal reader to this device.')
+      return
+    }
     try {
       // 1. Create basket
       setStage('Creating donation...')

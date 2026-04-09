@@ -23,6 +23,10 @@ export function CheckoutScreen() {
 
   async function processPayment() {
     setError('')
+    if (!stripeReaderId || !stripeReaderId.trim()) {
+      setError('No card reader configured. Please go to Admin Settings and assign a Stripe Terminal reader to this device.')
+      return
+    }
     try {
       // 1. Create basket (non-fatal — DB may not be available; payment still proceeds)
       setStage('Creating order…')
