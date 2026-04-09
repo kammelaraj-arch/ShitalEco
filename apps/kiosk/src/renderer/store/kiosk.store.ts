@@ -180,11 +180,13 @@ interface KioskState {
   idleTimer: number
   branchId: string
   theme: KioskTheme
-  cardProvider: 'stripe_terminal' | 'square' | 'cash'
+  cardProvider: 'stripe_terminal' | 'square' | 'clover' | 'cash'
   stripeReaderId: string
   stripeReaderLabel: string
   squareDeviceId: string
   squareDeviceName: string
+  cloverDeviceId: string
+  cloverDeviceName: string
   giftAidDeclaration: {
     agreed: boolean; fullName: string; postcode: string
     address: string; contactEmail: string; contactPhone: string
@@ -205,7 +207,7 @@ interface KioskState {
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
   setBranchId: (id: string) => void
-  setCardDevice: (provider: 'stripe_terminal' | 'square' | 'cash', deviceId: string, deviceLabel: string) => void
+  setCardDevice: (provider: 'stripe_terminal' | 'square' | 'clover' | 'cash', deviceId: string, deviceLabel: string) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
   removeItem: (id: string) => void
@@ -242,6 +244,8 @@ export const useKioskStore = create<KioskState>()(
   stripeReaderLabel: 'Temple WisePOS E',
   squareDeviceId: '',
   squareDeviceName: '',
+  cloverDeviceId: '',
+  cloverDeviceName: '',
   setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
   setContactInfo: (contactInfo) => set({ contactInfo }),
   setPendingPayment: (pendingPayment) => set({ pendingPayment }),
@@ -254,6 +258,8 @@ export const useKioskStore = create<KioskState>()(
       ? { cardProvider: provider, stripeReaderId: deviceId, stripeReaderLabel: deviceLabel }
       : provider === 'square'
       ? { cardProvider: provider, squareDeviceId: deviceId, squareDeviceName: deviceLabel }
+      : provider === 'clover'
+      ? { cardProvider: provider, cloverDeviceId: deviceId, cloverDeviceName: deviceLabel }
       : { cardProvider: provider }
   ),
   setBasketId: (basketId) => set({ basketId }),
@@ -285,6 +291,8 @@ export const useKioskStore = create<KioskState>()(
         stripeReaderLabel: state.stripeReaderLabel,
         squareDeviceId: state.squareDeviceId,
         squareDeviceName: state.squareDeviceName,
+        cloverDeviceId: state.cloverDeviceId,
+        cloverDeviceName: state.cloverDeviceName,
         branchId: state.branchId,
         endScreenTemplate: state.endScreenTemplate,
         formTextConfig: state.formTextConfig,

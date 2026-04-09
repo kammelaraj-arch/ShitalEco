@@ -19,17 +19,21 @@ interface StripeReader {
 interface SquareDevice {
   id: string; name: string; status: string; model: string
 }
+interface CloverDevice {
+  id: string; name: string; model: string; serial: string; status: string
+}
 interface DbDevice {
   id: string; label: string; provider: string
   stripe_reader_id: string; square_device_id: string
   device_type: string; serial_number: string; status: string; user_name: string
 }
 
-type Provider = 'stripe_terminal' | 'square' | 'cash'
+type Provider = 'stripe_terminal' | 'square' | 'clover' | 'cash'
 
 const PROVIDERS: { id: Provider; name: string; logo: string; sub: string; color: string }[] = [
   { id: 'stripe_terminal', name: 'Stripe WisePOS E', logo: '💳', sub: 'Stripe Terminal — tap/chip/contactless', color: '#6772E5' },
   { id: 'square',          name: 'Square Terminal',  logo: '◼',  sub: 'Square POS — card present',              color: '#3E4348' },
+  { id: 'clover',          name: 'Clover Flex C405', logo: '🍀', sub: 'Clover Cloud Pay Display — card present', color: '#FF6B00' },
   { id: 'cash',            name: 'Cash / Counter',   logo: '💷', sub: 'Customer pays at front desk',            color: '#2E7D32' },
 ]
 
@@ -41,25 +45,27 @@ const BRANCHES = [
 ]
 
 export function DeviceConfigScreen({ onClose }: { onClose: () => void }) {
-  const { theme, cardProvider, stripeReaderId, squareDeviceId, setCardDevice, branchId, setBranchId } = useKioskStore()
+  const { theme, cardProvider, stripeReaderId, squareDeviceId, cloverDeviceId, setCardDevice, branchId, setBranchId } = useKioskStore()
   const th = THEMES[theme]
   const [selectedBranch, setSelectedBranch] = useState(branchId)
 
-  const [selectedProvider, setSelectedProvider] = useState<Provider>(cardProvider)
-  const [dbDevices, setDbDevices]         = useState<DbDevice[]>([])
-  const [stripeReaders, setStripeReaders] = useState<StripeReader[]>([])
-  const [squareDevices, setSquareDevices] = useState<SquareDevice[]>([])
-  const [loading, setLoading]             = useState(false)
-  const [backendDown, setBackendDown]     = useState(false)
-  const [apiError, setApiError]           = useState('')
-  const [saved, setSaved]                 = useState(false)
-  const [manualMode, setManualMode]       = useState(false)
+  const [selectedProvider, setSelectedProvider] = useState<Provider>(cardProvider as Provider)
+  const [dbDevices, setDbDevices]           = useState<DbDevice[]>([])
+  const [stripeReaders, setStripeReaders]   = useState<StripeReader[]>([])
+  const [squareDevices, setSquareDevices]   = useState<SquareDevice[]>([])
+  const [cloverDevices, setCloverDevices]   = useState<CloverDevice[]>([])
+  const [loading, setLoading]               = useState(false)
+  const [backendDown, setBackendDown]       = useState(false)
+  const [apiError, setApiError]             = useState('')
+  const [saved, setSaved]                   = useState(false)
+  const [manualMode, setManualMode]         = useState(false)
 
   // Selection state
-  const [selectedStripeId, setSelectedStripeId] = useState(stripeReaderId)
-  const [selectedSquareId, setSelectedSquareId] = useState(squareDeviceId)
-  const [manualReaderId, setManualReaderId]     = useState(stripeReaderId)
-  const [manualReaderLabel, setManualReaderLabel] = useState('')
+  const [selectedStripeId, setSelectedStripeId]     = useState(stripeReaderId)
+  const [selectedSquareId, setSelectedSquareId]     = useState(squareDeviceId)
+  const [selectedCloverId, setSelectedCloverId]     = useState(cloverDeviceId)
+  const [manualReaderId, setManualReaderId]         = useState(stripeReaderId)
+  const [manualReaderLabel, setManualReaderLabel]   = useState('')
 
   // ── Load DB-registered devices for this branch ─────────────────────────────
   useEffect(() => {
@@ -116,7 +122,7 @@ export function DeviceConfigScreen({ onClose }: { onClose: () => void }) {
       }
     } catch { /* fall through to Stripe API */ }
 
-    // 2. Fall back to Stripe / Square API
+    // 2. Fall back to provider APIs
     try {
       if (selectedProvider === 'stripe_terminal') {
         const r = await fetch(`${API_BASE}/kiosk/terminal/readers`, { signal: AbortSignal.timeout(5000) })
@@ -128,6 +134,11 @@ export function DeviceConfigScreen({ onClose }: { onClose: () => void }) {
         const d = await r.json()
         if (d.error) setApiError(`Square: ${d.error}`)
         else if (d.devices?.length) setSquareDevices(d.devices)
+      } else if (selectedProvider === 'clover') {
+        const r = await fetch(`${API_BASE}/kiosk/clover/devices`, { signal: AbortSignal.timeout(5000) })
+        const d = await r.json()
+        if (d.error) setApiError(`Clover: ${d.error}`)
+        else if (d.devices?.length) setCloverDevices(d.devices)
       }
     } catch {
       // Backend is not reachable — allow manual entry
@@ -156,6 +167,9 @@ export function DeviceConfigScreen({ onClose }: { onClose: () => void }) {
     } else if (selectedProvider === 'square') {
       const dev = squareDevices.find(d => d.id === selectedSquareId)
       setCardDevice('square', selectedSquareId, dev?.name || selectedSquareId)
+    } else if (selectedProvider === 'clover') {
+      const dev = cloverDevices.find(d => d.id === selectedCloverId)
+      setCardDevice('clover', selectedCloverId, dev?.name || selectedCloverId)
     } else {
       setCardDevice('cash', '', 'Cash')
     }
@@ -166,6 +180,7 @@ export function DeviceConfigScreen({ onClose }: { onClose: () => void }) {
   const canSave = selectedProvider === 'cash'
     || (selectedProvider === 'stripe_terminal' && (manualMode || backendDown ? manualReaderId.trim().length > 3 : !!selectedStripeId))
     || (selectedProvider === 'square' && !!selectedSquareId)
+    || (selectedProvider === 'clover' && !!selectedCloverId)
 
   return (
     <motion.div
@@ -418,6 +433,71 @@ export function DeviceConfigScreen({ onClose }: { onClose: () => void }) {
                     })}
                   </div>
                 )}
+              </motion.div>
+            )}
+
+            {/* Clover Flex devices */}
+            {selectedProvider === 'clover' && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Clover Flex Devices</p>
+                  <button onClick={fetchDevices} className="text-xs text-orange-500 font-semibold hover:text-orange-700">↻ Refresh</button>
+                </div>
+
+                {loading ? (
+                  <div className="text-center py-8 text-gray-300">
+                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="text-3xl inline-block">⟳</motion.div>
+                    <p className="mt-2 text-xs text-gray-400">Looking for Clover devices…</p>
+                  </div>
+                ) : backendDown ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
+                    <p className="font-bold mb-1">⚠️ Backend offline</p>
+                    <p className="text-xs">Cannot discover Clover devices right now. Start the backend and tap Refresh.</p>
+                  </div>
+                ) : apiError ? (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-600">{apiError}</div>
+                ) : cloverDevices.length === 0 ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700 mb-3">
+                    <p className="font-bold mb-1">No Clover devices found</p>
+                    <p className="text-xs">Add <span className="font-mono">CLOVER_ACCESS_TOKEN</span> and <span className="font-mono">CLOVER_MERCHANT_ID</span> in Admin → API Keys, then tap Refresh.</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2 mb-3">
+                    {cloverDevices.map(d => {
+                      const isSelected = selectedCloverId === d.id
+                      const isOnline = d.status === 'online'
+                      return (
+                        <button
+                          key={d.id}
+                          onClick={() => setSelectedCloverId(d.id)}
+                          className="flex items-center gap-3 p-3.5 rounded-2xl border-2 text-left transition-all"
+                          style={{ borderColor: isSelected ? '#FF6B00' : '#F3F4F6', background: isSelected ? '#FF6B0010' : 'white' }}
+                        >
+                          <span className="text-2xl">🍀</span>
+                          <div className="flex-1">
+                            <p className="font-bold text-gray-900 text-sm">{d.name}</p>
+                            <p className="text-gray-400 text-xs">{d.model} · {d.serial || d.id.slice(0, 12)}</p>
+                          </div>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${isOnline ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                            {d.status}
+                          </span>
+                          {isSelected && <span className="font-black text-lg" style={{ color: '#FF6B00' }}>✓</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                <div className="bg-orange-50 rounded-xl p-3 text-xs text-orange-700 mt-2">
+                  <p className="font-bold mb-1">🍀 Setup: Clover Flex C405</p>
+                  <ol className="space-y-1 list-decimal list-inside text-orange-600">
+                    <li>Power on the Clover Flex and connect it to Wi-Fi</li>
+                    <li>In Clover Dashboard, go to <span className="font-mono">Account → API Access</span> and create an API token</li>
+                    <li>Add <span className="font-mono">CLOVER_ACCESS_TOKEN</span> and <span className="font-mono">CLOVER_MERCHANT_ID</span> in Admin → API Keys</li>
+                    <li>Set <span className="font-mono">CLOVER_ENVIRONMENT</span> to <span className="font-mono">production</span> for live payments</li>
+                    <li>Tap Refresh above to discover the device</li>
+                  </ol>
+                </div>
               </motion.div>
             )}
 

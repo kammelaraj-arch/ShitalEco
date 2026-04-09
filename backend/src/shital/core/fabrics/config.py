@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     SQUARE_ENVIRONMENT: str = "sandbox"  # sandbox | production
     SQUARE_LOCATION_ID: str = ""
 
+    # Clover
+    CLOVER_ACCESS_TOKEN: str = ""
+    CLOVER_MERCHANT_ID: str = ""
+    CLOVER_ENVIRONMENT: str = "sandbox"  # sandbox | production
+
     # MeiliSearch
     MEILISEARCH_URL: str = "http://localhost:7700"
     MEILISEARCH_MASTER_KEY: str = ""

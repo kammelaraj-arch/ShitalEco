@@ -316,6 +316,182 @@ async def list_square_devices():
         return {"devices": [], "error": str(e)}
 
 
+@router.get("/square/terminal-checkout/{checkout_id}")
+async def square_checkout_status(checkout_id: str):
+    """Poll Square Terminal checkout status."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    base = "https://connect.squareup.com" if settings.SQUARE_ENVIRONMENT == "production" else "https://connect.squareupsandbox.com"
+    headers = {"Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}", "Square-Version": "2024-06-04"}
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{base}/v2/terminals/checkouts/{checkout_id}", headers=headers, timeout=10)
+        data = resp.json()
+        checkout = data.get("checkout", {})
+        return {
+            "status": checkout.get("status", "UNKNOWN"),
+            "checkout_id": checkout_id,
+            "amount": checkout.get("amount_money", {}).get("amount", 0) / 100,
+        }
+    except Exception as e:
+        return {"status": "UNKNOWN", "error": str(e)}
+
+
+# ─── Clover Flex / Cloud Pay Display ─────────────────────────────────────────
+
+def _clover_base(environment: str) -> str:
+    return "https://api.clover.com" if environment == "production" else "https://sandbox.dev.clover.com"
+
+
+class CloverPaymentInput(BaseModel):
+    amount_pence: int
+    order_id: str
+    description: str = "Shital Temple Payment"
+    device_id: str = ""
+    items: list[dict[str, Any]] = []
+
+
+@router.post("/clover/payment")
+async def clover_payment(body: CloverPaymentInput):
+    """
+    Create a Clover order with line items and push it to the Clover Flex device display.
+    The customer then taps/inserts their card on the device.
+    Poll GET /clover/payment/{clover_order_id} to check completion.
+    """
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("CLOVER_ACCESS_TOKEN") or settings.CLOVER_ACCESS_TOKEN
+    merchant_id = await SecretsManager.get("CLOVER_MERCHANT_ID") or settings.CLOVER_MERCHANT_ID
+    environment = await SecretsManager.get("CLOVER_ENVIRONMENT") or settings.CLOVER_ENVIRONMENT or "sandbox"
+    device_id = body.device_id or await SecretsManager.get("CLOVER_DEVICE_ID") or ""
+
+    if not access_token or not merchant_id:
+        return {"error": "Clover is not configured. Add CLOVER_ACCESS_TOKEN and CLOVER_MERCHANT_ID in Admin → API Keys."}
+
+    base = _clover_base(environment)
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # 1. Create an order
+            order_resp = await client.post(
+                f"{base}/v3/merchants/{merchant_id}/orders",
+                headers=headers,
+                json={"currency": "GBP", "manualTransaction": False, "testMode": environment != "production"},
+            )
+            if not order_resp.is_success:
+                return {"error": f"Clover order creation failed ({order_resp.status_code}): {order_resp.text[:200]}"}
+            clover_order_id = order_resp.json()["id"]
+
+            # 2. Add line items
+            line_items = body.items or [{"name": body.description, "unit_price_pence": body.amount_pence, "quantity": 1}]
+            for item in line_items:
+                await client.post(
+                    f"{base}/v3/merchants/{merchant_id}/orders/{clover_order_id}/line_items",
+                    headers=headers,
+                    json={
+                        "price": item.get("unit_price_pence", body.amount_pence),
+                        "name": item.get("name", body.description),
+                        "quantity": item.get("quantity", 1),
+                    },
+                )
+
+            # 3. Push to device display (Cloud Pay Display)
+            if device_id:
+                await client.post(
+                    f"{base}/v3/merchants/{merchant_id}/devices/{device_id}/displays",
+                    headers=headers,
+                    json={"type": "TRANSACTION", "order": {"id": clover_order_id}},
+                )
+
+        return {
+            "clover_order_id": clover_order_id,
+            "device_id": device_id,
+            "amount": body.amount_pence / 100,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/clover/payment/{order_id}")
+async def clover_payment_status(order_id: str):
+    """Poll Clover order for payment completion (expand=payments)."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("CLOVER_ACCESS_TOKEN") or settings.CLOVER_ACCESS_TOKEN
+    merchant_id = await SecretsManager.get("CLOVER_MERCHANT_ID") or settings.CLOVER_MERCHANT_ID
+    environment = await SecretsManager.get("CLOVER_ENVIRONMENT") or settings.CLOVER_ENVIRONMENT or "sandbox"
+
+    if not access_token or not merchant_id:
+        return {"status": "error", "error": "Clover not configured"}
+
+    base = _clover_base(environment)
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{base}/v3/merchants/{merchant_id}/orders/{order_id}?expand=payments",
+                headers=headers,
+            )
+        data = resp.json()
+        payments = data.get("payments", {}).get("elements", [])
+        for p in payments:
+            if p.get("result") == "SUCCESS":
+                return {"status": "COMPLETED", "payment_id": p.get("id"), "amount": p.get("amount", 0) / 100}
+            if p.get("result") in ("FAIL", "VOIDED"):
+                return {"status": "FAILED"}
+        if data.get("state") == "LOCKED":
+            return {"status": "CANCELLED"}
+        return {"status": "PENDING"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/clover/devices")
+async def list_clover_devices():
+    """List Clover devices registered to the configured merchant."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("CLOVER_ACCESS_TOKEN") or settings.CLOVER_ACCESS_TOKEN
+    merchant_id = await SecretsManager.get("CLOVER_MERCHANT_ID") or settings.CLOVER_MERCHANT_ID
+    environment = await SecretsManager.get("CLOVER_ENVIRONMENT") or settings.CLOVER_ENVIRONMENT or "sandbox"
+
+    if not access_token or not merchant_id:
+        return {"devices": [], "error": "Clover not configured. Add CLOVER_ACCESS_TOKEN and CLOVER_MERCHANT_ID in Admin → API Keys."}
+
+    base = _clover_base(environment)
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{base}/v3/merchants/{merchant_id}/devices", headers=headers)
+        elements = resp.json().get("devices", {}).get("elements", [])
+        devices = [
+            {
+                "id": d.get("id"),
+                "name": d.get("name") or d.get("id"),
+                "model": d.get("model", "Clover Flex"),
+                "serial": d.get("serial", ""),
+                "status": "online" if d.get("online") else "offline",
+            }
+            for d in elements
+        ]
+        return {"devices": devices}
+    except Exception as e:
+        return {"devices": [], "error": str(e)}
+
+
 class QuickDonationRecordInput(BaseModel):
     basket_id: str
     order_ref: str
