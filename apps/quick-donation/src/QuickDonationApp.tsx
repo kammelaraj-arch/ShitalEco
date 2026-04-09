@@ -10,10 +10,38 @@ import { AdminScreen } from './pages/AdminScreen'
 
 // Show screensaver after 2 min of idle on the donate screen only
 const SCREENSAVER_TIMEOUT_MS = 120_000
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
+const TOKEN_STORAGE_KEY = 'shital-device-token'
 
 export function QuickDonationApp() {
-  const { screen, setScreen, reset } = useDonationStore()
+  const { screen, setScreen, reset, setBranchId, setReader } = useDonationStore()
   const idleTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Device token auto-config ───────────────────────────────────────────────
+  // Accepts ?token=xxx in URL. Stores in localStorage so subsequent loads
+  // (without the query param) still use the same config.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlToken = params.get('token')
+    if (urlToken) {
+      localStorage.setItem(TOKEN_STORAGE_KEY, urlToken)
+      // Clean the token from the URL bar without reloading
+      const clean = window.location.pathname + window.location.hash
+      window.history.replaceState({}, '', clean)
+    }
+
+    const token = urlToken || localStorage.getItem(TOKEN_STORAGE_KEY)
+    if (!token) return
+
+    fetch(`${API_BASE}/kiosk-devices/by-token/${token}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.branch_id) setBranchId(d.branch_id)
+        if (d.stripe_reader_id) setReader(d.stripe_reader_id, d.reader_label || d.stripe_reader_id)
+      })
+      .catch(() => {/* network error — use stored values */})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const resetIdle = useCallback(() => {
     if (idleTimeout.current) clearTimeout(idleTimeout.current)

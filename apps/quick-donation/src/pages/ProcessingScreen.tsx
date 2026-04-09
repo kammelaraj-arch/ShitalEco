@@ -4,6 +4,17 @@ import { useDonationStore } from '../store/donation.store'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
+/** Works on HTTP and HTTPS — crypto.randomUUID() requires a secure context */
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
 /**
  * ProcessingScreen — creates basket, order, payment intent, and sends to Stripe Terminal.
  * Fully automated — no user interaction needed. Transitions to TapScreen on success.
@@ -22,7 +33,7 @@ export function ProcessingScreen() {
     try {
       // 1. Create basket
       setStage('Creating donation...')
-      let basketId = crypto.randomUUID()
+      let basketId = generateUUID()
       try {
         const basketRes = await fetch(`${API_BASE}/kiosk/basket`, {
           method: 'POST',

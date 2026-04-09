@@ -144,21 +144,42 @@ async def get_device(device_id: str, ctx: CurrentSpace) -> dict[str, Any]:
 async def get_device_by_token(token: str, ctx: OptionalSpace) -> dict[str, Any]:
     """Public endpoint — device fetches its own config using its token."""
     async with SessionLocal() as db:
+        # Update last_seen and return full config including card reader stripe ID
         result = await db.execute(
             text("""
                 UPDATE kiosk_devices SET last_seen_at = NOW(), updated_at = NOW()
                 WHERE device_token = :token AND deleted_at IS NULL
                 RETURNING id, name, device_type, branch_id, location, status,
                           screen_profile_id, peak_start, peak_end,
-                          off_peak_playlist_id, default_donate_amount
+                          off_peak_playlist_id, default_donate_amount, card_reader_id
             """),
             {"token": token},
         )
         row = result.mappings().first()
+        if not row:
+            await db.commit()
+            raise HTTPException(status_code=404, detail="Device not found or token invalid")
+
+        # Look up the stripe_reader_id and label from terminal_devices
+        stripe_reader_id = None
+        reader_label = None
+        if row["card_reader_id"]:
+            rd = await db.execute(
+                text("SELECT stripe_reader_id, label FROM terminal_devices WHERE id = :id"),
+                {"id": str(row["card_reader_id"])},
+            )
+            rd_row = rd.mappings().first()
+            if rd_row:
+                stripe_reader_id = rd_row["stripe_reader_id"]
+                reader_label = rd_row["label"]
+
         await db.commit()
-    if not row:
-        raise HTTPException(status_code=404, detail="Device not found or token invalid")
-    return dict(row)
+
+    return {
+        **dict(row),
+        "stripe_reader_id": stripe_reader_id,
+        "reader_label": reader_label,
+    }
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
