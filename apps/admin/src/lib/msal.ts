@@ -61,7 +61,10 @@ export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
     throw new Error('Azure AD SSO is not configured. Add MS_CLIENT_ID and MS_TENANT_ID in Admin → API Keys.')
   }
 
-  const redirectUri = `${window.location.origin}/auth-callback`
+  // Use admin-configured redirect URI (MS_REDIRECT_URI secret) so it matches
+  // exactly what's registered in Azure AD app registration.
+  // Falls back to window.location.origin + '/auth-callback'.
+  const redirectUri = (config as any).redirect_uri || `${window.location.origin}/auth-callback`
   // Use Date.now() as nonce — avoids window.crypto which is HTTPS-only
   const nonce = String(Date.now())
   const scope = encodeURIComponent('openid profile email')

@@ -8,10 +8,10 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'https://sshitaleco.onrender.com/
 
 function saveSession(data: any) {
   if (typeof window === 'undefined') return
-  sessionStorage.setItem('shital_access_token', data.access_token)
-  sessionStorage.setItem('shital_refresh_token', data.refresh_token)
-  sessionStorage.setItem('shital_user', JSON.stringify(data.user))
-  document.cookie = 'shital_token=1; path=/; samesite=lax'
+  localStorage.setItem('shital_access_token', data.access_token)
+  localStorage.setItem('shital_refresh_token', data.refresh_token)
+  localStorage.setItem('shital_user', JSON.stringify(data.user))
+  document.cookie = 'shital_token=1; path=/; max-age=86400; samesite=lax'
 }
 
 // ─── Login page ─────────────────────────────────────────────────────────────────

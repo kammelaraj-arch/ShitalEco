@@ -1,5 +1,5 @@
 /**
- * Centralised API helper — reads the JWT from sessionStorage and adds
+ * Centralised API helper — reads the JWT from localStorage and adds
  * Authorization headers automatically.  All admin pages should import from here.
  */
 
@@ -7,7 +7,7 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
 
 export function getToken(): string {
   if (typeof window === 'undefined') return ''
-  return sessionStorage.getItem('shital_access_token') || ''
+  return localStorage.getItem('shital_access_token') || ''
 }
 
 export function authHeaders(extra?: Record<string, string>): Record<string, string> {

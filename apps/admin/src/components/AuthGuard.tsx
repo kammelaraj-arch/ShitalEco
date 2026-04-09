@@ -8,7 +8,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const token = sessionStorage.getItem('shital_access_token')
+    const token = localStorage.getItem('shital_access_token')
     if (!token) {
       router.replace('/login')
     } else {

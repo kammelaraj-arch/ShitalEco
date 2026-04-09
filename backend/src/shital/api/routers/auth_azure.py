@@ -88,6 +88,7 @@ async def azure_config():
     from shital.core.fabrics.secrets import SecretsManager
     client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
     tenant_id = await SecretsManager.get("MS_TENANT_ID") or settings.MS_TENANT_ID
+    redirect_uri = await SecretsManager.get("MS_REDIRECT_URI") or ""
     tenant = tenant_id or "common"
     return {
         "client_id": client_id,
@@ -95,6 +96,7 @@ async def azure_config():
         "tenant_id": tenant,
         "scopes": ["openid", "profile", "email", "User.Read"],
         "enabled": bool(client_id and tenant_id),
+        "redirect_uri": redirect_uri,  # If set, overrides the frontend-derived redirect URI
     }
 
 
