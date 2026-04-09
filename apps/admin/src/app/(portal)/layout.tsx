@@ -5,6 +5,7 @@ import { Sidebar } from '@/components/layout/Sidebar'
 import { AuthGuard } from '@/components/AuthGuard'
 import { BrandingProvider } from '@/lib/branding'
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs'
+import { AdminKeyboardProvider } from '@/components/ui/AdminKeyboard'
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -17,6 +18,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
 
   return (
     <BrandingProvider>
+      <AdminKeyboardProvider>
       <AuthGuard>
         <div className="flex h-screen overflow-hidden" style={{ background: '#0a0404' }}>
           {/* Mobile backdrop */}
@@ -54,6 +56,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
           </main>
         </div>
       </AuthGuard>
+      </AdminKeyboardProvider>
     </BrandingProvider>
   )
 }
