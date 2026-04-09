@@ -1,7 +1,9 @@
 """Finance router."""
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -18,6 +20,21 @@ from shital.capabilities.finance.capabilities import (
 )
 
 router = APIRouter(prefix="/finance", tags=["finance"])
+
+
+def _safe(v: Any) -> Any:
+    """Convert DB types that are not natively JSON-serializable."""
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, UUID):
+        return str(v)
+    if hasattr(v, 'isoformat'):
+        return v.isoformat()
+    return v
+
+
+def _row(row: Any) -> dict:
+    return {k: _safe(v) for k, v in dict(row).items()}
 
 
 @router.get("/trial-balance")
@@ -57,18 +74,18 @@ async def list_donations(
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         result = await db.execute(text("""
-            SELECT id, branch_id, amount, currency, purpose, payment_provider,
+            SELECT id::text, branch_id, amount, currency, purpose, payment_provider,
                    payment_ref, gift_aid_eligible, gift_aid_amount, status,
                    reference, created_at, updated_at
             FROM donations
             WHERE deleted_at IS NULL
-              AND created_at::date >= :from_date::date
-              AND created_at::date <= :to_date::date
+              AND created_at >= :from_dt::timestamptz
+              AND created_at < (:to_dt::date + INTERVAL '1 day')::timestamptz
             ORDER BY created_at DESC
             LIMIT :lim
-        """), {"from_date": from_date, "to_date": to_date, "lim": limit})
+        """), {"from_dt": from_date, "to_dt": to_date, "lim": limit})
         rows = result.mappings().all()
-    return {"donations": [dict(r) for r in rows]}
+    return {"donations": [_row(r) for r in rows]}
 
 
 class DonationUpdate(BaseModel):
@@ -161,4 +178,4 @@ async def list_accounts(ctx: CurrentSpace):
             """),
             {"bid": ctx.branch_id},
         )
-        return {"accounts": [dict(r) for r in result.mappings()]}
+        return {"accounts": [_row(r) for r in result.mappings()]}

@@ -21,11 +21,17 @@ VALID_ROLES = [
 
 
 def _row(row: Any) -> dict:
+    from decimal import Decimal
+    from uuid import UUID as _UUID
     d = dict(row)
-    for k in ("created_at", "updated_at", "last_login_at", "deleted_at"):
-        if d.get(k) and isinstance(d[k], datetime):
-            d[k] = d[k].isoformat()
     d.pop("password_hash", None)  # never expose password hash
+    for k, v in d.items():
+        if isinstance(v, datetime):
+            d[k] = v.isoformat()
+        elif isinstance(v, _UUID):
+            d[k] = str(v)
+        elif isinstance(v, Decimal):
+            d[k] = float(v)
     return d
 
 

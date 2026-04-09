@@ -5,12 +5,21 @@ Requires SUPER_ADMIN or ADMIN role for write operations.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace, OptionalSpace
+
+
+def _safe(v: Any) -> Any:
+    if isinstance(v, Decimal): return float(v)
+    if isinstance(v, UUID): return str(v)
+    if hasattr(v, 'isoformat'): return v.isoformat()
+    return v
 
 router = APIRouter(prefix="/branches", tags=["branches"])
 
@@ -50,7 +59,7 @@ async def list_branches(ctx: OptionalSpace) -> dict[str, Any]:
             "SELECT * FROM branches ORDER BY established ASC, name ASC"
         ))
         rows = result.mappings().all()
-    return {"branches": [dict(r) for r in rows]}
+    return {"branches": [{k: _safe(v) for k, v in dict(r).items()} for r in rows]}
 
 
 @router.post("", status_code=201)
