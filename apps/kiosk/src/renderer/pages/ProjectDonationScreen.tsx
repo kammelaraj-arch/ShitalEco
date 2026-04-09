@@ -133,7 +133,6 @@ export function ProjectDonationScreen() {
     }
     async function loadItems() {
       setLoadingItems(true)
-      setSelectedBrick(null)
       try {
         const res = await fetch(`${API_BASE}/projects/${selectedProjectId}/items`)
         const data = await res.json()
@@ -215,179 +214,174 @@ export function ProjectDonationScreen() {
         )}
       </header>
 
-      {/* Project blocks ──────────────────────────────────────────────────────── */}
-      <div
-        className="flex-shrink-0 px-4 pt-4 pb-3"
-        style={{ background: '#fff', borderBottom: `3px solid ${th.langActive}` }}
-      >
-        <p className="text-xs font-black uppercase tracking-widest mb-3" style={{ color: th.langActive }}>
-          {language === 'gu' ? 'પ્રોજેક્ટ પસંદ કરો' : language === 'hi' ? 'प्रोजेक्ट चुनें' : '— Choose a Project —'}
-        </p>
+      {/* ── Scrollable body — max-width centred ─────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto" style={{ background: th.mainBg, scrollbarWidth: 'none' }}>
+        <div className="max-w-2xl mx-auto px-4 py-4 space-y-5">
 
-        {loadingProjects ? (
-          <div className="flex flex-col gap-2">
-            {[1, 2].map(i => (
-              <div key={i} className="h-20 rounded-2xl animate-pulse" style={{ background: '#f3f4f6' }} />
-            ))}
-          </div>
-        ) : projects.length === 0 ? (
-          <p className="text-sm text-gray-400 py-2">No projects available — contact admin.</p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {projects.map(p => {
-              const active = selectedProjectId === p.project_id
-              return (
-                <motion.button
-                  key={p.project_id}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setSelectedProjectId(p.project_id)}
-                  className="relative overflow-hidden rounded-2xl text-left transition-all flex items-center"
-                  style={{
-                    height: 80,
-                    border: active ? `3px solid ${th.langActive}` : '3px solid #e5e7eb',
-                    boxShadow: active ? `0 4px 16px ${th.langActive}40` : '0 1px 4px rgba(0,0,0,0.06)',
-                    background: active ? `${th.langActive}08` : '#fff',
-                  }}
-                >
-                  {/* Image thumbnail */}
-                  <div
-                    className="relative overflow-hidden flex-shrink-0 flex items-center justify-center"
-                    style={{ width: 100, height: 80, background: '#f3f4f6' }}
-                  >
-                    {p.image_url ? (
-                      <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-4xl">🏗️</span>
-                    )}
-                  </div>
+          {/* Project selector ─────────────────────────────────────────────── */}
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest mb-2.5" style={{ color: th.langActive }}>
+              {language === 'gu' ? 'પ્રોજેક્ટ પસંદ કરો' : language === 'hi' ? 'प्रोजेक्ट चुनें' : '— Choose a Project —'}
+            </p>
 
-                  {/* Text */}
-                  <div className="flex-1 px-3 py-2">
-                    <p className="font-black text-base leading-snug text-gray-900">{p.name}</p>
-                    {p.goal_amount > 0 && (
-                      <p className="text-xs mt-0.5 font-bold" style={{ color: active ? th.langActive : '#9ca3af' }}>
-                        Goal: £{Number(p.goal_amount).toLocaleString()}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Selected badge */}
-                  {active && (
-                    <div className="pr-3">
-                      <span
-                        className="text-[11px] font-black px-2.5 py-1 rounded-full text-white"
-                        style={{ background: th.langActive }}
-                      >✓ Selected</span>
-                    </div>
-                  )}
-                </motion.button>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Brick tier grid ──────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto p-4" style={{ background: th.mainBg, scrollbarWidth: 'none' }}>
-        {loadingItems ? (
-          <div className="grid grid-cols-2 gap-3">
-            {[1, 2, 3, 4].map(i => (
-              <div key={i} className="h-40 rounded-2xl animate-pulse" style={{ background: 'rgba(0,0,0,0.08)' }} />
-            ))}
-          </div>
-        ) : (
-          <>
-            <p className="text-xs font-black uppercase tracking-widest mb-3" style={{ color: th.langActive }}>— Choose Donation Amount —</p>
-            <div className="grid grid-cols-2 gap-3">
-              {projectItems.map((brick, i) => {
-                const style = getBrickStyle(brick, i)
-                const isAdded = addedBrick === brick.id
-                const inBasket = items.find(it => it.referenceId === `${selectedProjectId}_${brick.id}`)
-                const isLarge = style.size === 'large'
-                return (
-                  <motion.button
-                    key={brick.id}
-                    initial={{ opacity: 0, y: 14 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    onClick={() => handleBrickTap(brick)}
-                    className="relative overflow-hidden rounded-2xl p-4 text-left transition-all active:scale-95"
-                    style={{
-                      background: style.gradient,
-                      boxShadow: `0 4px 12px ${style.glow}`,
-                      border: '3px solid transparent',
-                    }}
-                  >
-                    {/* Shine */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none rounded-2xl" />
-
-                    {/* Shimmer for large tiers */}
-                    {isLarge && (
-                      <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-2xl">
-                        <motion.div
-                          animate={{ x: ['−100%', '200%'] }}
-                          transition={{ duration: 2.5, repeat: Infinity, ease: 'linear', repeatDelay: 1 }}
-                          className="absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12"
-                        />
+            {loadingProjects ? (
+              <div className="flex gap-2">
+                {[1, 2].map(i => (
+                  <div key={i} className="h-14 flex-1 rounded-2xl animate-pulse" style={{ background: 'rgba(0,0,0,0.08)' }} />
+                ))}
+              </div>
+            ) : projects.length === 0 ? (
+              <p className="text-sm text-gray-400 py-2">No projects available — contact admin.</p>
+            ) : (
+              /* Horizontal chip row — each project is a fixed-width pill card */
+              <div className="flex gap-2 flex-wrap">
+                {projects.map(p => {
+                  const active = selectedProjectId === p.project_id
+                  return (
+                    <motion.button
+                      key={p.project_id}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => setSelectedProjectId(p.project_id)}
+                      className="flex items-center gap-2.5 px-3 py-2 rounded-2xl transition-all text-left"
+                      style={{
+                        border: active ? `2.5px solid ${th.langActive}` : '2.5px solid #e5e7eb',
+                        background: active ? `${th.langActive}12` : '#fff',
+                        boxShadow: active ? `0 3px 12px ${th.langActive}35` : '0 1px 3px rgba(0,0,0,0.06)',
+                        maxWidth: 260,
+                      }}
+                    >
+                      {/* Thumbnail */}
+                      <div
+                        className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden flex items-center justify-center"
+                        style={{ background: '#f3f4f6' }}
+                      >
+                        {p.image_url
+                          ? <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                          : <span className="text-xl">🏗️</span>}
                       </div>
-                    )}
-
-                    {/* Added flash overlay */}
-                    <AnimatePresence>
-                      {isAdded && (
-                        <motion.div
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          className="absolute inset-0 rounded-2xl flex items-center justify-center z-20 pointer-events-none"
-                          style={{ background: 'rgba(0,0,0,0.45)' }}
-                        >
-                          <span className="text-white font-black text-xl">✓ Added!</span>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    <div className="relative z-10">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-2xl">{brick.emoji}</span>
-                        {brick.giftAidEligible && (
-                          <span
-                            className="text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1"
-                            style={{ background: 'rgba(34,197,94,0.25)', color: '#15803D' }}
-                          >
-                            ✓ Gift Aid
-                          </span>
+                      {/* Text */}
+                      <div className="min-w-0">
+                        <p className="font-black text-sm leading-snug text-gray-900 truncate">{p.name}</p>
+                        {p.goal_amount > 0 && (
+                          <p className="text-xs font-bold truncate" style={{ color: active ? th.langActive : '#9ca3af' }}>
+                            Goal: £{Number(p.goal_amount).toLocaleString()}
+                          </p>
                         )}
                       </div>
-                      <p className="font-black text-base mb-0.5" style={{ color: style.textColor }}>
-                        {getBrickName(brick, language)}
-                      </p>
-                      <p className="font-black text-2xl" style={{ color: style.textColor }}>£{brick.price}</p>
+                      {active && (
+                        <span
+                          className="text-[10px] font-black px-2 py-0.5 rounded-full text-white flex-shrink-0"
+                          style={{ background: th.langActive }}
+                        >✓</span>
+                      )}
+                    </motion.button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
 
-                      {brick.giftAidEligible && (
-                        <div
-                          className="mt-2 rounded-xl px-2 py-1.5 text-xs"
-                          style={{ background: style.badgeBg }}
-                        >
-                          <p style={{ color: style.textColor }} className="opacity-80">Worth with Gift Aid:</p>
-                          <p className="font-black text-sm" style={{ color: style.textColor }}>
-                            £{getGiftAidTotal(brick.price)} (+£{getGiftAidValue(brick.price)})
+          {/* Brick tier grid ────────────────────────────────────────────────── */}
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest mb-2.5" style={{ color: th.langActive }}>
+              — Choose Donation Amount —
+            </p>
+
+            {loadingItems ? (
+              <div className="grid grid-cols-3 gap-3">
+                {[1, 2, 3, 4, 5, 6].map(i => (
+                  <div key={i} className="h-32 rounded-2xl animate-pulse" style={{ background: 'rgba(0,0,0,0.08)' }} />
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                {projectItems.map((brick, i) => {
+                  const style = getBrickStyle(brick, i)
+                  const isAdded = addedBrick === brick.id
+                  const inBasket = items.find(it => it.referenceId === `${selectedProjectId}_${brick.id}`)
+                  const isLarge = style.size === 'large'
+                  return (
+                    <motion.button
+                      key={brick.id}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.04 }}
+                      onClick={() => handleBrickTap(brick)}
+                      className="relative overflow-hidden rounded-2xl p-3 text-left transition-all active:scale-95"
+                      style={{
+                        background: style.gradient,
+                        boxShadow: `0 3px 10px ${style.glow}`,
+                      }}
+                    >
+                      {/* Shine */}
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none rounded-2xl" />
+
+                      {/* Shimmer for premium tiers */}
+                      {isLarge && (
+                        <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-2xl">
+                          <motion.div
+                            animate={{ x: ['-100%', '200%'] }}
+                            transition={{ duration: 2.5, repeat: Infinity, ease: 'linear', repeatDelay: 1 }}
+                            className="absolute inset-y-0 w-12 bg-gradient-to-r from-transparent via-white/25 to-transparent -skew-x-12"
+                          />
+                        </div>
+                      )}
+
+                      {/* Added flash */}
+                      <AnimatePresence>
+                        {isAdded && (
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute inset-0 rounded-2xl flex items-center justify-center z-20 pointer-events-none"
+                            style={{ background: 'rgba(0,0,0,0.45)' }}
+                          >
+                            <span className="text-white font-black text-lg">✓ Added!</span>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <div className="relative z-10">
+                        <div className="flex items-start justify-between mb-1.5">
+                          <span className="text-xl">{brick.emoji}</span>
+                          {brick.giftAidEligible && (
+                            <span
+                              className="text-[9px] font-black px-1.5 py-0.5 rounded-full"
+                              style={{ background: 'rgba(34,197,94,0.25)', color: '#15803D' }}
+                            >✓ GA</span>
+                          )}
+                        </div>
+                        <p className="font-black text-sm leading-tight mb-0.5" style={{ color: style.textColor }}>
+                          {getBrickName(brick, language)}
+                        </p>
+                        <p className="font-black text-xl leading-tight" style={{ color: style.textColor }}>
+                          £{brick.price}
+                        </p>
+                        {brick.giftAidEligible && (
+                          <div
+                            className="mt-1.5 rounded-lg px-1.5 py-1 text-[10px]"
+                            style={{ background: style.badgeBg }}
+                          >
+                            <p className="font-black" style={{ color: style.textColor }}>
+                              +GA: £{getGiftAidTotal(brick.price)}
+                            </p>
+                          </div>
+                        )}
+                        {inBasket && !isAdded && (
+                          <p className="mt-1 text-[10px] font-bold opacity-80" style={{ color: style.textColor }}>
+                            In basket: {inBasket.quantity}×
                           </p>
-                        </div>
-                      )}
+                        )}
+                      </div>
+                    </motion.button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
 
-                      {inBasket && !isAdded && (
-                        <div className="mt-2 flex items-center gap-1 text-xs font-bold" style={{ color: style.textColor }}>
-                          <span className="opacity-80">In basket: {inBasket.quantity}×</span>
-                        </div>
-                      )}
-                    </div>
-                  </motion.button>
-                )
-              })}
-            </div>
-          </>
-        )}
+        </div>
       </div>
 
       {/* ══ BOTTOM BAR — always visible, matches HomeScreen ══════════════════════ */}
