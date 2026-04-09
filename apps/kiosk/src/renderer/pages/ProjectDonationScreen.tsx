@@ -217,70 +217,76 @@ export function ProjectDonationScreen() {
         )}
       </header>
 
-      {/* Project cards — horizontal scroll ──────────────────────────────────── */}
+      {/* Project blocks ──────────────────────────────────────────────────────── */}
       <div
-        className="flex-shrink-0 px-3 py-3"
-        style={{ background: th.sectionHeaderBg, borderBottom: '1px solid rgba(0,0,0,0.07)' }}
+        className="flex-shrink-0 px-4 pt-4 pb-3"
+        style={{ background: '#fff', borderBottom: `3px solid ${th.langActive}` }}
       >
-        <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: th.sectionTitleColor, opacity: 0.5 }}>
-          {language === 'gu' ? 'પ્રોજેક્ટ પસંદ કરો' : language === 'hi' ? 'प्रोजेक्ट चुनें' : 'Select Project'}
+        <p className="text-xs font-black uppercase tracking-widest mb-3" style={{ color: th.langActive }}>
+          {language === 'gu' ? 'પ્રોજેક્ટ પસંદ કરો' : language === 'hi' ? 'प्रोजेक्ट चुनें' : '— Choose a Project —'}
         </p>
 
         {loadingProjects ? (
-          <div className="flex gap-3 overflow-x-hidden pb-1">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="flex-shrink-0 w-44 h-28 rounded-2xl animate-pulse" style={{ background: 'rgba(0,0,0,0.08)' }} />
+          <div className="grid grid-cols-2 gap-3">
+            {[1, 2].map(i => (
+              <div key={i} className="h-32 rounded-2xl animate-pulse" style={{ background: '#f3f4f6' }} />
             ))}
           </div>
         ) : projects.length === 0 ? (
-          <p className="text-xs text-gray-400 py-2">No projects available — contact admin.</p>
+          <p className="text-sm text-gray-400 py-2">No projects available — contact admin.</p>
         ) : (
-          <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+          <div
+            className={projects.length <= 3 ? 'grid gap-3' : 'flex gap-3 overflow-x-auto pb-1'}
+            style={projects.length <= 3
+              ? { gridTemplateColumns: `repeat(${Math.min(projects.length, 3)}, 1fr)` }
+              : { scrollbarWidth: 'none' }}
+          >
             {projects.map(p => {
               const active = selectedProjectId === p.project_id
               return (
                 <motion.button
                   key={p.project_id}
-                  whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => setSelectedProjectId(p.project_id)}
-                  className="flex-shrink-0 w-48 rounded-2xl p-3 text-left transition-all"
+                  className="relative overflow-hidden rounded-2xl text-left transition-all flex-shrink-0"
                   style={{
-                    background: active ? `${th.langActive}18` : 'rgba(0,0,0,0.05)',
-                    border: active ? `2px solid ${th.langActive}` : '2px solid rgba(0,0,0,0.08)',
-                    boxShadow: active ? `0 4px 16px ${th.langActive}30` : 'none',
+                    minWidth: projects.length > 3 ? 200 : undefined,
+                    border: active ? `3px solid ${th.langActive}` : '3px solid #e5e7eb',
+                    boxShadow: active ? `0 6px 20px ${th.langActive}40` : '0 2px 8px rgba(0,0,0,0.08)',
                   }}
                 >
-                  {/* Image or emoji header */}
+                  {/* Image / colour block */}
                   <div
-                    className="w-full h-20 rounded-xl mb-2 flex items-center justify-center overflow-hidden"
-                    style={{ background: active ? `${th.langActive}20` : 'rgba(0,0,0,0.06)' }}
+                    className="relative w-full overflow-hidden flex items-center justify-center"
+                    style={{ height: 110, background: active ? `${th.langActive}18` : '#f3f4f6' }}
                   >
                     {p.image_url ? (
-                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover rounded-xl" />
+                      <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" />
                     ) : (
-                      <span className="text-4xl">🏗️</span>
+                      <span className="text-5xl">🏗️</span>
+                    )}
+                    {active && (
+                      <div
+                        className="absolute inset-0 flex items-end justify-end p-2"
+                        style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 60%)' }}
+                      >
+                        <span
+                          className="text-[10px] font-black px-2 py-0.5 rounded-full text-white"
+                          style={{ background: th.langActive }}
+                        >✓ Selected</span>
+                      </div>
                     )}
                   </div>
-                  <p className="font-black text-sm leading-snug" style={{ color: active ? th.langActive : th.sectionTitleColor }}>
-                    {p.name}
-                  </p>
-                  {p.description ? (
-                    <p className="text-xs mt-0.5 line-clamp-1" style={{ color: th.sectionTitleColor, opacity: 0.5 }}>
-                      {p.description}
-                    </p>
-                  ) : null}
-                  {p.goal_amount > 0 && (
-                    <p className="text-xs mt-1 font-bold" style={{ color: active ? th.langActive : '#6B7280' }}>
-                      Goal: £{Number(p.goal_amount).toLocaleString()}
-                    </p>
-                  )}
-                  {active && (
-                    <div className="flex items-center gap-1 mt-1">
-                      <div className="w-2 h-2 rounded-full" style={{ background: th.langActive }} />
-                      <span className="text-xs font-black" style={{ color: th.langActive }}>Selected</span>
-                    </div>
-                  )}
+
+                  {/* Text */}
+                  <div className="px-3 py-2.5" style={{ background: active ? `${th.langActive}08` : '#fff' }}>
+                    <p className="font-black text-sm leading-snug text-gray-900">{p.name}</p>
+                    {p.goal_amount > 0 && (
+                      <p className="text-xs mt-0.5 font-bold" style={{ color: active ? th.langActive : '#9ca3af' }}>
+                        Goal: £{Number(p.goal_amount).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
                 </motion.button>
               )
             })}
@@ -298,7 +304,7 @@ export function ProjectDonationScreen() {
           </div>
         ) : (
           <>
-            <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Choose Your Donation Tier</p>
+            <p className="text-xs font-black uppercase tracking-widest mb-3" style={{ color: th.langActive }}>— Choose Donation Amount —</p>
             <div className="grid grid-cols-2 gap-3">
               {projectItems.map((brick, i) => {
                 const style = getBrickStyle(brick, i)

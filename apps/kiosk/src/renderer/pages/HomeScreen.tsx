@@ -509,16 +509,16 @@ export function HomeScreen() {
                             <button
                               type="button"
                               onPointerDown={() => handleAddCatalog(item)}
-                              className="w-full relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                              className="w-full relative overflow-hidden rounded-2xl text-left bg-white border border-gray-100 shadow-md active:scale-95 hover:shadow-lg transition-all flex flex-col"
                               style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
                             >
                               {/* Image area — per-item photo with emoji fallback */}
                               <div
                                 className="relative overflow-hidden flex-shrink-0 pointer-events-none"
-                                style={{ height: 100, background: '#f3f4f6' }}
+                                style={{ height: 100, background: `${(CATEGORY_META[item.category] ?? CATEGORY_META.OTHER).color}22` }}
                               >
                                 <div className="absolute inset-0 flex items-center justify-center">
-                                  <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.55 }}>{item.emoji ?? '🙏'}</span>
+                                  <span style={{ fontSize: 52, lineHeight: 1 }}>{item.emoji ?? '🙏'}</span>
                                 </div>
                                 <img
                                   src={item.image_url || getCategoryImage(item.category)}
@@ -585,15 +585,15 @@ export function HomeScreen() {
                             <button
                               type="button"
                               onPointerDown={() => handleAdd(svc)}
-                              className="w-full relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                              className="w-full relative overflow-hidden rounded-2xl text-left bg-white border border-gray-100 shadow-md active:scale-95 hover:shadow-lg transition-all flex flex-col"
                               style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
                             >
                               <div
                                 className="relative overflow-hidden flex-shrink-0 pointer-events-none"
-                                style={{ height: 100, background: `${m.color}25` }}
+                                style={{ height: 100, background: `${m.color}20` }}
                               >
                                 <div className="absolute inset-0 flex items-center justify-center">
-                                  <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.6 }}>{m.icon}</span>
+                                  <span style={{ fontSize: 52, lineHeight: 1 }}>{m.icon}</span>
                                 </div>
                                 <img
                                   src={getCategoryImage(svc.category)}
@@ -639,7 +639,7 @@ export function HomeScreen() {
       {/* ══ CUSTOM DONATION STRIP — always visible ═════════════════════════════ */}
       <div
         className="flex-shrink-0 px-4 py-3 flex items-center gap-3"
-        style={{ background: '#FFFBEB', borderTop: '2px solid #FDE68A' }}
+        style={{ background: '#FFF3E0', borderTop: '2px solid #FF9933' }}
       >
         <span className="text-sm font-bold text-amber-700 flex-shrink-0">🙏 Custom:</span>
         <div
