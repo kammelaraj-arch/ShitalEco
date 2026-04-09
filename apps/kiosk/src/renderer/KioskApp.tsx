@@ -65,7 +65,7 @@ export function KioskApp() {
   }
 
   return (
-    <div className="w-screen h-screen overflow-hidden" style={{ background: '#FAFAFA' }}>
+    <div className="w-screen overflow-hidden" style={{ background: '#FAFAFA', height: '100dvh' }}>
       <AnimatePresence mode="wait">
         <motion.div key={screen} variants={pageVariants} initial="initial" animate="animate" exit="exit" className="w-full h-full">
           {renderScreen()}

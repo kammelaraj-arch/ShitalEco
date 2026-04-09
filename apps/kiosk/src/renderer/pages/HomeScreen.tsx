@@ -638,25 +638,26 @@ export function HomeScreen() {
 
       {/* ══ CUSTOM DONATION STRIP — always visible ═════════════════════════════ */}
       <div
-        className="flex-shrink-0 px-4 py-3 flex items-center gap-3"
+        className="flex-shrink-0 px-3 py-2 flex items-center gap-2"
         style={{ background: '#FFF3E0', borderTop: '2px solid #FF9933' }}
       >
-        <span className="text-sm font-bold text-amber-700 flex-shrink-0">🙏 Custom:</span>
+        <span className="text-xs font-bold text-amber-700 flex-shrink-0 hidden sm:inline">🙏 Custom:</span>
+        <span className="text-xs font-bold text-amber-700 flex-shrink-0 sm:hidden">🙏</span>
         <div
-          className="flex items-center gap-1 flex-1 rounded-2xl border-2 bg-white cursor-pointer"
+          className="flex items-center gap-1 flex-1 rounded-xl border-2 bg-white cursor-pointer"
           style={{ borderColor: customAmount && parseFloat(customAmount) > 0 ? '#FF9933' : '#FDE68A' }}
           onClick={() => setKeyboardOpen(true)}
         >
-          <span className="text-xl font-black text-amber-600 px-3">£</span>
-          <span className={`flex-1 py-3 pr-3 text-xl font-black ${customAmount ? 'text-gray-800' : 'text-gray-400'}`}>
+          <span className="text-base font-black text-amber-600 px-2">£</span>
+          <span className={`flex-1 py-2 pr-2 text-base font-black ${customAmount ? 'text-gray-800' : 'text-gray-400'}`}>
             {customAmount || 'Tap to enter'}
           </span>
         </div>
         <button
           onClick={handleAddCustom}
           disabled={!customAmount || parseFloat(customAmount) <= 0}
-          className="px-20 py-2.5 rounded-2xl text-white font-black text-2xl transition-all active:scale-95 disabled:opacity-40 flex-shrink-0 shadow-xl"
-          style={{ background: customAdded ? '#22C55E' : th.langActive, minWidth: 200, letterSpacing: '-0.5px' }}
+          className="px-5 py-2 sm:px-20 sm:py-2.5 rounded-xl text-white font-black text-sm sm:text-2xl transition-all active:scale-95 disabled:opacity-40 flex-shrink-0 shadow-xl"
+          style={{ background: customAdded ? '#22C55E' : th.langActive, letterSpacing: '-0.5px' }}
         >
           {customAdded ? '✓ Added' : '+ Add'}
         </button>
@@ -665,7 +666,7 @@ export function HomeScreen() {
       {/* ══ BOTTOM BAR — always visible, McDonald's style ══════════════════════ */}
       <div
         className="flex-shrink-0"
-        style={{ background: '#fff', borderTop: '1px solid #e5e7eb', boxShadow: '0 -2px 12px rgba(0,0,0,0.08)' }}
+        style={{ background: '#fff', borderTop: '1px solid #e5e7eb', boxShadow: '0 -2px 12px rgba(0,0,0,0.08)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         {/* Main row: basket info + View My Order */}
         <div className="flex items-center gap-3 px-4 py-3">
