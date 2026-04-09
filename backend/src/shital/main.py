@@ -412,6 +412,23 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_kiosk_devices_token  ON kiosk_devices(device_token)",
         # ── Add card_reader_id to existing kiosk_devices rows ─────────────────
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS card_reader_id UUID",
+        # ── Deduplicate catalog_items — keep one row per (name, category, price) ─
+        # Keeps the row with the earliest created_at; safe to re-run (idempotent)
+        """
+        DELETE FROM catalog_items
+        WHERE id IN (
+            SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY lower(name), category, price
+                           ORDER BY created_at ASC, id ASC
+                       ) AS rn
+                FROM catalog_items
+                WHERE deleted_at IS NULL
+            ) t
+            WHERE rn > 1
+        )
+        """,
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
