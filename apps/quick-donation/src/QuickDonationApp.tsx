@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react'
+import React, { useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useDonationStore } from './store/donation.store'
 import { IdleScreen } from './pages/IdleScreen'
@@ -8,18 +8,20 @@ import { TapScreen } from './pages/TapScreen'
 import { ConfirmationScreen } from './pages/ConfirmationScreen'
 import { AdminScreen } from './pages/AdminScreen'
 
-const IDLE_TIMEOUT_MS = 90_000
+// Show screensaver after 2 min of idle on the donate screen only
+const SCREENSAVER_TIMEOUT_MS = 120_000
 
 export function QuickDonationApp() {
-  const { screen, reset } = useDonationStore()
-  let idleTimeout: ReturnType<typeof setTimeout>
+  const { screen, setScreen, reset } = useDonationStore()
+  const idleTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const resetIdle = useCallback(() => {
-    clearTimeout(idleTimeout)
-    if (screen !== 'idle') {
-      idleTimeout = setTimeout(() => reset(), IDLE_TIMEOUT_MS)
+    if (idleTimeout.current) clearTimeout(idleTimeout.current)
+    // Only start screensaver timer when on donate screen (not during active payment)
+    if (screen === 'donate') {
+      idleTimeout.current = setTimeout(() => setScreen('idle'), SCREENSAVER_TIMEOUT_MS)
     }
-  }, [screen, reset])
+  }, [screen, setScreen])
 
   useEffect(() => {
     window.addEventListener('touchstart', resetIdle)
@@ -28,7 +30,7 @@ export function QuickDonationApp() {
     return () => {
       window.removeEventListener('touchstart', resetIdle)
       window.removeEventListener('mousedown', resetIdle)
-      clearTimeout(idleTimeout)
+      if (idleTimeout.current) clearTimeout(idleTimeout.current)
     }
   }, [resetIdle])
 

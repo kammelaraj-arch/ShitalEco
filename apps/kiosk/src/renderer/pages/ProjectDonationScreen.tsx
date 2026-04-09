@@ -182,33 +182,34 @@ export function ProjectDonationScreen() {
 
       {/* Header */}
       <header
-        className="flex items-center h-16 px-4 gap-3 flex-shrink-0 z-20"
-        style={{ background: th.headerBg, borderBottom: `2px solid rgba(255,153,51,0.25)`, boxShadow: '0 2px 12px rgba(0,0,0,0.10)' }}
+        className="flex items-center h-20 px-5 gap-4 flex-shrink-0 z-20"
+        style={{ background: th.langActive, boxShadow: '0 4px 16px rgba(0,0,0,0.18)' }}
       >
         <button
           onClick={() => setScreen('home')}
-          className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg active:scale-95"
-          style={{ background: `${th.langActive}20`, color: th.headerText }}
+          className="w-12 h-12 rounded-2xl flex items-center justify-center font-black text-2xl active:scale-95 flex-shrink-0"
+          style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}
         >
           ←
         </button>
         <div className="flex-1">
-          <h1 className="font-black text-lg" style={{ color: th.headerText }}>
+          <h1 className="font-black text-2xl text-white leading-tight">
             {language === 'gu' ? 'પ્રોજેક્ટ દાન' : language === 'hi' ? 'प्रोजेक्ट दान' : 'Project Donations'}
           </h1>
-          <p className="text-xs" style={{ color: th.headerSub }}>🏗️ Build Something Lasting</p>
+          <p className="text-sm font-semibold" style={{ color: 'rgba(255,255,255,0.75)' }}>🏗️ Build Something Lasting</p>
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl" style={{ background: '#DCFCE7', border: '1.5px solid #86EFAC' }}>
-          <span className="text-green-600 font-black text-sm">✓</span>
-          <span className="text-green-700 font-bold text-xs">Gift Aid</span>
+        <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/20">
+          <span className="text-white font-black text-sm">✓</span>
+          <span className="text-white font-bold text-xs">Gift Aid</span>
         </div>
         {basketCount > 0 && (
           <button
             onClick={() => setScreen('basket')}
-            className="relative flex items-center gap-2 text-white font-bold px-3 py-2 rounded-xl active:scale-95 shadow-md text-sm"
-            style={{ background: th.basketBtn }}
+            className="relative flex items-center gap-2 text-white font-bold px-4 py-2.5 rounded-xl active:scale-95 shadow-lg text-base"
+            style={{ background: 'rgba(255,255,255,0.22)', border: '1.5px solid rgba(255,255,255,0.35)' }}
           >
             🛒
+            <span className="text-white font-black">£{basketTotal.toFixed(2)}</span>
             <span className="absolute -top-2 -right-2 bg-yellow-400 text-gray-900 text-xs font-black w-5 h-5 rounded-full flex items-center justify-center">
               {basketCount}
             </span>

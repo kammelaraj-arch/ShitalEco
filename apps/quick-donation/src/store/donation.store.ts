@@ -25,7 +25,7 @@ export interface DonationState {
 export const useDonationStore = create<DonationState>()(
   persist(
     (set) => ({
-      screen: 'idle',
+      screen: 'donate',
       amount: 0,
       branchId: 'main',
       stripeReaderId: '',
@@ -43,7 +43,7 @@ export const useDonationStore = create<DonationState>()(
         set({ orderId, orderRef, paymentIntentId, clientSecret }),
       reset: () =>
         set({
-          screen: 'idle',
+          screen: 'donate',
           amount: 0,
           orderId: null,
           orderRef: null,

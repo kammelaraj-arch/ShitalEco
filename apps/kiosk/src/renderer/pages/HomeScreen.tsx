@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, t, THEMES, KioskTheme, Language, LANGUAGE_META } from '../store/kiosk.store'
+import { KioskKeyboard } from '../components/KioskKeyboard'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -215,6 +216,7 @@ export function HomeScreen() {
   const [showLanguagePicker, setShowLanguagePicker] = useState(false)
   const [customAmount, setCustomAmount] = useState('')
   const [customAdded, setCustomAdded] = useState(false)
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
   // Debounce guard — prevents double-fire from pointerdown + click on touch devices
   const lastTap = React.useRef<Record<string, number>>({})
 
@@ -636,29 +638,25 @@ export function HomeScreen() {
 
       {/* ══ CUSTOM DONATION STRIP — always visible ═════════════════════════════ */}
       <div
-        className="flex-shrink-0 px-4 py-2 flex items-center gap-2"
-        style={{ background: '#FFFBEB', borderTop: '1px solid #FDE68A' }}
+        className="flex-shrink-0 px-4 py-3 flex items-center gap-3"
+        style={{ background: '#FFFBEB', borderTop: '2px solid #FDE68A' }}
       >
-        <span className="text-xs font-bold text-amber-700 flex-shrink-0">🙏 Custom:</span>
-        <div className="flex items-center gap-1 flex-1">
-          <span className="text-sm font-bold text-gray-500 flex-shrink-0">£</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            value={customAmount}
-            onChange={e => setCustomAmount(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAddCustom()}
-            placeholder="Enter amount"
-            min="1"
-            className="flex-1 px-3 py-1.5 rounded-xl border-2 text-sm font-bold outline-none bg-white"
-            style={{ borderColor: customAmount && parseFloat(customAmount) > 0 ? '#FF9933' : '#FDE68A' }}
-          />
+        <span className="text-sm font-bold text-amber-700 flex-shrink-0">🙏 Custom:</span>
+        <div
+          className="flex items-center gap-1 flex-1 rounded-2xl border-2 bg-white cursor-pointer"
+          style={{ borderColor: customAmount && parseFloat(customAmount) > 0 ? '#FF9933' : '#FDE68A' }}
+          onClick={() => setKeyboardOpen(true)}
+        >
+          <span className="text-xl font-black text-amber-600 px-3">£</span>
+          <span className={`flex-1 py-3 pr-3 text-xl font-black ${customAmount ? 'text-gray-800' : 'text-gray-400'}`}>
+            {customAmount || 'Tap to enter'}
+          </span>
         </div>
         <button
           onClick={handleAddCustom}
           disabled={!customAmount || parseFloat(customAmount) <= 0}
-          className="px-10 py-4 rounded-2xl text-white font-black text-xl transition-all active:scale-95 disabled:opacity-40 flex-shrink-0 shadow-lg"
-          style={{ background: customAdded ? '#22C55E' : th.langActive }}
+          className="px-14 py-5 rounded-2xl text-white font-black text-2xl transition-all active:scale-95 disabled:opacity-40 flex-shrink-0 shadow-xl"
+          style={{ background: customAdded ? '#22C55E' : th.langActive, minWidth: 140, letterSpacing: '-0.5px' }}
         >
           {customAdded ? '✓ Added' : '+ Add'}
         </button>
@@ -722,6 +720,16 @@ export function HomeScreen() {
       <AnimatePresence>
         {showLanguagePicker && <LanguagePicker onClose={() => setShowLanguagePicker(false)} />}
       </AnimatePresence>
+
+      {/* On-screen numeric keyboard for custom donation amount */}
+      <KioskKeyboard
+        value={customAmount}
+        onChange={v => { setCustomAmount(v); setCustomAdded(false) }}
+        mode="numeric"
+        visible={keyboardOpen}
+        onDone={() => setKeyboardOpen(false)}
+        accent={th.langActive}
+      />
     </div>
   )
 }
