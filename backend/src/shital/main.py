@@ -622,7 +622,7 @@ async def _seed_email_templates() -> None:
 
     from shital.core.fabrics.database import SessionLocal
 
-    DONATION_RECEIPT_HTML = """<!DOCTYPE html>
+    donation_receipt_html = """<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
@@ -700,7 +700,7 @@ async def _seed_email_templates() -> None:
 </body>
 </html>"""
 
-    DONATION_RECEIPT_TEXT = """Shital Temple — {{ branch_name }}
+    donation_receipt_text = """Shital Temple — {{ branch_name }}
 Receipt Confirmation
 
 {% if customer_name %}Dear {{ customer_name }},{% endif %}
@@ -723,9 +723,9 @@ Registered UK Charity
 
 This receipt is for your records only."""
 
-    DONATION_RECEIPT_SUBJECT = "Your Donation Receipt — {{ branch_name }} ({{ order_ref }})"
+    donation_receipt_subject = "Your Donation Receipt — {{ branch_name }} ({{ order_ref }})"
 
-    WHATSAPP_RECEIPT_TEXT = """🕉 *Shital Temple Receipt*
+    whatsapp_receipt_text = """🕉 *Shital Temple Receipt*
 *{{ branch_name }}*
 
 ✅ Thank you{% if customer_name %}, {{ customer_name }}{% endif %}!
@@ -747,9 +747,9 @@ _{{ branch_name }} — Registered UK Charity_"""
         {
             "key": "donation_receipt",
             "name": "Donation Receipt — Email",
-            "subject": DONATION_RECEIPT_SUBJECT,
-            "html_body": DONATION_RECEIPT_HTML,
-            "text_body": DONATION_RECEIPT_TEXT,
+            "subject": donation_receipt_subject,
+            "html_body": donation_receipt_html,
+            "text_body": donation_receipt_text,
             "variables": '["order_ref","customer_name","total","items","branch_name","date"]',
         },
         {
@@ -757,7 +757,7 @@ _{{ branch_name }} — Registered UK Charity_"""
             "name": "Donation Receipt — WhatsApp",
             "subject": "",
             "html_body": "",
-            "text_body": WHATSAPP_RECEIPT_TEXT,
+            "text_body": whatsapp_receipt_text,
             "variables": '["order_ref","customer_name","total","items","branch_name","date"]',
         },
     ]
