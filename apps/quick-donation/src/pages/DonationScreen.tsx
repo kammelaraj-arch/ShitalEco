@@ -38,11 +38,10 @@ function NumKey({ k, onPress }: { k: string; onPress: (k: string) => void }) {
 export function DonationScreen() {
   const { setScreen, setAmount, branchId } = useDonationStore()
 
-  const [tiles, setTiles]           = useState<AmountTile[]>([])
-  const [loading, setLoading]       = useState(true)
-  const [selected, setSelected]     = useState<string | null>(null)
-  const [otherOpen, setOtherOpen]   = useState(false)
-  const [otherVal, setOtherVal]     = useState('')
+  const [tiles, setTiles]         = useState<AmountTile[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [otherOpen, setOtherOpen] = useState(false)
+  const [otherVal, setOtherVal]   = useState('')
 
   // ── Load amounts from API ──────────────────────────────────────────────────
   useEffect(() => {
@@ -55,17 +54,9 @@ export function DonationScreen() {
         const items: AmountTile[] = (data.items || [])
           .filter((i: { is_active?: boolean }) => i.is_active !== false)
           .map((i: { id: string; price: number }) => ({ id: i.id, price: i.price }))
-
-        const list = items.length ? items : FALLBACK_AMOUNTS.map(p => ({ id: `f${p}`, price: p }))
-        setTiles(list)
-
-        // Auto-select amount closest to £5
-        const target = list.find(t => t.price === 5) || list[Math.floor(list.length / 2)]
-        if (target) setSelected(target.id)
+        setTiles(items.length ? items : FALLBACK_AMOUNTS.map(p => ({ id: `f${p}`, price: p })))
       } catch {
-        const list = FALLBACK_AMOUNTS.map(p => ({ id: `f${p}`, price: p }))
-        setTiles(list)
-        setSelected('f5')
+        setTiles(FALLBACK_AMOUNTS.map(p => ({ id: `f${p}`, price: p })))
       }
       setLoading(false)
     }
@@ -83,15 +74,21 @@ export function DonationScreen() {
     setOtherVal(next)
   }
 
-  const effectiveAmount = otherOpen
-    ? parseFloat(otherVal) || 0
-    : tiles.find(t => t.id === selected)?.price ?? 0
-
-  const handleDonate = () => {
-    if (effectiveAmount <= 0) return
-    setAmount(effectiveAmount)
+  // Tap a preset tile → go straight to payment
+  const handleTileTap = (price: number) => {
+    setAmount(price)
     setScreen('processing')
   }
+
+  // Confirm custom amount → go to payment
+  const handleOtherConfirm = () => {
+    const amt = parseFloat(otherVal)
+    if (!amt || amt <= 0) return
+    setAmount(amt)
+    setScreen('processing')
+  }
+
+  const otherAmount = parseFloat(otherVal) || 0
 
   return (
     <div className="w-full h-full flex flex-col bg-temple-gradient">
@@ -109,7 +106,7 @@ export function DonationScreen() {
       </div>
 
       {/* ── Amount grid ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 px-5 pb-3 overflow-hidden">
+      <div className="flex-1 px-5 pb-5 overflow-hidden">
         {loading ? (
           <div className="grid grid-cols-3 gap-3 h-full">
             {[1,2,3,4,5,6].map(i => (
@@ -118,64 +115,53 @@ export function DonationScreen() {
           </div>
         ) : (
           <div className="grid gap-3 h-full" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gridAutoRows: '1fr' }}>
-            {tiles.map(tile => {
-              const isSelected = !otherOpen && selected === tile.id
-              return (
-                <motion.button
-                  key={tile.id}
-                  whileTap={{ scale: 0.94 }}
-                  onClick={() => { setSelected(tile.id); setOtherOpen(false); setOtherVal('') }}
-                  className="rounded-3xl flex flex-col items-center justify-center font-black transition-all"
-                  style={{
-                    background: isSelected
-                      ? 'linear-gradient(135deg,#FF9933,#FF6B00)'
-                      : 'rgba(255,255,255,0.08)',
-                    border: isSelected ? '2.5px solid rgba(255,153,51,0.8)' : '1.5px solid rgba(255,255,255,0.10)',
-                    boxShadow: isSelected ? '0 8px 28px rgba(255,153,51,0.4)' : 'none',
-                    color: '#fff',
-                  }}
-                >
-                  <span className="text-white/50 text-xs font-semibold mb-1">£</span>
-                  <span style={{ fontSize: tile.price >= 100 ? 32 : 40 }}>{tile.price % 1 === 0 ? tile.price : tile.price.toFixed(2)}</span>
-                  {isSelected && <span className="text-white/60 text-xs mt-1">Selected</span>}
-                </motion.button>
-              )
-            })}
+            {tiles.map(tile => (
+              <motion.button
+                key={tile.id}
+                whileTap={{ scale: 0.92 }}
+                onClick={() => handleTileTap(tile.price)}
+                className="rounded-3xl flex flex-col items-center justify-center font-black transition-all active:brightness-110"
+                style={{
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1.5px solid rgba(255,255,255,0.12)',
+                  color: '#fff',
+                }}
+              >
+                <span className="text-white/40 text-xs font-semibold mb-0.5">£</span>
+                <span style={{ fontSize: tile.price >= 100 ? 34 : 42 }}>
+                  {tile.price % 1 === 0 ? tile.price : tile.price.toFixed(2)}
+                </span>
+                <span className="text-white/30 text-[10px] mt-1 font-medium">
+                  +GA £{(tile.price * 1.25).toFixed(2)}
+                </span>
+              </motion.button>
+            ))}
 
             {/* "Other" — double-width */}
             <motion.button
               whileTap={{ scale: 0.94 }}
-              onClick={() => { setOtherOpen(true); setSelected(null) }}
+              onClick={() => { setOtherOpen(true); setOtherVal('') }}
               className="rounded-3xl flex flex-col items-center justify-center font-black col-span-2 transition-all"
               style={{
-                background: otherOpen ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.06)',
-                border: otherOpen ? '2.5px solid rgba(255,255,255,0.35)' : '1.5px solid rgba(255,255,255,0.10)',
+                background: otherOpen ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)',
+                border: otherOpen ? '2px solid rgba(255,255,255,0.30)' : '1.5px solid rgba(255,255,255,0.10)',
                 color: '#fff',
               }}
             >
-              {otherOpen && otherVal ? (
-                <>
-                  <span className="text-white/50 text-xs mb-1">Custom</span>
-                  <span className="text-4xl">£{otherVal}</span>
-                </>
-              ) : (
-                <>
-                  <span className="text-3xl mb-1">✏️</span>
-                  <span className="text-xl">Other</span>
-                </>
-              )}
+              <span className="text-2xl mb-1">✏️</span>
+              <span className="text-xl">Other</span>
             </motion.button>
           </div>
         )}
       </div>
 
-      {/* ── On-screen numeric keypad (shown when Other is selected) ─────────── */}
+      {/* ── Numeric keypad (Other only) ──────────────────────────────────────── */}
       <AnimatePresence>
         {otherOpen && (
           <motion.div
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 350 }}
-            className="flex-shrink-0 px-5 pb-3"
+            className="flex-shrink-0 px-5 pb-4"
             style={{ background: '#1a0800', borderTop: '2px solid rgba(255,153,51,0.3)' }}
           >
             <div className="flex items-center justify-between py-3 mb-2">
@@ -189,41 +175,31 @@ export function DonationScreen() {
                 </React.Fragment>
               ))}
             </div>
-            <button
-              onClick={() => setOtherOpen(false)}
-              className="w-full mt-3 py-3 rounded-2xl text-white/50 font-bold text-sm"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
-            >
-              Cancel
-            </button>
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => { setOtherOpen(false); setOtherVal('') }}
+                className="flex-1 py-3 rounded-2xl text-white/50 font-bold text-sm"
+                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                Cancel
+              </button>
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={handleOtherConfirm}
+                disabled={otherAmount <= 0}
+                className="flex-[2] py-3 rounded-2xl font-black text-base text-white disabled:opacity-30"
+                style={{
+                  background: otherAmount > 0 ? 'linear-gradient(135deg,#FF9933,#FF6B00)' : 'rgba(255,255,255,0.08)',
+                  boxShadow: otherAmount > 0 ? '0 6px 20px rgba(255,153,51,0.45)' : 'none',
+                }}
+              >
+                {otherAmount > 0 ? `Donate £${otherAmount.toFixed(2)}` : 'Enter amount'}
+              </motion.button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Donate CTA ──────────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 px-5 pb-6 pt-2">
-        {effectiveAmount > 0 && (
-          <motion.p
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="text-center text-green-400/80 text-sm font-semibold mb-3"
-          >
-            🇬🇧 Gift Aid value: <span className="font-black text-green-400">£{(effectiveAmount * 1.25).toFixed(2)}</span>
-          </motion.p>
-        )}
-        <motion.button
-          whileTap={{ scale: 0.97 }}
-          onClick={handleDonate}
-          disabled={effectiveAmount <= 0}
-          className="w-full py-6 rounded-4xl font-black text-2xl transition-all ripple"
-          style={{
-            background: effectiveAmount > 0 ? 'linear-gradient(135deg,#FF9933,#FF6B00)' : 'rgba(255,255,255,0.08)',
-            color: effectiveAmount > 0 ? '#fff' : 'rgba(255,255,255,0.25)',
-            boxShadow: effectiveAmount > 0 ? '0 8px 32px rgba(255,153,51,0.5)' : 'none',
-          }}
-        >
-          {effectiveAmount > 0 ? `Tap to Donate £${effectiveAmount % 1 === 0 ? effectiveAmount : effectiveAmount.toFixed(2)}` : 'Select an amount'}
-        </motion.button>
-      </div>
     </div>
   )
 }
