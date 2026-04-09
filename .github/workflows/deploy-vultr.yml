@@ -137,21 +137,6 @@ jobs:
               echo "  attempt $i/30..."
             done
 
-            # ── Ensure SUPER_ADMIN always exists (idempotent upsert) ─────────
-            # Hash = bcrypt of "admin1234" at cost 12
-            echo "Ensuring SUPER_ADMIN exists..."
-            docker exec shitaleco-db-1 psql -U shitaleco_db_user -d shitaleco_db -c "
-              INSERT INTO users (id, email, name, role, password_hash, is_active, mfa_enabled, auth_provider, created_at, updated_at)
-              VALUES (gen_random_uuid(), 'admin@shitaleco.org', 'Admin', 'SUPER_ADMIN',
-                '\$2b\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TdxAtfq6Mp3vUhLtbS0c7c1MdRKC',
-                TRUE, FALSE, 'local', NOW(), NOW())
-              ON CONFLICT (email) DO UPDATE
-                SET role = 'SUPER_ADMIN',
-                    password_hash = '\$2b\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TdxAtfq6Mp3vUhLtbS0c7c1MdRKC',
-                    is_active = TRUE,
-                    updated_at = NOW();"
-            echo "SUPER_ADMIN ready: admin@shitaleco.org / admin1234"
-
             # ── Seed catalog if empty ────────────────────────────────────────
             curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
 

@@ -85,13 +85,16 @@ class AzureCallbackInput(BaseModel):
 @router.get("/config")
 async def azure_config():
     """Return MSAL client configuration for the admin frontend."""
-    tenant = settings.MS_TENANT_ID or "common"
+    from shital.core.fabrics.secrets import SecretsManager
+    client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
+    tenant_id = await SecretsManager.get("MS_TENANT_ID") or settings.MS_TENANT_ID
+    tenant = tenant_id or "common"
     return {
-        "client_id": settings.MS_CLIENT_ID,
+        "client_id": client_id,
         "authority": f"https://login.microsoftonline.com/{tenant}",
         "tenant_id": tenant,
         "scopes": ["openid", "profile", "email", "User.Read"],
-        "enabled": bool(settings.MS_CLIENT_ID and settings.MS_TENANT_ID),
+        "enabled": bool(client_id and tenant_id),
     }
 
 
@@ -110,7 +113,10 @@ async def verify_azure_token(body: VerifyTokenInput):
     from shital.capabilities.auth.capabilities import _create_access_token, _create_refresh_token
     from shital.core.fabrics.database import SessionLocal
 
-    if not settings.MS_CLIENT_ID:
+    from shital.core.fabrics.secrets import SecretsManager
+    ms_client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
+    ms_tenant_id = await SecretsManager.get("MS_TENANT_ID") or settings.MS_TENANT_ID
+    if not ms_client_id:
         raise HTTPException(status_code=501, detail="Azure AD SSO is not configured on this server")
 
     # ── 1. Decode header to get kid ───────────────────────────────────────────
@@ -137,7 +143,7 @@ async def verify_azure_token(body: VerifyTokenInput):
     jwk = jwks[kid]
 
     # ── 3. Validate the token signature + claims ──────────────────────────────
-    tenant = settings.MS_TENANT_ID or "common"
+    tenant = ms_tenant_id or "common"
     if tenant == "common":
         # Multi-tenant: accept any issuer (validate iss manually if needed)
         algorithms = ["RS256"]
@@ -151,7 +157,7 @@ async def verify_azure_token(body: VerifyTokenInput):
             body.id_token,
             jwk,
             algorithms=algorithms,
-            audience=settings.MS_CLIENT_ID,
+            audience=ms_client_id,
             options=options,
         )
     except JWTError as e:

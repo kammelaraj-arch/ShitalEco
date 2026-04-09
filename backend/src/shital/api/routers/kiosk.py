@@ -960,8 +960,10 @@ async def quick_kiosk_login_azure(body: AzureKioskLoginInput):
 
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
 
-    if not settings.MS_CLIENT_ID:
+    ms_client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
+    if not ms_client_id:
         return {"authenticated": False, "error": "Azure AD SSO is not configured"}
 
     # Validate token via existing Azure AD endpoint
