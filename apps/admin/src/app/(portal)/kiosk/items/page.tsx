@@ -124,6 +124,7 @@ export default function CatalogItemsPage() {
   const save = async () => {
     if (!form.name.trim()) return
     setSaving(true)
+    setError('')
     try {
       const url = editing ? `/items/${editing.id}` : `/items/`
       const method = editing ? 'PUT' : 'POST'
@@ -133,12 +134,16 @@ export default function CatalogItemsPage() {
         available_from: form.available_from || null,
         available_until: form.available_until || null,
         stock_qty: form.stock_qty ?? null,
+        // Send null instead of empty string so DB FK constraints are satisfied
+        branch_id: form.branch_id || null,
+        project_id: form.project_id || null,
       }
       await apiFetch(url, { method, body: JSON.stringify(body) })
       setShowForm(false)
       await load()
-    } catch { setError('Failed to save item') }
-    finally { setSaving(false) }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save item')
+    } finally { setSaving(false) }
   }
 
   const toggleLive = async (item: Item) => {

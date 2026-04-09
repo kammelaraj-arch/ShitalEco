@@ -469,52 +469,59 @@ async def create_item(body: ItemCreate, ctx: OptionalSpace):
     item_id = str(uuid.uuid4())
     now = datetime.utcnow()
 
-    async with SessionLocal() as db:
-        await db.execute(
-            text("""
-                INSERT INTO catalog_items
-                (id, name, name_gu, name_hi, name_te, description, category, price, currency,
-                 unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id, project_id,
-                 stock_qty, sort_order, metadata_json,
-                 available_from, available_until, display_channel, branch_stock, is_live,
-                 created_at, updated_at)
-                VALUES
-                (:id, :name, :name_gu, :name_hi, :name_te, :desc, :category, :price, :currency,
-                 :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id, :project_id,
-                 :stock_qty, :sort_order, :metadata_json::jsonb,
-                 :available_from, :available_until, :display_channel, :branch_stock::jsonb, :is_live,
-                 :now, :now)
-            """),
-            {
-                "id": item_id,
-                "name": body.name,
-                "name_gu": body.name_gu,
-                "name_hi": body.name_hi,
-                "name_te": body.name_te,
-                "desc": body.description,
-                "category": body.category.value,
-                "price": str(body.price),
-                "currency": body.currency,
-                "unit": body.unit,
-                "emoji": body.emoji,
-                "image_url": body.image_url,
-                "gift_aid": body.gift_aid_eligible,
-                "is_active": body.is_active,
-                "scope": body.scope.value,
-                "branch_id": body.branch_id,
-                "project_id": body.project_id,
-                "stock_qty": body.stock_qty,
-                "sort_order": body.sort_order,
-                "metadata_json": json.dumps(body.metadata_json),
-                "available_from": body.available_from,
-                "available_until": body.available_until,
-                "display_channel": body.display_channel.value,
-                "branch_stock": json.dumps(body.branch_stock),
-                "is_live": body.is_live,
-                "now": now,
-            },
-        )
-        await db.commit()
+    # Coerce empty strings to None so FK / nullable columns get NULL not ""
+    branch_id = body.branch_id or None
+    project_id = body.project_id or None
+
+    try:
+        async with SessionLocal() as db:
+            await db.execute(
+                text("""
+                    INSERT INTO catalog_items
+                    (id, name, name_gu, name_hi, name_te, description, category, price, currency,
+                     unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id, project_id,
+                     stock_qty, sort_order, metadata_json,
+                     available_from, available_until, display_channel, branch_stock, is_live,
+                     created_at, updated_at)
+                    VALUES
+                    (:id, :name, :name_gu, :name_hi, :name_te, :desc, :category, :price, :currency,
+                     :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id, :project_id,
+                     :stock_qty, :sort_order, :metadata_json::jsonb,
+                     :available_from, :available_until, :display_channel, :branch_stock::jsonb, :is_live,
+                     :now, :now)
+                """),
+                {
+                    "id": item_id,
+                    "name": body.name,
+                    "name_gu": body.name_gu,
+                    "name_hi": body.name_hi,
+                    "name_te": body.name_te,
+                    "desc": body.description,
+                    "category": body.category.value,
+                    "price": str(body.price),
+                    "currency": body.currency,
+                    "unit": body.unit,
+                    "emoji": body.emoji,
+                    "image_url": body.image_url,
+                    "gift_aid": body.gift_aid_eligible,
+                    "is_active": body.is_active,
+                    "scope": body.scope.value,
+                    "branch_id": branch_id,
+                    "project_id": project_id,
+                    "stock_qty": body.stock_qty,
+                    "sort_order": body.sort_order,
+                    "metadata_json": json.dumps(body.metadata_json),
+                    "available_from": body.available_from,
+                    "available_until": body.available_until,
+                    "display_channel": body.display_channel.value,
+                    "branch_stock": json.dumps(body.branch_stock),
+                    "is_live": body.is_live,
+                    "now": now,
+                },
+            )
+            await db.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
     return {"id": item_id, "created": True}
 
@@ -542,8 +549,8 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
         "gift_aid_eligible": body.gift_aid_eligible,
         "is_active": body.is_active,
         "scope": body.scope.value if body.scope else None,
-        "branch_id": body.branch_id,
-        "project_id": body.project_id,
+        "branch_id": body.branch_id or None,
+        "project_id": body.project_id or None,
         "stock_qty": body.stock_qty,
         "sort_order": body.sort_order,
         "available_from": body.available_from,
