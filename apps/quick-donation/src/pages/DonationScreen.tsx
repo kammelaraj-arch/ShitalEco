@@ -11,12 +11,24 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useDonationStore } from '../store/donation.store'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
-const FALLBACK_AMOUNTS = [3, 5, 8, 11, 15, 21, 25]
 
 interface AmountTile {
   id: string
   price: number
+  description?: string
+  name?: string
 }
+
+// Short descriptions for fallback amounts
+const FALLBACK_TILES: AmountTile[] = [
+  { id: 'f3',  price: 3,  name: 'Small Offering',     description: 'Provide prasad for a devotee' },
+  { id: 'f5',  price: 5,  name: 'Daily Seva',         description: 'Support daily temple rituals' },
+  { id: 'f8',  price: 8,  name: 'Lamp Offering',      description: 'Light a diya for your family' },
+  { id: 'f11', price: 11, name: 'Food Donation',      description: 'Help feed those in need' },
+  { id: 'f15', price: 15, name: 'Weekly Seva',        description: 'Support a week of worship' },
+  { id: 'f21', price: 21, name: 'Festival Seva',      description: 'Contribute to festivals' },
+  { id: 'f25', price: 25, name: 'Blessing Seva',      description: 'Special blessing ceremony' },
+]
 
 // ── Numeric keypad (inline) ────────────────────────────────────────────────────
 const NUM_ROWS = [['7','8','9'],['4','5','6'],['1','2','3'],['.','0','⌫']]
@@ -53,10 +65,12 @@ export function DonationScreen() {
         const data = await res.json()
         const items: AmountTile[] = (data.items || [])
           .filter((i: { is_active?: boolean }) => i.is_active !== false)
-          .map((i: { id: string; price: number }) => ({ id: i.id, price: i.price }))
-        setTiles(items.length ? items : FALLBACK_AMOUNTS.map(p => ({ id: `f${p}`, price: p })))
+          .map((i: { id: string; price: number; name?: string; description?: string }) => ({
+            id: i.id, price: i.price, name: i.name, description: i.description,
+          }))
+        setTiles(items.length ? items : FALLBACK_TILES)
       } catch {
-        setTiles(FALLBACK_AMOUNTS.map(p => ({ id: `f${p}`, price: p })))
+        setTiles(FALLBACK_TILES)
       }
       setLoading(false)
     }
@@ -120,18 +134,34 @@ export function DonationScreen() {
                 key={tile.id}
                 whileTap={{ scale: 0.92 }}
                 onClick={() => handleTileTap(tile.price)}
-                className="rounded-3xl flex flex-col items-center justify-center font-black transition-all active:brightness-110"
+                className="rounded-3xl flex flex-col items-center justify-center font-black transition-all active:brightness-110 px-3 py-3 text-center"
                 style={{
                   background: 'rgba(255,255,255,0.08)',
                   border: '1.5px solid rgba(255,255,255,0.12)',
                   color: '#fff',
                 }}
               >
-                <span className="text-white/40 text-xs font-semibold mb-0.5">£</span>
-                <span style={{ fontSize: tile.price >= 100 ? 34 : 42 }}>
-                  {tile.price % 1 === 0 ? tile.price : tile.price.toFixed(2)}
-                </span>
-                <span className="text-white/30 text-[10px] mt-1 font-medium">
+                {/* Amount */}
+                <div className="flex items-baseline gap-0.5 leading-none">
+                  <span className="text-white/50 text-base font-semibold">£</span>
+                  <span style={{ fontSize: tile.price >= 100 ? 32 : 38 }}>
+                    {tile.price % 1 === 0 ? tile.price : tile.price.toFixed(2)}
+                  </span>
+                </div>
+                {/* Name */}
+                {tile.name && (
+                  <span className="text-white/75 text-[11px] font-bold mt-1.5 leading-tight line-clamp-1">
+                    {tile.name}
+                  </span>
+                )}
+                {/* Description */}
+                {tile.description && (
+                  <span className="text-white/40 text-[10px] font-medium mt-0.5 leading-tight line-clamp-2 px-1">
+                    {tile.description}
+                  </span>
+                )}
+                {/* Gift Aid */}
+                <span className="text-green-400/60 text-[10px] font-semibold mt-1.5">
                   +GA £{(tile.price * 1.25).toFixed(2)}
                 </span>
               </motion.button>
