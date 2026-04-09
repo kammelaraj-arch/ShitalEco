@@ -92,7 +92,7 @@ function getBrickName(item: CatalogItem, lang: string) {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 export function ProjectDonationScreen() {
-  const { language, setScreen, addItem, items, updateQuantity, theme } = useKioskStore()
+  const { language, setScreen, addItem, items, updateQuantity, resetKiosk, theme } = useKioskStore()
   const th = THEMES[theme]
 
   const [projects, setProjects] = useState<ApiProject[]>([])
@@ -227,66 +227,61 @@ export function ProjectDonationScreen() {
         </p>
 
         {loadingProjects ? (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-2">
             {[1, 2].map(i => (
-              <div key={i} className="h-32 rounded-2xl animate-pulse" style={{ background: '#f3f4f6' }} />
+              <div key={i} className="h-20 rounded-2xl animate-pulse" style={{ background: '#f3f4f6' }} />
             ))}
           </div>
         ) : projects.length === 0 ? (
           <p className="text-sm text-gray-400 py-2">No projects available — contact admin.</p>
         ) : (
-          <div
-            className={projects.length <= 3 ? 'grid gap-3' : 'flex gap-3 overflow-x-auto pb-1'}
-            style={projects.length <= 3
-              ? { gridTemplateColumns: `repeat(${Math.min(projects.length, 3)}, 1fr)` }
-              : { scrollbarWidth: 'none' }}
-          >
+          <div className="flex flex-col gap-2">
             {projects.map(p => {
               const active = selectedProjectId === p.project_id
               return (
                 <motion.button
                   key={p.project_id}
-                  whileTap={{ scale: 0.97 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => setSelectedProjectId(p.project_id)}
-                  className="relative overflow-hidden rounded-2xl text-left transition-all flex-shrink-0"
+                  className="relative overflow-hidden rounded-2xl text-left transition-all flex items-center"
                   style={{
-                    minWidth: projects.length > 3 ? 200 : undefined,
+                    height: 80,
                     border: active ? `3px solid ${th.langActive}` : '3px solid #e5e7eb',
-                    boxShadow: active ? `0 6px 20px ${th.langActive}40` : '0 2px 8px rgba(0,0,0,0.08)',
+                    boxShadow: active ? `0 4px 16px ${th.langActive}40` : '0 1px 4px rgba(0,0,0,0.06)',
+                    background: active ? `${th.langActive}08` : '#fff',
                   }}
                 >
-                  {/* Image / colour block */}
+                  {/* Image thumbnail */}
                   <div
-                    className="relative w-full overflow-hidden flex items-center justify-center"
-                    style={{ height: 110, background: active ? `${th.langActive}18` : '#f3f4f6' }}
+                    className="relative overflow-hidden flex-shrink-0 flex items-center justify-center"
+                    style={{ width: 100, height: 80, background: '#f3f4f6' }}
                   >
                     {p.image_url ? (
                       <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" />
                     ) : (
-                      <span className="text-5xl">🏗️</span>
-                    )}
-                    {active && (
-                      <div
-                        className="absolute inset-0 flex items-end justify-end p-2"
-                        style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 60%)' }}
-                      >
-                        <span
-                          className="text-[10px] font-black px-2 py-0.5 rounded-full text-white"
-                          style={{ background: th.langActive }}
-                        >✓ Selected</span>
-                      </div>
+                      <span className="text-4xl">🏗️</span>
                     )}
                   </div>
 
                   {/* Text */}
-                  <div className="px-3 py-2.5" style={{ background: active ? `${th.langActive}08` : '#fff' }}>
-                    <p className="font-black text-sm leading-snug text-gray-900">{p.name}</p>
+                  <div className="flex-1 px-3 py-2">
+                    <p className="font-black text-base leading-snug text-gray-900">{p.name}</p>
                     {p.goal_amount > 0 && (
                       <p className="text-xs mt-0.5 font-bold" style={{ color: active ? th.langActive : '#9ca3af' }}>
                         Goal: £{Number(p.goal_amount).toLocaleString()}
                       </p>
                     )}
                   </div>
+
+                  {/* Selected badge */}
+                  {active && (
+                    <div className="pr-3">
+                      <span
+                        className="text-[11px] font-black px-2.5 py-1 rounded-full text-white"
+                        style={{ background: th.langActive }}
+                      >✓ Selected</span>
+                    </div>
+                  )}
                 </motion.button>
               )
             })}
@@ -381,14 +376,14 @@ export function ProjectDonationScreen() {
         )}
       </div>
 
-      {/* Quantity & Add to basket ─────────────────────────────────────────────── */}
+      {/* Add to basket panel — slides up above bottom bar when brick selected */}
       <AnimatePresence>
         {selectedBrick && selectedTier && (
           <motion.div
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            className="flex-shrink-0 px-4 pt-3 pb-5 border-t"
+            className="flex-shrink-0 px-4 pt-3 pb-4 border-t"
             style={{ background: th.headerBg, borderColor: 'rgba(255,153,51,0.2)' }}
           >
             <div className="flex items-center gap-4 mb-3">
@@ -425,37 +420,53 @@ export function ProjectDonationScreen() {
         )}
       </AnimatePresence>
 
-      {/* Running total bar when no brick selected */}
-      <AnimatePresence>
-        {!selectedBrick && basketCount > 0 && (
-          <motion.div
-            initial={{ y: 80, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 80, opacity: 0 }}
-            className="flex-shrink-0 flex items-center justify-between px-5 py-3"
-            style={{ background: th.basketBarBg, borderTop: `2px solid rgba(255,153,51,0.30)`, boxShadow: '0 -4px 20px rgba(0,0,0,0.15)' }}
-          >
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">🏗️</span>
-              <div>
-                <p className="text-xs font-medium opacity-70" style={{ color: th.basketBarText }}>
-                  {basketCount} item{basketCount !== 1 ? 's' : ''}
-                </p>
-                <p className="font-black text-lg" style={{ color: th.basketBarSubText }}>
-                  £{basketTotal.toFixed(2)}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setScreen('basket')}
-              className="text-white font-black px-6 py-2.5 rounded-xl text-sm transition-all shadow-lg active:scale-95"
-              style={{ background: th.basketBtn }}
+      {/* ══ BOTTOM BAR — always visible, matches HomeScreen ══════════════════════ */}
+      <div
+        className="flex-shrink-0"
+        style={{ background: '#fff', borderTop: '1px solid #e5e7eb', boxShadow: '0 -2px 12px rgba(0,0,0,0.08)' }}
+      >
+        <div className="flex items-center gap-3 px-4 py-3">
+          {/* Basket summary */}
+          <div className="flex items-center gap-2 flex-1">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center relative flex-shrink-0"
+              style={{ background: `${th.langActive}15` }}
             >
-              View Basket →
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <span className="text-xl">🛒</span>
+              {basketCount > 0 && (
+                <span
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center text-white shadow"
+                  style={{ background: th.langActive }}
+                >
+                  {basketCount}
+                </span>
+              )}
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 leading-none">{basketCount} item{basketCount !== 1 ? 's' : ''}</p>
+              <p className="font-black text-lg text-gray-900 leading-tight">£{basketTotal.toFixed(2)}</p>
+            </div>
+          </div>
+
+          {/* Start Again */}
+          <button
+            onClick={() => { if (window.confirm('Start a new order?')) resetKiosk() }}
+            className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-500 text-sm font-semibold active:scale-95 transition-all flex-shrink-0"
+          >
+            Start Again
+          </button>
+
+          {/* View My Order */}
+          <button
+            onClick={() => setScreen('basket')}
+            disabled={basketCount === 0}
+            className="px-6 py-2.5 rounded-xl text-white font-black text-sm shadow-md active:scale-95 transition-all flex-shrink-0 disabled:opacity-40"
+            style={{ background: basketCount > 0 ? th.langActive : '#9ca3af', minWidth: 140 }}
+          >
+            View My Order →
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
