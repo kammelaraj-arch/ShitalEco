@@ -87,9 +87,14 @@ export function ConfirmationScreen() {
     setShowKeyboard(false)
   }
 
-  // Fix: just call window.print() — CSS handles show/hide of .print-receipt
+  // Use Electron silent print when running in kiosk app; fall back to browser print
   function handlePrint() {
-    window.print()
+    const api = (window as unknown as { kioskAPI?: { printReceipt: () => void } }).kioskAPI
+    if (api?.printReceipt) {
+      api.printReceipt() // silent — no dialog in Electron
+    } else {
+      window.print()     // fallback for browser dev/web mode
+    }
   }
 
   function handleStarClick(star: number) {

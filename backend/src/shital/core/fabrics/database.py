@@ -4,6 +4,7 @@ Provides a shared async session for all capability modules.
 """
 from __future__ import annotations
 
+import re as _re
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -17,7 +18,6 @@ from shital.core.fabrics.config import settings
 
 # Use SSL only when connecting to a remote/cloud database.
 # Skip SSL for local or Docker connections (no dots in hostname = Docker service name).
-import re as _re
 _db_url = settings.async_database_url
 _host_match = _re.search(r'@([^:/]+)', _db_url)
 _host = _host_match.group(1) if _host_match else ''

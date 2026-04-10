@@ -69,10 +69,11 @@ async def list_donations(
     to_date: str = "2099-12-31",
     limit: int = 200,
 ) -> dict[str, Any]:
+    from datetime import date as _date, datetime as _dt
+
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    from datetime import date as _date, datetime as _dt
     try:
         fd = _date.fromisoformat(from_date)
         td = _date.fromisoformat(to_date)

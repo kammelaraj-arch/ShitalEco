@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { BranchSelect } from '@/components/ui/SearchSelect'
-import { useAdminKeyboard } from '@/components/ui/AdminKeyboard'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,7 +87,6 @@ function UserModal({ user, onClose, onSaved }: {
   const [password, setPassword] = useState('')
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState('')
-  const kb = useAdminKeyboard()
 
   async function save() {
     setError(''); setSaving(true)
@@ -135,39 +133,47 @@ function UserModal({ user, onClose, onSaved }: {
 
           {!isEdit && (
             <>
-              {/* Touch-friendly tappable fields — keyboard slides up from bottom */}
               <div>
                 <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Full Name *</label>
-                <div onClick={() => kb.open(name, 'text', setName, 'Full Name')}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm cursor-pointer min-h-[40px] flex items-center"
-                  style={{ color: name ? '#fff' : 'rgba(255,255,255,0.2)' }}>
-                  {name || 'Tap to enter full name'}
-                </div>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="e.g. Priya Patel"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors"
+                />
               </div>
               <div>
                 <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Email *</label>
-                <div onClick={() => kb.open(email, 'text', setEmail, 'Email')}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm cursor-pointer min-h-[40px] flex items-center"
-                  style={{ color: email ? '#fff' : 'rgba(255,255,255,0.2)' }}>
-                  {email || 'Tap to enter email'}
-                </div>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="e.g. priya@shital.org"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors"
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Phone</label>
-                  <div onClick={() => kb.open(phone, 'numeric', setPhone, 'Phone')}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm cursor-pointer min-h-[40px] flex items-center"
-                    style={{ color: phone ? '#fff' : 'rgba(255,255,255,0.2)' }}>
-                    {phone || 'Tap to enter'}
-                  </div>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    placeholder="+44 7700 000000"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors"
+                  />
                 </div>
                 <div>
                   <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Password</label>
-                  <div onClick={() => kb.open(password, 'text', setPassword, 'Password')}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm cursor-pointer min-h-[40px] flex items-center"
-                    style={{ color: password ? '#fff' : 'rgba(255,255,255,0.2)' }}>
-                    {password ? '•'.repeat(password.length) : 'Tap to enter (optional)'}
-                  </div>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Optional"
+                    autoComplete="new-password"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors"
+                  />
                 </div>
               </div>
             </>

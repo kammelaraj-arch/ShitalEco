@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 // ── Sample data for the test receipt ──────────────────────────────────────────
 const SAMPLE = {
@@ -17,41 +17,73 @@ const SAMPLE = {
   giftAid: false,
 }
 
-const PRINT_WIDTH = 80 // mm
-
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ReceiptTestPage() {
   const [donor, setDonor]   = useState(SAMPLE.donorName)
   const [branch, setBranch] = useState(SAMPLE.branchName)
   const [giftAid, setGiftAid] = useState(false)
+  const printFrameRef = useRef<HTMLIFrameElement>(null)
   const giftAidAmount = (SAMPLE.total * 0.25).toFixed(2)
 
   function handlePrint() {
-    window.print()
+    // Build receipt HTML into a hidden iframe and auto-print — avoids showing
+    // the full admin page in the print preview (only the 80mm receipt prints)
+    const now = new Date()
+    const dateStr = now.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    const gaBlock = giftAid ? `
+      <div style="border-top:1px dashed #000;padding-top:6px;margin:6px 0;font-size:9px;">
+        <div style="font-weight:900;margin-bottom:2px;">GIFT AID DECLARATION</div>
+        <div>I am a UK taxpayer and understand that if I pay less Income Tax and/or Capital Gains Tax than the amount of Gift Aid claimed on all my donations, it is my responsibility to pay any difference.</div>
+        <div style="margin-top:3px;">Gift Aid reclaimed: <strong>£${giftAidAmount}</strong></div>
+      </div>` : ''
+    const itemsHtml = SAMPLE.items.map(i =>
+      `<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;"><span>${i.name} x${i.quantity}</span><span style="font-weight:700;">£${i.total.toFixed(2)}</span></div>`
+    ).join('')
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+      <style>
+        body{margin:0;padding:6mm;width:80mm;font-family:'Courier New',monospace;font-size:10pt;color:#000;}
+        @page{size:80mm auto;margin:0;}
+      </style>
+    </head><body>
+      <div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:8px;margin-bottom:8px;">
+        <div style="font-size:16px;font-weight:900;letter-spacing:1px;">🕉 Shital Temple</div>
+        <div style="font-size:10px;">${branch} · Registered UK Charity</div>
+        <div style="font-size:9px;margin-top:2px;color:#555;">${dateStr}</div>
+      </div>
+      <div style="text-align:center;margin-bottom:8px;">
+        <div style="font-size:9px;color:#555;">ORDER REFERENCE</div>
+        <div style="font-size:13px;font-weight:900;letter-spacing:2px;">${SAMPLE.orderRef}</div>
+      </div>
+      <div style="border-top:1px dashed #000;padding-top:6px;margin-bottom:6px;">${itemsHtml}</div>
+      <div style="border-top:2px solid #000;padding-top:5px;margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:900;"><span>TOTAL</span><span>£${SAMPLE.total.toFixed(2)}</span></div>
+        <div style="font-size:9px;text-align:right;color:#555;">CARD PAYMENT</div>
+      </div>
+      ${donor ? `<div style="font-size:9px;margin-bottom:6px;">Donor: <strong>${donor}</strong></div>` : ''}
+      ${gaBlock}
+      <div style="border-top:1px dashed #000;padding-top:8px;text-align:center;font-size:9px;color:#444;">
+        <div style="font-weight:900;margin-bottom:2px;">Thank you for your generous donation 🙏</div>
+        <div>Jay Shri Krishna</div>
+        <div style="margin-top:4px;color:#777;">Registered Charity No. ${SAMPLE.charityNumber}</div>
+        <div style="color:#777;">This receipt is your donation record.</div>
+        <div style="margin-top:4px;">kiosk.shital.org.uk</div>
+      </div>
+    </body></html>`
+
+    const frame = printFrameRef.current
+    if (!frame) return
+    const doc = frame.contentDocument || frame.contentWindow?.document
+    if (!doc) return
+    doc.open(); doc.write(html); doc.close()
+    frame.contentWindow?.focus()
+    frame.contentWindow?.print()
   }
 
   return (
     <div className="max-w-2xl space-y-6">
 
-      {/* ── Print-only stylesheet ──────────────────────────────────────── */}
-      <style>{`
-        @media screen { .receipt-print { display: none; } }
-        @media print {
-          body * { visibility: hidden !important; }
-          .receipt-print,
-          .receipt-print * { visibility: visible !important; }
-          .receipt-print {
-            position: fixed !important;
-            top: 0 !important; left: 0 !important;
-            width: ${PRINT_WIDTH}mm !important;
-            padding: 6mm !important;
-            background: white !important;
-            font-family: 'Courier New', monospace !important;
-            font-size: 10pt !important;
-            color: black !important;
-          }
-        }
-      `}</style>
+      {/* Hidden iframe used to print only the receipt without the admin UI */}
+      <iframe ref={printFrameRef} style={{ display: 'none' }} title="print-frame" />
 
       {/* ── Page header ───────────────────────────────────────────────── */}
       <div>
@@ -125,10 +157,6 @@ export default function ReceiptTestPage() {
         </ul>
       </div>
 
-      {/* ── Hidden receipt for printing ───────────────────────────────── */}
-      <div className="receipt-print">
-        <ReceiptContent donor={donor} branch={branch} giftAid={giftAid} giftAidAmount={giftAidAmount} forPrint />
-      </div>
     </div>
   )
 }
