@@ -469,9 +469,9 @@ async def create_item(body: ItemCreate, ctx: OptionalSpace):
     item_id = str(uuid.uuid4())
     now = datetime.utcnow()
 
-    # Coerce empty strings to None so FK / nullable columns get NULL not ""
-    branch_id = body.branch_id or None
-    project_id = body.project_id or None
+    # Coerce None to empty string — branch_id/project_id are NOT NULL DEFAULT ''
+    branch_id = body.branch_id or ''
+    project_id = body.project_id or ''
 
     try:
         async with SessionLocal() as db:
@@ -549,8 +549,8 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
         "gift_aid_eligible": body.gift_aid_eligible,
         "is_active": body.is_active,
         "scope": body.scope.value if body.scope else None,
-        "branch_id": body.branch_id or None,
-        "project_id": body.project_id or None,
+        "branch_id": body.branch_id,  # None = skip; '' = clear
+        "project_id": body.project_id,  # None = skip; '' = clear
         "stock_qty": body.stock_qty,
         "sort_order": body.sort_order,
         "available_from": body.available_from,
