@@ -89,7 +89,13 @@ jobs:
             ufw allow 8000/tcp 2>/dev/null || true
             ufw --force enable 2>/dev/null || true
 
-            # ── Start DB first so backend can connect ─────────────────────────
+            # ── Tear down everything cleanly to free ports & networks ────────
+            docker compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+            # Kill any process that may have survived on port 8000
+            fuser -k 8000/tcp 2>/dev/null || true
+            sleep 2
+
+            # ── Start DB so backend can connect on first boot ─────────────────
             docker compose -f docker-compose.prod.yml up -d db
             echo "Waiting for DB..."
             for i in $(seq 1 30); do
@@ -125,12 +131,6 @@ jobs:
               -f apps/admin/Dockerfile \
               --build-arg NEXT_PUBLIC_API_URL=/api/v1 \
               --build-arg GIT_SHA="${GIT_SHA}" .
-
-            # ── Stop app containers to free ports before starting new ones ────
-            docker compose -f docker-compose.prod.yml stop \
-              backend admin quick-donation kiosk screen nginx 2>/dev/null || true
-            docker compose -f docker-compose.prod.yml rm -f \
-              backend admin quick-donation kiosk screen nginx 2>/dev/null || true
 
             # ── Start all services ────────────────────────────────────────────
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
