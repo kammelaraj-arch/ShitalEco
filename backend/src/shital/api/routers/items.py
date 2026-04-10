@@ -59,8 +59,8 @@ class ItemBase(BaseModel):
     gift_aid_eligible: bool = False
     is_active: bool = True
     scope: ItemScope = ItemScope.GLOBAL
-    branch_id: str = ""
-    project_id: str = ""
+    branch_id: str | None = ""
+    project_id: str | None = ""
     stock_qty: int | None = None
     sort_order: int = 0
     metadata_json: dict = {}

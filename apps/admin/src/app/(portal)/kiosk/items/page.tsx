@@ -134,9 +134,9 @@ export default function CatalogItemsPage() {
         available_from: form.available_from || null,
         available_until: form.available_until || null,
         stock_qty: form.stock_qty ?? null,
-        // Send null instead of empty string so DB FK constraints are satisfied
-        branch_id: form.branch_id || null,
-        project_id: form.project_id || null,
+        // Empty strings for FK fields — backend converts '' to None internally
+        branch_id: form.branch_id || '',
+        project_id: form.project_id || '',
       }
       await apiFetch(url, { method, body: JSON.stringify(body) })
       setShowForm(false)
