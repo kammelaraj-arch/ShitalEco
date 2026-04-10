@@ -126,6 +126,12 @@ jobs:
               --build-arg NEXT_PUBLIC_API_URL=/api/v1 \
               --build-arg GIT_SHA="${GIT_SHA}" .
 
+            # ── Stop app containers to free ports before starting new ones ────
+            docker compose -f docker-compose.prod.yml stop \
+              backend admin quick-donation kiosk screen nginx 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml rm -f \
+              backend admin quick-donation kiosk screen nginx 2>/dev/null || true
+
             # ── Start all services ────────────────────────────────────────────
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
