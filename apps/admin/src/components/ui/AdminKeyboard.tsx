@@ -2,12 +2,14 @@
 /**
  * AdminKeyboard — global on-screen keyboard for admin portal touch screens.
  *
+ * Disabled by default. Enable via the sidebar toggle (persisted in localStorage).
+ *
  * Wrap your layout with <AdminKeyboardProvider>.
  * Any component can then call:
  *   const kb = useAdminKeyboard()
  *   kb.open(currentValue, 'text', newVal => setState(newVal), 'Field label')
  */
-import React, { createContext, useCallback, useContext, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
 export type KbMode = 'numeric' | 'text' | 'postcode'
@@ -23,10 +25,23 @@ interface KbSession {
 interface AdminKeyboardCtx {
   open: (val: string, mode: KbMode, commit: (v: string) => void, label?: string, onDone?: () => void) => void
   close: () => void
+  enabled: boolean
+  setEnabled: (v: boolean) => void
 }
 
-const Ctx = createContext<AdminKeyboardCtx>({ open: () => {}, close: () => {} })
+const STORAGE_KEY = 'shital_keyboard_enabled'
+
+const Ctx = createContext<AdminKeyboardCtx>({
+  open: () => {},
+  close: () => {},
+  enabled: false,
+  setEnabled: () => {},
+})
 export const useAdminKeyboard = () => useContext(Ctx)
+export const useKeyboardEnabled = () => {
+  const { enabled, setEnabled } = useContext(Ctx)
+  return { enabled, setEnabled }
+}
 
 // ── Layouts ──────────────────────────────────────────────────────────────────
 
@@ -135,18 +150,32 @@ function Panel({ s, live, setLive, onClose }: {
 export function AdminKeyboardProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<KbSession | null>(null)
   const [live, setLiveInner] = useState('')
+  const [enabled, setEnabledState] = useState(false)
+
+  // Load persisted preference once on mount
+  useEffect(() => {
+    setEnabledState(localStorage.getItem(STORAGE_KEY) === 'true')
+  }, [])
+
+  const setEnabled = useCallback((v: boolean) => {
+    localStorage.setItem(STORAGE_KEY, String(v))
+    setEnabledState(v)
+    if (!v) setSession(null) // close if open when disabled
+  }, [])
 
   const setLive = useCallback((v: string) => setLiveInner(v), [])
 
   const open = useCallback((val: string, mode: KbMode, commit: (v: string) => void, label = 'Input', onDone?: () => void) => {
+    // No-op when keyboard is disabled — let the browser's native keyboard handle input
+    if (!enabled) return
     setLiveInner(val)
     setSession({ value: val, mode, label, commit, onDone })
-  }, [])
+  }, [enabled])
 
   const close = useCallback(() => setSession(null), [])
 
   return (
-    <Ctx.Provider value={{ open, close }}>
+    <Ctx.Provider value={{ open, close, enabled, setEnabled }}>
       {children}
       <AnimatePresence>
         {session && (

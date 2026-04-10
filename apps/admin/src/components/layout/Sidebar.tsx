@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { clsx } from 'clsx'
 import { useBranding } from '@/lib/branding'
+import { useKeyboardEnabled } from '@/components/ui/AdminKeyboard'
 
 const NAV_SECTIONS = [
   {
@@ -90,6 +91,7 @@ interface SidebarProps {
 export function Sidebar({ open = true, onClose }: SidebarProps) {
   const pathname = usePathname()
   const { branding } = useBranding()
+  const { enabled: kbEnabled, setEnabled: setKbEnabled } = useKeyboardEnabled()
 
   return (
     <aside
@@ -181,6 +183,33 @@ export function Sidebar({ open = true, onClose }: SidebarProps) {
           </div>
         ))}
       </nav>
+
+      {/* On-screen keyboard toggle */}
+      <div className="px-4 py-2 flex-shrink-0" style={{ borderTop: '1px solid rgba(185,28,28,0.10)' }}>
+        <button
+          onClick={() => setKbEnabled(!kbEnabled)}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all"
+          style={{
+            background: kbEnabled ? 'rgba(185,28,28,0.15)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${kbEnabled ? 'rgba(185,28,28,0.3)' : 'rgba(255,255,255,0.06)'}`,
+          }}
+          title={kbEnabled ? 'Disable on-screen keyboard' : 'Enable on-screen keyboard'}
+        >
+          <span className="text-base leading-none">{kbEnabled ? '⌨️' : '🖱️'}</span>
+          <span className="flex-1 text-left text-xs font-medium" style={{ color: kbEnabled ? '#f87171' : 'rgba(255,255,255,0.35)' }}>
+            On-screen keyboard
+          </span>
+          <span
+            className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+            style={{
+              background: kbEnabled ? 'rgba(185,28,28,0.3)' : 'rgba(255,255,255,0.08)',
+              color: kbEnabled ? '#fca5a5' : 'rgba(255,255,255,0.3)',
+            }}
+          >
+            {kbEnabled ? 'ON' : 'OFF'}
+          </span>
+        </button>
+      </div>
 
       {/* User profile footer */}
       <div className="px-4 py-4 flex-shrink-0" style={{ borderTop: '1px solid rgba(185,28,28,0.15)' }}>
