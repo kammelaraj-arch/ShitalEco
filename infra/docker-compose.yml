@@ -1,8 +1,6 @@
-version: "3.9"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Shital Temple ERP — Full Stack Docker Compose
-# Runs: Python backend, Next.js admin, React kiosk, PostgreSQL, Redis,
+# Runs: Python backend, Next.js admin, PostgreSQL, Redis,
 #        MeiliSearch, and Nginx reverse proxy
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -17,6 +15,7 @@ volumes:
   redis_data:
   meilisearch_data:
   sharepoint_cache:
+  letsencrypt_data:
 
 services:
 
@@ -80,7 +79,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── Python Backend (FastAPI + Digital Brain) ───────────────────────────────
+  # ─── Python Backend (FastAPI) ────────────────────────────────────────────────
   backend:
     build:
       context: ../backend
@@ -93,7 +92,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://shital:${POSTGRES_PASSWORD:-shital_dev_password}@postgres:5432/shital
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_dev_password}@redis:6379/0
       MEILISEARCH_URL: http://meilisearch:7700
-      APP_ENV: ${APP_ENV:-development}
+      APP_ENV: ${APP_ENV:-production}
     ports:
       - "8000:8000"
     depends_on:
@@ -112,24 +111,6 @@ services:
       retries: 5
       start_period: 30s
 
-  # ─── DB Migrations (runs once, then exits) ──────────────────────────────────
-  migrate:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
-    container_name: shital-migrate
-    command: alembic upgrade head
-    env_file:
-      - ../backend/.env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://shital:${POSTGRES_PASSWORD:-shital_dev_password}@postgres:5432/shital
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - shital-net
-    restart: "no"
-
   # ─── Admin Portal (Next.js) ──────────────────────────────────────────────────
   admin:
     build:
@@ -138,8 +119,8 @@ services:
     container_name: shital-admin
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://backend:8000/api/v1
-      NODE_ENV: ${NODE_ENV:-production}
+      NEXT_PUBLIC_API_URL: /api/v1
+      NODE_ENV: production
     ports:
       - "3001:3001"
     depends_on:
@@ -152,24 +133,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # ─── Public Web Portal (Next.js) ────────────────────────────────────────────
-  web:
-    build:
-      context: ../apps/web
-      dockerfile: Dockerfile
-    container_name: shital-web
-    restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_URL: http://backend:8000/api/v1
-      NODE_ENV: ${NODE_ENV:-production}
-    ports:
-      - "3000:3000"
-    depends_on:
-      - backend
-    networks:
-      - shital-net
-
-  # ─── Nginx Reverse Proxy ────────────────────────────────────────────────────
+  # ─── Nginx Reverse Proxy + SSL ───────────────────────────────────────────────
   nginx:
     image: nginx:alpine
     container_name: shital-nginx
@@ -180,10 +144,10 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
+      - letsencrypt_data:/var/www/certbot:ro
     depends_on:
       - backend
       - admin
-      - web
     networks:
       - shital-net
     healthcheck:
