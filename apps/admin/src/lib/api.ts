@@ -30,6 +30,14 @@ export async function apiFetch<T = unknown>(
       ...(init?.headers ?? {}),
     },
   })
+  if (res.status === 401) {
+    // Token expired or invalid — clear it and force re-login
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('shital_access_token')
+      window.location.replace('/admin/login')
+    }
+    throw new Error('Session expired. Please log in again.')
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`${res.status}: ${text.slice(0, 200)}`)

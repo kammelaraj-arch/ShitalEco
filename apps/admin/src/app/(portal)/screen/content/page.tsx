@@ -27,7 +27,7 @@ interface ContentItem {
   description: string; tags: string; created_at: string
 }
 
-function tok() { return typeof window !== 'undefined' ? sessionStorage.getItem('shital_access_token') || '' : '' }
+function tok() { return typeof window !== 'undefined' ? localStorage.getItem('shital_access_token') || '' : '' }
 
 async function apiFetch(path: string, opts: RequestInit = {}) {
   const res = await fetch(API + path, {

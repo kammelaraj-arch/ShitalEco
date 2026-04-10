@@ -39,7 +39,7 @@ export default function AddressLookupPage() {
   const [testing, setTesting] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
 
-  const token = typeof window !== 'undefined' ? sessionStorage.getItem('shital_access_token') || '' : ''
+  const token = typeof window !== 'undefined' ? localStorage.getItem('shital_access_token') || '' : ''
 
   useEffect(() => {
     loadSettings()
