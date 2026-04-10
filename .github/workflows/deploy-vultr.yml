@@ -61,6 +61,7 @@ jobs:
             JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod
             APP_ENV=production
             CORS_ORIGINS=http://192.248.147.205,http://192.248.147.205:8000
+            MS_REDIRECT_URI=https://shital.org.uk/admin/auth-callback
             ENVEOF
             fi
 
@@ -81,6 +82,8 @@ jobs:
             inject MS_CLIENT_ID           "$MS_CLIENT_ID"
             inject MS_TENANT_ID           "$MS_TENANT_ID"
             inject MS_CLIENT_SECRET       "$MS_CLIENT_SECRET"
+            # Always ensure redirect URI is set (safe to hardcode — not a secret)
+            inject MS_REDIRECT_URI        "https://shital.org.uk/admin/auth-callback"
 
             # ── Firewall ──────────────────────────────────────────────────────
             ufw allow 22/tcp  2>/dev/null || true
@@ -91,10 +94,15 @@ jobs:
 
             # ── Tear down everything cleanly to free ports & networks ────────
             docker compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
-            # Kill any process that may have survived on port 8000
+            # Force-stop and remove ALL containers (catches any that compose
+            # missed or that were started outside this compose project).
+            docker stop $(docker ps -q) 2>/dev/null || true
+            docker rm -f $(docker ps -aq) 2>/dev/null || true
+            # Kill any non-Docker process on port 8000
             fuser -k 8000/tcp 2>/dev/null || true
-            # Restart Docker daemon to flush all iptables/NAT rules that
-            # `compose down` leaves behind, ensuring port 8000 is truly free.
+            # Restart Docker daemon to flush all iptables/NAT rules.
+            # All containers were explicitly removed above, so restart: unless-stopped
+            # will not re-launch them automatically.
             systemctl restart docker
             sleep 5
 
