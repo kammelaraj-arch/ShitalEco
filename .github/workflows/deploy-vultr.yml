@@ -60,8 +60,8 @@ jobs:
             POSTGRES_PASSWORD=ShitalEco2024Prod!
             JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod
             APP_ENV=production
-            CORS_ORIGINS=http://192.248.147.205,http://192.248.147.205:8000
-            MS_REDIRECT_URI=https://shital.org.uk/admin/auth-callback
+            CORS_ORIGINS=https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,http://192.248.147.205
+            MS_REDIRECT_URI=https://admin.shital.org.uk/auth-callback
             ENVEOF
             fi
 
@@ -82,8 +82,9 @@ jobs:
             inject MS_CLIENT_ID           "$MS_CLIENT_ID"
             inject MS_TENANT_ID           "$MS_TENANT_ID"
             inject MS_CLIENT_SECRET       "$MS_CLIENT_SECRET"
-            # Always ensure redirect URI is set (safe to hardcode — not a secret)
-            inject MS_REDIRECT_URI        "https://shital.org.uk/admin/auth-callback"
+            # Always set CORS origins and AAD redirect URI (not secrets, safe to hardcode)
+            inject CORS_ORIGINS           "https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,http://192.248.147.205"
+            inject MS_REDIRECT_URI        "https://admin.shital.org.uk/auth-callback"
 
             # ── Firewall ──────────────────────────────────────────────────────
             ufw allow 22/tcp  2>/dev/null || true
