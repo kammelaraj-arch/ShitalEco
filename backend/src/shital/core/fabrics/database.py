@@ -15,9 +15,13 @@ from sqlalchemy.orm import DeclarativeBase
 
 from shital.core.fabrics.config import settings
 
-# Use SSL only when connecting to a remote database (not local Docker Postgres)
+# Use SSL only when connecting to a remote/cloud database.
+# Skip SSL for local or Docker connections (no dots in hostname = Docker service name).
+import re as _re
 _db_url = settings.async_database_url
-_use_ssl = "@db:" not in _db_url and "localhost" not in _db_url and "127.0.0.1" not in _db_url
+_host_match = _re.search(r'@([^:/]+)', _db_url)
+_host = _host_match.group(1) if _host_match else ''
+_use_ssl = '.' in _host  # e.g. db.render.com → SSL; postgres/localhost → no SSL
 
 engine = create_async_engine(
     _db_url,
