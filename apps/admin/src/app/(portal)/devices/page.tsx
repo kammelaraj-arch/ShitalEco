@@ -369,10 +369,11 @@ export default function DevicesPage() {
                     {(d.device_type === 'KIOSK' || d.device_type === 'QUICK_DONATION') && (
                       <button
                         onClick={() => {
-                          const base = window.location.origin
-                          const path = d.device_type === 'QUICK_DONATION' ? '/donate/' : '/kiosk/'
+                          const base = d.device_type === 'QUICK_DONATION'
+                            ? 'https://donate.shital.org.uk'
+                            : 'https://kiosk.shital.org.uk'
                           const token = revealedToken || d.device_token
-                          copy(`${base}${path}?token=${token}`, `url-${d.id}`)
+                          copy(`${base}/?token=${token}`, `url-${d.id}`)
                         }}
                         className="mt-2 w-full py-1.5 rounded-lg text-[10px] font-bold transition-colors flex items-center justify-center gap-1"
                         style={{ background: 'rgba(255,153,51,0.12)', color: copied === `url-${d.id}` ? '#22C55E' : '#FF9933', border: '1px solid rgba(255,153,51,0.2)' }}
