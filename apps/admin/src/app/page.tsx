@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 
-// Root → redirect to dashboard (AuthGuard will bounce to /login if not authenticated)
+// Root → redirect to dashboard.
+// Use absolute path to avoid basePath ambiguity with Next.js 15 RSC redirects.
 export default function RootPage() {
-  redirect('/dashboard')
+  redirect('/admin/dashboard')
 }
