@@ -486,8 +486,8 @@ async def create_item(body: ItemCreate, ctx: OptionalSpace):
                     VALUES
                     (:id, :name, :name_gu, :name_hi, :name_te, :desc, :category, :price, :currency,
                      :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id, :project_id,
-                     :stock_qty, :sort_order, :metadata_json::jsonb,
-                     :available_from, :available_until, :display_channel, :branch_stock::jsonb, :is_live,
+                     :stock_qty, :sort_order, :metadata_json,
+                     :available_from, :available_until, :display_channel, :branch_stock, :is_live,
                      :now, :now)
                 """),
                 {
@@ -575,7 +575,7 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
     updates["id"] = item_id
 
     set_clause = ", ".join(
-        f"{col} = :{col}" + ("::jsonb" if col == "metadata_json" else "")
+        f"{col} = :{col}"
         for col in updates
         if col != "id"
     )
