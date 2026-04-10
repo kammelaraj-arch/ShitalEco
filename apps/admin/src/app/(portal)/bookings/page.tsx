@@ -99,7 +99,9 @@ export default function BookingsPage() {
   useEffect(() => { load() }, [load])
 
   const save = async () => {
-    if (!form.title.trim() || !form.booking_date) return
+    if (!form.title.trim()) { setError('Title is required'); return }
+    if (!form.booking_date) { setError('Booking date is required'); return }
+    setError('')
     setSaving(true)
     try {
       await apiFetch('/bookings', {

@@ -34,6 +34,13 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     total_caps = len(DigitalDNA.all_capabilities())
     logger.info("digital_dna_loaded", total_capabilities=total_caps)
 
+    # Idempotent schema patch + catalog seed on every startup
+    # Must run BEFORE sync_from_digital_dna so function_registry table exists.
+    try:
+        await _patch_schema()
+    except Exception as exc:
+        logger.error("startup_patch_failed", error=str(exc))
+
     # Sync Digital DNA capabilities to the DB function registry
     try:
         from shital.api.routers.functions import sync_from_digital_dna
@@ -42,12 +49,6 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
                     synced=result["synced"], errors=len(result["errors"]))
     except Exception as exc:
         logger.error("function_registry_sync_failed", error=str(exc))
-
-    # Idempotent schema patch + catalog seed on every startup
-    try:
-        await _patch_schema()
-    except Exception as exc:
-        logger.error("startup_patch_failed", error=str(exc))
 
     yield
     logger.info("shital_shutdown")
@@ -94,6 +95,16 @@ async def _patch_schema() -> None:
             gross_salary     NUMERIC(12,2) NOT NULL DEFAULT 0,
             national_insurance VARCHAR(20) NOT NULL DEFAULT '',
             is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+            full_name        VARCHAR(200),
+            email            VARCHAR(255),
+            phone            VARCHAR(50),
+            address          TEXT,
+            photo_url        TEXT NOT NULL DEFAULT '',
+            nationality      VARCHAR(100) NOT NULL DEFAULT '',
+            right_to_work_type VARCHAR(50) NOT NULL DEFAULT '',
+            visa_number      VARCHAR(100) NOT NULL DEFAULT '',
+            visa_expiry      DATE,
+            manager_id       UUID,
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             deleted_at       TIMESTAMPTZ
@@ -449,6 +460,319 @@ async def _patch_schema() -> None:
             updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_email_templates_key ON email_templates(template_key)",
+        # ── Temple Services ───────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS temple_services (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id        VARCHAR(100) NOT NULL DEFAULT 'main',
+            name             VARCHAR(300) NOT NULL,
+            name_gu          VARCHAR(300) NOT NULL DEFAULT '',
+            name_hi          VARCHAR(300) NOT NULL DEFAULT '',
+            name_te          VARCHAR(300) NOT NULL DEFAULT '',
+            description      TEXT,
+            category         VARCHAR(50)  NOT NULL DEFAULT 'OTHER',
+            price            NUMERIC(12,2) NOT NULL DEFAULT 0,
+            currency         VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            duration         INTEGER,
+            capacity         INTEGER,
+            image_url        TEXT,
+            gift_aid_eligible BOOLEAN NOT NULL DEFAULT false,
+            is_active        BOOLEAN NOT NULL DEFAULT true,
+            display_channel  VARCHAR(20)  NOT NULL DEFAULT 'both',
+            is_live          BOOLEAN      NOT NULL DEFAULT true,
+            available_from   TIMESTAMPTZ,
+            available_until  TIMESTAMPTZ,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at       TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_temple_services_branch   ON temple_services(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_temple_services_category ON temple_services(category)",
+        # ── Catalog Items ─────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS catalog_items (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name             VARCHAR(200) NOT NULL,
+            name_gu          VARCHAR(200) NOT NULL DEFAULT '',
+            name_hi          VARCHAR(200) NOT NULL DEFAULT '',
+            name_te          VARCHAR(200) NOT NULL DEFAULT '',
+            description      TEXT NOT NULL DEFAULT '',
+            category         VARCHAR(50)  NOT NULL,
+            price            NUMERIC(10,2) NOT NULL,
+            currency         VARCHAR(3)   NOT NULL DEFAULT 'GBP',
+            unit             VARCHAR(50)  NOT NULL DEFAULT '',
+            emoji            VARCHAR(10)  NOT NULL DEFAULT '',
+            image_url        TEXT NOT NULL DEFAULT '',
+            gift_aid_eligible BOOLEAN NOT NULL DEFAULT false,
+            is_active        BOOLEAN NOT NULL DEFAULT true,
+            scope            VARCHAR(20)  NOT NULL DEFAULT 'GLOBAL',
+            branch_id        VARCHAR(100) NOT NULL DEFAULT '',
+            project_id       VARCHAR(60)  NOT NULL DEFAULT '',
+            stock_qty        INTEGER,
+            sort_order       INTEGER      NOT NULL DEFAULT 0,
+            metadata_json    JSONB        NOT NULL DEFAULT '{}',
+            available_from   TIMESTAMPTZ,
+            available_until  TIMESTAMPTZ,
+            display_channel  VARCHAR(20)  NOT NULL DEFAULT 'both',
+            branch_stock     JSONB        NOT NULL DEFAULT '{}',
+            is_live          BOOLEAN      NOT NULL DEFAULT true,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at       TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON catalog_items(category)",
+        "CREATE INDEX IF NOT EXISTS idx_catalog_items_branch   ON catalog_items(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_catalog_items_scope    ON catalog_items(scope)",
+        # ── Kiosk: Baskets, Basket Items, Orders ──────────────────────────────
+        """CREATE TABLE IF NOT EXISTS baskets (
+            id         VARCHAR(36) PRIMARY KEY,
+            session_id VARCHAR(36) NOT NULL,
+            branch_id  VARCHAR(64) NOT NULL DEFAULT 'main',
+            status     VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+            expires_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_baskets_session ON baskets(session_id)",
+        """CREATE TABLE IF NOT EXISTS basket_items (
+            id               VARCHAR(36)  PRIMARY KEY,
+            basket_id        VARCHAR(36)  NOT NULL,
+            item_type        VARCHAR(64)  NOT NULL,
+            reference_id     VARCHAR(64),
+            name             VARCHAR(256) NOT NULL,
+            description      TEXT,
+            quantity         INTEGER      NOT NULL DEFAULT 1,
+            unit_price       NUMERIC(10,2) NOT NULL,
+            total_price      NUMERIC(10,2) NOT NULL,
+            gift_aid_eligible BOOLEAN     NOT NULL DEFAULT false,
+            metadata         TEXT,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_basket_items_basket ON basket_items(basket_id)",
+        """CREATE TABLE IF NOT EXISTS orders (
+            id               VARCHAR(36)  PRIMARY KEY,
+            branch_id        VARCHAR(64)  NOT NULL DEFAULT 'main',
+            user_id          VARCHAR(200),
+            basket_id        VARCHAR(36),
+            reference        VARCHAR(64)  NOT NULL,
+            status           VARCHAR(32)  NOT NULL DEFAULT 'PENDING',
+            total_amount     NUMERIC(10,2) NOT NULL,
+            currency         VARCHAR(3)   NOT NULL DEFAULT 'GBP',
+            payment_provider VARCHAR(32),
+            payment_ref      VARCHAR(256),
+            idempotency_key  VARCHAR(64)  UNIQUE,
+            customer_name    VARCHAR(256),
+            customer_email   VARCHAR(256),
+            customer_phone   VARCHAR(64),
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_reference ON orders(reference)",
+        "CREATE INDEX IF NOT EXISTS idx_orders_branch   ON orders(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_orders_status   ON orders(status)",
+        "CREATE INDEX IF NOT EXISTS idx_orders_created  ON orders(created_at DESC)",
+        # ── Terminal Devices ─────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS terminal_devices (
+            id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id          VARCHAR(100) NOT NULL,
+            branch_name        VARCHAR(200) NOT NULL DEFAULT '',
+            user_id            VARCHAR(100) DEFAULT NULL,
+            user_name          VARCHAR(200) NOT NULL DEFAULT '',
+            user_email         VARCHAR(200) NOT NULL DEFAULT '',
+            label              VARCHAR(255) NOT NULL,
+            provider           VARCHAR(50)  NOT NULL DEFAULT 'stripe_terminal',
+            stripe_reader_id   VARCHAR(255) NOT NULL DEFAULT '',
+            stripe_location_id VARCHAR(255) NOT NULL DEFAULT '',
+            square_device_id   VARCHAR(255) NOT NULL DEFAULT '',
+            device_type        VARCHAR(100) NOT NULL DEFAULT '',
+            serial_number      VARCHAR(100) NOT NULL DEFAULT '',
+            status             VARCHAR(50)  NOT NULL DEFAULT 'offline',
+            is_active          BOOLEAN      NOT NULL DEFAULT TRUE,
+            last_seen_at       TIMESTAMPTZ  DEFAULT NULL,
+            notes              TEXT         NOT NULL DEFAULT '',
+            metadata_json      JSONB        NOT NULL DEFAULT '{}',
+            created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at         TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_terminal_devices_branch ON terminal_devices(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_terminal_devices_active ON terminal_devices(is_active) WHERE deleted_at IS NULL",
+        # ── Gift Aid Declarations ─────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS gift_aid_declarations (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            order_ref           VARCHAR(100) NOT NULL,
+            full_name           VARCHAR(200) NOT NULL,
+            postcode            VARCHAR(20)  NOT NULL,
+            address             TEXT         NOT NULL DEFAULT '',
+            contact_email       VARCHAR(254) NOT NULL DEFAULT '',
+            contact_phone       VARCHAR(50)  NOT NULL DEFAULT '',
+            donation_amount     NUMERIC(10,2) NOT NULL,
+            donation_date       DATE         NOT NULL,
+            gift_aid_agreed     BOOLEAN      NOT NULL DEFAULT true,
+            hmrc_submitted      BOOLEAN      NOT NULL DEFAULT false,
+            hmrc_submission_ref VARCHAR(100),
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at          TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_gift_aid_decl_order_ref  ON gift_aid_declarations(order_ref)",
+        "CREATE INDEX IF NOT EXISTS idx_gift_aid_decl_submitted  ON gift_aid_declarations(hmrc_submitted)",
+        # ── Function Registry + Invocations ───────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS function_registry (
+            id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            function_name  VARCHAR(300) UNIQUE NOT NULL,
+            display_name   VARCHAR(300) NOT NULL DEFAULT '',
+            description    TEXT         NOT NULL DEFAULT '',
+            fabric         VARCHAR(100) NOT NULL DEFAULT 'general',
+            tags           JSONB        NOT NULL DEFAULT '[]',
+            version        VARCHAR(50)  NOT NULL DEFAULT '1.0.0',
+            module_path    VARCHAR(500) DEFAULT NULL,
+            http_endpoint  VARCHAR(500) DEFAULT NULL,
+            http_method    VARCHAR(10)  NOT NULL DEFAULT 'POST',
+            input_schema   JSONB        NOT NULL DEFAULT '{}',
+            output_schema  JSONB        NOT NULL DEFAULT '{}',
+            example_input  JSONB        DEFAULT '{}',
+            example_output JSONB        DEFAULT '{}',
+            status         VARCHAR(50)  NOT NULL DEFAULT 'active',
+            human_in_loop  BOOLEAN      NOT NULL DEFAULT false,
+            requires_auth  BOOLEAN      NOT NULL DEFAULT true,
+            required_roles JSONB        NOT NULL DEFAULT '[]',
+            idempotent     BOOLEAN      NOT NULL DEFAULT false,
+            total_calls    INTEGER      NOT NULL DEFAULT 0,
+            success_count  INTEGER      NOT NULL DEFAULT 0,
+            failure_count  INTEGER      NOT NULL DEFAULT 0,
+            last_used_at   TIMESTAMPTZ  DEFAULT NULL,
+            is_active      BOOLEAN      NOT NULL DEFAULT true,
+            created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at     TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_fn_reg_fabric ON function_registry(fabric) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_fn_reg_status ON function_registry(status) WHERE deleted_at IS NULL",
+        """CREATE TABLE IF NOT EXISTS function_invocations (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            function_id      UUID         REFERENCES function_registry(id) ON DELETE SET NULL,
+            function_name    VARCHAR(300) NOT NULL,
+            branch_id        VARCHAR(100) NOT NULL DEFAULT 'main',
+            user_id          VARCHAR(200) DEFAULT NULL,
+            user_email       VARCHAR(200) DEFAULT NULL,
+            user_role        VARCHAR(100) DEFAULT NULL,
+            triggered_by     VARCHAR(50)  NOT NULL DEFAULT 'manual',
+            agent_session_id VARCHAR(200) DEFAULT NULL,
+            agent_reasoning  TEXT         DEFAULT NULL,
+            agent_query      TEXT         DEFAULT NULL,
+            input_data       JSONB        NOT NULL DEFAULT '{}',
+            output_data      JSONB        DEFAULT NULL,
+            status           VARCHAR(50)  NOT NULL DEFAULT 'pending',
+            error_message    TEXT         DEFAULT NULL,
+            error_code       VARCHAR(100) DEFAULT NULL,
+            duration_ms      INTEGER      DEFAULT NULL,
+            request_id       VARCHAR(200) DEFAULT NULL,
+            created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            completed_at     TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_fn_inv_function_name ON function_invocations(function_name)",
+        "CREATE INDEX IF NOT EXISTS idx_fn_inv_status       ON function_invocations(status)",
+        "CREATE INDEX IF NOT EXISTS idx_fn_inv_created      ON function_invocations(created_at DESC)",
+        # ── Finance: Accounts, Transactions, Transaction Lines ────────────────
+        """CREATE TABLE IF NOT EXISTS accounts (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id   VARCHAR(100) NOT NULL DEFAULT 'main',
+            code        VARCHAR(20)  NOT NULL,
+            name        VARCHAR(200) NOT NULL,
+            type        VARCHAR(30)  NOT NULL DEFAULT 'EXPENSE',
+            balance     NUMERIC(12,2) NOT NULL DEFAULT 0,
+            currency    VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            is_active   BOOLEAN      NOT NULL DEFAULT true,
+            description TEXT         NOT NULL DEFAULT '',
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at  TIMESTAMPTZ,
+            UNIQUE (branch_id, code)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_accounts_branch ON accounts(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_accounts_code   ON accounts(code)",
+        """CREATE TABLE IF NOT EXISTS transactions (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id       VARCHAR(100) NOT NULL DEFAULT 'main',
+            reference       VARCHAR(100) NOT NULL DEFAULT '',
+            description     TEXT         NOT NULL DEFAULT '',
+            date            DATE         NOT NULL,
+            total_amount    NUMERIC(12,2) NOT NULL DEFAULT 0,
+            currency        VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            status          VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+            posted_by       VARCHAR(200) NOT NULL DEFAULT '',
+            posted_at       TIMESTAMPTZ,
+            idempotency_key VARCHAR(200) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at      TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_branch ON transactions(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_date   ON transactions(date)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status)",
+        """CREATE TABLE IF NOT EXISTS transaction_lines (
+            id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            transaction_id UUID NOT NULL,
+            account_id     UUID NOT NULL,
+            description    TEXT NOT NULL DEFAULT '',
+            debit_amount   NUMERIC(12,2) NOT NULL DEFAULT 0,
+            credit_amount  NUMERIC(12,2) NOT NULL DEFAULT 0,
+            created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_txn     ON transaction_lines(transaction_id)",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_account ON transaction_lines(account_id)",
+        # ── HR: Leave Requests, Time Entries ─────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS leave_requests (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            employee_id      UUID NOT NULL,
+            leave_policy_id  VARCHAR(100) NOT NULL DEFAULT '',
+            start_date       DATE NOT NULL,
+            end_date         DATE NOT NULL,
+            days             VARCHAR(10)  NOT NULL DEFAULT '0',
+            reason           TEXT,
+            status           VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            reviewed_by      VARCHAR(200),
+            reviewed_at      TIMESTAMPTZ,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_leave_requests_employee ON leave_requests(employee_id)",
+        "CREATE INDEX IF NOT EXISTS idx_leave_requests_status   ON leave_requests(status)",
+        """CREATE TABLE IF NOT EXISTS time_entries (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            employee_id UUID NOT NULL,
+            branch_id   VARCHAR(100) NOT NULL DEFAULT 'main',
+            date        DATE NOT NULL,
+            hours_worked VARCHAR(10) NOT NULL DEFAULT '0',
+            description TEXT,
+            approved    BOOLEAN NOT NULL DEFAULT false,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_time_entries_employee ON time_entries(employee_id)",
+        "CREATE INDEX IF NOT EXISTS idx_time_entries_date     ON time_entries(date)",
+        # ── Payroll Runs ──────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS payroll_runs (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id       VARCHAR(100) NOT NULL DEFAULT 'main',
+            period          VARCHAR(20)  NOT NULL,
+            run_date        DATE         NOT NULL,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            processed_by    VARCHAR(200) NOT NULL DEFAULT '',
+            completed_at    TIMESTAMPTZ,
+            total_gross     NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total_net       NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total_tax       NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total_ni        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total_pension   NUMERIC(12,2) NOT NULL DEFAULT 0,
+            idempotency_key VARCHAR(200) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at      TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_payroll_runs_branch ON payroll_runs(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
