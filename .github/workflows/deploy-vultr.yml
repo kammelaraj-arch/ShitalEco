@@ -93,7 +93,10 @@ jobs:
             docker compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
             # Kill any process that may have survived on port 8000
             fuser -k 8000/tcp 2>/dev/null || true
-            sleep 2
+            # Restart Docker daemon to flush all iptables/NAT rules that
+            # `compose down` leaves behind, ensuring port 8000 is truly free.
+            systemctl restart docker
+            sleep 5
 
             # ── Start DB so backend can connect on first boot ─────────────────
             docker compose -f docker-compose.prod.yml up -d db
