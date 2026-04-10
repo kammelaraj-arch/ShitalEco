@@ -133,6 +133,57 @@ services:
       timeout: 10s
       retries: 3
 
+  # ─── Kiosk App (Vite/React SPA) ─────────────────────────────────────────────
+  kiosk:
+    build:
+      context: ../apps/kiosk
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api/v1
+        VITE_BASE: /
+        VITE_BRANCH_ID: main
+    container_name: shital-kiosk
+    restart: unless-stopped
+    networks:
+      - shital-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ─── Quick Donation App (Vite/React SPA) ─────────────────────────────────────
+  quick-donation:
+    build:
+      context: ..
+      dockerfile: apps/quick-donation/Dockerfile
+      args:
+        VITE_API_URL: /api/v1
+    container_name: shital-donate
+    restart: unless-stopped
+    networks:
+      - shital-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ─── Smart Screen App (static HTML) ──────────────────────────────────────────
+  screen:
+    build:
+      context: ../apps/screen
+      dockerfile: Dockerfile
+    container_name: shital-screen
+    restart: unless-stopped
+    networks:
+      - shital-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   # ─── Nginx Reverse Proxy + SSL ───────────────────────────────────────────────
   nginx:
     image: nginx:alpine
@@ -149,6 +200,9 @@ services:
     depends_on:
       - backend
       - admin
+      - kiosk
+      - quick-donation
+      - screen
     networks:
       - shital-net
     healthcheck:
