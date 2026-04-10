@@ -133,8 +133,8 @@ services:
   # ─── Admin Portal (Next.js) ──────────────────────────────────────────────────
   admin:
     build:
-      context: ../apps/admin
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: apps/admin/Dockerfile
     container_name: shital-admin
     restart: unless-stopped
     environment:
