@@ -55,10 +55,11 @@ const NAV_SECTIONS = [
     items: [
       { href: '/kiosk/projects',    icon: '🏗️', label: 'Projects' },
       { href: '/kiosk/services',    icon: '🛕', label: 'Services' },
-      { href: '/kiosk/items',       icon: '📦', label: 'Catalog Items' },
-      { href: '/kiosk/orders',      icon: '🧾', label: 'Orders' },
-      { href: '/devices',           icon: '🖥️', label: 'Devices' },
-      { href: '/terminal-devices',  icon: '💳', label: 'Card Readers' },
+      { href: '/kiosk/items',          icon: '📦', label: 'Catalog Items' },
+      { href: '/kiosk/orders',         icon: '🧾', label: 'Orders' },
+      { href: '/kiosk/receipt-test',   icon: '🖨️', label: 'Receipt Printer Test' },
+      { href: '/devices',              icon: '🖥️', label: 'Devices' },
+      { href: '/terminal-devices',     icon: '💳', label: 'Card Readers' },
     ],
   },
   {

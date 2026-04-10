@@ -168,15 +168,18 @@ export function ConfirmationScreen() {
 
         {/* Thermal receipt — hidden on screen, shown by @media print CSS */}
         <div className="print-receipt">
+          {/* Header */}
           <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: 8, marginBottom: 8 }}>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>🕉 Shital</div>
-            <div style={{ fontSize: 11 }}>{branchName} · Registered UK Charity</div>
-            <div style={{ fontSize: 10, marginTop: 2 }}>{new Date().toLocaleString('en-GB')}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, letterSpacing: 1 }}>🕉 Shital Temple</div>
+            <div style={{ fontSize: 10 }}>{`Shital ${branchName}`} · Registered UK Charity</div>
+            <div style={{ fontSize: 9, marginTop: 2, color: '#555' }}>{new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
           </div>
+          {/* Order ref */}
           <div style={{ textAlign: 'center', marginBottom: 8 }}>
-            <div style={{ fontSize: 10, color: '#555' }}>Order Reference</div>
-            <div style={{ fontSize: 14, fontWeight: 900, letterSpacing: 2 }}>{orderRef}</div>
+            <div style={{ fontSize: 9, color: '#555' }}>ORDER REFERENCE</div>
+            <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: 2 }}>{orderRef}</div>
           </div>
+          {/* Items */}
           <div style={{ borderTop: '1px dashed #000', paddingTop: 6, marginBottom: 6 }}>
             {items.map((item, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
@@ -185,17 +188,24 @@ export function ConfirmationScreen() {
               </div>
             ))}
           </div>
-          <div style={{ borderTop: '2px solid #000', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 900, marginBottom: 10 }}>
-            <span>TOTAL</span>
-            <span>£{total.toFixed(2)}</span>
+          {/* Total */}
+          <div style={{ borderTop: '2px solid #000', paddingTop: 5, marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 900 }}>
+              <span>TOTAL</span>
+              <span>£{total.toFixed(2)}</span>
+            </div>
+            <div style={{ fontSize: 9, textAlign: 'right', color: '#555' }}>CARD PAYMENT</div>
           </div>
+          {/* Donor */}
           {contactInfo?.name && !contactInfo.anonymous && (
-            <div style={{ fontSize: 10, marginBottom: 8 }}>Donor: {contactInfo.name}</div>
+            <div style={{ fontSize: 9, marginBottom: 6 }}>Donor: <strong>{contactInfo.name}</strong></div>
           )}
-          <div style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: 8, fontSize: 10 }}>
-            <div>Thank you for your generous donation 🙏</div>
-            <div style={{ marginTop: 4 }}>Jay Shri Krishna</div>
-            <div style={{ marginTop: 6, fontSize: 9, color: '#555' }}>This receipt is for your records.</div>
+          {/* Footer */}
+          <div style={{ borderTop: '1px dashed #000', paddingTop: 8, textAlign: 'center', fontSize: 9, color: '#444' }}>
+            <div style={{ fontWeight: 900, marginBottom: 2 }}>Thank you for your generous donation 🙏</div>
+            <div>Jay Shri Krishna</div>
+            <div style={{ marginTop: 4, color: '#777' }}>This receipt is your donation record.</div>
+            <div style={{ marginTop: 4 }}>kiosk.shital.org.uk</div>
           </div>
         </div>
 

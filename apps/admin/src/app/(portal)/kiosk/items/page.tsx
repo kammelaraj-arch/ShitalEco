@@ -72,6 +72,7 @@ export default function CatalogItemsPage() {
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [imageUploading, setImageUploading] = useState(false)
+  const [reordering, setReordering] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -156,10 +157,37 @@ export default function CatalogItemsPage() {
     } catch { setError('Failed to update') }
   }
 
-  const filtered = items.filter(i =>
-    (catFilter === 'ALL' || i.category === catFilter) &&
-    i.name.toLowerCase().includes(search.toLowerCase())
-  )
+  const moveSortOrder = async (item: Item, direction: 'up' | 'down') => {
+    // Find the sorted list (by sort_order) for items in same category
+    const sorted = [...items].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+    const idx = sorted.findIndex(x => x.id === item.id)
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= sorted.length) return
+    const swapItem = sorted[swapIdx]
+    // Swap their sort_order values (or use neighbour +/- 1 if equal)
+    const newOrder = swapItem.sort_order === item.sort_order
+      ? (direction === 'up' ? item.sort_order - 1 : item.sort_order + 1)
+      : swapItem.sort_order
+    const swapOrder = item.sort_order
+    setReordering(item.id)
+    try {
+      await apiFetch(`/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ sort_order: newOrder }) })
+      await apiFetch(`/items/${swapItem.id}`, { method: 'PUT', body: JSON.stringify({ sort_order: swapOrder }) })
+      setItems(prev => prev.map(x =>
+        x.id === item.id ? { ...x, sort_order: newOrder }
+        : x.id === swapItem.id ? { ...x, sort_order: swapOrder }
+        : x
+      ))
+    } catch { setError('Failed to reorder') }
+    finally { setReordering(null) }
+  }
+
+  const filtered = items
+    .filter(i =>
+      (catFilter === 'ALL' || i.category === catFilter) &&
+      i.name.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
 
   const handleImageFile = (file: File) => {
     if (file.size > 3 * 1024 * 1024) { setError('Image must be under 3MB'); return }
@@ -213,7 +241,7 @@ export default function CatalogItemsPage() {
           <div className="overflow-x-auto"><table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
-                {['Item', 'Category', 'Price', 'Channel', 'Schedule', 'Live', ''].map(h => (
+                {['Order', 'Item', 'Category', 'Price', 'Channel', 'Schedule', 'Live', ''].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -228,6 +256,24 @@ export default function CatalogItemsPage() {
                   <motion.tr key={item.id}
                     initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                     className="border-b border-white/5 hover:bg-white/3 transition-colors">
+                    {/* Sort order controls */}
+                    <td className="px-2 py-3 w-14">
+                      <div className="flex flex-col items-center gap-0.5">
+                        <button
+                          onClick={() => moveSortOrder(item, 'up')}
+                          disabled={reordering === item.id || i === 0}
+                          className="w-6 h-5 rounded text-white/30 hover:text-white/70 hover:bg-white/8 disabled:opacity-20 transition-colors text-xs leading-none flex items-center justify-center"
+                          title="Move up"
+                        >▲</button>
+                        <span className="text-white/25 text-[10px] font-mono w-6 text-center">{item.sort_order}</span>
+                        <button
+                          onClick={() => moveSortOrder(item, 'down')}
+                          disabled={reordering === item.id || i === filtered.length - 1}
+                          className="w-6 h-5 rounded text-white/30 hover:text-white/70 hover:bg-white/8 disabled:opacity-20 transition-colors text-xs leading-none flex items-center justify-center"
+                          title="Move down"
+                        >▼</button>
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {item.image_url ? (
