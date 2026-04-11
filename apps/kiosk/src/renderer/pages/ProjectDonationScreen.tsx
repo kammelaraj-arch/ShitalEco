@@ -119,6 +119,18 @@ export function ProjectDonationScreen() {
   const basketCount = items.reduce((s, i) => s + i.quantity, 0)
   const basketTotal = items.reduce((s, i) => s + i.totalPrice, 0)
 
+  // ── Default project used when API returns nothing ──────────────────────────
+  const DEFAULT_PROJECT: ApiProject = {
+    id: '__default__',
+    project_id: '__default__',
+    name: 'Brick Sponsorship',
+    description: 'Support the temple construction project',
+    goal_amount: 0,
+    image_url: '',
+    sort_order: 0,
+    is_active: true,
+  }
+
   // ── Load projects on mount ────────────────────────────────────────────────
   useEffect(() => {
     async function load() {
@@ -127,12 +139,17 @@ export function ProjectDonationScreen() {
         const res = await fetch(`${API_BASE}/projects`)
         const data = await res.json()
         const projs: ApiProject[] = data.projects || []
-        setProjects(projs)
         if (projs.length > 0) {
+          setProjects(projs)
           setSelectedProjectId(projs[0].project_id)
+        } else {
+          // No projects configured yet — show default so screen is usable
+          setProjects([DEFAULT_PROJECT])
+          setSelectedProjectId(DEFAULT_PROJECT.project_id)
         }
       } catch {
-        setProjects([])
+        setProjects([DEFAULT_PROJECT])
+        setSelectedProjectId(DEFAULT_PROJECT.project_id)
       }
       setLoadingProjects(false)
     }
@@ -141,7 +158,7 @@ export function ProjectDonationScreen() {
 
   // ── Load items when project changes ──────────────────────────────────────
   useEffect(() => {
-    if (!selectedProjectId) {
+    if (!selectedProjectId || selectedProjectId === '__default__') {
       setProjectItems(filterActiveItems(BRICK_TIERS))
       return
     }
