@@ -158,6 +158,13 @@ jobs:
             # ── Seed catalog if empty ────────────────────────────────────────
             curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
 
+            # ── Diagnose nginx and certs ─────────────────────────────────────
+            echo "=== Nginx status ==="
+            docker compose -f docker-compose.prod.yml logs --tail=20 nginx || true
+
+            echo "=== SSL certificates on server ==="
+            docker compose -f docker-compose.prod.yml run --rm certbot certificates 2>&1 || true
+
             echo ""
             echo "=== Deploy complete ==="
             docker compose -f docker-compose.prod.yml ps
