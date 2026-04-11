@@ -468,9 +468,8 @@ export default function ApiKeysPage() {
     if (unlocked) loadKeys()
   }, [unlocked, loadKeys])
 
-  function handlePinVerified() {
-    // We'll store the PIN temporarily in state (never in localStorage)
-    // The user must re-enter on page reload — intentional security
+  function handlePinVerified(verifiedPin: string) {
+    setPin(verifiedPin)
     setUnlocked(true)
   }
 
