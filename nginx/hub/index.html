@@ -3,238 +3,503 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Shital — App Portal</title>
+<title>Shital — Platform Hub</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  :root {
+    --prod: #FF9933;
+    --dev:  #10B981;
+    --bg:   #080c10;
+  }
+
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #0d0404;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
     color: #fff;
     min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
+    padding: 2.5rem 1.5rem 4rem;
   }
 
-  /* Subtle background pattern */
+  /* Ambient glow */
   body::before {
     content: '';
-    position: fixed;
-    inset: 0;
+    position: fixed; inset: 0; pointer-events: none;
     background:
-      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(185,28,28,0.18) 0%, transparent 70%),
-      radial-gradient(ellipse 60% 40% at 80% 80%, rgba(255,153,51,0.06) 0%, transparent 60%);
-    pointer-events: none;
+      radial-gradient(ellipse 70% 45% at 20% 0%, rgba(185,28,28,0.12) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 35% at 80% 100%, rgba(255,153,51,0.07) 0%, transparent 55%);
   }
 
-  .logo {
-    font-size: 3.5rem;
-    margin-bottom: 0.5rem;
-  }
+  .wrap { max-width: 960px; margin: 0 auto; position: relative; }
 
-  h1 {
-    font-size: 2rem;
-    font-weight: 900;
-    letter-spacing: -0.5px;
-    background: linear-gradient(135deg, #FF9933 0%, #e8732a 50%, #B91C1C 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 0.25rem;
-    text-align: center;
-  }
-
-  .subtitle {
-    color: rgba(255,255,255,0.35);
-    font-size: 0.9rem;
+  /* ── Header ──────────────────────────────────────────────────────── */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
     margin-bottom: 3rem;
-    text-align: center;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  .header-logo {
+    width: 60px; height: 60px;
+    border-radius: 1.25rem;
+    background: linear-gradient(135deg, #d97706, #b91c1c);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.75rem;
+    flex-shrink: 0;
+    box-shadow: 0 8px 30px rgba(185,28,28,0.35);
+  }
+  .header-title { font-size: 1.9rem; font-weight: 900; letter-spacing: -0.5px; }
+  .header-sub   { color: rgba(255,255,255,0.35); font-size: 0.85rem; margin-top: 0.2rem; }
+  .header-meta  { margin-left: auto; text-align: right; flex-shrink: 0; }
+  .header-meta .live {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #10B981;
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor; box-shadow: 0 0 6px currentColor;
+    animation: blink 2s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ── Section labels ──────────────────────────────────────────────── */
+  .env-header {
+    display: flex; align-items: center; gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .env-badge {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 0.7rem; font-weight: 800; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 0.3rem 0.75rem;
+    border-radius: 99px;
+  }
+  .env-badge.prod { background: rgba(255,153,51,0.15); color: #FF9933; border: 1px solid rgba(255,153,51,0.25); }
+  .env-badge.dev  { background: rgba(16,185,129,0.12); color: #10B981; border: 1px solid rgba(16,185,129,0.2); }
+  .env-url {
+    font-size: 0.78rem; color: rgba(255,255,255,0.25);
+    font-family: 'SF Mono', 'Consolas', monospace;
   }
 
+  /* ── Card grid ───────────────────────────────────────────────────── */
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 1rem;
-    width: 100%;
-    max-width: 780px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.875rem;
+    margin-bottom: 2.5rem;
   }
 
   .card {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 1.25rem;
-    padding: 1.75rem 1.5rem;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 1.1rem;
+    padding: 1.25rem;
     text-decoration: none;
     color: inherit;
-    transition: all 0.2s ease;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    position: relative;
-    overflow: hidden;
+    display: flex; flex-direction: column; gap: 0.6rem;
+    transition: all 0.18s ease;
+    position: relative; overflow: hidden;
   }
-
-  .card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: var(--accent);
-    opacity: 0;
-    transition: opacity 0.2s;
+  .card::after {
+    content: '↗';
+    position: absolute; top: 0.9rem; right: 1rem;
+    font-size: 0.8rem; color: rgba(255,255,255,0.12);
+    transition: all 0.18s;
   }
-
   .card:hover {
-    background: rgba(255,255,255,0.07);
-    border-color: rgba(255,255,255,0.16);
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.13);
     transform: translateY(-2px);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.35);
   }
+  .card:hover::after { color: rgba(255,255,255,0.45); transform: translate(1px,-1px); }
 
-  .card:hover::before { opacity: 1; }
+  .card-accent-line {
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--c); opacity: 0; transition: opacity 0.18s;
+  }
+  .card:hover .card-accent-line { opacity: 1; }
 
   .card-icon {
-    width: 3rem;
-    height: 3rem;
-    border-radius: 0.875rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5rem;
-    background: var(--accent-bg);
+    width: 2.4rem; height: 2.4rem; border-radius: 0.65rem;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem;
+    background: color-mix(in srgb, var(--c) 18%, transparent);
     flex-shrink: 0;
   }
-
-  .card-title {
-    font-size: 1.05rem;
-    font-weight: 800;
-    color: #fff;
+  .card-name { font-size: 0.92rem; font-weight: 800; }
+  .card-desc { font-size: 0.75rem; color: rgba(255,255,255,0.38); line-height: 1.5; flex: 1; }
+  .card-tag  {
+    font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 0.18rem 0.55rem;
+    border-radius: 99px; width: fit-content;
+    background: color-mix(in srgb, var(--c) 15%, transparent);
+    color: var(--c);
   }
 
-  .card-desc {
+  /* ── Info panel ──────────────────────────────────────────────────── */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.875rem;
+    margin-bottom: 2.5rem;
+  }
+  .info-card {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 1rem;
+    padding: 1.25rem 1.5rem;
+  }
+  .info-card h3 {
+    font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: rgba(255,255,255,0.3);
+    margin-bottom: 0.9rem;
+  }
+  .info-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
     font-size: 0.8rem;
-    color: rgba(255,255,255,0.4);
-    line-height: 1.5;
-    flex: 1;
+  }
+  .info-row:last-child { border-bottom: none; }
+  .info-row .label { color: rgba(255,255,255,0.35); }
+  .info-row .value { font-weight: 600; font-family: 'SF Mono','Consolas',monospace; font-size: 0.75rem; }
+  .info-row .value.green  { color: #34d399; }
+  .info-row .value.orange { color: #fb923c; }
+  .info-row .value.blue   { color: #60a5fa; }
+
+  /* ── Workflow banner ─────────────────────────────────────────────── */
+  .workflow {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 1rem;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+  .workflow h3 {
+    font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: rgba(255,255,255,0.3);
+    margin-bottom: 1rem;
+  }
+  .wf-steps {
+    display: flex; align-items: center; gap: 0; flex-wrap: wrap;
+  }
+  .wf-step {
+    display: flex; align-items: center; gap: 0.5rem;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 0.65rem; padding: 0.5rem 0.9rem;
+    font-size: 0.78rem;
+  }
+  .wf-step .s-icon { font-size: 1rem; }
+  .wf-step .s-label { font-weight: 700; }
+  .wf-step .s-sub   { font-size: 0.68rem; color: rgba(255,255,255,0.3); }
+  .wf-arrow {
+    color: rgba(255,255,255,0.2); font-size: 0.9rem;
+    padding: 0 0.4rem;
   }
 
-  .card-tag {
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    padding: 0.2rem 0.6rem;
-    border-radius: 99px;
-    width: fit-content;
-    background: var(--accent-bg);
-    color: var(--accent-text);
+  hr.divider {
+    border: none; border-top: 1px solid rgba(255,255,255,0.06);
+    margin: 2rem 0;
   }
 
-  /* Accent variants */
-  .orange  { --accent: #FF9933; --accent-bg: rgba(255,153,51,0.12); --accent-text: #FF9933; }
-  .crimson { --accent: #B91C1C; --accent-bg: rgba(185,28,28,0.15);  --accent-text: #f87171; }
-  .blue    { --accent: #3B82F6; --accent-bg: rgba(59,130,246,0.12); --accent-text: #60a5fa; }
-  .green   { --accent: #10B981; --accent-bg: rgba(16,185,129,0.12); --accent-text: #34d399; }
-  .purple  { --accent: #8B5CF6; --accent-bg: rgba(139,92,246,0.12); --accent-text: #a78bfa; }
-
-  .divider {
-    width: 100%;
-    max-width: 780px;
-    border: none;
-    border-top: 1px solid rgba(255,255,255,0.06);
-    margin: 2rem 0 1.25rem;
-  }
-
-  .section-label {
-    width: 100%;
-    max-width: 780px;
-    color: rgba(255,255,255,0.2);
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    margin-bottom: 0.75rem;
-  }
-
-  .status-dot {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: #10B981;
-    display: inline-block;
-    margin-right: 0.4rem;
-    box-shadow: 0 0 6px #10B981;
-    animation: pulse 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+  .section-title {
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: rgba(255,255,255,0.2);
+    margin-bottom: 1rem;
   }
 
   .footer {
-    margin-top: 2.5rem;
-    color: rgba(255,255,255,0.2);
-    font-size: 0.75rem;
-    text-align: center;
+    text-align: center; color: rgba(255,255,255,0.15);
+    font-size: 0.72rem; margin-top: 1rem;
   }
+  .footer a { color: rgba(255,255,255,0.25); text-decoration: none; }
+  .footer a:hover { color: rgba(255,255,255,0.5); }
 </style>
 </head>
 <body>
+<div class="wrap">
 
-<div class="logo">🛕</div>
-<h1>Shital</h1>
-<p class="subtitle">Staff Portal &amp; App Hub</p>
+  <!-- ── Header ─────────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-logo">🛕</div>
+    <div>
+      <div class="header-title">Shital Platform</div>
+      <div class="header-sub">Temple ERP &amp; Digital Operations Hub &nbsp;·&nbsp; Wembley, UK</div>
+    </div>
+    <div class="header-meta">
+      <span class="live"><span class="dot"></span> All systems live</span>
+      <div style="color:rgba(255,255,255,0.2);font-size:0.7rem;margin-top:0.35rem">shital.org.uk</div>
+    </div>
+  </header>
 
-<p class="section-label"><span class="status-dot"></span>Public Apps</p>
-<div class="grid">
+  <!-- ── PRODUCTION ─────────────────────────────────────────────────── -->
+  <div class="env-header">
+    <span class="env-badge prod"><span class="dot" style="color:#FF9933"></span> Production</span>
+    <span class="env-url">https://shital.org.uk</span>
+  </div>
 
-  <a href="/donate/" class="card orange">
-    <div class="card-icon">🙏</div>
-    <div class="card-title">Quick Donation</div>
-    <p class="card-desc">Touch-screen donation kiosk for walk-up devotees. Accept payments via card or cash.</p>
-    <span class="card-tag">Public Kiosk</span>
-  </a>
+  <div class="grid">
 
-  <a href="/kiosk/" class="card crimson">
-    <div class="card-icon">🖥️</div>
-    <div class="card-title">Temple Kiosk</div>
-    <p class="card-desc">Full-service temple kiosk — services, shop, bookings and donations in multiple languages.</p>
-    <span class="card-tag">Touch Screen</span>
-  </a>
+    <a href="/admin/" class="card" style="--c:#3B82F6">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">⚙️</div>
+      <div class="card-name">Admin Portal</div>
+      <div class="card-desc">Full ERP — finance, HR, payroll, Gift Aid, catalog, compliance, AI tools.</div>
+      <span class="card-tag">Staff</span>
+    </a>
+
+    <a href="/kiosk/" class="card" style="--c:#FF9933">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">🖥️</div>
+      <div class="card-name">Temple Kiosk</div>
+      <div class="card-desc">Touch-screen kiosk — donations, services, shop &amp; bookings in 3 languages.</div>
+      <span class="card-tag">Kiosk</span>
+    </a>
+
+    <a href="/donate/" class="card" style="--c:#F59E0B">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">🙏</div>
+      <div class="card-name">Quick Donation</div>
+      <div class="card-desc">Fast walk-up donation terminal. Card payments with Gift Aid capture.</div>
+      <span class="card-tag">Public</span>
+    </a>
+
+    <a href="/screen/" class="card" style="--c:#8B5CF6">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">📺</div>
+      <div class="card-name">Smart Screen</div>
+      <div class="card-desc">Digital display board — announcements, events and live donation totals.</div>
+      <span class="card-tag">Display</span>
+    </a>
+
+    <a href="/api/v1/docs" class="card" style="--c:#10B981">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">📡</div>
+      <div class="card-name">API Docs</div>
+      <div class="card-desc">Interactive REST API documentation. Browse and test all backend endpoints.</div>
+      <span class="card-tag">Developer</span>
+    </a>
+
+    <a href="/admin/settings/api-keys" class="card" style="--c:#EF4444">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">🔑</div>
+      <div class="card-name">API Keys</div>
+      <div class="card-desc">Manage encrypted secrets — Stripe, SendGrid, Azure AD, AI and more.</div>
+      <span class="card-tag">Admin PIN</span>
+    </a>
+
+  </div>
+
+  <!-- ── DEV ENVIRONMENT ────────────────────────────────────────────── -->
+  <div class="env-header">
+    <span class="env-badge dev"><span class="dot" style="color:#10B981"></span> Dev / Staging</span>
+    <span class="env-url">http://192.248.147.205:8080</span>
+  </div>
+
+  <div class="grid">
+
+    <a href="http://192.248.147.205:8080/admin/" class="card" style="--c:#3B82F6">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">⚙️</div>
+      <div class="card-name">Admin — Dev</div>
+      <div class="card-desc">Admin portal running the latest develop branch code. Test before promoting to prod.</div>
+      <span class="card-tag">Dev</span>
+    </a>
+
+    <a href="http://192.248.147.205:8080/kiosk/" class="card" style="--c:#FF9933">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">🖥️</div>
+      <div class="card-name">Kiosk — Dev</div>
+      <div class="card-desc">Kiosk app on dev environment with separate database. Safe to test freely.</div>
+      <span class="card-tag">Dev</span>
+    </a>
+
+    <a href="http://192.248.147.205:8080/donate/" class="card" style="--c:#F59E0B">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">🙏</div>
+      <div class="card-name">Donation — Dev</div>
+      <div class="card-desc">Quick donation app on dev. Separate DB — test data only, never real donations.</div>
+      <span class="card-tag">Dev</span>
+    </a>
+
+    <a href="http://192.248.147.205:8080/screen/" class="card" style="--c:#8B5CF6">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">📺</div>
+      <div class="card-name">Screen — Dev</div>
+      <div class="card-desc">Smart screen display running dev build. Safe for layout and content testing.</div>
+      <span class="card-tag">Dev</span>
+    </a>
+
+    <a href="http://192.248.147.205:8001/docs" class="card" style="--c:#10B981">
+      <div class="card-accent-line"></div>
+      <div class="card-icon">📡</div>
+      <div class="card-name">API Docs — Dev</div>
+      <div class="card-desc">Dev backend API explorer. Direct port 8001 access, no nginx proxy.</div>
+      <span class="card-tag">Dev</span>
+    </a>
+
+  </div>
+
+  <!-- ── Deploy workflow ────────────────────────────────────────────── -->
+  <hr class="divider">
+  <p class="section-title">Deploy workflow</p>
+  <div class="workflow">
+    <h3>Code → Dev → Production pipeline</h3>
+    <div class="wf-steps">
+      <div class="wf-step">
+        <span class="s-icon">✏️</span>
+        <div>
+          <div class="s-label">Write code</div>
+          <div class="s-sub">develop branch</div>
+        </div>
+      </div>
+      <span class="wf-arrow">→</span>
+      <div class="wf-step">
+        <span class="s-icon">🔄</span>
+        <div>
+          <div class="s-label">Auto-deploy</div>
+          <div class="s-sub">GitHub Actions</div>
+        </div>
+      </div>
+      <span class="wf-arrow">→</span>
+      <div class="wf-step" style="border-color:rgba(16,185,129,0.3)">
+        <span class="s-icon">🧪</span>
+        <div>
+          <div class="s-label" style="color:#10B981">Dev :8080</div>
+          <div class="s-sub">Test &amp; verify</div>
+        </div>
+      </div>
+      <span class="wf-arrow">→</span>
+      <div class="wf-step">
+        <span class="s-icon">📋</span>
+        <div>
+          <div class="s-label">Pull Request</div>
+          <div class="s-sub">develop → main</div>
+        </div>
+      </div>
+      <span class="wf-arrow">→</span>
+      <div class="wf-step" style="border-color:rgba(255,153,51,0.3)">
+        <span class="s-icon">🚀</span>
+        <div>
+          <div class="s-label" style="color:#FF9933">Production</div>
+          <div class="s-sub">shital.org.uk</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Info panels ────────────────────────────────────────────────── -->
+  <p class="section-title">System info</p>
+  <div class="info-grid">
+
+    <div class="info-card">
+      <h3>Infrastructure</h3>
+      <div class="info-row">
+        <span class="label">Server</span>
+        <span class="value blue">Vultr VPS · 192.248.147.205</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Container runtime</span>
+        <span class="value">Docker Compose</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Database</span>
+        <span class="value">PostgreSQL 16</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Web server</span>
+        <span class="value">nginx:alpine</span>
+      </div>
+      <div class="info-row">
+        <span class="label">SSL</span>
+        <span class="value green">Let's Encrypt</span>
+      </div>
+    </div>
+
+    <div class="info-card">
+      <h3>Stack</h3>
+      <div class="info-row">
+        <span class="label">Backend</span>
+        <span class="value">Python · FastAPI</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Admin portal</span>
+        <span class="value">Next.js 14 · TypeScript</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Kiosk / Donation</span>
+        <span class="value">Vite · React · Tailwind</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Payments</span>
+        <span class="value">Stripe</span>
+      </div>
+      <div class="info-row">
+        <span class="label">AI</span>
+        <span class="value">Claude (Anthropic)</span>
+      </div>
+    </div>
+
+    <div class="info-card">
+      <h3>Environments</h3>
+      <div class="info-row">
+        <span class="label">Production branch</span>
+        <span class="value orange">main</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Dev branch</span>
+        <span class="value green">develop</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Prod images</span>
+        <span class="value">:latest</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Dev images</span>
+        <span class="value">:dev</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Rollback</span>
+        <span class="value green">:previous checkpoint</span>
+      </div>
+    </div>
+
+    <div class="info-card">
+      <h3>GitHub Actions</h3>
+      <div class="info-row">
+        <span class="label">Deploy to dev</span>
+        <span class="value green">push → develop</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Deploy to prod</span>
+        <span class="value orange">push → main</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Rollback</span>
+        <span class="value blue">manual trigger</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Deploy strategy</span>
+        <span class="value">Rolling · zero downtime</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Auto-rollback</span>
+        <span class="value green">health check gate</span>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="footer">
+    Shital Temple ERP &nbsp;·&nbsp; London, UK &nbsp;·&nbsp;
+    <a href="/api/v1/health">API health</a> &nbsp;·&nbsp;
+    <a href="https://github.com/kammelaraj-arch/ShitalEco" target="_blank">GitHub</a>
+  </p>
 
 </div>
-
-<hr class="divider">
-<p class="section-label">Staff &amp; Admin</p>
-<div class="grid">
-
-  <a href="/admin/" class="card blue">
-    <div class="card-icon">⚙️</div>
-    <div class="card-title">Admin Portal</div>
-    <p class="card-desc">Full ERP — finance, HR, payroll, catalog, Gift Aid, compliance and AI-powered tools.</p>
-    <span class="card-tag">Staff Only</span>
-  </a>
-
-  <a href="/api/v1/docs" class="card green">
-    <div class="card-icon">📡</div>
-    <div class="card-title">API Explorer</div>
-    <p class="card-desc">Interactive REST API documentation. Browse and test all backend endpoints.</p>
-    <span class="card-tag">Developer</span>
-  </a>
-
-  <a href="/admin/ai/functions" class="card purple">
-    <div class="card-icon">🧠</div>
-    <div class="card-title">Digital Brain</div>
-    <p class="card-desc">AI Agent function registry, audit log and agentic workflow management.</p>
-    <span class="card-tag">AI / Admin</span>
-  </a>
-
-</div>
-
-<p class="footer">Shital — Management Platform &nbsp;·&nbsp; All systems operational</p>
-
 </body>
 </html>
