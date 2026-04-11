@@ -127,8 +127,13 @@ export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
   })
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Authentication failed' }))
-    throw new Error(err.detail || 'Authentication failed')
+    const text = await res.text().catch(() => '')
+    let detail = 'Authentication failed'
+    try {
+      const j = JSON.parse(text)
+      detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+    } catch { detail = text || `HTTP ${res.status}` }
+    throw new Error(detail)
   }
 
   return res.json() as Promise<ShitalAuthResult>

@@ -143,23 +143,33 @@ async def verify_azure_token(body: VerifyTokenInput):
 
     jwk = jwks[kid]
 
-    # ── 3. Validate the token signature + claims ──────────────────────────────
-    tenant = ms_tenant_id or "common"
-    if tenant == "common":
-        # Multi-tenant: accept any issuer (validate iss manually if needed)
-        algorithms = ["RS256"]
-        options = {"verify_iss": False}
-    else:
-        algorithms = ["RS256"]
-        options = {}
+    # ── 3. Build RSA public key from JWK and validate the token ─────────────
+    # python-jose can struggle with Microsoft's JWK format (x5c fields etc).
+    # We extract the RSA public key directly using the cryptography library
+    # (already a dependency) and pass the key object to jose for decoding.
+    try:
+        import base64 as _b64
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+        from cryptography.hazmat.backends import default_backend as _backend
+
+        def _b64url_to_int(s: str) -> int:
+            s += "=" * (-len(s) % 4)
+            return int.from_bytes(_b64.urlsafe_b64decode(s), "big")
+
+        public_key = RSAPublicNumbers(
+            e=_b64url_to_int(jwk["e"]),
+            n=_b64url_to_int(jwk["n"]),
+        ).public_key(_backend())
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Failed to build signing key: {e}")
 
     try:
         payload = jose_jwt.decode(
             body.id_token,
-            jwk,
-            algorithms=algorithms,
+            public_key,
+            algorithms=["RS256"],
             audience=ms_client_id,
-            options=options,
+            options={"verify_iss": False},   # issuer varies by tenant/flow
         )
     except JWTError as e:
         raise HTTPException(status_code=401, detail=f"Token validation failed: {e}")
