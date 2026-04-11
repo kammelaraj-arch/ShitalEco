@@ -1,0 +1,161 @@
+name: Deploy to Dev
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Dev environment (port 8080)
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 1800s
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
+          script: |
+            set -e
+
+            # ── Docker ────────────────────────────────────────────────────────
+            if ! command -v docker &>/dev/null; then
+              curl -fsSL https://get.docker.com | sh
+            fi
+            systemctl enable docker && systemctl start docker || true
+
+            # ── Clone / update repo (dev branch) ─────────────────────────────
+            if [ -d /opt/shitaleco-dev/.git ]; then
+              cd /opt/shitaleco-dev
+              git fetch origin
+              git reset --hard origin/develop
+            else
+              apt-get install -y git -q
+              git clone --branch develop \
+                https://${GH_PAT}@github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco-dev
+            fi
+            cd /opt/shitaleco-dev
+
+            # ── .env for dev ──────────────────────────────────────────────────
+            if [ ! -f .env.dev ]; then
+              cat > .env.dev << 'ENVEOF'
+            JWT_SECRET=shital-dev-jwt-secret-not-for-prod
+            APP_ENV=development
+            ENVEOF
+            fi
+
+            inject() {
+              local file=$1 key=$2 val=$3
+              [ -z "$val" ] && return
+              if grep -q "^${key}=" "${file}"; then
+                sed -i "s|^${key}=.*|${key}=${val}|" "${file}"
+              else
+                echo "${key}=${val}" >> "${file}"
+              fi
+            }
+            inject .env.dev STRIPE_SECRET_KEY      "$STRIPE_SECRET_KEY"
+            inject .env.dev STRIPE_PUBLISHABLE_KEY "$STRIPE_PUBLISHABLE_KEY"
+            inject .env.dev ANTHROPIC_API_KEY      "$ANTHROPIC_API_KEY"
+            inject .env.dev SENDGRID_API_KEY       "$SENDGRID_API_KEY"
+            inject .env.dev MS_CLIENT_ID           "$MS_CLIENT_ID"
+            inject .env.dev MS_TENANT_ID           "$MS_TENANT_ID"
+            inject .env.dev MS_CLIENT_SECRET       "$MS_CLIENT_SECRET"
+
+            # Source dev env vars for compose
+            set -a; source .env.dev; set +a
+
+            # ── Firewall — open dev port ──────────────────────────────────────
+            ufw allow 8080/tcp 2>/dev/null || true
+
+            # ── Ensure DB is up before building ──────────────────────────────
+            docker compose -f docker-compose.dev.yml up -d db-dev 2>/dev/null || true
+            echo "Waiting for dev DB..."
+            for i in $(seq 1 20); do
+              sleep 2
+              docker compose -f docker-compose.dev.yml exec -T db-dev \
+                pg_isready -U shitaleco_dev_user -d shitaleco_dev_db &>/dev/null && break
+              echo "  db-dev attempt $i/20..."
+            done
+
+            # ── Build dev images (tagged :dev — never touches :latest) ────────
+            GIT_SHA=$(git rev-parse HEAD)
+            echo "=== [DEV] Building backend (${GIT_SHA}) ==="
+            docker build -t ghcr.io/kammelaraj-arch/shitaleco-backend:dev \
+              --build-arg GIT_SHA="${GIT_SHA}" ./backend
+
+            echo "=== [DEV] Building quick-donation ==="
+            docker build -t ghcr.io/kammelaraj-arch/shitaleco-quick-donation:dev \
+              -f apps/quick-donation/Dockerfile \
+              --build-arg VITE_API_URL=/api/v1 \
+              --build-arg GIT_SHA="${GIT_SHA}" .
+
+            echo "=== [DEV] Building kiosk ==="
+            docker build -t ghcr.io/kammelaraj-arch/shitaleco-kiosk:dev \
+              --build-arg VITE_API_URL=/api/v1 --build-arg VITE_BASE=/kiosk/ \
+              --build-arg GIT_SHA="${GIT_SHA}" ./apps/kiosk
+
+            echo "=== [DEV] Building screen ==="
+            docker build -t ghcr.io/kammelaraj-arch/shitaleco-screen:dev \
+              --build-arg GIT_SHA="${GIT_SHA}" ./apps/screen
+
+            echo "=== [DEV] Building admin ==="
+            docker build -t ghcr.io/kammelaraj-arch/shitaleco-admin:dev \
+              -f apps/admin/Dockerfile \
+              --build-arg NEXT_PUBLIC_API_URL=/api/v1 \
+              --build-arg GIT_SHA="${GIT_SHA}" .
+
+            # ── Rolling restart dev services ──────────────────────────────────
+            echo "=== [DEV] Restarting backend-dev ==="
+            docker compose -f docker-compose.dev.yml up -d --no-deps backend-dev
+
+            echo "Waiting for dev backend health..."
+            DEV_OK=0
+            for i in $(seq 1 20); do
+              sleep 5
+              curl -sf http://localhost:8001/health > /dev/null && echo "Dev backend healthy!" && DEV_OK=1 && break
+              echo "  attempt $i/20..."
+            done
+
+            if [ "$DEV_OK" -eq 0 ]; then
+              echo "!!! Dev backend failed health check !!!"
+              docker compose -f docker-compose.dev.yml logs --tail=30 backend-dev
+              exit 1
+            fi
+
+            # Seed dev catalog
+            curl -sf -X POST http://localhost:8001/api/v1/admin/seed-catalog || true
+
+            echo "=== [DEV] Restarting frontend services ==="
+            docker compose -f docker-compose.dev.yml up -d --no-deps \
+              admin-dev quick-donation-dev kiosk-dev screen-dev
+
+            echo "=== [DEV] Reloading nginx-dev ==="
+            docker compose -f docker-compose.dev.yml up -d --no-deps nginx-dev
+
+            echo ""
+            echo "=== DEV deploy complete ==="
+            echo "Dev URLs (HTTP, port 8080):"
+            echo "  Site:   http://192.248.147.205:8080"
+            echo "  Admin:  http://192.248.147.205:8080/admin"
+            echo "  Kiosk:  http://192.248.147.205:8080/kiosk/"
+            echo "  Donate: http://192.248.147.205:8080/donate/"
+            echo "  Screen: http://192.248.147.205:8080/screen/"
+            echo "  API:    http://192.248.147.205:8001/health"
+            echo ""
+            docker compose -f docker-compose.dev.yml ps

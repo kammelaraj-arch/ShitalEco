@@ -3,6 +3,8 @@ name: Deploy to Vultr
 on:
   push:
     branches: [claude/shital-erp-platform-iR2UF, main]
+    # NOTE: 'develop' branch deploys to DEV only (deploy-dev.yml)
+    # Merge develop → main to release to production
   workflow_dispatch:
 
 concurrency:
