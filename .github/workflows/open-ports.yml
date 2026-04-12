@@ -1,23 +1,32 @@
-name: Open Firewall Ports
+name: Open Firewall + Start Dev Stack
 
 on:
-  workflow_dispatch:  # Run manually from GitHub Actions UI
+  workflow_dispatch:
+  push:
+    branches: [claude/shital-erp-platform-iR2UF]
+    paths:
+      - '.github/workflows/open-ports.yml'
 
+# No concurrency group — runs immediately, never queued behind a full deploy
 jobs:
   open-ports:
     runs-on: ubuntu-latest
     steps:
-      - name: Open required firewall ports on server
+      - name: Open ports and start dev stack
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         with:
           host: 192.248.147.205
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
-          timeout: 60s
+          timeout: 300s
+          envs: GH_PAT
           script: |
             set -e
-            echo "Opening firewall ports..."
+
+            echo "=== 1. Opening firewall ports ==="
             ufw allow 22/tcp   2>/dev/null || true
             ufw allow 80/tcp   2>/dev/null || true
             ufw allow 443/tcp  2>/dev/null || true
@@ -25,12 +34,51 @@ jobs:
             ufw allow 8001/tcp 2>/dev/null || true
             ufw allow 8080/tcp 2>/dev/null || true
             ufw reload         2>/dev/null || true
-            echo ""
-            echo "=== UFW status ==="
+            echo "Firewall updated:"
             ufw status numbered
+
             echo ""
-            echo "=== Dev containers ==="
-            docker compose -f /opt/shitaleco-dev/docker-compose.dev.yml ps 2>/dev/null || echo "(dev stack not running)"
+            echo "=== 2. Ensure dev repo exists ==="
+            DEV_DIR=/opt/shitaleco-dev
+            if [ ! -d "$DEV_DIR/.git" ]; then
+              echo "Dev repo not cloned yet — cloning..."
+              apt-get install -y git -q 2>/dev/null || true
+              git clone --branch develop \
+                https://${GH_PAT}@github.com/kammelaraj-arch/ShitalEco.git "$DEV_DIR"
+            else
+              cd "$DEV_DIR"
+              git fetch origin
+              git reset --hard origin/develop
+            fi
+            cd "$DEV_DIR"
+
             echo ""
-            echo "=== Prod containers ==="
-            docker compose -f /opt/shitaleco/docker-compose.prod.yml ps 2>/dev/null || echo "(prod stack not running)"
+            echo "=== 3. Start dev DB ==="
+            docker compose -f docker-compose.dev.yml up -d db-dev 2>/dev/null || true
+            sleep 3
+
+            echo ""
+            echo "=== 4. Bootstrap :dev images if missing ==="
+            DEV_IMGS=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep ":dev$" | wc -l)
+            echo "Dev images found: $DEV_IMGS"
+            if [ "$DEV_IMGS" -eq 0 ]; then
+              echo "No :dev images — tagging prod :latest as :dev to bootstrap..."
+              for svc in backend admin quick-donation kiosk screen; do
+                img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+                docker tag "${img}:latest" "${img}:dev" 2>/dev/null && \
+                  echo "  Tagged ${svc}" || echo "  Skipped ${svc} (no :latest image)"
+              done
+            fi
+
+            echo ""
+            echo "=== 5. Start full dev stack ==="
+            docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
+
+            echo ""
+            echo "=== 6. Status ==="
+            docker compose -f docker-compose.dev.yml ps
+            echo ""
+            echo "Dev URLs:"
+            echo "  http://192.248.147.205:8080"
+            echo "  http://192.248.147.205:8080/admin"
+            echo "  http://192.248.147.205:8080/kiosk/"
