@@ -1,0 +1,36 @@
+name: Open Firewall Ports
+
+on:
+  workflow_dispatch:  # Run manually from GitHub Actions UI
+
+jobs:
+  open-ports:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open required firewall ports on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          script: |
+            set -e
+            echo "Opening firewall ports..."
+            ufw allow 22/tcp   2>/dev/null || true
+            ufw allow 80/tcp   2>/dev/null || true
+            ufw allow 443/tcp  2>/dev/null || true
+            ufw allow 8000/tcp 2>/dev/null || true
+            ufw allow 8001/tcp 2>/dev/null || true
+            ufw allow 8080/tcp 2>/dev/null || true
+            ufw reload         2>/dev/null || true
+            echo ""
+            echo "=== UFW status ==="
+            ufw status numbered
+            echo ""
+            echo "=== Dev containers ==="
+            docker compose -f /opt/shitaleco-dev/docker-compose.dev.yml ps 2>/dev/null || echo "(dev stack not running)"
+            echo ""
+            echo "=== Prod containers ==="
+            docker compose -f /opt/shitaleco/docker-compose.prod.yml ps 2>/dev/null || echo "(prod stack not running)"
