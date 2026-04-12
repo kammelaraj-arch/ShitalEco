@@ -88,10 +88,12 @@ jobs:
             inject MS_REDIRECT_URI        "https://admin.shital.org.uk/auth-callback"
 
             # ── Firewall ──────────────────────────────────────────────────────
-            ufw allow 22/tcp  2>/dev/null || true
-            ufw allow 80/tcp  2>/dev/null || true
-            ufw allow 443/tcp 2>/dev/null || true
+            ufw allow 22/tcp   2>/dev/null || true
+            ufw allow 80/tcp   2>/dev/null || true
+            ufw allow 443/tcp  2>/dev/null || true
             ufw allow 8000/tcp 2>/dev/null || true
+            ufw allow 8001/tcp 2>/dev/null || true  # dev backend direct
+            ufw allow 8080/tcp 2>/dev/null || true  # dev nginx (HTTP)
             ufw --force enable 2>/dev/null || true
 
             # ── Ensure stack is running (first-boot or recovery) ─────────────
