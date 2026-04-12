@@ -264,7 +264,7 @@ async def list_items(
                 text(f"""
                     SELECT id, name, name_gu, name_hi, name_te, description, category,
                            price, currency, unit, emoji, image_url,
-                           gift_aid_eligible, is_active, scope, branch_id,
+                           gift_aid_eligible, is_active, scope, branch_id, project_id,
                            stock_qty, sort_order, metadata_json,
                            available_from, available_until, display_channel, branch_stock, is_live,
                            created_at, updated_at
@@ -441,10 +441,11 @@ async def get_item(item_id: str, ctx: OptionalSpace):
         async with SessionLocal() as db:
             result = await db.execute(
                 text("""
-                    SELECT id, name, name_gu, name_hi, description, category,
+                    SELECT id, name, name_gu, name_hi, name_te, description, category,
                            price, currency, unit, emoji, image_url,
-                           gift_aid_eligible, is_active, scope, branch_id,
+                           gift_aid_eligible, is_active, scope, branch_id, project_id,
                            stock_qty, sort_order, metadata_json,
+                           available_from, available_until, display_channel, branch_stock, is_live,
                            created_at, updated_at
                     FROM catalog_items
                     WHERE id = :id AND deleted_at IS NULL
