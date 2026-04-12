@@ -116,7 +116,6 @@ async def verify_azure_token(body: VerifyTokenInput):
     from shital.core.fabrics.database import SessionLocal
     from shital.core.fabrics.secrets import SecretsManager
     ms_client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
-    ms_tenant_id = await SecretsManager.get("MS_TENANT_ID") or settings.MS_TENANT_ID
     if not ms_client_id:
         raise HTTPException(status_code=501, detail="Azure AD SSO is not configured on this server")
 
@@ -149,8 +148,9 @@ async def verify_azure_token(body: VerifyTokenInput):
     # (already a dependency) and pass the key object to jose for decoding.
     try:
         import base64 as _b64
-        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+
         from cryptography.hazmat.backends import default_backend as _backend
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
 
         def _b64url_to_int(s: str) -> int:
             s += "=" * (-len(s) % 4)
