@@ -201,6 +201,7 @@ export default function CatalogItemsPage() {
   }
 
   const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson-700/50'
+  const sel = 'w-full border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson-700/50 bg-gray-900'
   const label = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5'
 
   return (
@@ -369,8 +370,8 @@ export default function CatalogItemsPage() {
                   <div>
                     <label className={label}>Category *</label>
                     <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}
-                      className={inp}>
-                      {CATEGORIES.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+                      className={sel}>
+                      {CATEGORIES.map(c => <option key={c} value={c} style={{ background: '#111827', color: '#fff' }}>{c.replace('_', ' ')}</option>)}
                     </select>
                   </div>
                   <div>
@@ -506,9 +507,11 @@ export default function CatalogItemsPage() {
                 {form.category === 'PROJECT_DONATION' && (
                   <div>
                     <label className={label}>Project</label>
-                    <select value={form.project_id} onChange={e => setForm(p => ({ ...p, project_id: e.target.value }))} className={inp}>
-                      <option value="">No project / General</option>
-                      {projects.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                    <select value={form.project_id} onChange={e => setForm(p => ({ ...p, project_id: e.target.value }))} className={sel}>
+                      <option value="" style={{ background: '#111827', color: '#fff' }}>No project / General</option>
+                      {projects.map(pr => (
+                        <option key={pr.id} value={pr.project_id} style={{ background: '#111827', color: '#fff' }}>{pr.name}</option>
+                      ))}
                     </select>
                   </div>
                 )}
@@ -517,9 +520,9 @@ export default function CatalogItemsPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={label}>Scope</label>
-                    <select value={form.scope} onChange={e => setForm(p => ({ ...p, scope: e.target.value }))} className={inp}>
-                      <option value="GLOBAL">Global (all branches)</option>
-                      <option value="BRANCH">Branch-specific</option>
+                    <select value={form.scope} onChange={e => setForm(p => ({ ...p, scope: e.target.value }))} className={sel}>
+                      <option value="GLOBAL" style={{ background: '#111827', color: '#fff' }}>Global (all branches)</option>
+                      <option value="BRANCH" style={{ background: '#111827', color: '#fff' }}>Branch-specific</option>
                     </select>
                   </div>
                   <div>
