@@ -230,8 +230,8 @@ async def request_leave(ctx: DigitalSpace, data: LeaveRequestInput) -> dict[str,
                 VALUES (:id, :emp, :pol, :start, :end, :days, :reason, 'PENDING', :now, :now)
             """),
             {
-                "id": req_id, "emp": data.employee_id, "pol": data.leave_policy_id,
-                "start": start, "end": end, "days": str(delta),
+                "id": req_id, "emp": data.employee_id, "pol": data.leave_policy_id or None,
+                "start": start, "end": end, "days": delta,
                 "reason": data.reason or None, "now": now,
             },
         )
@@ -298,7 +298,7 @@ async def log_time(ctx: DigitalSpace, data: TimeEntryInput) -> dict[str, Any]:
             """),
             {
                 "id": entry_id, "emp": data.employee_id, "bid": ctx.branch_id,
-                "date": data.entry_date, "hours": data.hours_worked,
+                "date": data.entry_date, "hours": float(data.hours_worked),
                 "desc": data.description or None, "now": now,
             },
         )
@@ -326,11 +326,12 @@ async def get_org_chart(ctx: DigitalSpace) -> dict[str, Any]:
         result = await db.execute(
             text("""
                 SELECT e.id, e.employee_number, e.job_title, e.department,
-                       e.manager_id, u.name
+                       e.manager_id,
+                       COALESCE(e.full_name, u.name, e.employee_number) AS name
                 FROM employees e
-                JOIN users u ON u.id = e.user_id
+                LEFT JOIN users u ON u.id = e.user_id
                 WHERE e.branch_id = :bid AND e.is_active = true AND e.deleted_at IS NULL
-                ORDER BY e.department, u.name
+                ORDER BY e.department, name
             """),
             {"bid": ctx.branch_id},
         )
