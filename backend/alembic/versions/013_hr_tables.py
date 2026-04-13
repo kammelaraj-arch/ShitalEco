@@ -25,7 +25,7 @@ def upgrade() -> None:
         CREATE TABLE IF NOT EXISTS employees (
             id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
-            user_id             UUID REFERENCES users(id) ON DELETE SET NULL,
+            user_id             UUID DEFAULT NULL,
             employee_number     VARCHAR(50)  NOT NULL,
             job_title           VARCHAR(200) NOT NULL DEFAULT 'Staff',
             department          VARCHAR(100) NOT NULL DEFAULT 'General',
@@ -81,7 +81,7 @@ def upgrade() -> None:
             days             NUMERIC(5,1) NOT NULL DEFAULT 1,
             reason           TEXT,
             status           VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-            reviewed_by      UUID REFERENCES users(id) ON DELETE SET NULL,
+            reviewed_by      UUID DEFAULT NULL,
             reviewed_at      TIMESTAMPTZ,
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
