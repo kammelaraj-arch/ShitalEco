@@ -401,6 +401,37 @@ export function ProjectDonationScreen() {
           {/* ── Scrollable body (brick grid only) ───────────────────────────── */}
           <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}>
             <div>
+
+              {/* ── Selected project hero tile ──────────────────────────────── */}
+              {(() => {
+                const proj = projects.find(p => p.project_id === selectedProjectId)
+                if (!proj || proj.project_id === '__default__') return null
+                return (
+                  <div
+                    className="w-full rounded-2xl overflow-hidden mb-4 relative"
+                    style={{ boxShadow: `0 4px 20px ${th.langActive}30`, border: `2px solid ${th.langActive}40` }}
+                  >
+                    {/* Banner image */}
+                    <div className="relative w-full flex items-center justify-center" style={{ height: 130, background: `${th.langActive}18` }}>
+                      {proj.image_url
+                        ? <img src={proj.image_url} alt={proj.name} className="absolute inset-0 w-full h-full object-cover" />
+                        : <span className="text-5xl">🏗️</span>
+                      }
+                      <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.65) 0%, transparent 55%)' }} />
+                      <div className="absolute bottom-3 left-4 right-4">
+                        <p className="text-white font-black text-lg leading-tight drop-shadow">{proj.name}</p>
+                        {proj.description ? <p className="text-white/80 text-xs mt-0.5 leading-snug line-clamp-2">{proj.description}</p> : null}
+                      </div>
+                      {proj.goal_amount > 0 && (
+                        <div className="absolute top-3 right-3 px-2 py-1 rounded-xl text-xs font-black text-white" style={{ background: th.langActive }}>
+                          Goal: £{Number(proj.goal_amount).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
               <p className="text-xs font-black uppercase tracking-widest mb-3" style={{ color: th.langActive }}>
                 — Choose Donation Amount —
               </p>
