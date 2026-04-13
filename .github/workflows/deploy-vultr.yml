@@ -17,8 +17,11 @@ jobs:
     steps:
       - name: Trigger webhook deployer (preferred — bypasses fail2ban)
         run: |
+          # Use secret from GitHub if set, otherwise fall back to deployer default
+          SECRET="${{ secrets.DEPLOY_SECRET }}"
+          SECRET="${SECRET:-shital-deploy-secret-change-me}"
           curl -X POST https://shital.org.uk/deploy \
-            -H "X-Deploy-Secret: ${{ secrets.DEPLOY_SECRET }}" \
+            -H "X-Deploy-Secret: ${SECRET}" \
             --max-time 15 --retry 3 --retry-delay 5 || true
 
       - name: SSH fallback (used only if webhook deployer is not yet running)

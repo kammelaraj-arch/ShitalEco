@@ -281,6 +281,7 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_screen_profiles_branch ON screen_profiles(branch_id)",
         # HR — standalone employee fields (no user account required)
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS user_id               TEXT DEFAULT NULL",
         "ALTER TABLE employees ADD COLUMN IF NOT EXISTS full_name             VARCHAR(200)",
         "ALTER TABLE employees ADD COLUMN IF NOT EXISTS email                 VARCHAR(255)",
         "ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone                 VARCHAR(50)",
@@ -1123,6 +1124,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# ─── Domain exception → HTTP status mapping ────────────────────────────────────
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from shital.core.fabrics.errors import (
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    UnauthorizedError,
+    ValidationError as ShitalValidationError,
+)
+
+
+@app.exception_handler(ForbiddenError)
+async def _forbidden(request: Request, exc: ForbiddenError) -> JSONResponse:
+    return JSONResponse(status_code=403, content={"detail": exc.message, "code": exc.code})
+
+
+@app.exception_handler(UnauthorizedError)
+async def _unauthorized(request: Request, exc: UnauthorizedError) -> JSONResponse:
+    return JSONResponse(status_code=401, content={"detail": exc.message, "code": exc.code})
+
+
+@app.exception_handler(NotFoundError)
+async def _not_found(request: Request, exc: NotFoundError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": exc.message, "code": exc.code})
+
+
+@app.exception_handler(ConflictError)
+async def _conflict(request: Request, exc: ConflictError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": exc.message, "code": exc.code})
+
+
+@app.exception_handler(ShitalValidationError)
+async def _validation(request: Request, exc: ShitalValidationError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": exc.message, "code": exc.code})
+
 
 # ─── Mount all routers (resilient — import errors logged but don't crash app) ──
 def _mount(module: str, attr: str, prefix: str = "/api/v1") -> None:
