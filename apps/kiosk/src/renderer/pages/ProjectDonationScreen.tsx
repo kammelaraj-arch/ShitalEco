@@ -408,22 +408,33 @@ export function ProjectDonationScreen() {
                 if (!proj) return null
                 return (
                   <div
-                    className="w-full rounded-2xl overflow-hidden mb-4 relative"
-                    style={{ boxShadow: `0 4px 20px ${th.langActive}30`, border: `2px solid ${th.langActive}40` }}
+                    className="w-full rounded-2xl overflow-hidden mb-4"
+                    style={{ border: `3px solid ${th.langActive}`, boxShadow: `0 4px 24px ${th.langActive}50` }}
                   >
-                    {/* Banner image */}
-                    <div className="relative w-full flex items-center justify-center" style={{ height: 130, background: `${th.langActive}18` }}>
-                      {proj.image_url
-                        ? <img src={proj.image_url} alt={proj.name} className="absolute inset-0 w-full h-full object-cover" />
-                        : <span className="text-5xl">🏗️</span>
-                      }
-                      <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.65) 0%, transparent 55%)' }} />
-                      <div className="absolute bottom-3 left-4 right-4">
-                        <p className="text-white font-black text-lg leading-tight drop-shadow">{proj.name}</p>
-                        {proj.description ? <p className="text-white/80 text-xs mt-0.5 leading-snug line-clamp-2">{proj.description}</p> : null}
+                    <div
+                      className="relative w-full flex items-end"
+                      style={{
+                        height: 140,
+                        background: proj.image_url
+                          ? undefined
+                          : `linear-gradient(135deg, ${th.langActive} 0%, #7f1010 100%)`,
+                      }}
+                    >
+                      {proj.image_url && (
+                        <img src={proj.image_url} alt={proj.name}
+                          className="absolute inset-0 w-full h-full object-cover" />
+                      )}
+                      {/* Always-dark overlay so text is readable */}
+                      <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.2) 60%, transparent 100%)' }} />
+                      <div className="relative z-10 px-4 pb-3 w-full">
+                        <p className="text-white font-black text-xl leading-tight drop-shadow-lg">{proj.name}</p>
+                        {proj.description
+                          ? <p className="text-white/80 text-xs mt-0.5 leading-snug line-clamp-1">{proj.description}</p>
+                          : null
+                        }
                       </div>
                       {proj.goal_amount > 0 && (
-                        <div className="absolute top-3 right-3 px-2 py-1 rounded-xl text-xs font-black text-white" style={{ background: th.langActive }}>
+                        <div className="absolute top-3 right-3 px-2.5 py-1 rounded-xl text-xs font-black text-white" style={{ background: th.langActive }}>
                           Goal: £{Number(proj.goal_amount).toLocaleString()}
                         </div>
                       )}
