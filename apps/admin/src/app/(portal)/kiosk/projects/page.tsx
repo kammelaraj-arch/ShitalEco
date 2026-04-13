@@ -31,6 +31,7 @@ interface ProjectItem {
   is_live: boolean
   available_from: string | null
   available_until: string | null
+  project_id: string
 }
 
 const BRANCHES = [
@@ -59,15 +60,22 @@ export default function ProjectsPage() {
   const [saving, setSaving] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
 
+  // Add-items modal state
+  const [addingFor, setAddingFor] = useState<Project | null>(null)
+  const [allItems, setAllItems] = useState<ProjectItem[]>([])
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [addItemSearch, setAddItemSearch] = useState('')
+  const [addingSaving, setAddingSaving] = useState(false)
+
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
       const data = await apiFetch<{ projects: Project[] }>('/projects?include_inactive=true')
       const list = data.projects || []
       setProjects(list)
-      // Load items for each project
+      // ← FIXED: use project_id (slug) not id (UUID) — catalog_items.project_id stores the slug
       const entries = await Promise.allSettled(
-        list.map(p => apiFetch<{ items: ProjectItem[] }>(`/projects/${p.id}/items`))
+        list.map(p => apiFetch<{ items: ProjectItem[] }>(`/projects/${p.project_id}/items`))
       )
       const map: Record<string, ProjectItem[]> = {}
       list.forEach((p, i) => {
@@ -123,10 +131,71 @@ export default function ProjectsPage() {
     }
   }
 
+  // Unassign an item from a project
+  const unassignItem = async (itemId: string, projectId: string) => {
+    try {
+      await apiFetch(`/items/${itemId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ project_id: '' }),
+      })
+      // Refresh items for this project
+      const data = await apiFetch<{ items: ProjectItem[] }>(`/projects/${projectId}/items`)
+      const proj = projects.find(p => p.project_id === projectId)
+      if (proj) setItemsByProject(prev => ({ ...prev, [proj.id]: data.items || [] }))
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to unassign item')
+    }
+  }
+
+  // Open "add items" modal for a project
+  const openAddItems = async (p: Project) => {
+    setAddingFor(p)
+    setSelectedIds(new Set())
+    setAddItemSearch('')
+    try {
+      const data = await apiFetch<{ items: ProjectItem[] }>('/items/?active_only=false')
+      // Show all items not already in this project
+      const linked = new Set((itemsByProject[p.id] || []).map(i => i.id))
+      setAllItems((data.items || []).filter(i => !linked.has(i.id)))
+    } catch { setAllItems([]) }
+  }
+
+  const toggleItem = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const assignItems = async () => {
+    if (!addingFor || selectedIds.size === 0) return
+    setAddingSaving(true)
+    try {
+      await Promise.all(
+        [...selectedIds].map(id =>
+          apiFetch(`/items/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ project_id: addingFor.project_id }),
+          })
+        )
+      )
+      setAddingFor(null)
+      await load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to assign items')
+    } finally { setAddingSaving(false) }
+  }
+
   const f = <K extends keyof typeof EMPTY>(k: K, v: typeof EMPTY[K]) =>
     setForm(p => ({ ...p, [k]: v }))
 
   const branchName = (bid: string) => BRANCHES.find(b => b.id === bid)?.name || bid
+
+  const filteredAddItems = allItems.filter(i =>
+    i.name.toLowerCase().includes(addItemSearch.toLowerCase()) ||
+    i.category.toLowerCase().includes(addItemSearch.toLowerCase())
+  )
 
   return (
     <div className="space-y-6">
@@ -157,7 +226,6 @@ export default function ProjectsPage() {
         <div className="space-y-4">
           {projects.map((p, i) => {
             const items = itemsByProject[p.id] || []
-            const raised = items.reduce((s, it) => s + it.price, 0)
             const isExpanded = expanded === p.id
             const now = new Date()
             const start = p.start_date ? new Date(p.start_date) : null
@@ -219,11 +287,23 @@ export default function ProjectsPage() {
                   {isExpanded && (
                     <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }}
                       className="overflow-hidden border-t border-white/5">
+                      {/* Add items button */}
+                      <div className="px-6 py-3 flex items-center justify-between border-b border-white/5">
+                        <p className="text-white/40 text-xs">
+                          {items.length === 0 ? 'No items linked yet' : `${items.length} item${items.length !== 1 ? 's' : ''} linked`}
+                        </p>
+                        <button
+                          onClick={() => openAddItems(p)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all hover:scale-105 active:scale-95"
+                          style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}
+                        >
+                          + Add Items
+                        </button>
+                      </div>
+
                       {items.length === 0 ? (
                         <div className="px-6 py-6 text-center text-white/30 text-sm">
-                          No items linked to this project.
-                          <br />
-                          <span className="text-xs">Go to Catalog Items and set project_id to <code className="text-saffron-400">{p.project_id}</code></span>
+                          No donation tiers linked. Click <strong className="text-white/50">+ Add Items</strong> to assign catalog items to this project.
                         </div>
                       ) : (
                         <div className="overflow-x-auto">
@@ -232,48 +312,42 @@ export default function ProjectsPage() {
                               <tr className="border-b border-white/5">
                                 <th className="text-left px-4 sm:px-6 py-2 text-white/30 text-xs font-semibold uppercase">Item</th>
                                 <th className="text-left px-4 py-2 text-white/30 text-xs font-semibold uppercase hidden sm:table-cell">Price</th>
-                                <th className="text-left px-4 py-2 text-white/30 text-xs font-semibold uppercase hidden md:table-cell">Schedule</th>
                                 <th className="text-left px-4 py-2 text-white/30 text-xs font-semibold uppercase">Status</th>
+                                <th className="px-4 py-2" />
                               </tr>
                             </thead>
                             <tbody>
-                              {items.map(it => {
-                                const itFrom = it.available_from ? new Date(it.available_from) : null
-                                const itUntil = it.available_until ? new Date(it.available_until) : null
-                                const inWindow = (!itFrom || itFrom <= now) && (!itUntil || itUntil >= now)
-                                return (
-                                  <tr key={it.id} className="border-b border-white/5 hover:bg-white/3">
-                                    <td className="px-4 sm:px-6 py-3">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-lg">{it.emoji || '🧱'}</span>
-                                        <div>
-                                          <p className="text-white text-sm font-semibold">{it.name}</p>
-                                          {it.gift_aid_eligible && (
-                                            <span className="text-xs text-green-400/70">Gift Aid eligible</span>
-                                          )}
-                                        </div>
+                              {items.map(it => (
+                                <tr key={it.id} className="border-b border-white/5 hover:bg-white/3">
+                                  <td className="px-4 sm:px-6 py-3">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-lg">{it.emoji || '🧱'}</span>
+                                      <div>
+                                        <p className="text-white text-sm font-semibold">{it.name}</p>
+                                        {it.gift_aid_eligible && (
+                                          <span className="text-xs text-green-400/70">Gift Aid eligible</span>
+                                        )}
                                       </div>
-                                    </td>
-                                    <td className="px-4 py-3 text-white font-bold text-sm hidden sm:table-cell">
-                                      £{Number(it.price).toFixed(2)}
-                                    </td>
-                                    <td className="px-4 py-3 text-xs hidden md:table-cell">
-                                      {!itFrom && !itUntil ? (
-                                        <span className="text-white/30">Always</span>
-                                      ) : (
-                                        <span className={inWindow ? 'text-green-400' : 'text-red-400'}>
-                                          {itFrom ? itFrom.toLocaleDateString('en-GB') : '∞'} → {itUntil ? itUntil.toLocaleDateString('en-GB') : '∞'}
-                                        </span>
-                                      )}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
-                                        it.is_live ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-white/5 text-white/30 border-white/10'
-                                      }`}>{it.is_live ? 'Live' : 'Hidden'}</span>
-                                    </td>
-                                  </tr>
-                                )
-                              })}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-white font-bold text-sm hidden sm:table-cell">
+                                    £{Number(it.price).toFixed(2)}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                                      it.is_live ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-white/5 text-white/30 border-white/10'
+                                    }`}>{it.is_live ? 'Live' : 'Hidden'}</span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <button
+                                      onClick={() => unassignItem(it.id, p.project_id)}
+                                      className="text-xs text-red-400/60 hover:text-red-400 transition-colors"
+                                    >
+                                      Remove
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
                             </tbody>
                           </table>
                         </div>
@@ -287,7 +361,80 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {/* Slide-over form */}
+      {/* ── Add Items modal ──────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {addingFor && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setAddingFor(null)} className="fixed inset-0 bg-black/60 z-40" />
+            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+              className="fixed right-0 top-0 h-full w-full sm:max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+                <div>
+                  <h2 className="text-white font-black text-lg">Add Items to Project</h2>
+                  <p className="text-white/40 text-xs mt-0.5">{addingFor.name}</p>
+                </div>
+                <button onClick={() => setAddingFor(null)} className="text-white/40 hover:text-white text-xl p-1">✕</button>
+              </div>
+
+              {/* Search */}
+              <div className="px-6 py-3 border-b border-white/5">
+                <input
+                  value={addItemSearch}
+                  onChange={e => setAddItemSearch(e.target.value)}
+                  placeholder="Search items…"
+                  className={inp}
+                  autoFocus
+                />
+              </div>
+
+              {/* Item list */}
+              <div className="flex-1 overflow-y-auto divide-y divide-white/5">
+                {filteredAddItems.length === 0 ? (
+                  <p className="px-6 py-8 text-center text-white/30 text-sm">No items available to add.</p>
+                ) : filteredAddItems.map(item => {
+                  const checked = selectedIds.has(item.id)
+                  return (
+                    <button key={item.id} type="button"
+                      onClick={() => toggleItem(item.id)}
+                      className="w-full flex items-center gap-3 px-6 py-3 text-left hover:bg-white/5 transition-colors">
+                      {/* Checkbox */}
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                        checked ? 'border-crimson-600 bg-crimson-600' : 'border-white/20'
+                      }`}>
+                        {checked && <span className="text-white text-xs font-black">✓</span>}
+                      </div>
+                      <span className="text-xl flex-shrink-0">{item.emoji || '🧱'}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-semibold truncate">{item.name}</p>
+                        <p className="text-white/30 text-xs">{item.category}</p>
+                      </div>
+                      <span className="text-white font-bold text-sm flex-shrink-0">£{Number(item.price).toFixed(2)}</span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-white/5 flex gap-3 items-center">
+                <p className="text-white/40 text-sm flex-1">{selectedIds.size} selected</p>
+                <button onClick={() => setAddingFor(null)}
+                  className="px-4 py-2.5 rounded-xl border border-white/10 text-white/60 font-semibold text-sm">
+                  Cancel
+                </button>
+                <button onClick={assignItems} disabled={addingSaving || selectedIds.size === 0}
+                  className="px-6 py-2.5 rounded-xl text-white font-black text-sm disabled:opacity-40 transition-all"
+                  style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
+                  {addingSaving ? 'Saving…' : `Assign ${selectedIds.size > 0 ? selectedIds.size : ''} Item${selectedIds.size !== 1 ? 's' : ''}`}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── Project create/edit slide-over ───────────────────────────────────── */}
       <AnimatePresence>
         {showForm && (
           <>

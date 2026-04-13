@@ -405,7 +405,7 @@ export function ProjectDonationScreen() {
               {/* ── Selected project hero tile ──────────────────────────────── */}
               {(() => {
                 const proj = projects.find(p => p.project_id === selectedProjectId)
-                if (!proj || proj.project_id === '__default__') return null
+                if (!proj) return null
                 return (
                   <div
                     className="w-full rounded-2xl overflow-hidden mb-4 relative"
