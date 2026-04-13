@@ -96,6 +96,17 @@ jobs:
             ufw allow 8080/tcp 2>/dev/null || true  # dev nginx (HTTP)
             ufw --force enable 2>/dev/null || true
 
+            # ── Stop fail2ban banning GitHub Actions IPs ──────────────────────
+            # fail2ban keeps banning rotating GitHub runner IPs, blocking future
+            # deploys. Unban all and raise the threshold so normal deploy retries
+            # never trigger a ban.
+            if command -v fail2ban-client &>/dev/null; then
+              fail2ban-client unban --all               2>/dev/null || true
+              fail2ban-client set sshd maxretry 100     2>/dev/null || true
+              fail2ban-client set sshd findtime 3600    2>/dev/null || true
+              fail2ban-client set sshd bantime  60      2>/dev/null || true
+            fi
+
             # ── Ensure stack is running (first-boot or recovery) ─────────────
             # On very first boot there are no containers at all — bring up DB
             # and nginx so the site stays live throughout the build phase.
