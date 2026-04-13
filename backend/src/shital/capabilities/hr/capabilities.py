@@ -64,6 +64,7 @@ class TimeEntryInput(BaseModel):
 async def _ensure_hr_tables() -> None:
     """Create HR tables if they don't exist yet (self-healing — no migration required)."""
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         await db.execute(text("""

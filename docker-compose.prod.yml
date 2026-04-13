@@ -82,6 +82,19 @@ services:
     networks:
       - internal
 
+  deployer:
+    build:
+      context: ./deployer
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
+    volumes:
+      - /opt/shitaleco:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - internal
+
   nginx:
     image: nginx:alpine
     restart: unless-stopped
