@@ -106,6 +106,8 @@ services:
   nginx:
     image: nginx:alpine
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
       - "443:443"

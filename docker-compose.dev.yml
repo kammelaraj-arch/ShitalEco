@@ -34,14 +34,14 @@ services:
       APP_ENV: development
       JWT_SECRET: ${JWT_SECRET:-shital-dev-jwt-secret-not-for-prod}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      CORS_ORIGINS: http://192.248.147.205:8080,http://localhost:8080
+      CORS_ORIGINS: https://dev.shital.org.uk,http://192.248.147.205:8080,http://localhost:8080
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       MS_CLIENT_ID: ${MS_CLIENT_ID:-}
       MS_TENANT_ID: ${MS_TENANT_ID:-}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
-      MS_REDIRECT_URI: http://192.248.147.205:8080/auth-callback
+      MS_REDIRECT_URI: https://dev.shital.org.uk/auth-callback
     depends_on:
       db-dev:
         condition: service_healthy
