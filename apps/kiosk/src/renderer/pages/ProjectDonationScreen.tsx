@@ -101,7 +101,7 @@ function getBrickName(item: CatalogItem, lang: string) {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 export function ProjectDonationScreen() {
-  const { language, setScreen, addItem, items, updateQuantity, resetKiosk, theme, setHomeActiveNav } = useKioskStore()
+  const { language, setScreen, addItem, items, updateQuantity, resetKiosk, theme, setHomeActiveNav, branchId } = useKioskStore()
   const th = THEMES[theme]
 
   const [projects, setProjects] = useState<ApiProject[]>([])
@@ -136,7 +136,7 @@ export function ProjectDonationScreen() {
     async function load() {
       setLoadingProjects(true)
       try {
-        const res = await fetch(`${API_BASE}/projects`)
+        const res = await fetch(`${API_BASE}/projects?branch_id=${branchId}`)
         const data = await res.json()
         const projs: ApiProject[] = data.projects || []
         if (projs.length > 0) {
@@ -153,7 +153,7 @@ export function ProjectDonationScreen() {
       setLoadingProjects(false)
     }
     load()
-  }, [])
+  }, [branchId])
 
   // ── Load items when project changes ──────────────────────────────────────
   useEffect(() => {
@@ -164,7 +164,7 @@ export function ProjectDonationScreen() {
     async function loadItems() {
       setLoadingItems(true)
       try {
-        const res = await fetch(`${API_BASE}/projects/${selectedProjectId}/items`)
+        const res = await fetch(`${API_BASE}/projects/${selectedProjectId}/items?branch_id=${branchId}`)
         const data = await res.json()
         const apiItems: ApiItem[] = (data.items || []).filter((i: ApiItem) => i.is_active)
         if (apiItems.length > 0) {
