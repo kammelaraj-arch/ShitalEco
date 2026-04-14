@@ -30,7 +30,7 @@ docker build -t ghcr.io/kammelaraj-arch/shitaleco-admin:latest \
   --build-arg GIT_SHA="${GIT_SHA}" .
 
 # Rolling restart — backend first
-docker compose -f docker-compose.prod.yml up -d --no-deps backend
+docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
 
 # Wait for backend health before updating frontends
 echo "=== Waiting for backend health ==="
@@ -50,8 +50,8 @@ if [ "$BACKEND_OK" -eq 0 ]; then
   exit 1
 fi
 
-# Frontend rollout
-docker compose -f docker-compose.prod.yml up -d --no-deps admin quick-donation kiosk screen
+# Frontend rollout — force-recreate so new images actually replace running containers
+docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
 docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
   docker compose -f docker-compose.prod.yml up -d --no-deps nginx
 
