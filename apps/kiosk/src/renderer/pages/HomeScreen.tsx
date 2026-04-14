@@ -217,6 +217,11 @@ export function HomeScreen() {
   const [customAmount, setCustomAmount] = useState('')
   const [customAdded, setCustomAdded] = useState(false)
   const [keyboardOpen, setKeyboardOpen] = useState(false)
+  // Project donation state
+  interface ApiProject { id: string; project_id: string; name: string; description: string; goal_amount: number; image_url: string; sort_order: number; is_active: boolean }
+  const [projects, setProjects] = useState<ApiProject[]>([])
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [projectItems, setProjectItems] = useState<DbItem[]>([])
   // Clear the store's homeActiveNav after consuming it on mount
   useEffect(() => { if (homeActiveNav) setHomeActiveNav('') }, []) // eslint-disable-line react-hooks/exhaustive-deps
   // Debounce guard — prevents double-fire from pointerdown + click on touch devices
@@ -245,11 +250,31 @@ export function HomeScreen() {
     }).finally(() => setLoading(false))
   }, [branchId])
 
+  // Fetch projects when on project_donation tab
+  useEffect(() => {
+    if (activeNav !== 'project_donation') return
+    fetch(`${API_BASE}/projects?branch_id=${branchId || 'main'}`)
+      .then(r => r.json()).catch(() => ({ projects: [] }))
+      .then(data => {
+        const projs: ApiProject[] = data.projects ?? []
+        setProjects(projs)
+        if (projs.length > 0 && !selectedProjectId) setSelectedProjectId(projs[0].project_id)
+      })
+  }, [activeNav, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch items for selected project
+  useEffect(() => {
+    if (!selectedProjectId) { setProjectItems(brickTiers); return }
+    fetch(`${API_BASE}/projects/${selectedProjectId}/items?branch_id=${branchId || 'main'}`)
+      .then(r => r.json()).catch(() => ({ items: [] }))
+      .then(data => { setProjectItems(data.items?.length ? data.items : brickTiers) })
+  }, [selectedProjectId, brickTiers]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const activeNavItem = NAV_SECTIONS.flatMap(s => s.items).find(i => i.id === activeNav)
 
   const catalogItems: DbItem[] = (() => {
     if (activeNav === 'soft_donation')    return softDonations
-    if (activeNav === 'project_donation') return brickTiers
+    if (activeNav === 'project_donation') return projectItems
     if (activeNav === 'shop')             return shopItems
     if (activeNav === 'donations')        return generalDonations
     if (activeNav === 'sponsorship')      return sponsorships
@@ -389,7 +414,7 @@ export function HomeScreen() {
           return (
             <button
               key={item.id}
-              onClick={() => item.id === 'project_donation' ? setScreen('project-donation') : setActiveNav(item.id)}
+              onClick={() => setActiveNav(item.id)}
               className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-2.5 transition-all active:scale-95 relative"
               style={{ borderBottom: isActive ? `3px solid ${th.langActive}` : '3px solid transparent' }}
             >
@@ -432,7 +457,7 @@ export function HomeScreen() {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => item.id === 'project_donation' ? setScreen('project-donation') : setActiveNav(item.id)}
+                    onClick={() => setActiveNav(item.id)}
                     className="w-full flex flex-col items-center gap-1 py-3 px-2 text-center transition-all relative active:scale-95"
                     style={{
                       background: isActive ? `${th.langActive}15` : 'transparent',
@@ -480,6 +505,37 @@ export function HomeScreen() {
               </span>
             )}
           </div>
+
+          {/* Project selector — shown only on project_donation tab */}
+          {activeNav === 'project_donation' && projects.length > 0 && (
+            <div className="flex-shrink-0 px-4 pt-2 pb-2" style={{ borderBottom: `2px solid ${th.langActive}20`, background: '#fafafa' }}>
+              <div
+                className={projects.length <= 4 ? 'grid gap-2' : 'flex gap-2 overflow-x-auto pb-1'}
+                style={projects.length <= 4 ? { gridTemplateColumns: `repeat(${Math.min(projects.length, 4)}, 1fr)` } : { scrollbarWidth: 'none' }}
+              >
+                {projects.map(p => {
+                  const active = selectedProjectId === p.project_id
+                  return (
+                    <button key={p.project_id}
+                      onClick={() => setSelectedProjectId(p.project_id)}
+                      className="relative overflow-hidden rounded-xl text-left flex-shrink-0 transition-all active:scale-95"
+                      style={{ border: active ? `2px solid ${th.langActive}` : '2px solid #e5e7eb', boxShadow: active ? `0 4px 12px ${th.langActive}40` : undefined, minWidth: projects.length > 4 ? 140 : undefined }}
+                    >
+                      <div className="relative overflow-hidden flex items-center justify-center" style={{ height: 70, background: active ? `${th.langActive}18` : '#f3f4f6' }}>
+                        {p.image_url ? <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" /> : <span className="text-3xl">🏗️</span>}
+                        <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 60%)' }} />
+                        {active && <span className="absolute bottom-1.5 right-1.5 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white" style={{ background: th.langActive }}>✓</span>}
+                      </div>
+                      <div className="px-2 py-1.5" style={{ background: active ? `${th.langActive}08` : '#fff' }}>
+                        <p className="font-black text-xs leading-snug text-gray-900 truncate">{p.name}</p>
+                        {p.goal_amount > 0 && <p className="text-[10px] font-bold truncate" style={{ color: active ? th.langActive : '#9ca3af' }}>£{Number(p.goal_amount).toLocaleString()}</p>}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Items grid — scrollable */}
           <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent', touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
