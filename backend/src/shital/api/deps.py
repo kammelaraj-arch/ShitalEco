@@ -35,6 +35,9 @@ async def get_current_space(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     role = payload.get("role", "DEVOTEE")
+    # Normalise legacy "ADMIN" role → "SUPER_ADMIN" so all permission checks pass
+    if role == "ADMIN":
+        role = "SUPER_ADMIN"
     branch_id = payload.get("branch_id") or "main"
     permissions = [p for p, roles in PERMISSIONS.items() if role in roles]
 
