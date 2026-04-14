@@ -170,7 +170,7 @@ async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[
     job_title     = data.job_title or data.role or "Staff"
     salary        = str(data.gross_salary) if data.gross_salary else data.salary
     ni_number     = data.ni_number or data.national_insurance
-    start_date    = data.start_date or date.today().isoformat()
+    start_date    = date.fromisoformat(data.start_date) if data.start_date else date.today()
 
     # Auto-generate employee number if not provided
     emp_number = data.employee_number
@@ -211,7 +211,7 @@ async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[
                 "nationality": data.nationality or '',
                 "rtw_type": data.right_to_work_type or '',
                 "visa_num": data.visa_number or '',
-                "visa_exp": data.visa_expiry or None,
+                "visa_exp": date.fromisoformat(data.visa_expiry) if data.visa_expiry else None,
                 "now": now,
             },
         )
