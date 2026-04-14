@@ -178,7 +178,7 @@ jobs:
             # DB and nginx stay up throughout. Each app is replaced individually.
 
             echo "=== Rolling restart: backend ==="
-            docker compose -f docker-compose.prod.yml up -d --no-deps backend
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
 
             echo "Waiting for backend health..."
             BACKEND_OK=0
@@ -197,7 +197,7 @@ jobs:
               echo "!!! Backend health check failed — rolling back to :previous !!!"
               docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
                          ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
-              docker compose -f docker-compose.prod.yml up -d --no-deps backend
+              docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
               echo "Backend rolled back. Frontend apps will NOT be updated."
               docker compose -f docker-compose.prod.yml ps
               exit 1
@@ -207,10 +207,10 @@ jobs:
             curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
 
             echo "=== Rolling restart: frontend apps ==="
-            docker compose -f docker-compose.prod.yml up -d --no-deps admin
-            docker compose -f docker-compose.prod.yml up -d --no-deps quick-donation
-            docker compose -f docker-compose.prod.yml up -d --no-deps kiosk
-            docker compose -f docker-compose.prod.yml up -d --no-deps screen
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate quick-donation
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate kiosk
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate screen
 
             # Reload nginx config (graceful, zero downtime)
             echo "=== Reloading nginx ==="
