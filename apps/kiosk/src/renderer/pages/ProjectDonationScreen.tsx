@@ -107,6 +107,7 @@ export function ProjectDonationScreen() {
   const [projects, setProjects] = useState<ApiProject[]>([])
   const [loadingProjects, setLoadingProjects] = useState(true)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'gallery' | 'items'>('gallery')
   const [projectItems, setProjectItems] = useState<CatalogItem[]>([])
   const [loadingItems, setLoadingItems] = useState(false)
   const [addedBrick, setAddedBrick] = useState<string | null>(null)
@@ -141,15 +142,11 @@ export function ProjectDonationScreen() {
         const projs: ApiProject[] = data.projects || []
         if (projs.length > 0) {
           setProjects(projs)
-          setSelectedProjectId(projs[0].project_id)
         } else {
-          // No projects configured yet — show default so screen is usable
           setProjects([DEFAULT_PROJECT])
-          setSelectedProjectId(DEFAULT_PROJECT.project_id)
         }
       } catch {
         setProjects([DEFAULT_PROJECT])
-        setSelectedProjectId(DEFAULT_PROJECT.project_id)
       }
       setLoadingProjects(false)
     }
@@ -319,94 +316,88 @@ export function ProjectDonationScreen() {
         {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
         <main className="flex-1 flex flex-col overflow-hidden" style={{ background: '#f7f3ee' }}>
 
-          {/* ── PROJECT HEADER BLOCK (fixed, above scroll) ───────────────────── */}
-          <div
-            className="flex-shrink-0 px-4 pt-3 pb-3"
-            style={{ background: '#fff', borderBottom: `3px solid ${th.langActive}` }}
-          >
-            <p className="text-xs font-black uppercase tracking-widest mb-3" style={{ color: th.langActive }}>
-              {language === 'gu' ? 'પ્રોજેક્ટ પસંદ કરો' : language === 'hi' ? 'प्रोजेक्ट चुनें' : '— Choose a Project —'}
-            </p>
+          {/* ── Scrollable body ──────────────────────────────────────────────── */}
+          <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}>
 
-            {loadingProjects ? (
-              <div className={`grid gap-3`} style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-                {[1, 2, 3].map(i => (
-                  <div key={i} className="rounded-2xl animate-pulse" style={{ height: 110, background: '#f3f4f6' }} />
-                ))}
-              </div>
-            ) : projects.length === 0 ? (
-              <p className="text-sm text-gray-400 py-2">No projects available — contact admin.</p>
-            ) : (
-              <div
-                className={projects.length <= 4 ? 'grid gap-3' : 'flex gap-3 overflow-x-auto pb-1'}
-                style={projects.length <= 4
-                  ? { gridTemplateColumns: `repeat(${Math.min(projects.length, 4)}, 1fr)` }
-                  : { scrollbarWidth: 'none' }}
-              >
-                {projects.map(p => {
-                  const active = selectedProjectId === p.project_id
-                  return (
-                    <motion.button
-                      key={p.project_id}
-                      whileTap={{ scale: 0.97 }}
-                      onClick={() => setSelectedProjectId(p.project_id)}
-                      className="relative overflow-hidden rounded-2xl text-left transition-all flex-shrink-0"
-                      style={{
-                        minWidth: projects.length > 4 ? 160 : undefined,
-                        border: active ? `3px solid ${th.langActive}` : '3px solid #e5e7eb',
-                        boxShadow: active ? `0 6px 20px ${th.langActive}40` : '0 2px 8px rgba(0,0,0,0.08)',
-                      }}
-                    >
-                      {/* Image / colour block */}
-                      <div
-                        className="relative w-full overflow-hidden flex items-center justify-center"
-                        style={{ height: 90, background: active ? `${th.langActive}18` : '#f3f4f6' }}
+            {/* ══ GALLERY VIEW — all project hero tiles ═══════════════════════ */}
+            {viewMode === 'gallery' && (
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest mb-4" style={{ color: th.langActive }}>
+                  {language === 'gu' ? 'પ્રોજેક્ટ પસંદ કરો' : language === 'hi' ? 'प्रोजेक्ट चुनें' : '— Choose a Project —'}
+                </p>
+
+                {loadingProjects ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    {[1, 2, 3, 4].map(i => (
+                      <div key={i} className="rounded-2xl animate-pulse" style={{ height: 200, background: '#e5e7eb' }} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    {projects.map((p, idx) => (
+                      <motion.button
+                        key={p.project_id}
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.06 }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => { setSelectedProjectId(p.project_id); setViewMode('items') }}
+                        className="relative overflow-hidden rounded-2xl text-left"
+                        style={{
+                          height: 200,
+                          border: `3px solid ${th.langActive}`,
+                          boxShadow: `0 6px 24px ${th.langActive}40`,
+                        }}
                       >
-                        {p.image_url ? (
-                          <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-4xl">🏗️</span>
-                        )}
-                        {/* Dark gradient overlay */}
-                        <div
-                          className="absolute inset-0 pointer-events-none"
-                          style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.5) 0%, transparent 55%)' }}
-                        />
-                        {active && (
-                          <div className="absolute bottom-2 right-2">
-                            <span
-                              className="text-[10px] font-black px-2 py-0.5 rounded-full text-white"
-                              style={{ background: th.langActive }}
-                            >✓ Selected</span>
+                        {/* Background image or gradient */}
+                        <div className="absolute inset-0" style={{
+                          background: p.image_url ? undefined : `linear-gradient(135deg, ${th.langActive} 0%, #7f1010 100%)`,
+                        }}>
+                          {p.image_url && (
+                            <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                          )}
+                        </div>
+                        {/* Dark overlay */}
+                        <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.80) 0%, rgba(0,0,0,0.15) 60%, transparent 100%)' }} />
+                        {/* Goal badge */}
+                        {p.goal_amount > 0 && (
+                          <div className="absolute top-3 right-3 px-2.5 py-1 rounded-xl text-xs font-black text-white" style={{ background: th.langActive }}>
+                            Goal: £{Number(p.goal_amount).toLocaleString()}
                           </div>
                         )}
-                      </div>
-
-                      {/* Text */}
-                      <div className="px-3 py-2" style={{ background: active ? `${th.langActive}08` : '#fff' }}>
-                        <p className="font-black text-sm leading-snug text-gray-900 truncate">{p.name}</p>
-                        {p.goal_amount > 0 && (
-                          <p className="text-xs mt-0.5 font-bold truncate" style={{ color: active ? th.langActive : '#9ca3af' }}>
-                            Goal: £{Number(p.goal_amount).toLocaleString()}
-                          </p>
-                        )}
-                      </div>
-                    </motion.button>
-                  )
-                })}
+                        {/* Text */}
+                        <div className="absolute bottom-0 left-0 right-0 px-4 pb-4">
+                          <p className="text-white font-black text-lg leading-tight drop-shadow-lg">{p.name}</p>
+                          {p.description && (
+                            <p className="text-white/75 text-xs mt-0.5 leading-snug line-clamp-2">{p.description}</p>
+                          )}
+                          <div className="mt-2 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-black text-white" style={{ background: th.langActive }}>
+                            Donate →
+                          </div>
+                        </div>
+                      </motion.button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
-          </div>
 
-          {/* ── Scrollable body (brick grid only) ───────────────────────────── */}
-          <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}>
-            <div>
+            {/* ══ ITEMS VIEW — selected project + donation tiers ══════════════ */}
+            {viewMode === 'items' && (() => {
+              const proj = projects.find(p => p.project_id === selectedProjectId)
+              if (!proj) return null
+              return (
+                <div>
+                  {/* Back button */}
+                  <button
+                    onClick={() => setViewMode('gallery')}
+                    className="mb-3 flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl"
+                    style={{ background: `${th.langActive}15`, color: th.langActive }}
+                  >
+                    ← All Projects
+                  </button>
 
-              {/* ── Selected project hero tile ──────────────────────────────── */}
-              {(() => {
-                const proj = projects.find(p => p.project_id === selectedProjectId)
-                if (!proj) return null
-                return (
+                  {/* Hero tile */}
                   <div
                     className="w-full rounded-2xl overflow-hidden mb-4"
                     style={{ border: `3px solid ${th.langActive}`, boxShadow: `0 4px 24px ${th.langActive}50` }}
@@ -414,24 +405,19 @@ export function ProjectDonationScreen() {
                     <div
                       className="relative w-full flex items-end"
                       style={{
-                        height: 140,
-                        background: proj.image_url
-                          ? undefined
-                          : `linear-gradient(135deg, ${th.langActive} 0%, #7f1010 100%)`,
+                        height: 160,
+                        background: proj.image_url ? undefined : `linear-gradient(135deg, ${th.langActive} 0%, #7f1010 100%)`,
                       }}
                     >
                       {proj.image_url && (
-                        <img src={proj.image_url} alt={proj.name}
-                          className="absolute inset-0 w-full h-full object-cover" />
+                        <img src={proj.image_url} alt={proj.name} className="absolute inset-0 w-full h-full object-cover" />
                       )}
-                      {/* Always-dark overlay so text is readable */}
                       <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.2) 60%, transparent 100%)' }} />
                       <div className="relative z-10 px-4 pb-3 w-full">
                         <p className="text-white font-black text-xl leading-tight drop-shadow-lg">{proj.name}</p>
-                        {proj.description
-                          ? <p className="text-white/80 text-xs mt-0.5 leading-snug line-clamp-1">{proj.description}</p>
-                          : null
-                        }
+                        {proj.description && (
+                          <p className="text-white/80 text-xs mt-0.5 leading-snug line-clamp-1">{proj.description}</p>
+                        )}
                       </div>
                       {proj.goal_amount > 0 && (
                         <div className="absolute top-3 right-3 px-2.5 py-1 rounded-xl text-xs font-black text-white" style={{ background: th.langActive }}>
@@ -440,12 +426,10 @@ export function ProjectDonationScreen() {
                       )}
                     </div>
                   </div>
-                )
-              })()}
 
-              <p className="text-xs font-black uppercase tracking-widest mb-3" style={{ color: th.langActive }}>
-                — Choose Donation Amount —
-              </p>
+                  <p className="text-xs font-black uppercase tracking-widest mb-3" style={{ color: th.langActive }}>
+                    — Choose Donation Amount —
+                  </p>
 
               {loadingItems ? (
                 <div className="grid grid-cols-3 gap-3">
@@ -539,7 +523,9 @@ export function ProjectDonationScreen() {
                   })}
                 </div>
               )}
-            </div>
+                </div>
+              )
+            })()}
 
           </div>
         </main>
