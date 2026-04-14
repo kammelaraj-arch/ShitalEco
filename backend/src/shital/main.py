@@ -9,12 +9,21 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse, ORJSONResponse
 
 from shital.core.fabrics.config import settings
+from shital.core.fabrics.errors import (
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    UnauthorizedError,
+)
+from shital.core.fabrics.errors import (
+    ValidationError as ShitalValidationError,
+)
 
 logger = structlog.get_logger()
 
@@ -1126,15 +1135,6 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ─── Domain exception → HTTP status mapping ────────────────────────────────────
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from shital.core.fabrics.errors import (
-    ConflictError,
-    ForbiddenError,
-    NotFoundError,
-    UnauthorizedError,
-    ValidationError as ShitalValidationError,
-)
 
 
 @app.exception_handler(ForbiddenError)
