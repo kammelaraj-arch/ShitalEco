@@ -389,7 +389,7 @@ export function HomeScreen() {
           return (
             <button
               key={item.id}
-              onClick={() => setActiveNav(item.id)}
+              onClick={() => item.id === 'project_donation' ? setScreen('project-donation') : setActiveNav(item.id)}
               className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-2.5 transition-all active:scale-95 relative"
               style={{ borderBottom: isActive ? `3px solid ${th.langActive}` : '3px solid transparent' }}
             >
@@ -432,7 +432,7 @@ export function HomeScreen() {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setActiveNav(item.id)}
+                    onClick={() => item.id === 'project_donation' ? setScreen('project-donation') : setActiveNav(item.id)}
                     className="w-full flex flex-col items-center gap-1 py-3 px-2 text-center transition-all relative active:scale-95"
                     style={{
                       background: isActive ? `${th.langActive}15` : 'transparent',
