@@ -1,7 +1,7 @@
-"""006 payment providers
+"""015 payment providers
 
-Revision ID: 006_payment_providers
-Revises: 005_azure_ad
+Revision ID: 015_payment_providers
+Revises: 014_catalog_items_project_id
 Create Date: 2026-04-15 00:00:00.000000
 
 Adds Clover Flex and SumUp columns to terminal_devices.
@@ -12,8 +12,8 @@ from __future__ import annotations
 from alembic import op
 from sqlalchemy import text
 
-revision = "006_payment_providers"
-down_revision = "005_azure_ad"
+revision = "015_payment_providers"
+down_revision = "014_catalog_items_project_id"
 branch_labels = None
 depends_on = None
 
