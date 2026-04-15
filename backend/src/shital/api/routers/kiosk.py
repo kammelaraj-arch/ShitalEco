@@ -508,6 +508,7 @@ async def sumup_checkout(body: SumUpCheckoutInput):
     Poll GET /sumup/checkout/{checkout_id} to check completion.
     """
     import uuid as _uuid
+
     import httpx
 
     from shital.core.fabrics.config import settings
