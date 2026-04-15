@@ -69,6 +69,7 @@ export default function HRPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [activeView, setActiveView] = useState<'active' | 'inactive'>('active')
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -84,12 +85,14 @@ export default function HRPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const data = await apiFetch<{ items: Employee[]; next_cursor: string | null; count: number }>('/hr/employees?limit=200')
+      const data = await apiFetch<{ items: Employee[]; next_cursor: string | null; count: number }>(
+        `/hr/employees?limit=200&is_active=${activeView === 'active'}`
+      )
       setEmployees(data.items || [])
     } catch {
       setError('Failed to load employees')
     } finally { setLoading(false) }
-  }, [])
+  }, [activeView])
 
   useEffect(() => { load() }, [load])
 
@@ -169,6 +172,14 @@ export default function HRPage() {
     } catch { setError('Failed to deactivate') }
   }
 
+  const reactivate = async (emp: Employee) => {
+    if (!confirm(`Reactivate ${emp.full_name}?`)) return
+    try {
+      await apiFetch(`/hr/employees/${emp.id}`, { method: 'PUT', body: JSON.stringify({ is_active: true }) })
+      await load()
+    } catch { setError('Failed to reactivate') }
+  }
+
   const filtered = employees.filter(e =>
     (deptFilter === '' || e.department === deptFilter) &&
     (e.full_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -207,7 +218,7 @@ export default function HRPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Total Employees', value: String(employees.length), icon: '👥', color: 'from-blue-600 to-indigo-500' },
+          { label: activeView === 'active' ? 'Active Employees' : 'Inactive Employees', value: String(employees.length), icon: '👥', color: 'from-blue-600 to-indigo-500' },
           { label: 'Full-Time', value: String(fullTime), icon: '💼', color: 'from-green-600 to-emerald-500' },
           { label: 'Part-Time', value: String(partTime), icon: '⏱️', color: 'from-amber-600 to-orange-500' },
           { label: 'Volunteers', value: String(volunteers), icon: '🤝', color: 'from-purple-600 to-violet-500' },
@@ -222,8 +233,20 @@ export default function HRPage() {
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-3 flex-wrap">
+      {/* Active / Inactive toggle + filters */}
+      <div className="flex gap-3 flex-wrap items-center">
+        <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1">
+          {(['active', 'inactive'] as const).map(v => (
+            <button key={v} onClick={() => { setActiveView(v); setSearch(''); setDeptFilter('') }}
+              className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all capitalize ${
+                activeView === v
+                  ? 'bg-saffron-gradient text-white shadow'
+                  : 'text-white/40 hover:text-white/70'
+              }`}>
+              {v}
+            </button>
+          ))}
+        </div>
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search employees…"
           className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 w-full sm:w-64" />
@@ -242,7 +265,9 @@ export default function HRPage() {
         ) : filtered.length === 0 ? (
           <div className="text-center py-16 text-white/30">
             <p className="text-4xl mb-3">👥</p>
-            <p>{employees.length === 0 ? 'No employees yet — add your first team member.' : 'No employees match your search.'}</p>
+            <p>{employees.length === 0
+              ? (activeView === 'inactive' ? 'No inactive employees.' : 'No employees yet — add your first team member.')
+              : 'No employees match your search.'}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -308,9 +333,13 @@ export default function HRPage() {
                     }`}>{emp.is_active ? 'Active' : 'Inactive'}</span>
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <button onClick={() => openEdit(emp)} className="text-white/40 hover:text-saffron-400 text-sm px-2 py-1 mr-1">Edit</button>
-                    {emp.is_active && (
-                      <button onClick={() => deactivate(emp)} className="text-red-400/50 hover:text-red-400 text-xs px-2 py-1">Off</button>
+                    {activeView === 'active' ? (
+                      <>
+                        <button onClick={() => openEdit(emp)} className="text-white/40 hover:text-saffron-400 text-sm px-2 py-1 mr-1">Edit</button>
+                        <button onClick={() => deactivate(emp)} className="text-red-400/50 hover:text-red-400 text-xs px-2 py-1">Off</button>
+                      </>
+                    ) : (
+                      <button onClick={() => reactivate(emp)} className="text-green-400/60 hover:text-green-400 text-xs font-semibold px-2 py-1">Reactivate</button>
                     )}
                   </td>
                 </motion.tr>
