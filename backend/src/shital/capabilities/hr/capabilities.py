@@ -37,6 +37,7 @@ class CreateEmployeeInput(BaseModel):
     ni_number: str = ""
     tax_code: str = "1257L"
     manager_id: str = ""
+    reporting_manager_id: str = ""  # alias for manager_id from form
 
     # Photo & immigration
     photo_url: str = ""
@@ -186,12 +187,12 @@ async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[
                 INSERT INTO employees
                 (id, branch_id, employee_number, job_title, department,
                  start_date, employment_type, gross_salary, national_insurance,
-                 is_active,
+                 is_active, manager_id,
                  full_name, email, phone, address,
                  photo_url, nationality, right_to_work_type, visa_number, visa_expiry,
                  created_at, updated_at)
                 VALUES (:id, :bid, :num, :title, :dept, :start, :type,
-                        :gross_salary, :ni, true,
+                        :gross_salary, :ni, true, :mgr_id,
                         :full_name, :email, :phone, :address,
                         :photo_url, :nationality, :rtw_type, :visa_num, :visa_exp,
                         :now, :now)
@@ -203,6 +204,7 @@ async def create_employee(ctx: DigitalSpace, data: CreateEmployeeInput) -> dict[
                 "type": data.employment_type,
                 "gross_salary": float(salary) if salary else 0.0,
                 "ni": ni_number or '',
+                "mgr_id": data.reporting_manager_id or data.manager_id or None,
                 "full_name": data.full_name or None,
                 "email": data.email or None,
                 "phone": data.phone or None,
@@ -273,8 +275,11 @@ async def list_employees(
                        COALESCE(e.photo_url, '')         AS photo_url,
                        COALESCE(e.nationality, '')       AS nationality,
                        COALESCE(e.right_to_work_type,'') AS right_to_work_type,
-                       e.visa_expiry
+                       e.visa_expiry,
+                       e.manager_id AS reporting_manager_id,
+                       COALESCE(rm.full_name, '') AS reporting_manager_name
                 FROM employees e
+                LEFT JOIN employees rm ON rm.id = e.manager_id
                 WHERE {where}
                 ORDER BY e.full_name, e.id
                 LIMIT :limit
@@ -387,7 +392,7 @@ async def log_time(ctx: DigitalSpace, data: TimeEntryInput) -> dict[str, Any]:
             """),
             {
                 "id": entry_id, "emp": data.employee_id, "bid": ctx.branch_id,
-                "date": data.entry_date, "hours": float(data.hours_worked),
+                "date": date.fromisoformat(data.entry_date), "hours": float(data.hours_worked),
                 "desc": data.description or None, "now": now,
             },
         )

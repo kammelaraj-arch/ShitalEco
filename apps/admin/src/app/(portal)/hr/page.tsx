@@ -18,6 +18,8 @@ interface Employee {
   nationality: string
   right_to_work_type: string
   visa_expiry: string | null
+  reporting_manager_id: string | null
+  reporting_manager_name: string
 }
 
 interface EmployeeForm {
@@ -36,6 +38,8 @@ interface EmployeeForm {
   right_to_work_type: string
   visa_number: string
   visa_expiry: string
+  reporting_manager_id: string
+  reporting_manager_name: string
 }
 
 const EMPTY_FORM: EmployeeForm = {
@@ -43,6 +47,7 @@ const EMPTY_FORM: EmployeeForm = {
   email: '', phone: '', start_date: '', gross_salary: '', national_insurance: '', address: '',
   photo_url: '', nationality: 'British', right_to_work_type: 'British Citizen',
   visa_number: '', visa_expiry: '',
+  reporting_manager_id: '', reporting_manager_name: '',
 }
 
 const RTW_TYPES = ['British Citizen', 'ILR / Settled Status', 'Pre-Settled Status', 'Skilled Worker Visa', 'Student Visa', 'Graduate Visa', 'Spouse Visa', 'Other']
@@ -70,6 +75,10 @@ export default function HRPage() {
   const [editing, setEditing] = useState<Employee | null>(null)
   const [form, setForm] = useState<EmployeeForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [mgrSearch, setMgrSearch] = useState('')
+  const [mgrResults, setMgrResults] = useState<{ id: string; full_name: string; role: string }[]>([])
+  const [showMgrDropdown, setShowMgrDropdown] = useState(false)
+  const mgrRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -84,9 +93,33 @@ export default function HRPage() {
 
   useEffect(() => { load() }, [load])
 
-  const openNew = () => { setEditing(null); setForm(EMPTY_FORM); setShowForm(true) }
+  useEffect(() => {
+    if (!mgrSearch.trim()) { setMgrResults([]); return }
+    const t = setTimeout(async () => {
+      try {
+        const data = await apiFetch<{ items: { id: string; full_name: string; role: string }[] }>(
+          `/hr/employees/search?q=${encodeURIComponent(mgrSearch)}&limit=10`
+        )
+        setMgrResults(data.items || [])
+        setShowMgrDropdown(true)
+      } catch { setMgrResults([]) }
+    }, 250)
+    return () => clearTimeout(t)
+  }, [mgrSearch])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (mgrRef.current && !mgrRef.current.contains(e.target as Node)) setShowMgrDropdown(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const openNew = () => { setEditing(null); setForm(EMPTY_FORM); setMgrSearch(''); setShowForm(true) }
   const openEdit = (emp: Employee) => {
     setEditing(emp)
+    setMgrSearch(emp.reporting_manager_name || '')
     setForm({
       full_name: emp.full_name || '', role: emp.role || '',
       department: emp.department || 'Admin', employment_type: emp.employment_type || 'FULL_TIME',
@@ -97,6 +130,8 @@ export default function HRPage() {
       photo_url: emp.photo_url || '', nationality: emp.nationality || '',
       right_to_work_type: emp.right_to_work_type || '', visa_number: '',
       visa_expiry: emp.visa_expiry ? emp.visa_expiry.slice(0, 10) : '',
+      reporting_manager_id: emp.reporting_manager_id || '',
+      reporting_manager_name: emp.reporting_manager_name || '',
     })
     setShowForm(true)
   }
@@ -377,6 +412,50 @@ export default function HRPage() {
                 <div>
                   <label className={lbl}>Address</label>
                   <textarea value={form.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} rows={2} className={inp + ' resize-none'} placeholder="1 Temple Road, Wembley, HA9 0AA" />
+                </div>
+
+                {/* Reporting Manager */}
+                <div ref={mgrRef} className="relative">
+                  <label className={lbl}>Reporting Manager</label>
+                  <input
+                    value={mgrSearch}
+                    onChange={e => {
+                      setMgrSearch(e.target.value)
+                      if (!e.target.value) setForm(p => ({ ...p, reporting_manager_id: '', reporting_manager_name: '' }))
+                    }}
+                    onFocus={() => { if (mgrResults.length > 0) setShowMgrDropdown(true) }}
+                    className={inp}
+                    placeholder="Search by name…"
+                    autoComplete="off"
+                  />
+                  {form.reporting_manager_id && !showMgrDropdown && (
+                    <p className="text-white/40 text-xs mt-1">Selected: {form.reporting_manager_name}</p>
+                  )}
+                  {showMgrDropdown && mgrResults.length > 0 && (
+                    <div className="absolute z-50 left-0 right-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-xl overflow-hidden">
+                      {mgrResults.map(m => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => {
+                            setForm(p => ({ ...p, reporting_manager_id: m.id, reporting_manager_name: m.full_name }))
+                            setMgrSearch(m.full_name)
+                            setShowMgrDropdown(false)
+                          }}
+                          className="w-full text-left px-4 py-2.5 hover:bg-white/5 transition-colors flex items-center gap-3"
+                        >
+                          <span className="w-7 h-7 rounded-full bg-saffron-gradient flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                            {m.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                          </span>
+                          <div>
+                            <p className="text-white text-sm font-semibold">{m.full_name}</p>
+                            <p className="text-white/40 text-xs">{m.role}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Immigration */}

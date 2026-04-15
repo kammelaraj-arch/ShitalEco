@@ -33,6 +33,27 @@ async def create_emp(body: CreateEmployeeInput, ctx: CurrentSpace):
     return await create_employee(ctx, body)
 
 
+@router.get("/employees/search")
+async def search_employees(ctx: CurrentSpace, q: str = "", limit: int = 20):
+    """Typeahead search for employees by name (for reporting manager picker)."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            SELECT id, COALESCE(full_name, '') AS full_name,
+                   job_title AS role,
+                   COALESCE(photo_url, '') AS photo_url
+            FROM employees
+            WHERE branch_id = :bid AND is_active = true AND deleted_at IS NULL
+              AND (full_name ILIKE :q OR job_title ILIKE :q)
+            ORDER BY full_name
+            LIMIT :limit
+        """), {"bid": ctx.branch_id, "q": f"%{q}%", "limit": limit})
+        rows = result.mappings().all()
+    return {"items": [dict(r) for r in rows]}
+
+
 class EmployeeUpdate(BaseModel):
     full_name: str | None = None
     email: str | None = None
@@ -50,11 +71,12 @@ class EmployeeUpdate(BaseModel):
     right_to_work_type: str | None = None
     visa_number: str | None = None
     visa_expiry: str | None = None
+    reporting_manager_id: str | None = None
 
 
 @router.put("/employees/{employee_id}")
 async def update_emp(employee_id: str, body: EmployeeUpdate, ctx: CurrentSpace) -> dict[str, Any]:
-    from datetime import datetime
+    from datetime import date, datetime
 
     from sqlalchemy import text
 
@@ -67,12 +89,16 @@ async def update_emp(employee_id: str, body: EmployeeUpdate, ctx: CurrentSpace) 
         "employment_type": body.employment_type, "is_active": body.is_active,
         "photo_url": body.photo_url, "nationality": body.nationality,
         "right_to_work_type": body.right_to_work_type,
-        "visa_number": body.visa_number, "visa_expiry": body.visa_expiry,
+        "visa_number": body.visa_number,
     }
     for col, val in field_map.items():
         if val is not None:
             sets.append(f"{col} = :{col}")
             params[col] = val
+    # DATE fields — must be Python date objects, not strings
+    if body.visa_expiry is not None:
+        sets.append("visa_expiry = :visa_expiry")
+        params["visa_expiry"] = date.fromisoformat(body.visa_expiry) if body.visa_expiry else None
     if body.role is not None:
         sets.append("job_title = :job_title")
         params["job_title"] = body.role
@@ -84,7 +110,10 @@ async def update_emp(employee_id: str, body: EmployeeUpdate, ctx: CurrentSpace) 
         params["national_insurance"] = body.national_insurance
     if body.start_date is not None:
         sets.append("start_date = :start_date")
-        params["start_date"] = body.start_date
+        params["start_date"] = date.fromisoformat(body.start_date)
+    if body.reporting_manager_id is not None:
+        sets.append("manager_id = :manager_id")
+        params["manager_id"] = body.reporting_manager_id if body.reporting_manager_id else None
     if not sets:
         return {"ok": True}
     sets.append("updated_at = :now")
