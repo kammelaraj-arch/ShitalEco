@@ -20,6 +20,8 @@ export function PaymentScreen() {
   const readerId = pi?.reader_id as string
   const checkoutId = pi?.checkout_id as string
   const cloverOrderId = pi?.clover_order_id as string
+  const sumupCheckoutId = pi?.sumup_checkout_id as string
+  const readerSerial = pi?.reader_serial as string
 
   const [timeLeft, setTimeLeft] = useState(300)
   const [readerStatus, setReaderStatus] = useState<ReaderStatus>('waiting')
@@ -87,6 +89,34 @@ export function PaymentScreen() {
     return () => clearInterval(poll)
   }, [provider, checkoutId])
 
+  // Poll SumUp
+  useEffect(() => {
+    if (provider !== 'SUMUP' || !sumupCheckoutId) return
+    setReaderStatus('processing')
+    setStatusMessage('Waiting for card on SumUp reader...')
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/kiosk/sumup/checkout/${sumupCheckoutId}`)
+        const d = await res.json()
+        if (d.status === 'PAID') {
+          clearInterval(poll)
+          setReaderStatus('succeeded')
+          setStatusMessage('Payment successful!')
+          setTimeout(() => setScreen('confirmation'), 1500)
+        } else if (d.status === 'FAILED') {
+          clearInterval(poll)
+          setReaderStatus('failed')
+          setStatusMessage('Payment declined.')
+        } else if (d.status === 'EXPIRED') {
+          clearInterval(poll)
+          setReaderStatus('cancelled')
+          setStatusMessage('Payment session expired.')
+        }
+      } catch { }
+    }, 2500)
+    return () => clearInterval(poll)
+  }, [provider, sumupCheckoutId])
+
   // Poll Clover Flex
   useEffect(() => {
     if (provider !== 'CLOVER' || !cloverOrderId) return
@@ -129,7 +159,7 @@ export function PaymentScreen() {
     waiting: '#F59E0B', processing: '#3B82F6', succeeded: '#22C55E', failed: '#EF4444', cancelled: '#6B7280',
   }
 
-  const isTerminal = provider === 'STRIPE_TERMINAL' || provider === 'SQUARE' || provider === 'CLOVER'
+  const isTerminal = provider === 'STRIPE_TERMINAL' || provider === 'SQUARE' || provider === 'CLOVER' || provider === 'SUMUP'
 
   return (
     <div className="w-full h-full flex flex-col items-center justify-center px-8 py-6" style={{ background: th.mainBg }}>
@@ -138,8 +168,8 @@ export function PaymentScreen() {
         {isTerminal && (
           <div className="text-center mb-6">
             <div className="flex items-center justify-center gap-3 mb-6">
-              <div className="px-4 py-2 rounded-xl text-white text-sm font-black shadow-md" style={{ background: provider === 'STRIPE_TERMINAL' ? '#6366F1' : provider === 'CLOVER' ? '#FF6B00' : '#3E4348' }}>
-                {provider === 'STRIPE_TERMINAL' ? '🔷 Stripe Terminal' : provider === 'CLOVER' ? '🍀 Clover Flex' : '◼ Square Terminal'}
+              <div className="px-4 py-2 rounded-xl text-white text-sm font-black shadow-md" style={{ background: provider === 'STRIPE_TERMINAL' ? '#6366F1' : provider === 'CLOVER' ? '#FF6B00' : provider === 'SUMUP' ? '#00B4D8' : '#3E4348' }}>
+                {provider === 'STRIPE_TERMINAL' ? '🔷 Stripe Terminal' : provider === 'CLOVER' ? '🍀 Clover Flex' : provider === 'SUMUP' ? '💳 SumUp' : '◼ Square Terminal'}
               </div>
             </div>
             <motion.div className="relative inline-flex flex-col items-center mb-6">
@@ -152,7 +182,7 @@ export function PaymentScreen() {
                       <motion.div key="fail" initial={{ scale: 0 }} animate={{ scale: 1 }} className="text-5xl">✗</motion.div>
                     ) : (
                       <motion.div key="waiting" animate={{ scale: [1, 1.15, 1], opacity: [0.7, 1, 0.7] }} transition={{ duration: 1.8, repeat: Infinity }} className="text-4xl">
-                        {provider === 'STRIPE_TERMINAL' ? '📦' : provider === 'CLOVER' ? '🍀' : '◼'}
+                        {provider === 'STRIPE_TERMINAL' ? '📦' : provider === 'CLOVER' ? '🍀' : provider === 'SUMUP' ? '💳' : '◼'}
                       </motion.div>
                     )}
                   </AnimatePresence>

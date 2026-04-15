@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     CLOVER_ACCESS_TOKEN: str = ""
     CLOVER_MERCHANT_ID: str = ""
     CLOVER_ENVIRONMENT: str = "sandbox"  # sandbox | production
+    CLOVER_DEVICE_ID: str = ""
+
+    # SumUp
+    SUMUP_ACCESS_TOKEN: str = ""
+    SUMUP_MERCHANT_CODE: str = ""
 
     # MeiliSearch
     MEILISEARCH_URL: str = "http://localhost:7700"

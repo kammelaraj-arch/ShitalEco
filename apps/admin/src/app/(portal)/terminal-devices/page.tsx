@@ -14,10 +14,12 @@ interface TerminalDevice {
   user_name: string
   user_email: string
   label: string
-  provider: 'stripe_terminal' | 'square' | 'cash'
+  provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash'
   stripe_reader_id: string
   stripe_location_id: string
   square_device_id: string
+  clover_device_id: string
+  sumup_reader_serial: string
   device_type: string
   serial_number: string
   status: 'online' | 'offline' | 'busy'
@@ -36,6 +38,8 @@ interface FormState {
   stripe_reader_id: string
   stripe_location_id: string
   square_device_id: string
+  clover_device_id: string
+  sumup_reader_serial: string
   device_type: string
   serial_number: string
   user_id: string
@@ -49,6 +53,7 @@ const DEFAULT_LOCATION_ID = 'tml_Gcuz0gCsvSvQZg'
 const EMPTY_FORM: FormState = {
   branch_id: '', branch_name: '', label: '', provider: 'stripe_terminal',
   stripe_reader_id: '', stripe_location_id: DEFAULT_LOCATION_ID, square_device_id: '',
+  clover_device_id: '', sumup_reader_serial: '',
   device_type: '', serial_number: '',
   user_id: '', user_name: '', user_email: '', notes: '',
 }
@@ -69,6 +74,8 @@ function providerBadge(provider: string) {
   const map: Record<string, { icon: string; label: string; cls: string }> = {
     stripe_terminal: { icon: '⚡', label: 'Stripe Terminal', cls: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/20' },
     square:          { icon: '◼', label: 'Square',          cls: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
+    clover:          { icon: '🍀', label: 'Clover Flex',     cls: 'bg-orange-500/15 text-orange-400 border-orange-500/20' },
+    sumup:           { icon: '💳', label: 'SumUp',           cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20' },
     cash:            { icon: '💵', label: 'Cash',            cls: 'bg-green-500/15 text-green-400 border-green-500/20' },
   }
   return map[provider] ?? { icon: '?', label: provider, cls: 'bg-white/10 text-white/50 border-white/10' }
@@ -99,6 +106,8 @@ function DeviceModal({
           stripe_reader_id: device.stripe_reader_id,
           stripe_location_id: device.stripe_location_id,
           square_device_id: device.square_device_id,
+          clover_device_id: device.clover_device_id,
+          sumup_reader_serial: device.sumup_reader_serial,
           device_type: device.device_type,   serial_number: device.serial_number,
           user_id: device.user_id ?? '',     user_name: device.user_name,
           user_email: device.user_email,     notes: device.notes,
@@ -134,7 +143,9 @@ function DeviceModal({
   const PROVIDERS = [
     { id: 'stripe_terminal', label: 'Stripe Terminal (WisePOS E)', icon: '⚡' },
     { id: 'square',          label: 'Square Terminal',             icon: '◼' },
-    { id: 'cash',            label: 'Cash / Manual',              icon: '💵' },
+    { id: 'clover',          label: 'Clover Flex',                 icon: '🍀' },
+    { id: 'sumup',           label: 'SumUp Solo',                  icon: '💳' },
+    { id: 'cash',            label: 'Cash / Manual',               icon: '💵' },
   ]
 
   return (
@@ -166,7 +177,7 @@ function DeviceModal({
           {/* Provider */}
           <div>
             <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider mb-2">Provider</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {PROVIDERS.map(p => (
                 <button
                   key={p.id}
@@ -210,6 +221,12 @@ function DeviceModal({
           )}
           {form.provider === 'square' && (
             <Field label="Square Device ID" value={form.square_device_id} onChange={v => set('square_device_id', v)} placeholder="device_xxxxxxxxx" mono />
+          )}
+          {form.provider === 'clover' && (
+            <Field label="Clover Device ID" value={form.clover_device_id} onChange={v => set('clover_device_id', v)} placeholder="CLOVER_DEVICE_XXXXXXXXX" mono />
+          )}
+          {form.provider === 'sumup' && (
+            <Field label="SumUp Reader Serial" value={form.sumup_reader_serial} onChange={v => set('sumup_reader_serial', v)} placeholder="e.g. SNR-XXXXXXX" mono />
           )}
 
           {/* Hardware */}

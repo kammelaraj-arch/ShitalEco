@@ -181,13 +181,15 @@ interface KioskState {
   idleTimer: number
   branchId: string
   theme: KioskTheme
-  cardProvider: 'stripe_terminal' | 'square' | 'clover' | 'cash'
+  cardProvider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash'
   stripeReaderId: string
   stripeReaderLabel: string
   squareDeviceId: string
   squareDeviceName: string
   cloverDeviceId: string
   cloverDeviceName: string
+  sumupReaderId: string
+  sumupReaderLabel: string
   giftAidDeclaration: {
     agreed: boolean; fullName: string; postcode: string
     address: string; contactEmail: string; contactPhone: string
@@ -209,7 +211,7 @@ interface KioskState {
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
   setBranchId: (id: string) => void
-  setCardDevice: (provider: 'stripe_terminal' | 'square' | 'clover' | 'cash', deviceId: string, deviceLabel: string) => void
+  setCardDevice: (provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash', deviceId: string, deviceLabel: string) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
   removeItem: (id: string) => void
@@ -249,6 +251,8 @@ export const useKioskStore = create<KioskState>()(
   squareDeviceName: '',
   cloverDeviceId: '',
   cloverDeviceName: '',
+  sumupReaderId: '',
+  sumupReaderLabel: '',
   setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
   setContactInfo: (contactInfo) => set({ contactInfo }),
   setPendingPayment: (pendingPayment) => set({ pendingPayment }),
@@ -264,6 +268,8 @@ export const useKioskStore = create<KioskState>()(
       ? { cardProvider: provider, squareDeviceId: deviceId, squareDeviceName: deviceLabel }
       : provider === 'clover'
       ? { cardProvider: provider, cloverDeviceId: deviceId, cloverDeviceName: deviceLabel }
+      : provider === 'sumup'
+      ? { cardProvider: provider, sumupReaderId: deviceId, sumupReaderLabel: deviceLabel }
       : { cardProvider: provider }
   ),
   setBasketId: (basketId) => set({ basketId }),
@@ -297,6 +303,8 @@ export const useKioskStore = create<KioskState>()(
         squareDeviceName: state.squareDeviceName,
         cloverDeviceId: state.cloverDeviceId,
         cloverDeviceName: state.cloverDeviceName,
+        sumupReaderId: state.sumupReaderId,
+        sumupReaderLabel: state.sumupReaderLabel,
         branchId: state.branchId,
         endScreenTemplate: state.endScreenTemplate,
         formTextConfig: state.formTextConfig,

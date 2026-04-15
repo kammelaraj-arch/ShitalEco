@@ -16,6 +16,7 @@ export function CheckoutScreen() {
     stripeReaderId, stripeReaderLabel,
     squareDeviceId, squareDeviceName,
     cloverDeviceId, cloverDeviceName,
+    sumupReaderId, sumupReaderLabel,
     pendingPayment, setPendingPayment, theme,
   } = useKioskStore()
   const th = THEMES[theme]
@@ -38,6 +39,10 @@ export function CheckoutScreen() {
     }
     if (cardProvider === 'clover' && (!cloverDeviceId || !cloverDeviceId.trim())) {
       setError('No Clover device configured. Go to Admin Settings → Device Config and assign a Clover Flex.')
+      return
+    }
+    if (cardProvider === 'sumup' && (!sumupReaderId || !sumupReaderId.trim())) {
+      setError('No SumUp reader configured. Go to Admin Settings → Device Config and assign a SumUp reader.')
       return
     }
 
@@ -169,6 +174,34 @@ export function CheckoutScreen() {
           clover_order_id: cl.clover_order_id,
           device_id: cloverDeviceId,
           reader_label: cloverDeviceName,
+        })
+        setScreen('payment')
+        return
+      }
+
+      // ── SumUp Solo ───────────────────────────────────────────────────────
+      if (cardProvider === 'sumup') {
+        setStage('Sending to SumUp reader…')
+        const suRes = await fetch(`${API_BASE}/kiosk/sumup/checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: total,
+            currency: 'GBP',
+            description: 'Shital Temple Payment',
+            order_id: basket_id,
+            reader_serial: sumupReaderId,
+          }),
+        })
+        if (!suRes.ok) throw new Error(`SumUp error (${suRes.status}): ${(await suRes.text()).slice(0, 120)}`)
+        const su = await suRes.json()
+        if (su.error) throw new Error(su.error)
+
+        setOrderResult(basket_id, orderRef, {
+          provider: 'SUMUP',
+          sumup_checkout_id: su.checkout_id,
+          reader_serial: sumupReaderId,
+          reader_label: sumupReaderLabel,
         })
         setScreen('payment')
         return

@@ -492,6 +492,129 @@ async def list_clover_devices():
         return {"devices": [], "error": str(e)}
 
 
+# ─── SumUp ────────────────────────────────────────────────────────────────────
+
+class SumUpCheckoutInput(BaseModel):
+    amount_pence: int
+    order_id: str
+    description: str = "Temple Payment"
+    reader_serial: str = ""     # SumUp Solo/Air Plus serial number
+
+
+@router.post("/sumup/checkout")
+async def sumup_checkout(body: SumUpCheckoutInput):
+    """
+    Create a SumUp checkout and push it to the configured SumUp reader.
+    Poll GET /sumup/checkout/{checkout_id} to check completion.
+    """
+    import uuid as _uuid
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+
+    if not access_token or not merchant_code:
+        return {"error": "SumUp is not configured. Add SUMUP_ACCESS_TOKEN and SUMUP_MERCHANT_CODE in Admin → API Keys."}
+
+    base = "https://api.sumup.com"
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    amount = round(body.amount_pence / 100, 2)
+    checkout_ref = f"SHT-{body.order_id[:12].upper()}-{_uuid.uuid4().hex[:6].upper()}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # 1. Create checkout
+            create_resp = await client.post(
+                f"{base}/v0.1/checkouts",
+                headers=headers,
+                json={
+                    "checkout_reference": checkout_ref,
+                    "amount": amount,
+                    "currency": "GBP",
+                    "merchant_code": merchant_code,
+                    "description": body.description,
+                },
+            )
+            if not create_resp.is_success:
+                return {"error": f"SumUp checkout creation failed ({create_resp.status_code}): {create_resp.text[:200]}"}
+
+            checkout = create_resp.json()
+            checkout_id = checkout.get("id")
+
+            # 2. Push to physical reader if serial provided
+            reader_serial = body.reader_serial or await SecretsManager.get("SUMUP_READER_SERIAL") or ""
+            if reader_serial and checkout_id:
+                await client.post(
+                    f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_serial}/checkout",
+                    headers=headers,
+                    json={"id": checkout_id},
+                )
+
+        return {
+            "checkout_id": checkout_id,
+            "checkout_reference": checkout_ref,
+            "amount": amount,
+            "reader_serial": reader_serial,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/sumup/checkout/{checkout_id}")
+async def sumup_checkout_status(checkout_id: str):
+    """Poll SumUp checkout status (PENDING / COMPLETED / FAILED / EXPIRED)."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    if not access_token:
+        return {"status": "error", "error": "SumUp not configured"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        data = resp.json()
+        return {"status": data.get("status", "PENDING"), "raw": data}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/sumup/readers")
+async def list_sumup_readers():
+    """List SumUp readers registered to the merchant."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+
+    if not access_token or not merchant_code:
+        return {"readers": [], "error": "SumUp not configured. Add SUMUP_ACCESS_TOKEN and SUMUP_MERCHANT_CODE."}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.sumup.com/v0.1/merchants/{merchant_code}/readers",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        readers = resp.json() if resp.is_success else []
+        if isinstance(readers, list):
+            return {"readers": [{"serial": r.get("serial_number", ""), "name": r.get("name", r.get("serial_number", "")), "status": r.get("status", "unknown")} for r in readers]}
+        return {"readers": []}
+    except Exception as e:
+        return {"readers": [], "error": str(e)}
+
+
 class QuickDonationRecordInput(BaseModel):
     basket_id: str
     order_ref: str
