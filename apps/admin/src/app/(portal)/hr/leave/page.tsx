@@ -36,8 +36,8 @@ export default function LeavePage() {
   const loadEmployees = useCallback(async () => {
     setEmpLoading(true)
     try {
-      const data = await apiFetch<{ employees: Employee[] }>('/hr/employees?limit=100')
-      setEmployees(data.employees || [])
+      const data = await apiFetch<{ items: Employee[] }>('/hr/employees?limit=100')
+      setEmployees(data.items || [])
     } catch {
       // non-fatal
     } finally {
@@ -60,7 +60,7 @@ export default function LeavePage() {
         method: 'POST',
         body: JSON.stringify({
           employee_id: form.employee_id,
-          leave_type: form.leave_type,
+          leave_policy_id: '',
           start_date: form.start_date,
           end_date: form.end_date,
           reason: form.reason,
