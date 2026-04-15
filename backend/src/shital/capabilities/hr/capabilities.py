@@ -101,6 +101,14 @@ async def _ensure_hr_tables() -> None:
         await db.execute(text("CREATE INDEX IF NOT EXISTS idx_employees_branch ON employees(branch_id)"))
         await db.execute(text("CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(branch_id, is_active)"))
         await db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uidx_employees_number ON employees(branch_id, employee_number)"))
+        # Self-healing column additions for existing databases
+        await db.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS manager_id UUID"))
+        await db.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo_url TEXT NOT NULL DEFAULT ''"))
+        await db.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS nationality VARCHAR(100) NOT NULL DEFAULT ''"))
+        await db.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS right_to_work_type VARCHAR(50) NOT NULL DEFAULT ''"))
+        await db.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_number VARCHAR(100) NOT NULL DEFAULT ''"))
+        await db.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_expiry DATE"))
+        await db.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS full_name VARCHAR(200)"))
 
         await db.execute(text("""
             CREATE TABLE IF NOT EXISTS leave_policies (
@@ -276,7 +284,7 @@ async def list_employees(
                        COALESCE(e.nationality, '')       AS nationality,
                        COALESCE(e.right_to_work_type,'') AS right_to_work_type,
                        e.visa_expiry,
-                       e.manager_id AS reporting_manager_id,
+                       CAST(e.manager_id AS VARCHAR) AS reporting_manager_id,
                        COALESCE(rm.full_name, '') AS reporting_manager_name
                 FROM employees e
                 LEFT JOIN employees rm ON rm.id = e.manager_id
