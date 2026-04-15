@@ -283,11 +283,8 @@ async def list_employees(
                        COALESCE(e.photo_url, '')         AS photo_url,
                        COALESCE(e.nationality, '')       AS nationality,
                        COALESCE(e.right_to_work_type,'') AS right_to_work_type,
-                       e.visa_expiry,
-                       CAST(e.manager_id AS VARCHAR) AS reporting_manager_id,
-                       COALESCE(rm.full_name, '') AS reporting_manager_name
+                       e.visa_expiry
                 FROM employees e
-                LEFT JOIN employees rm ON rm.id = e.manager_id
                 WHERE {where}
                 ORDER BY e.full_name, e.id
                 LIMIT :limit

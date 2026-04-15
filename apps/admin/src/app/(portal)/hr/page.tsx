@@ -18,8 +18,7 @@ interface Employee {
   nationality: string
   right_to_work_type: string
   visa_expiry: string | null
-  reporting_manager_id: string | null
-  reporting_manager_name: string
+  reporting_manager_id?: string | null
 }
 
 interface EmployeeForm {
@@ -89,8 +88,8 @@ export default function HRPage() {
         `/hr/employees?limit=200&is_active=${activeView === 'active'}`
       )
       setEmployees(data.items || [])
-    } catch {
-      setError('Failed to load employees')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load employees')
     } finally { setLoading(false) }
   }, [activeView])
 
@@ -120,10 +119,10 @@ export default function HRPage() {
   }, [])
 
   const openNew = () => { setEditing(null); setForm(EMPTY_FORM); setMgrSearch(''); setShowForm(true) }
-  const openEdit = (emp: Employee) => {
+  const openEdit = async (emp: Employee) => {
     setEditing(emp)
-    setMgrSearch(emp.reporting_manager_name || '')
-    setForm({
+    setMgrSearch('')
+    const f: EmployeeForm = {
       full_name: emp.full_name || '', role: emp.role || '',
       department: emp.department || 'Admin', employment_type: emp.employment_type || 'FULL_TIME',
       email: emp.email || '', phone: emp.phone || '',
@@ -134,8 +133,19 @@ export default function HRPage() {
       right_to_work_type: emp.right_to_work_type || '', visa_number: '',
       visa_expiry: emp.visa_expiry ? emp.visa_expiry.slice(0, 10) : '',
       reporting_manager_id: emp.reporting_manager_id || '',
-      reporting_manager_name: emp.reporting_manager_name || '',
-    })
+      reporting_manager_name: '',
+    }
+    // Resolve manager name if we have an id
+    if (emp.reporting_manager_id) {
+      try {
+        const res = await apiFetch<{ items: { id: string; full_name: string }[] }>(
+          `/hr/employees/search?id=${emp.reporting_manager_id}`
+        )
+        const mgr = res.items[0]
+        if (mgr) { f.reporting_manager_name = mgr.full_name; setMgrSearch(mgr.full_name) }
+      } catch { /* non-fatal */ }
+    }
+    setForm(f)
     setShowForm(true)
   }
 

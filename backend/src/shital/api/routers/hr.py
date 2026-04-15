@@ -34,22 +34,32 @@ async def create_emp(body: CreateEmployeeInput, ctx: CurrentSpace):
 
 
 @router.get("/employees/search")
-async def search_employees(ctx: CurrentSpace, q: str = "", limit: int = 20):
-    """Typeahead search for employees by name (for reporting manager picker)."""
+async def search_employees(ctx: CurrentSpace, q: str = "", id: str = "", limit: int = 20):
+    """Typeahead search for employees by name, or look up a single employee by id."""
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
-        result = await db.execute(text("""
-            SELECT id, COALESCE(full_name, '') AS full_name,
-                   job_title AS role,
-                   COALESCE(photo_url, '') AS photo_url
-            FROM employees
-            WHERE branch_id = :bid AND is_active = true AND deleted_at IS NULL
-              AND (full_name ILIKE :q OR job_title ILIKE :q)
-            ORDER BY full_name
-            LIMIT :limit
-        """), {"bid": ctx.branch_id, "q": f"%{q}%", "limit": limit})
+        if id:
+            result = await db.execute(text("""
+                SELECT id, COALESCE(full_name, '') AS full_name,
+                       job_title AS role,
+                       COALESCE(photo_url, '') AS photo_url
+                FROM employees
+                WHERE id = :id AND branch_id = :bid AND deleted_at IS NULL
+                LIMIT 1
+            """), {"id": id, "bid": ctx.branch_id})
+        else:
+            result = await db.execute(text("""
+                SELECT id, COALESCE(full_name, '') AS full_name,
+                       job_title AS role,
+                       COALESCE(photo_url, '') AS photo_url
+                FROM employees
+                WHERE branch_id = :bid AND is_active = true AND deleted_at IS NULL
+                  AND (full_name ILIKE :q OR job_title ILIKE :q)
+                ORDER BY full_name
+                LIMIT :limit
+            """), {"bid": ctx.branch_id, "q": f"%{q}%", "limit": limit})
         rows = result.mappings().all()
     return {"items": [dict(r) for r in rows]}
 
