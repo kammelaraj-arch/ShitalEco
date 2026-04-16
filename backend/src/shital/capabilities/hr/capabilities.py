@@ -324,12 +324,12 @@ async def request_leave(ctx: DigitalSpace, data: LeaveRequestInput) -> dict[str,
         await db.execute(
             text("""
                 INSERT INTO leave_requests
-                (id, employee_id, leave_policy_id, start_date, end_date, days,
+                (id, employee_id, start_date, end_date, days,
                  reason, status, created_at, updated_at)
-                VALUES (:id, :emp, :pol, :start, :end, :days, :reason, 'PENDING', :now, :now)
+                VALUES (:id, :emp, :start, :end, :days, :reason, 'PENDING', :now, :now)
             """),
             {
-                "id": req_id, "emp": data.employee_id, "pol": data.leave_policy_id or None,
+                "id": req_id, "emp": data.employee_id,
                 "start": start, "end": end, "days": delta,
                 "reason": data.reason or None, "now": now,
             },

@@ -199,10 +199,12 @@ async def import_donations_csv(
             try:
                 amount_str = (row.get("amount") or "").strip()
                 if not amount_str:
-                    errors.append({"row": row_num, "error": "Missing amount"}); continue
+                    errors.append({"row": row_num, "error": "Missing amount"})
+                    continue
                 amount = float(amount_str)
                 if amount <= 0:
-                    errors.append({"row": row_num, "error": f"Amount must be > 0"}); continue
+                    errors.append({"row": row_num, "error": "Amount must be > 0"})
+                    continue
 
                 date_str = (row.get("date") or "").strip()
                 try:
