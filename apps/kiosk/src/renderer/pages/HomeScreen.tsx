@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, t, THEMES, KioskTheme, Language, LANGUAGE_META } from '../store/kiosk.store'
 import { KioskKeyboard } from '../components/KioskKeyboard'
+import { cachedFetch } from '../utils/cachedFetch'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -233,28 +234,29 @@ export function HomeScreen() {
   useEffect(() => {
     const bid = branchId || 'main'
     setLoading(true)
+    const empty = { items: [] }
     Promise.all([
-      fetch(`${API_BASE}/items/kiosk/soft-donations?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/items/kiosk/projects?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/items/kiosk/shop?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/items/kiosk/general-donations`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/items/kiosk/sponsorship?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/kiosk/services`).then(r => r.json()).catch(() => ({ services: [] })),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/soft-donations?branch_id=${bid}`).catch(() => empty),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/projects?branch_id=${bid}`).catch(() => empty),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/shop?branch_id=${bid}`).catch(() => empty),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/general-donations`).catch(() => empty),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/sponsorship?branch_id=${bid}`).catch(() => empty),
+      cachedFetch<{ services: Service[] }>(`${API_BASE}/kiosk/services`).catch(() => ({ services: [] })),
     ]).then(([sd, proj, shop, gd, spon, svcs]) => {
       setSoftDonations(sd.items ?? [])
       setBrickTiers(proj.items ?? [])
       setShopItems(shop.items ?? [])
       setGeneralDonations(gd.items ?? [])
       setSponsorships(spon.items ?? [])
-      setServices(svcs.services ?? [])
+      setServices((svcs as { services: Service[] }).services ?? [])
     }).finally(() => setLoading(false))
   }, [branchId])
 
   // Fetch projects when on project_donation tab
   useEffect(() => {
     if (activeNav !== 'project_donation') return
-    fetch(`${API_BASE}/projects?branch_id=${branchId || 'main'}`)
-      .then(r => r.json()).catch(() => ({ projects: [] }))
+    cachedFetch<{ projects: ApiProject[] }>(`${API_BASE}/projects?branch_id=${branchId || 'main'}`)
+      .catch(() => ({ projects: [] }))
       .then(data => {
         const projs: ApiProject[] = data.projects ?? []
         setProjects(projs)
@@ -265,8 +267,8 @@ export function HomeScreen() {
   // Fetch items for selected project
   useEffect(() => {
     if (!selectedProjectId) { setProjectItems(brickTiers); return }
-    fetch(`${API_BASE}/projects/${selectedProjectId}/items?branch_id=${branchId || 'main'}`)
-      .then(r => r.json()).catch(() => ({ items: [] }))
+    cachedFetch<{ items: DbItem[] }>(`${API_BASE}/projects/${selectedProjectId}/items?branch_id=${branchId || 'main'}`)
+      .catch(() => ({ items: [] }))
       .then(data => { setProjectItems(data.items?.length ? data.items : brickTiers) })
   }, [selectedProjectId, brickTiers]) // eslint-disable-line react-hooks/exhaustive-deps
 
