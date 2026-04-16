@@ -18,12 +18,12 @@ async def get_services(ctx: OptionalSpace, category: str = "", branch_id: str = 
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    conditions = ["ts.is_active = true", "ts.deleted_at IS NULL"]
+    conditions = ["is_active = true", "deleted_at IS NULL"]
     params: dict[str, Any] = {"bid": branch_id}
     if category:
-        conditions.append("ts.category = :cat")
+        conditions.append("category = :cat")
         params["cat"] = category
-    conditions.append("ts.branch_id = :bid")
+    conditions.append("branch_id = :bid")
     async with SessionLocal() as db:
         result = await db.execute(
             text(f"SELECT id, name, name_gu, name_hi, description, category, price, currency, duration, capacity, image_url FROM temple_services WHERE {' AND '.join(conditions)} ORDER BY category, name"),
