@@ -22,14 +22,26 @@ export function authHeaders(extra?: Record<string, string>): Record<string, stri
 export async function apiFetch<T = unknown>(
   path: string,
   init?: RequestInit,
+  timeoutMs = 15000,
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      ...authHeaders(),
-      ...(init?.headers ?? {}),
-    },
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        ...authHeaders(),
+        ...(init?.headers ?? {}),
+      },
+    })
+  } catch (err: unknown) {
+    clearTimeout(timer)
+    if (err instanceof Error && err.name === 'AbortError') throw new Error('Request timed out — please try again')
+    throw err
+  }
+  clearTimeout(timer)
   if (res.status === 401) {
     // Token expired or invalid — clear it and force re-login
     if (typeof window !== 'undefined') {
@@ -39,8 +51,17 @@ export async function apiFetch<T = unknown>(
     throw new Error('Session expired. Please log in again.')
   }
   if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`${res.status}: ${text.slice(0, 200)}`)
+    let msg = ''
+    const ct = res.headers.get('content-type') || ''
+    if (ct.includes('application/json')) {
+      try { const j = await res.json(); msg = j.detail || j.message || JSON.stringify(j) } catch { /* ignore */ }
+    }
+    if (!msg) {
+      if (res.status === 502 || res.status === 503) msg = 'Server is temporarily unavailable — please try again in a moment'
+      else if (res.status === 504) msg = 'Request timed out — please try again'
+      else { const t = await res.text().catch(() => ''); msg = t.replace(/<[^>]+>/g, '').trim().slice(0, 200) || `HTTP ${res.status}` }
+    }
+    throw new Error(msg)
   }
   return res.json() as Promise<T>
 }
