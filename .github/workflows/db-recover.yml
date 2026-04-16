@@ -1,0 +1,98 @@
+name: DB Recovery
+
+on:
+  push:
+    branches: [claude/shital-erp-platform-iR2UF]
+    paths: ['.github/workflows/db-recover.yml']
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recover database and bring services up
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 300s
+          command_timeout: 10m
+          script: |
+            set -e
+            echo "===== DB RECOVERY SCRIPT ====="
+
+            # ── 1. Check volume state ─────────────────────────────────────────
+            echo ""
+            echo "=== Volumes ==="
+            docker volume ls
+
+            echo ""
+            echo "=== All containers ==="
+            docker ps -a --format "{{.Names}}\t{{.Status}}"
+
+            echo ""
+            echo "=== Backups ==="
+            ls -lht /opt/shitaleco/backups/ 2>/dev/null | head -10 || echo "No backups directory"
+
+            # ── 2. Ensure prod dir is up to date ──────────────────────────────
+            cd /opt/shitaleco
+            git fetch origin claude/shital-erp-platform-iR2UF
+            git reset --hard origin/claude/shital-erp-platform-iR2UF
+
+            # ── 3. Start postgres first ───────────────────────────────────────
+            echo ""
+            echo "=== Starting postgres ==="
+            docker compose -f infra/docker-compose.yml up -d postgres
+            sleep 15
+
+            # ── 4. Check if DB has data ───────────────────────────────────────
+            echo ""
+            echo "=== Checking DB tables ==="
+            TABLE_COUNT=$(docker exec shital-postgres psql -U shital shital -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null | tr -d ' ' || echo "0")
+            echo "Tables found: $TABLE_COUNT"
+
+            # ── 5. If DB is empty and backup exists, restore ──────────────────
+            if [ "$TABLE_COUNT" -lt "5" ]; then
+              echo "DB appears empty — checking for backups..."
+              LATEST=$(ls -t /opt/shitaleco/backups/*.sql.gz 2>/dev/null | head -1 || echo "")
+              if [ -n "$LATEST" ]; then
+                echo "Restoring from: $LATEST"
+                zcat "$LATEST" | docker exec -i shital-postgres psql -U shital shital
+                echo "Restore complete"
+              else
+                echo "No backup found — DB will start fresh (alembic will create tables)"
+              fi
+            else
+              echo "DB has data — no restore needed"
+            fi
+
+            # ── 6. Start all services ─────────────────────────────────────────
+            echo ""
+            echo "=== Starting all services ==="
+            docker compose -f infra/docker-compose.yml up -d
+
+            # ── 7. Wait for backend ───────────────────────────────────────────
+            echo ""
+            echo "=== Waiting for backend health ==="
+            for i in $(seq 1 24); do
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "Backend healthy at attempt $i"
+                break
+              fi
+              echo "  attempt $i/24..."
+              sleep 5
+            done
+
+            # ── 8. Final status ───────────────────────────────────────────────
+            echo ""
+            echo "=== Final container status ==="
+            docker compose -f infra/docker-compose.yml ps
+
+            echo ""
+            echo "=== DB table count ==="
+            docker exec shital-postgres psql -U shital shital -c "\dt" 2>/dev/null | tail -5
+
+            echo ""
+            echo "===== RECOVERY COMPLETE ====="
