@@ -25,13 +25,11 @@ FROM base AS production
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
 
-# Bust cache on every new commit so source changes are always picked up
-ARG GIT_SHA=dev
-RUN echo "Building commit ${GIT_SHA}"
-
 COPY . .
 
 RUN pip install -e . --no-deps
+ARG GIT_SHA=dev
+RUN echo "Built commit ${GIT_SHA}"
 
 EXPOSE 8000
 

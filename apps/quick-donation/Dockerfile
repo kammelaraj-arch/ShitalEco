@@ -12,19 +12,15 @@ COPY apps/quick-donation/package.json apps/quick-donation/
 # Install dependencies
 RUN pnpm install --frozen-lockfile --filter @shital/quick-donation... || pnpm install --filter @shital/quick-donation...
 
-# Bust cache on every new commit so source changes are always picked up
-ARG GIT_SHA=dev
-RUN echo "Building commit ${GIT_SHA}"
-
-# Copy source code
 COPY apps/quick-donation/ apps/quick-donation/
 
 WORKDIR /app/apps/quick-donation
 
-# Build for production
 ARG VITE_API_URL=/api/v1
 ENV VITE_API_URL=${VITE_API_URL}
 RUN pnpm build
+ARG GIT_SHA=dev
+RUN echo "Built commit ${GIT_SHA}"
 
 # ─── Stage 2: Serve with nginx ───
 FROM nginx:alpine AS production

@@ -14,16 +14,14 @@ RUN pnpm install --frozen-lockfile --filter @shital/admin... \
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/admin/node_modules ./apps/admin/node_modules
-# Bust cache on every new commit so source changes are always picked up
-ARG GIT_SHA=dev
-RUN echo "Building commit ${GIT_SHA}"
-
 COPY apps/admin ./apps/admin
 WORKDIR /app/apps/admin
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_API_URL=/api/v1
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 RUN pnpm build
+ARG GIT_SHA=dev
+RUN echo "Built commit ${GIT_SHA}"
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 FROM node:20-slim AS runner

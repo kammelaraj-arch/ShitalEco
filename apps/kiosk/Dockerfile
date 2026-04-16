@@ -14,11 +14,6 @@ COPY package.json ./
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN pnpm install --no-frozen-lockfile --ignore-scripts
 
-# Bust cache on every new commit so source changes are always picked up
-ARG GIT_SHA=dev
-RUN echo "Building commit ${GIT_SHA}"
-
-# Copy source
 COPY . .
 
 # Build web-only bundle
@@ -29,6 +24,8 @@ ENV VITE_API_URL=${VITE_API_URL}
 ENV VITE_BASE=${VITE_BASE}
 ENV VITE_BRANCH_ID=${VITE_BRANCH_ID}
 RUN pnpm run build:web
+ARG GIT_SHA=dev
+RUN echo "Built commit ${GIT_SHA}"
 
 # ─── Stage 2: Serve with nginx ────────────────────────────────────────────────
 FROM nginx:alpine AS production
