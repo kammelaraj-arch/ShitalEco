@@ -1,7 +1,10 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+
+const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
+function authToken() { return typeof window !== 'undefined' ? (localStorage.getItem('shital_access_token') || '') : '' }
 
 function generateUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -45,6 +48,12 @@ export default function DonationsPage() {
   const [firstOfYear] = useState(() => `${new Date().getFullYear()}-01-01`)
   const [fromDate, setFromDate] = useState(() => `${new Date().getFullYear()}-01-01`)
   const [toDate, setToDate] = useState(() => new Date().toISOString().slice(0, 10))
+
+  // CSV
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [csvDownloading, setCsvDownloading] = useState(false)
+  const [csvImporting, setCsvImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; error: string }[] } | null>(null)
 
   // New / Edit form
   const [showForm, setShowForm] = useState(false)
@@ -148,6 +157,50 @@ export default function DonationsPage() {
     }
   }
 
+  async function downloadCsv() {
+    setCsvDownloading(true)
+    try {
+      const res = await fetch(
+        `${API}/finance/donations/export.csv?from_date=${fromDate}&to_date=${toDate}`,
+        { headers: { Authorization: `Bearer ${authToken()}` } }
+      )
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `donations-${fromDate}-to-${toDate}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Export failed')
+    } finally { setCsvDownloading(false) }
+  }
+
+  async function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setCsvImporting(true); setImportResult(null); setError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`${API}/finance/donations/import`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken()}` },
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Import failed')
+      setImportResult(data)
+      if (data.imported > 0) await load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Import failed')
+    } finally {
+      setCsvImporting(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   const totalAmount = donations.reduce((s, d) => s + Number(d.amount), 0)
   const totalGiftAid = donations.reduce((s, d) => s + Number(d.gift_aid_amount || 0), 0)
   const branchName = (bid: string) => branches.find(b => b.branch_id === bid)?.name || bid
@@ -159,8 +212,53 @@ export default function DonationsPage() {
           <h1 className="text-3xl font-black text-white">Donations</h1>
           <p className="text-white/40 mt-1">Track and manage all temple donations</p>
         </div>
-        <button onClick={openNew} className="btn-primary">+ New Donation</button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={openNew} className="btn-primary">+ New Donation</button>
+          <button
+            onClick={downloadCsv}
+            disabled={csvDownloading}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+          >
+            {csvDownloading ? '⏳' : '⬇'} Export CSV
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={csvImporting}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+          >
+            {csvImporting ? '⏳' : '⬆'} Import CSV
+          </button>
+          <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvUpload} />
+        </div>
       </div>
+
+      {/* Import result */}
+      <AnimatePresence>
+        {importResult && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="rounded-2xl p-4 space-y-2"
+            style={{ background: importResult.imported > 0 ? 'rgba(21,128,61,0.1)' : 'rgba(185,28,28,0.1)', border: `1px solid ${importResult.imported > 0 ? 'rgba(21,128,61,0.25)' : 'rgba(185,28,28,0.25)'}` }}
+          >
+            <div className="flex items-center justify-between">
+              <p className="font-bold text-sm" style={{ color: importResult.imported > 0 ? '#4ade80' : '#f87171' }}>
+                {importResult.imported > 0 ? `✅ Imported ${importResult.imported} donation${importResult.imported !== 1 ? 's' : ''}` : '❌ Import completed with errors'}
+                {importResult.skipped > 0 && <span className="text-white/40 font-normal ml-2">({importResult.skipped} row{importResult.skipped !== 1 ? 's' : ''} skipped)</span>}
+              </p>
+              <button onClick={() => setImportResult(null)} className="text-white/30 hover:text-white/60 text-lg leading-none">✕</button>
+            </div>
+            {importResult.errors.length > 0 && (
+              <div className="space-y-1 mt-2">
+                {importResult.errors.map((e, i) => (
+                  <p key={i} className="text-xs text-red-400/80 font-mono">Row {e.row}: {e.error}</p>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Date range filter */}
       <div className="flex flex-wrap gap-2 sm:gap-3 items-end">

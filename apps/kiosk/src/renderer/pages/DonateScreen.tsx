@@ -10,6 +10,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
+import { cachedFetch } from '../utils/cachedFetch'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 const FALLBACK_AMOUNTS = [3, 5, 8, 11, 15, 21, 25]
@@ -40,11 +41,9 @@ export function DonateScreen() {
     async function load() {
       setLoading(true)
       try {
-        const res = await fetch(
-          `${API_BASE}/items/?category=QUICK_DONATION&branch_id=${branchId || 'main'}&active_only=true`,
-          { signal: AbortSignal.timeout(6000) }
+        const data = await cachedFetch<{ items: { id: string; price: string | number; name_gu?: string; name_hi?: string }[] }>(
+          `${API_BASE}/items/?category=QUICK_DONATION&branch_id=${branchId || 'main'}&active_only=true`
         )
-        const data = await res.json()
         const apiTiles: AmountTile[] = (data.items || [])
           .map((i: { id: string; price: string | number; name_gu?: string; name_hi?: string }) => ({
             id: i.id,

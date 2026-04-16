@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useKioskStore, EndScreenTemplate, FormTextConfig } from '../store/kiosk.store'
+import { clearKioskCache } from '../utils/cachedFetch'
 
 const ICON_PRESETS = ['🕉', '🙏', '🪔', '✨', '🌸', '☀️', '🌺', '🕊️']
 
@@ -183,9 +184,28 @@ export function AdminScreen() {
               <p className="font-bold mb-1">ℹ️ Branch & Device Setup</p>
               <p className="text-xs">Branch assignment and payment terminal configuration are set at device profile level and cannot be changed here.</p>
             </div>
+            <ClearCacheButton />
           </div>
         )}
       </div>
     </motion.div>
+  )
+}
+
+function ClearCacheButton() {
+  const [cleared, setCleared] = useState(false)
+  function handleClear() {
+    clearKioskCache()
+    setCleared(true)
+    setTimeout(() => setCleared(false), 2500)
+  }
+  return (
+    <button
+      onClick={handleClear}
+      className="w-full py-3 rounded-2xl font-bold text-sm transition-all active:scale-[0.98]"
+      style={{ background: cleared ? '#dcfce7' : '#f1f5f9', color: cleared ? '#16a34a' : '#374151', border: '1px solid #e2e8f0' }}
+    >
+      {cleared ? '✓ Cache cleared — next load fetches fresh data' : '🔄 Clear Catalog Cache (force refresh)'}
+    </button>
   )
 }

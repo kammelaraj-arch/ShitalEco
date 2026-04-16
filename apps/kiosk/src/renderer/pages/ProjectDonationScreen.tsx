@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 import { BRICK_TIERS, CatalogItem, filterActiveItems } from '../data/catalog'
 import { KioskKeyboard } from '../components/KioskKeyboard'
+import { cachedFetch } from '../utils/cachedFetch'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -136,8 +137,7 @@ export function ProjectDonationScreen() {
     async function load() {
       setLoadingProjects(true)
       try {
-        const res = await fetch(`${API_BASE}/projects?branch_id=${branchId}`)
-        const data = await res.json()
+        const data = await cachedFetch<{ projects: ApiProject[] }>(`${API_BASE}/projects?branch_id=${branchId}`)
         const projs: ApiProject[] = data.projects || []
         if (projs.length > 0) {
           setProjects(projs)
@@ -164,8 +164,7 @@ export function ProjectDonationScreen() {
     async function loadItems() {
       setLoadingItems(true)
       try {
-        const res = await fetch(`${API_BASE}/projects/${selectedProjectId}/items?branch_id=${branchId}`)
-        const data = await res.json()
+        const data = await cachedFetch<{ items: ApiItem[] }>(`${API_BASE}/projects/${selectedProjectId}/items?branch_id=${branchId}`)
         const apiItems: ApiItem[] = (data.items || []).filter((i: ApiItem) => i.is_active)
         if (apiItems.length > 0) {
           setProjectItems(apiItems.map(apiItemToDisplay))
