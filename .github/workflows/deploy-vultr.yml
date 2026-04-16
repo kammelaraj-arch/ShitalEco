@@ -148,8 +148,16 @@ jobs:
             done
 
             # ── BUILD new images while old containers stay live ───────────────
+            # Admin is built FIRST because it takes the longest (Next.js SSG).
+            # Smaller apps follow so cache misses on admin don't starve them.
             GIT_SHA=$(git rev-parse HEAD)
-            echo "=== Building backend (${GIT_SHA}) ==="
+            echo "=== Building admin (${GIT_SHA}) ==="
+            docker build -t ghcr.io/kammelaraj-arch/shitaleco-admin:latest \
+              -f apps/admin/Dockerfile \
+              --build-arg NEXT_PUBLIC_API_URL=/api/v1 \
+              --build-arg GIT_SHA="${GIT_SHA}" .
+
+            echo "=== Building backend ==="
             docker build -t ghcr.io/kammelaraj-arch/shitaleco-backend:latest \
               --build-arg GIT_SHA="${GIT_SHA}" ./backend
 
@@ -167,12 +175,6 @@ jobs:
             echo "=== Building screen ==="
             docker build -t ghcr.io/kammelaraj-arch/shitaleco-screen:latest \
               --build-arg GIT_SHA="${GIT_SHA}" ./apps/screen
-
-            echo "=== Building admin ==="
-            docker build -t ghcr.io/kammelaraj-arch/shitaleco-admin:latest \
-              -f apps/admin/Dockerfile \
-              --build-arg NEXT_PUBLIC_API_URL=/api/v1 \
-              --build-arg GIT_SHA="${GIT_SHA}" .
 
             # ── ROLLING RESTART — one service at a time ───────────────────────
             # DB and nginx stay up throughout. Each app is replaced individually.
