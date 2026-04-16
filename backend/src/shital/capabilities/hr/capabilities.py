@@ -154,6 +154,21 @@ async def _ensure_hr_tables() -> None:
                 updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
             )
         """))
+        # Self-heal: main.py created hours_worked as VARCHAR(10) — upgrade to NUMERIC so float binding works
+        await db.execute(text("""
+            DO $$ BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='time_entries'
+                      AND column_name='hours_worked'
+                      AND data_type='character varying'
+                ) THEN
+                    ALTER TABLE time_entries
+                    ALTER COLUMN hours_worked TYPE NUMERIC(5,2)
+                    USING NULLIF(hours_worked, '')::NUMERIC;
+                END IF;
+            END $$
+        """))
         await db.commit()
 
 
@@ -308,6 +323,7 @@ async def list_employees(
     tags=["hr", "leave"],
 )
 async def request_leave(ctx: DigitalSpace, data: LeaveRequestInput) -> dict[str, Any]:
+    await _ensure_hr_tables()
     import uuid
 
     from sqlalchemy import text
@@ -380,6 +396,7 @@ async def approve_leave(ctx: DigitalSpace, leave_request_id: str) -> dict[str, A
     tags=["hr", "timesheet"],
 )
 async def log_time(ctx: DigitalSpace, data: TimeEntryInput) -> dict[str, Any]:
+    await _ensure_hr_tables()
     import uuid
 
     from sqlalchemy import text
