@@ -190,3 +190,83 @@ async def set_address_provider(body: AddressProviderInput, ctx: CurrentSpace) ->
     from shital.core.fabrics.secrets import SecretsManager
     await SecretsManager.set("ADDRESS_LOOKUP_PROVIDER", body.provider, updated_by=ctx.user_email)
     return {"ok": True, "provider": body.provider}
+
+
+# ── Azure Blob Storage backup settings ────────────────────────────────────────
+
+class AzureBackupInput(BaseModel):
+    connection_string: str
+    container: str
+
+
+@settings_router.get("/azure-backup")
+async def get_azure_backup_config(ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    from shital.core.fabrics.secrets import SecretsManager
+    conn = await SecretsManager.get("AZURE_STORAGE_CONNECTION_STRING")
+    container = await SecretsManager.get("AZURE_STORAGE_CONTAINER", fallback="shitaleco-backups")
+    return {
+        "connection_string_set": bool(conn),
+        "container": container or "shitaleco-backups",
+    }
+
+
+@settings_router.post("/azure-backup")
+async def set_azure_backup_config(
+    body: AzureBackupInput,
+    ctx: CurrentSpace,
+    x_admin_pin: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_admin(ctx)
+    await _verify_pin_or_raise(x_admin_pin)
+    from shital.core.fabrics.secrets import SecretsManager
+    if body.connection_string:
+        await SecretsManager.set(
+            "AZURE_STORAGE_CONNECTION_STRING", body.connection_string,
+            updated_by=ctx.user_email,
+        )
+    if body.container:
+        await SecretsManager.set(
+            "AZURE_STORAGE_CONTAINER", body.container,
+            updated_by=ctx.user_email,
+        )
+    await _write_azure_creds_env(body.connection_string or "", body.container or "shitaleco-backups")
+    return {"ok": True}
+
+
+@settings_router.delete("/azure-backup")
+async def clear_azure_backup_config(
+    ctx: CurrentSpace,
+    x_admin_pin: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_admin(ctx)
+    await _verify_pin_or_raise(x_admin_pin)
+    from shital.core.fabrics.secrets import SecretsManager
+    await SecretsManager.delete("AZURE_STORAGE_CONNECTION_STRING")
+    await SecretsManager.delete("AZURE_STORAGE_CONTAINER")
+    await _write_azure_creds_env("", "")
+    return {"ok": True}
+
+
+_AZURE_CREDS_FILE = "/opt/shitaleco/backups/.azure-creds.env"
+
+
+async def _write_azure_creds_env(conn_str: str, container: str) -> None:
+    """Write (or clear) Azure credentials to a file readable by backup.sh."""
+    import asyncio
+    import os
+
+    def _write() -> None:
+        os.makedirs(os.path.dirname(_AZURE_CREDS_FILE), exist_ok=True)
+        with open(_AZURE_CREDS_FILE, "w") as f:
+            if conn_str:
+                f.write(f"AZURE_STORAGE_CONNECTION_STRING={conn_str}\n")
+            if container:
+                f.write(f"AZURE_STORAGE_CONTAINER={container}\n")
+        os.chmod(_AZURE_CREDS_FILE, 0o600)
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _write)
+    except Exception:
+        pass

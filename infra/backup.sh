@@ -26,11 +26,19 @@ mkdir -p "$BACKUP_DIR/daily" "$BACKUP_DIR/weekly" "$BACKUP_DIR/monthly"
 
 log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 
-# ── Load Azure creds from .env if present ───────────────────────────────────
+# ── Load Azure creds (.env first, then admin-UI-managed creds file) ──────────
 if [ -f "$ENV_FILE" ]; then
   set -a
   # shellcheck disable=SC1090
   source <(grep -E '^(AZURE_STORAGE_CONNECTION_STRING|AZURE_STORAGE_CONTAINER|AZURE_STORAGE_ACCOUNT|AZURE_STORAGE_KEY)=' "$ENV_FILE" 2>/dev/null || true)
+  set +a
+fi
+# Creds saved via Admin UI override .env values
+AZURE_CREDS_FILE="$BACKUP_DIR/.azure-creds.env"
+if [ -f "$AZURE_CREDS_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$AZURE_CREDS_FILE"
   set +a
 fi
 

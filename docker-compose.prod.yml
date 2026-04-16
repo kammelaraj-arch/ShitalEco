@@ -42,6 +42,8 @@ services:
       MS_TENANT_ID: ${MS_TENANT_ID:-}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
       MS_REDIRECT_URI: ${MS_REDIRECT_URI:-https://admin.shital.org.uk/auth-callback}
+    volumes:
+      - /opt/shitaleco/backups:/opt/shitaleco/backups
     depends_on:
       db:
         condition: service_healthy
