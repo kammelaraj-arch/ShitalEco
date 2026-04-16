@@ -21,6 +21,13 @@ services:
   backend:
     image: ghcr.io/kammelaraj-arch/shitaleco-backend:latest
     restart: unless-stopped
+    # Override Dockerfile CMD: remove destructive 'alembic stamp base' (which
+    # was resetting alembic_version on every start) and reduce workers from 4
+    # to 1 to survive high-steal VPS hosts without crashing.
+    command: >
+      sh -c "alembic upgrade head 2>&1 || echo 'WARNING: alembic failed';
+             exec uvicorn shital.main:app --host 0.0.0.0 --port 8000
+                  --workers 1 --loop uvloop --http httptools"
     ports:
       - "8000:8000"
     environment:
