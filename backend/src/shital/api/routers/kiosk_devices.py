@@ -95,7 +95,7 @@ async def list_devices(
             text(f"""
                 SELECT id, name, description, device_type, branch_id, location,
                        status, screen_profile_id, peak_start, peak_end,
-                       off_peak_playlist_id, default_donate_amount,
+                       off_peak_playlist_id, default_donate_amount, card_reader_id,
                        serial_number, ip_address, device_token,
                        last_seen_at, notes, created_at, updated_at
                 FROM kiosk_devices
