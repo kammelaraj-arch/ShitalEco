@@ -110,6 +110,7 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
         raise HTTPException(400, detail=f"PayPal payment not completed: {data.get('status')}")
 
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
 
     order_id  = str(uuid.uuid4())
