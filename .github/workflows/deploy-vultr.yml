@@ -147,9 +147,17 @@ jobs:
                 echo "  (no previous image for ${svc} — skipping)"
             done
 
+            # ── Enable BuildKit for all docker builds ────────────────────────
+            export DOCKER_BUILDKIT=1
+
+            # ── Weekly cron to prune dangling images (permanent) ─────────────
+            cat > /etc/cron.d/docker-prune << 'CRONEOF'
+0 3 * * 0 root docker image prune -f && docker container prune -f >> /var/log/docker-prune.log 2>&1
+CRONEOF
+            chmod 644 /etc/cron.d/docker-prune
+
             # ── BUILD new images while old containers stay live ───────────────
             # Admin is built FIRST because it takes the longest (Next.js SSG).
-            # Smaller apps follow so cache misses on admin don't starve them.
             GIT_SHA=$(git rev-parse HEAD)
             echo "=== Building admin (${GIT_SHA}) ==="
             docker build -t ghcr.io/kammelaraj-arch/shitaleco-admin:latest \
@@ -175,6 +183,11 @@ jobs:
             echo "=== Building screen ==="
             docker build -t ghcr.io/kammelaraj-arch/shitaleco-screen:latest \
               --build-arg GIT_SHA="${GIT_SHA}" ./apps/screen
+
+            # ── Prune dangling images + stopped containers after builds ─────────
+            echo "=== Pruning dangling images ==="
+            docker image prune -f
+            docker container prune -f
 
             # ── ROLLING RESTART — one service at a time ───────────────────────
             # DB and nginx stay up throughout. Each app is replaced individually.

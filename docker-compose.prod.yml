@@ -2,6 +2,11 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-shitaleco_db}
       POSTGRES_USER: ${POSTGRES_USER:-shitaleco_db_user}
@@ -24,9 +29,7 @@ services:
         limits:
           cpus: '1.50'
           memory: 512M
-    # Override Dockerfile CMD: remove destructive 'alembic stamp base' (which
-    # was resetting alembic_version on every start) and reduce workers from 4
-    # to 1 to survive high-steal VPS hosts without crashing.
+    # Use alembic upgrade head only — never stamp base (would wipe migration history)
     command: >
       sh -c "alembic upgrade head 2>&1 || echo 'WARNING: alembic failed';
              exec uvicorn shital.main:app --host 0.0.0.0 --port 8000
@@ -58,47 +61,97 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
+      start_period: 60s
       retries: 3
 
   admin:
     image: ghcr.io/kammelaraj-arch/shitaleco-admin:latest
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
     environment:
       NODE_ENV: production
     depends_on:
       - backend
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/admin"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
 
   quick-donation:
     image: ghcr.io/kammelaraj-arch/shitaleco-quick-donation:latest
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
     depends_on:
       - backend
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   kiosk:
     image: ghcr.io/kammelaraj-arch/shitaleco-kiosk:latest
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
     depends_on:
       - backend
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   screen:
     image: ghcr.io/kammelaraj-arch/shitaleco-screen:latest
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
     depends_on:
       - backend
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   backup-scheduler:
     build:
       context: ./infra/cron
     container_name: shitaleco-backup-cron
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
     environment:
       TZ: Europe/London
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -120,8 +173,14 @@ services:
       context: ./deployer
       dockerfile: Dockerfile
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.00'
+          memory: 128M
     environment:
       DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
+      DOCKER_BUILDKIT: "1"
     volumes:
       - /opt/shitaleco:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
@@ -131,6 +190,11 @@ services:
   nginx:
     image: nginx:alpine
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 64M
     ports:
       - "80:80"
       - "443:443"

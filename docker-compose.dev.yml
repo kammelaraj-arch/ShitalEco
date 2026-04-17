@@ -5,11 +5,17 @@ name: shitaleco-dev
 # Dev nginx: port 8080 (HTTP only — no SSL needed for dev)
 # Dev backend: port 8001 exposed for direct debugging
 # All data in separate named volumes (pgdata-dev) — never touches prod DB
+# Memory limits prevent dev stack from starving the prod stack on a 2GB VPS
 
 services:
   db-dev:
     image: postgres:16-alpine
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
     environment:
       POSTGRES_DB: shitaleco_dev_db
       POSTGRES_USER: shitaleco_dev_user
@@ -26,7 +32,13 @@ services:
 
   backend-dev:
     image: ghcr.io/kammelaraj-arch/shitaleco-backend:dev
-    restart: unless-stopped
+    # on-failure: stop crashing indefinitely rather than consuming CPU in a loop
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 384M
     ports:
       - "8001:8000"
     environment:
@@ -51,11 +63,17 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
+      start_period: 60s
       retries: 3
 
   admin-dev:
     image: ghcr.io/kammelaraj-arch/shitaleco-admin:dev
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
     environment:
       NODE_ENV: production
     depends_on:
@@ -66,6 +84,11 @@ services:
   quick-donation-dev:
     image: ghcr.io/kammelaraj-arch/shitaleco-quick-donation:dev
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 48M
     depends_on:
       - backend-dev
     networks:
@@ -74,6 +97,11 @@ services:
   kiosk-dev:
     image: ghcr.io/kammelaraj-arch/shitaleco-kiosk:dev
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 48M
     depends_on:
       - backend-dev
     networks:
@@ -82,6 +110,11 @@ services:
   screen-dev:
     image: ghcr.io/kammelaraj-arch/shitaleco-screen:dev
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 48M
     depends_on:
       - backend-dev
     networks:
@@ -90,6 +123,11 @@ services:
   nginx-dev:
     image: nginx:alpine
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 32M
     ports:
       - "8080:80"
     volumes:
