@@ -4,9 +4,17 @@ import { useStore, LANGUAGE_META, type Language, t } from '../store'
 
 export function Header() {
   const { language, setLanguage, itemCount, setScreen, screen } = useStore()
+  const branchName = useStore((s) => s.branchName)
+  const branchLocked = useStore((s) => s.branchLocked)
+  const setBranch = useStore((s) => s.setBranch)
   const [showLang, setShowLang] = useState(false)
 
   const total = useStore((s) => s.total)
+
+  const handleChangeBranch = () => {
+    setBranch('main', '', false)
+    setScreen('browse')
+  }
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-orange-100 shadow-sm">
@@ -22,7 +30,19 @@ export function Header() {
           </div>
           <div className="hidden sm:block min-w-0">
             <p className="font-black text-maroon-900 text-sm leading-tight tracking-tight truncate">Shital Temple</p>
-            <p className="text-xs text-saffron-500 font-medium">Service Portal</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-xs text-saffron-500 font-medium truncate">
+                {branchName && branchName !== 'All Temples' ? branchName : 'Service Portal'}
+              </p>
+              {!branchLocked && (
+                <button
+                  onClick={handleChangeBranch}
+                  className="text-xs text-orange-400 hover:text-orange-600 font-semibold flex-shrink-0"
+                >
+                  change
+                </button>
+              )}
+            </div>
           </div>
         </button>
 

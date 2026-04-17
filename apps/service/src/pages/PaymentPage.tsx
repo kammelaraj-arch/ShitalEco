@@ -1,8 +1,19 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, type ComponentType } from 'react'
 import { motion } from 'framer-motion'
-import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js'
+import {
+  PayPalScriptProvider as _PayPalScriptProvider,
+  PayPalButtons as _PayPalButtons,
+  type PayPalButtonsComponentProps,
+  type ReactPayPalScriptOptions,
+} from '@paypal/react-paypal-js'
 import { useStore, t } from '../store'
 import { api } from '../api'
+
+// Cast to ComponentType<any> to avoid React 18/19 JSX type incompatibility
+const PayPalScriptProvider = _PayPalScriptProvider as ComponentType<{
+  options: ReactPayPalScriptOptions; children: React.ReactNode
+}>
+const PayPalButtons = _PayPalButtons as ComponentType<PayPalButtonsComponentProps>
 
 export function PaymentPage() {
   const {

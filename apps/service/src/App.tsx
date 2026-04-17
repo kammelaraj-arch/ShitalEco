@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useStore } from './store'
+import { useStore, detectBranchFromHostname } from './store'
 import { Header } from './components/Header'
+import { BranchPicker } from './components/BranchPicker'
 import { BrowsePage } from './pages/BrowsePage'
 import { BasketPage } from './pages/BasketPage'
 import { ContactPage } from './pages/ContactPage'
@@ -43,6 +45,15 @@ function ProgressBar({ screen }: { screen: string }) {
 
 export default function App() {
   const screen = useStore((s) => s.screen)
+  const branchName = useStore((s) => s.branchName)
+  const branchLocked = useStore((s) => s.branchLocked)
+  const setBranch = useStore((s) => s.setBranch)
+
+  // Auto-detect branch from subdomain on mount (e.g. mk.shital.org.uk → 'mk')
+  useEffect(() => {
+    const sub = detectBranchFromHostname()
+    if (sub) setBranch(sub, sub, true)
+  }, [])
 
   const pageVariants = {
     initial: { opacity: 0, x: 20 },
@@ -60,6 +71,12 @@ export default function App() {
       case 'confirmation': return <ConfirmationPage />
       default:             return <BrowsePage />
     }
+  }
+
+  // Show branch picker when no branch has been selected yet (branchName is empty)
+  // and the branch isn't locked from a subdomain
+  if (!branchName && !branchLocked) {
+    return <BranchPicker />
   }
 
   return (
@@ -87,7 +104,7 @@ export default function App() {
         <footer className="bg-maroon-900 text-white py-6 px-4 mt-8">
           <div className="max-w-5xl mx-auto text-center">
             <p className="text-orange-200 text-xs">
-              🕉 Shital Shirdi Sai Baba Temple · Registered Charity · London, UK
+              🕉 SHITAL · Shri Shirdi Saibaba Temple Association · UK Charity No. 1138530
             </p>
             <p className="text-white/40 text-xs mt-1">
               Secure payments powered by PayPal · All donations subject to our charity terms

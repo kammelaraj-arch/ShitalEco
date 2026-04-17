@@ -111,6 +111,15 @@ export const api = {
     return d.id
   },
 
+  async getBranches(): Promise<Array<{ branch_id: string; name: string; city: string; is_active: boolean }>> {
+    try {
+      const r = await fetch(`${API}/branches`)
+      if (!r.ok) return []
+      const d = await r.json()
+      return (d.branches ?? []).filter((b: { is_active: boolean }) => b.is_active)
+    } catch { return [] }
+  },
+
   async paypalCapture(params: {
     paypal_order_id: string; amount: number; branch_id: string
     contact_name: string; contact_email: string; contact_phone: string

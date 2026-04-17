@@ -63,6 +63,28 @@ export interface OrderResult {
   amount: number
 }
 
+/** Detect branch from hostname subdomain.
+ *  mk.shital.org.uk  → 'mk'
+ *  wembley.shital.org.uk → 'wembley'
+ *  service.shital.org.uk → null  (show picker)
+ *  localhost → null  (dev: show picker)
+ */
+const RESERVED_SUBS = new Set([
+  'www', 'service', 'admin', 'kiosk', 'donate', 'screen', 'dev', 'api',
+])
+
+export function detectBranchFromHostname(): string | null {
+  try {
+    const parts = window.location.hostname.split('.')
+    // e.g. mk.shital.org.uk → 4 parts; shital.org.uk → 3 parts
+    if (parts.length >= 4) {
+      const sub = parts[0].toLowerCase()
+      if (!RESERVED_SUBS.has(sub)) return sub
+    }
+  } catch { /* SSR guard */ }
+  return null
+}
+
 function genId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -77,6 +99,8 @@ interface ServiceStore {
   screen: Screen
   language: Language
   branchId: string
+  branchName: string          // human-readable name from DB, e.g. "Wembley Temple"
+  branchLocked: boolean       // true when branch comes from subdomain (not user-selected)
   items: BasketItem[]
   basketId: string | null
   giftAidDeclaration: GiftAidDeclaration | null
@@ -86,6 +110,7 @@ interface ServiceStore {
   setScreen: (s: Screen) => void
   setLanguage: (l: Language) => void
   setBranchId: (id: string) => void
+  setBranch: (id: string, name: string, locked?: boolean) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
   removeItem: (id: string) => void
@@ -107,6 +132,8 @@ export const useStore = create<ServiceStore>()(
       screen: 'browse',
       language: 'en',
       branchId: 'main',
+      branchName: '',
+      branchLocked: false,
       items: [],
       basketId: null,
       giftAidDeclaration: null,
@@ -116,6 +143,7 @@ export const useStore = create<ServiceStore>()(
       setScreen: (screen) => set({ screen }),
       setLanguage: (language) => set({ language }),
       setBranchId: (branchId) => set({ branchId }),
+      setBranch: (branchId, branchName, locked = false) => set({ branchId, branchName, branchLocked: locked }),
       setBasketId: (basketId) => set({ basketId }),
 
       addItem: (item) => set((state) => {
@@ -165,7 +193,10 @@ export const useStore = create<ServiceStore>()(
     {
       name: 'shital-service-config',
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ language: s.language, branchId: s.branchId }),
+      partialize: (s) => ({
+        language: s.language,
+        // never persist branchId — always re-detect from URL / user picks fresh
+      }),
     }
   )
 )

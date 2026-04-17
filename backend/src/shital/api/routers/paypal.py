@@ -109,13 +109,14 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
     if data.get("status") != "COMPLETED":
         raise HTTPException(400, detail=f"PayPal payment not completed: {data.get('status')}")
 
+    from sqlalchemy import text
+    from shital.core.fabrics.database import SessionLocal
+
     order_id  = str(uuid.uuid4())
     order_ref = f"SVC-{body.paypal_order_id[:8].upper()}"
     now       = datetime.utcnow()
 
     try:
-        from shital.core.fabrics.database import SessionLocal
-        from sqlalchemy import text
         async with SessionLocal() as db:
             decl_id: str | None = None
             if body.gift_aid and body.contact_name:
