@@ -165,7 +165,7 @@ async def _ensure_hr_tables() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_time_entries_employee ON time_entries(employee_id)",
         "CREATE INDEX IF NOT EXISTS idx_time_entries_branch ON time_entries(branch_id, date)",
-        # Upgrade hours_worked from VARCHAR(10) (main.py schema) to NUMERIC so float binds work
+        # Upgrade VARCHAR(10) columns in main.py schema → correct NUMERIC types
         """DO $$ BEGIN
             IF EXISTS (
                 SELECT 1 FROM information_schema.columns
@@ -176,6 +176,18 @@ async def _ensure_hr_tables() -> None:
                 ALTER TABLE time_entries
                 ALTER COLUMN hours_worked TYPE NUMERIC(5,2)
                 USING NULLIF(hours_worked, '')::NUMERIC;
+            END IF;
+        END $$""",
+        """DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='leave_requests'
+                  AND column_name='days'
+                  AND data_type='character varying'
+            ) THEN
+                ALTER TABLE leave_requests
+                ALTER COLUMN days TYPE NUMERIC(5,1)
+                USING NULLIF(days, '')::NUMERIC;
             END IF;
         END $$""",
     ]
@@ -365,7 +377,7 @@ async def request_leave(ctx: DigitalSpace, data: LeaveRequestInput) -> dict[str,
             """),
             {
                 "id": req_id, "emp": data.employee_id,
-                "start": start, "end": end, "days": delta,
+                "start": start, "end": end, "days": str(delta),
                 "reason": data.reason or None, "now": now,
             },
         )
@@ -433,7 +445,7 @@ async def log_time(ctx: DigitalSpace, data: TimeEntryInput) -> dict[str, Any]:
             """),
             {
                 "id": entry_id, "emp": data.employee_id, "bid": ctx.branch_id,
-                "date": date.fromisoformat(data.entry_date), "hours": float(data.hours_worked),
+                "date": date.fromisoformat(data.entry_date), "hours": str(float(data.hours_worked)),
                 "desc": data.description or None, "now": now,
             },
         )

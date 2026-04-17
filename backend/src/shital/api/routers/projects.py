@@ -74,10 +74,14 @@ async def export_projects_csv(ctx: CurrentSpace) -> StreamingResponse:
         rows = result.mappings().all()
 
     buf = io.StringIO()
+    buf.write('\ufeff')  # UTF-8 BOM — Excel reads Unicode correctly
     writer = csv.writer(buf)
     writer.writerow(["project_id", "name", "description", "branch_id", "goal_amount",
                      "start_date", "end_date", "is_active", "sort_order", "image_url"])
     for r in rows:
+        img = r["image_url"] or ""
+        if img.startswith("data:"):
+            img = ""
         writer.writerow([
             r["project_id"], r["name"], r["description"] or "",
             r["branch_id"], float(r["goal_amount"] or 0),
@@ -85,7 +89,7 @@ async def export_projects_csv(ctx: CurrentSpace) -> StreamingResponse:
             r["end_date"].isoformat() if r["end_date"] else "",
             "true" if r["is_active"] else "false",
             r["sort_order"] or 0,
-            r["image_url"] or "",
+            img,
         ])
 
     return StreamingResponse(

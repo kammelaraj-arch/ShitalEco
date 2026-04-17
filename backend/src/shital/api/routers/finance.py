@@ -139,6 +139,7 @@ async def export_donations_csv(
         rows = result.mappings().all()
 
     buf = io.StringIO()
+    buf.write('\ufeff')  # UTF-8 BOM — Excel reads Unicode correctly
     writer = csv.writer(buf)
     writer.writerow([
         "date", "amount", "currency", "purpose", "payment_method",

@@ -253,6 +253,7 @@ async def export_items_csv(ctx: CurrentSpace) -> StreamingResponse:
         rows = result.mappings().all()
 
     buf = io.StringIO()
+    buf.write('\ufeff')  # UTF-8 BOM — Excel reads Gujarati/Hindi correctly
     writer = csv.writer(buf)
     writer.writerow([
         "name", "name_gu", "name_hi", "name_te", "description", "category",
@@ -261,10 +262,13 @@ async def export_items_csv(ctx: CurrentSpace) -> StreamingResponse:
         "stock_qty", "sort_order", "display_channel",
     ])
     for r in rows:
+        img = r["image_url"] or ""
+        if img.startswith("data:"):
+            img = ""
         writer.writerow([
             r["name"], r["name_gu"] or "", r["name_hi"] or "", r["name_te"] or "",
             r["description"] or "", r["category"],
-            float(r["price"] or 0), r["unit"] or "", r["emoji"] or "", r["image_url"] or "",
+            float(r["price"] or 0), r["unit"] or "", r["emoji"] or "", img,
             "true" if r["gift_aid_eligible"] else "false",
             "true" if r["is_active"] else "false",
             "true" if r["is_live"] else "false",
