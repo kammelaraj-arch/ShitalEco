@@ -9,16 +9,15 @@
   }
 
   body {
-    background: #060100;
+    background: #B80000;
     color: #FFF8DC;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     min-height: 100vh;
-    /* Subtle temple-stone texture */
     background-image:
-      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(212,175,55,0.08) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 40% at 80% 110%, rgba(183,28,28,0.12) 0%, transparent 55%);
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(212,175,55,0.10) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 110%, rgba(90,0,0,0.5) 0%, transparent 55%);
   }
 
   * { box-sizing: border-box; }
@@ -36,7 +35,7 @@
     border-color: rgba(212,175,55,0.6) !important;
     box-shadow: 0 0 0 3px rgba(212,175,55,0.12) !important;
   }
-  select option { background: #1A0606; color: #FFF8DC; }
+  select option { background: #8B0000; color: #FFF8DC; }
 }
 
 @layer components {

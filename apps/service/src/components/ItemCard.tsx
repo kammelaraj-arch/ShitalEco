@@ -77,7 +77,7 @@ export function ItemCard({ item, category }: ItemCardProps) {
         )}
         {outOfStock && (
           <div className="absolute inset-0 flex items-center justify-center"
-            style={{ background: 'rgba(6,1,0,0.75)' }}>
+            style={{ background: 'rgba(100,0,0,0.80)' }}>
             <span className="text-xs font-bold" style={{ color: 'rgba(255,248,220,0.5)' }}>Out of Stock</span>
           </div>
         )}
@@ -112,7 +112,7 @@ export function ItemCard({ item, category }: ItemCardProps) {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
               style={{
                 background: outOfStock ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg,#D4AF37,#C5A028)',
-                color: outOfStock ? 'rgba(255,248,220,0.3)' : '#1A0606',
+                color: outOfStock ? 'rgba(255,248,220,0.3)' : '#6B0000',
               }}
             >
               <span>Add</span>

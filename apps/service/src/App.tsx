@@ -22,7 +22,7 @@ function ProgressBar({ screen }: { screen: string }) {
   }
 
   return (
-    <div style={{ background: 'rgba(6,1,0,0.95)', borderBottom: '1px solid rgba(212,175,55,0.15)' }}>
+    <div style={{ background: 'rgba(140,0,0,0.97)', borderBottom: '1px solid rgba(212,175,55,0.15)' }}>
       <div className="max-w-5xl mx-auto px-4 py-2.5">
         <div className="flex items-center gap-1">
           {CHECKOUT_STEPS.map((step, i) => (
@@ -83,7 +83,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: '#060100' }}>
+    <div className="min-h-screen flex flex-col" style={{ background: '#B80000' }}>
       <Header />
       <ProgressBar screen={screen} />
 
@@ -104,7 +104,7 @@ export default function App() {
 
       {screen === 'browse' && (
         <footer className="py-8 px-4 mt-8"
-          style={{ borderTop: '1px solid rgba(212,175,55,0.15)', background: 'rgba(26,6,6,0.8)' }}>
+          style={{ borderTop: '1px solid rgba(212,175,55,0.15)', background: 'rgba(90,0,0,0.6)' }}>
           <div className="max-w-5xl mx-auto text-center space-y-1">
             <p className="font-display text-gold-500 text-xs tracking-widest uppercase">
               🕉 SHITAL · Shri Shirdi Saibaba Temple Association

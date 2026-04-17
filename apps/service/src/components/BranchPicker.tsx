@@ -24,7 +24,7 @@ export function BranchPicker() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12"
-      style={{ background: '#060100' }}>
+      style={{ background: '#B80000' }}>
 
       {/* Ambient glow */}
       <div className="fixed inset-0 pointer-events-none"
@@ -44,7 +44,7 @@ export function BranchPicker() {
             animate={{ boxShadow: ['0 0 20px rgba(212,175,55,0.2)', '0 0 50px rgba(212,175,55,0.5)', '0 0 20px rgba(212,175,55,0.2)'] }}
             transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
             className="w-20 h-20 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-6"
-            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#1A0606' }}
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#6B0000' }}
           >
             🛕
           </motion.div>

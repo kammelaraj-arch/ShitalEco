@@ -5,11 +5,11 @@ export default {
     extend: {
       colors: {
         temple: {
-          bg:      '#060100',
-          deep:    '#0E0303',
-          mid:     '#1A0606',
-          surface: '#261010',
-          raised:  '#321414',
+          bg:      '#B80000',
+          deep:    '#8B0000',
+          mid:     '#A00000',
+          surface: '#C41010',
+          raised:  '#D01818',
         },
         gold: {
           100: '#FFF8DC',

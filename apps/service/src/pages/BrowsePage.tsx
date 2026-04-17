@@ -72,12 +72,12 @@ export function BrowsePage() {
   }
 
   return (
-    <div className="min-h-screen pb-32" style={{ background: '#060100' }}>
+    <div className="min-h-screen pb-32" style={{ background: '#B80000' }}>
 
       {/* Hero Banner */}
       <div className="relative overflow-hidden px-4 py-8"
         style={{
-          background: 'linear-gradient(135deg, rgba(26,6,6,0.95), rgba(14,3,3,0.98))',
+          background: 'linear-gradient(135deg, rgba(150,0,0,0.97), rgba(120,0,0,0.99))',
           borderBottom: '1px solid rgba(212,175,55,0.15)',
         }}>
         <div className="absolute inset-0 pointer-events-none"
@@ -95,7 +95,7 @@ export function BrowsePage() {
 
       {/* Category Tabs */}
       <div className="sticky top-16 z-30"
-        style={{ background: 'rgba(6,1,0,0.97)', borderBottom: '1px solid rgba(212,175,55,0.12)' }}>
+        style={{ background: 'rgba(140,0,0,0.99)', borderBottom: '1px solid rgba(212,175,55,0.12)' }}>
         <div
           ref={tabsRef}
           className="max-w-5xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1.5 py-2.5"
@@ -108,7 +108,7 @@ export function BrowsePage() {
               className="flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all flex-shrink-0"
               style={activeTab === tab.id ? {
                 background: 'linear-gradient(135deg,#D4AF37,#C5A028)',
-                color: '#1A0606',
+                color: '#6B0000',
               } : {
                 background: 'rgba(255,255,255,0.04)',
                 color: 'rgba(255,248,220,0.55)',
@@ -130,7 +130,7 @@ export function BrowsePage() {
               onClick={() => setSelectedProject('')}
               className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors flex-shrink-0"
               style={!selectedProject
-                ? { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1A0606' }
+                ? { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#6B0000' }
                 : { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.55)', border: '1px solid rgba(212,175,55,0.2)' }}
             >All Projects</button>
             {projects.map((p) => (
@@ -139,7 +139,7 @@ export function BrowsePage() {
                 onClick={() => setSelectedProject(p.id === selectedProject ? '' : p.id)}
                 className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors flex-shrink-0"
                 style={selectedProject === p.id
-                  ? { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1A0606' }
+                  ? { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#6B0000' }
                   : { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.55)', border: '1px solid rgba(212,175,55,0.2)' }}
               >{p.name}</button>
             ))}
@@ -198,12 +198,12 @@ export function BrowsePage() {
                 className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-between px-5 shadow-2xl active:scale-[0.99] transition-transform"
                 style={{
                   background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)',
-                  color: '#1A0606',
+                  color: '#6B0000',
                   boxShadow: '0 8px 32px rgba(212,175,55,0.4)',
                 }}
               >
                 <span className="rounded-xl px-3 py-1 text-sm font-bold"
-                  style={{ background: 'rgba(26,6,6,0.2)' }}>
+                  style={{ background: 'rgba(90,0,0,0.3)' }}>
                   {itemCount} {t('items', language)}
                 </span>
                 <span className="font-black">{t('basket', language)} →</span>
