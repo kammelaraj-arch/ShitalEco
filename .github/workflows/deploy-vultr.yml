@@ -214,6 +214,16 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate kiosk
             docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate screen
 
+            # Wait for admin to become healthy before reloading nginx
+            echo "Waiting for admin health..."
+            for i in $(seq 1 20); do
+              sleep 5
+              if curl -sf http://localhost:3001/admin > /dev/null 2>&1; then
+                echo "Admin healthy!"; break
+              fi
+              echo "  attempt $i/20..."
+            done
+
             # Reload nginx config (graceful, zero downtime)
             echo "=== Reloading nginx ==="
             docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
@@ -261,7 +271,35 @@ jobs:
             docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
               docker compose -f docker-compose.prod.yml up -d --no-deps nginx
 
+            # ── Post-deploy smoke tests ───────────────────────────────────────
+            echo "=== Running smoke tests ==="
+            SMOKE_FAIL=0
+
+            smoke() {
+              local label=$1 url=$2
+              if curl -sf --max-time 10 "$url" > /dev/null 2>&1; then
+                echo "  ✓ $label"
+              else
+                echo "  ✗ $label FAILED ($url)"
+                SMOKE_FAIL=1
+              fi
+            }
+
+            smoke "backend /health"           "http://localhost:8000/health"
+            smoke "backend /api/v1/ping"      "http://localhost:8000/api/v1/ping"
+            smoke "admin portal"              "http://localhost:3001/admin"
+            smoke "nginx main site"           "http://localhost:80/"
+            smoke "kiosk via nginx"           "http://localhost:80/kiosk/"
+            smoke "donation via nginx"        "http://localhost:80/donate/"
+
+            if [ "$SMOKE_FAIL" -ne 0 ]; then
+              echo "!!! One or more smoke tests failed — check logs above !!!"
+              echo "--- backend logs (last 30 lines) ---"
+              docker compose -f docker-compose.prod.yml logs --tail=30 backend
+              exit 1
+            fi
+
             # ── Status ────────────────────────────────────────────────────────
             echo ""
-            echo "=== Deploy complete — all sites should be live ==="
+            echo "=== Deploy complete — all sites live ==="
             docker compose -f docker-compose.prod.yml ps

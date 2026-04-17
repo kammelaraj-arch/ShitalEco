@@ -19,6 +19,11 @@ services:
   backend:
     image: ghcr.io/kammelaraj-arch/shitaleco-backend:latest
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'
+          memory: 512M
     # Override Dockerfile CMD: remove destructive 'alembic stamp base' (which
     # was resetting alembic_version on every start) and reduce workers from 4
     # to 1 to survive high-steal VPS hosts without crashing.
@@ -86,6 +91,27 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    networks:
+      - internal
+
+  backup-scheduler:
+    build:
+      context: ./infra/cron
+    container_name: shitaleco-backup-cron
+    restart: unless-stopped
+    environment:
+      TZ: Europe/London
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-shitaleco_db}
+      POSTGRES_USER: ${POSTGRES_USER:-shitaleco_db_user}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./infra/backup.sh:/opt/shitaleco/infra/backup.sh:ro
+      - /opt/shitaleco/backups:/opt/shitaleco/backups
+      - ./.env:/opt/shitaleco/.env:ro
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - internal
 

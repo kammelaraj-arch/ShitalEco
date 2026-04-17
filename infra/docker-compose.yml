@@ -184,26 +184,6 @@ services:
       timeout: 5s
       retries: 3
 
-  # ─── Backup Scheduler (daily at 02:00 London time) ──────────────────────────
-  backup-scheduler:
-    build:
-      context: ./cron
-    container_name: shital-backup-cron
-    restart: unless-stopped
-    environment:
-      TZ: Europe/London
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shital_dev_password}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ../infra/backup.sh:/opt/shitaleco/infra/backup.sh:ro
-      - /opt/shitaleco/backups:/opt/shitaleco/backups
-      - /opt/shitaleco/.env:/opt/shitaleco/.env:ro
-      - sharepoint_cache:/opt/shitaleco/cache
-    depends_on:
-      - postgres
-    networks:
-      - shital-net
-
   # ─── Nginx Reverse Proxy + SSL ───────────────────────────────────────────────
   nginx:
     image: nginx:alpine
