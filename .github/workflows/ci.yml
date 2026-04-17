@@ -205,6 +205,19 @@ jobs:
           cache-from: type=gha,scope=screen
           cache-to: type=gha,scope=screen,mode=max
 
+      - name: Build & push service portal
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/service
+          push: true
+          tags: ghcr.io/kammelaraj-arch/shitaleco-service:${{ steps.tag.outputs.tag }}
+          build-args: |
+            VITE_API_URL=/api/v1
+            VITE_BASE=/service/
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=service
+          cache-to: type=gha,scope=service,mode=max
+
       - name: Trigger production deploy (main only)
         if: github.ref == 'refs/heads/main'
         run: |

@@ -129,14 +129,14 @@ jobs:
             echo "Logged in to GHCR"
 
             # ── Checkpoint: tag :latest as :previous ─────────────────────────
-            for svc in backend admin quick-donation kiosk screen; do
+            for svc in backend admin quick-donation kiosk screen service; do
               img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
               docker tag "${img}:latest" "${img}:previous" 2>/dev/null || true
             done
 
             # ── Pull images built by CI — zero build load on this server ─────
             echo "=== Pulling pre-built images from GHCR ==="
-            docker compose -f docker-compose.prod.yml pull backend admin quick-donation kiosk screen
+            docker compose -f docker-compose.prod.yml pull backend admin quick-donation kiosk screen service
             docker image prune -f
             docker container prune -f
 
@@ -167,7 +167,7 @@ jobs:
 
             # ── Rolling restart: frontends ────────────────────────────────────
             echo "=== Rolling restart: frontends ==="
-            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen service
 
             echo "Waiting for admin (nginx:alpine on :80)..."
             for i in $(seq 1 10); do
@@ -191,6 +191,7 @@ jobs:
             smoke "nginx main"       "http://localhost:80/"
             smoke "kiosk"            "http://localhost:80/kiosk/"
             smoke "donation"         "http://localhost:80/donate/"
+            smoke "service portal"   "http://localhost:80/service/"
 
             if [ "$SMOKE_FAIL" -ne 0 ]; then
               echo "!!! Smoke tests failed — check logs above !!!"
@@ -207,13 +208,13 @@ jobs:
               -d shital.org.uk -d www.shital.org.uk \
               -d admin.shital.org.uk -d kiosk.shital.org.uk \
               -d donate.shital.org.uk -d screen.shital.org.uk \
-              -d dev.shital.org.uk \
+              -d service.shital.org.uk -d dev.shital.org.uk \
               --expand --non-interactive --agree-tos \
               -m admin@shirdisai.org.uk \
               2>&1 | tail -5 || true
 
             # ── Tag :latest as :dev for dev stack ─────────────────────────────
-            for svc in backend admin quick-donation kiosk screen; do
+            for svc in backend admin quick-donation kiosk screen service; do
               docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
                          ghcr.io/kammelaraj-arch/shitaleco-${svc}:dev 2>/dev/null || true
             done

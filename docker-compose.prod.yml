@@ -140,6 +140,25 @@ services:
       start_period: 20s
       retries: 3
 
+  service:
+    image: ghcr.io/kammelaraj-arch/shitaleco-service:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+    depends_on:
+      - backend
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
   backup-scheduler:
     build:
       context: ./infra/cron
@@ -210,6 +229,7 @@ services:
       - quick-donation
       - kiosk
       - screen
+      - service
     networks:
       - internal
 
