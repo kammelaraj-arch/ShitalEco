@@ -10,6 +10,9 @@ import structlog
 from pydantic import BaseModel
 
 from shital.core.dna.registry import Fabric, capability
+
+# Guard: only run DDL once per worker process lifetime
+_hr_tables_ready = False
 from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
@@ -67,7 +70,12 @@ async def _ensure_hr_tables() -> None:
 
     Each statement runs in its own transaction so one failure (e.g. duplicate
     data blocking a unique index) doesn't abort the whole batch.
+    Only runs once per worker process; subsequent calls return immediately.
     """
+    global _hr_tables_ready
+    if _hr_tables_ready:
+        return
+
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
@@ -179,6 +187,8 @@ async def _ensure_hr_tables() -> None:
                 await db.commit()
         except Exception:
             pass  # best-effort; tables/columns should exist from alembic/main.py
+
+    _hr_tables_ready = True
 
 
 @capability(

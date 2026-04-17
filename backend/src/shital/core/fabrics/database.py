@@ -26,9 +26,10 @@ _use_ssl = '.' in _host  # e.g. db.render.com → SSL; postgres/localhost → no
 engine = create_async_engine(
     _db_url,
     echo=settings.APP_ENV == "development",
-    pool_size=3,
-    max_overflow=2,
-    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=5,
+    pool_pre_ping=False,
+    pool_recycle=1800,
     connect_args={"ssl": True} if _use_ssl else {},
 )
 
