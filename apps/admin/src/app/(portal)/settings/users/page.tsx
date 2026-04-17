@@ -1,8 +1,8 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+import { apiFetch } from '@/lib/api'
+import { BranchSelect } from '@/components/ui/SearchSelect'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,22 +92,16 @@ function UserModal({ user, onClose, onSaved }: {
     setError(''); setSaving(true)
     try {
       if (isEdit) {
-        // Update role only (edit modal)
-        const res = await fetch(`${API}/users/${user!.id}/role`, {
+        await apiFetch(`/users/${user!.id}/role`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ role, branch_id: branchId || null }),
         })
-        if (!res.ok) throw new Error((await res.json()).detail)
       } else {
-        // Create new user
         if (!name.trim() || !email.trim()) { setError('Name and email are required'); setSaving(false); return }
-        const res = await fetch(`${API}/users/`, {
+        await apiFetch('/users/', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, email, role, branch_id: branchId || '', phone, password }),
         })
-        if (!res.ok) throw new Error((await res.json()).detail)
       }
       onSaved(); onClose()
     } catch (e: any) {
@@ -118,14 +112,13 @@ function UserModal({ user, onClose, onSaved }: {
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}>
-      <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9 }}
-        className="w-full max-w-md rounded-2xl overflow-hidden"
-        style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.08)' }}
-        onClick={e => e.stopPropagation()}>
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full sm:max-w-[480px] z-50 flex flex-col overflow-hidden"
+        style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}>
 
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
           <div>
@@ -142,24 +135,45 @@ function UserModal({ user, onClose, onSaved }: {
             <>
               <div>
                 <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Full Name *</label>
-                <input value={name} onChange={e => setName(e.target.value)} placeholder="Priya Patel"
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-saffron-400/40" />
+                <input
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="e.g. Priya Patel"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors"
+                />
               </div>
               <div>
                 <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Email *</label>
-                <input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="priya@shital.org"
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-saffron-400/40" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="e.g. priya@shital.org"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors"
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Phone</label>
-                  <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="07xxx xxxxxx"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-saffron-400/40" />
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    placeholder="+44 7700 000000"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors"
+                  />
                 </div>
                 <div>
                   <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Password</label>
-                  <input value={password} onChange={e => setPassword(e.target.value)} type="password" placeholder="Leave blank for SSO only"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-saffron-400/40" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Optional"
+                    autoComplete="new-password"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors"
+                  />
                 </div>
               </div>
             </>
@@ -180,9 +194,13 @@ function UserModal({ user, onClose, onSaved }: {
           </div>
 
           <div>
-            <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Branch ID <span className="text-white/20 font-normal">(optional)</span></label>
-            <input value={branchId} onChange={e => setBranchId(e.target.value)} placeholder="e.g. wembley"
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-saffron-400/40" />
+            <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Branch <span className="text-white/20 font-normal normal-case">(optional)</span></label>
+            <BranchSelect
+              value={branchId}
+              onChange={v => setBranchId(v)}
+              placeholder="— No branch (global) —"
+              allowAny
+            />
           </div>
         </div>
 
@@ -195,7 +213,7 @@ function UserModal({ user, onClose, onSaved }: {
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </>
   )
 }
 
@@ -204,6 +222,7 @@ function UserModal({ user, onClose, onSaved }: {
 export default function UsersPage() {
   const [users, setUsers]           = useState<User[]>([])
   const [loading, setLoading]       = useState(true)
+  const [loadError, setLoadError]   = useState('')
   const [filterRole, setFilterRole] = useState('')
   const [search, setSearch]         = useState('')
   const [showInactive, setShowInactive] = useState(false)
@@ -212,14 +231,16 @@ export default function UsersPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError('')
     try {
       const params = new URLSearchParams()
       if (filterRole) params.set('role', filterRole)
       if (search) params.set('search', search)
       params.set('active_only', showInactive ? 'false' : 'true')
-      const res = await fetch(`${API}/users/?${params}`)
-      const data = await res.json()
+      const data = await apiFetch<{ users: User[] }>(`/users/?${params}`)
       setUsers(data.users ?? [])
+    } catch (e: any) {
+      setLoadError(e.message || 'Failed to load users')
     } finally {
       setLoading(false)
     }
@@ -228,13 +249,13 @@ export default function UsersPage() {
   useEffect(() => { load() }, [load])
 
   async function toggleActive(u: User) {
-    await fetch(`${API}/users/${u.id}/toggle-active`, { method: 'PUT' })
+    await apiFetch(`/users/${u.id}/toggle-active`, { method: 'PUT' })
     load()
   }
 
   async function deleteUser(u: User) {
     if (!confirm(`Remove ${u.name}? This cannot be undone.`)) return
-    await fetch(`${API}/users/${u.id}`, { method: 'DELETE' })
+    await apiFetch(`/users/${u.id}`, { method: 'DELETE' })
     load()
   }
 
@@ -246,7 +267,7 @@ export default function UsersPage() {
     <div className="space-y-8 animate-fade-in">
 
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-black text-white">🔐 Users & Roles</h1>
           <p className="text-white/40 mt-1">Manage staff accounts and permission levels</p>
@@ -259,7 +280,7 @@ export default function UsersPage() {
       </div>
 
       {/* Role summary cards */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {byRole.filter(r => r.level >= 30).map((r, i) => (
           <motion.button key={r.id}
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
@@ -303,13 +324,13 @@ export default function UsersPage() {
       {/* Role legend */}
       <div className="glass rounded-2xl p-5">
         <h3 className="text-white font-black text-sm mb-3">Role Permission Levels</h3>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
           {ROLES.map(r => (
-            <div key={r.id} className="flex items-center gap-3 py-1.5 px-3 rounded-xl bg-white/2">
-              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: r.color }} />
-              <span className="font-bold text-xs" style={{ color: r.color }}>{r.label}</span>
-              <span className="text-white/30 text-xs flex-1">{r.desc}</span>
-              <span className="text-white/20 text-xs font-mono">L{r.level}</span>
+            <div key={r.id} className="flex items-start gap-2.5 py-2 px-3 rounded-xl bg-white/2">
+              <div className="w-2 h-2 rounded-full flex-shrink-0 mt-0.5" style={{ background: r.color }} />
+              <span className="font-bold text-xs flex-shrink-0 w-24" style={{ color: r.color }}>{r.label}</span>
+              <span className="text-white/30 text-xs leading-snug flex-1 min-w-0">{r.desc}</span>
+              <span className="text-white/20 text-xs font-mono flex-shrink-0">L{r.level}</span>
             </div>
           ))}
         </div>
@@ -317,7 +338,7 @@ export default function UsersPage() {
 
       {/* Users table */}
       <div className="glass rounded-2xl overflow-hidden">
-        <table className="w-full">
+        <div className="overflow-x-auto"><table className="w-full">
           <thead>
             <tr className="border-b border-white/5">
               {['User', 'Role', 'Branch', 'Sign-in Method', 'Last Login', 'Status', 'Actions'].map(h => (
@@ -328,6 +349,11 @@ export default function UsersPage() {
           <tbody>
             {loading ? (
               <tr><td colSpan={7} className="px-6 py-16 text-center text-white/20 text-sm">Loading users…</td></tr>
+            ) : loadError ? (
+              <tr><td colSpan={7} className="px-6 py-16 text-center">
+                <p className="text-red-400 text-sm font-semibold">{loadError}</p>
+                <button onClick={load} className="mt-3 px-4 py-2 rounded-xl bg-white/5 text-white/50 text-sm">Retry</button>
+              </td></tr>
             ) : users.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-6 py-20 text-center">
@@ -409,7 +435,7 @@ export default function UsersPage() {
               ))
             )}
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       {/* Modals */}

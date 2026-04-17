@@ -3,17 +3,17 @@ Finance Capabilities — Digital DNA micro-capabilities for double-entry account
 donations, gift aid, budgets, and financial reporting.
 """
 from __future__ import annotations
-from decimal import Decimal, ROUND_HALF_UP
+
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from pydantic import BaseModel, field_validator
 import structlog
+from pydantic import BaseModel, field_validator
 
-from shital.core.dna.registry import capability, Fabric
+from shital.core.dna.registry import Fabric, capability
+from shital.core.fabrics.errors import AccountingError, IdempotencyError
 from shital.core.space.context import DigitalSpace
-from shital.core.space.result import Ok, Err, Result
-from shital.core.fabrics.errors import AccountingError, NotFoundError, IdempotencyError
 
 logger = structlog.get_logger()
 
@@ -74,8 +74,9 @@ class BudgetInput(BaseModel):
 )
 async def get_trial_balance(ctx: DigitalSpace, as_at_date: str = "") -> dict[str, Any]:
     """Return trial balance as of a given date (defaults to today)."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     log = logger.bind(**ctx.log_context)
     ctx.require_permission("finance:read")
@@ -149,9 +150,11 @@ async def post_journal_entry(ctx: DigitalSpace, entry: PostJournalInput) -> dict
             f"Journal does not balance: debits={total_dr} credits={total_cr}"
         )
 
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import uuid
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     log = logger.bind(**ctx.log_context)
 
@@ -226,9 +229,11 @@ async def record_donation(ctx: DigitalSpace, donation: DonationInput) -> dict[st
     """Record a donation, calculate gift aid, and post the accounting journal."""
     ctx.require_permission("finance:write")
 
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import uuid
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     amount = Decimal(donation.amount)
     gift_aid_amount = Decimal("0")
@@ -299,8 +304,9 @@ async def record_donation(ctx: DigitalSpace, donation: DonationInput) -> dict[st
 async def get_income_statement(ctx: DigitalSpace, from_date: str, to_date: str) -> dict[str, Any]:
     ctx.require_permission("finance:read")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -324,8 +330,8 @@ async def get_income_statement(ctx: DigitalSpace, from_date: str, to_date: str) 
     income_lines = [{"name": r["name"], "amount": str(Decimal(str(r["net"])))} for r in rows if r["type"] == "INCOME"]
     expense_lines = [{"name": r["name"], "amount": str(abs(Decimal(str(r["net"]))))} for r in rows if r["type"] == "EXPENSE"]
 
-    total_income = sum(Decimal(l["amount"]) for l in income_lines)
-    total_expenses = sum(Decimal(l["amount"]) for l in expense_lines)
+    total_income = sum(Decimal(line["amount"]) for line in income_lines)
+    total_expenses = sum(Decimal(line["amount"]) for line in expense_lines)
     surplus = total_income - total_expenses
 
     return {
@@ -349,8 +355,9 @@ async def get_income_statement(ctx: DigitalSpace, from_date: str, to_date: str) 
 async def get_donation_summary(ctx: DigitalSpace, from_date: str, to_date: str) -> dict[str, Any]:
     ctx.require_permission("finance:read")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(

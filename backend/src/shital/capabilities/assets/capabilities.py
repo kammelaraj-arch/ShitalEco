@@ -2,14 +2,15 @@
 Asset Capabilities — Asset register, depreciation, maintenance scheduling.
 """
 from __future__ import annotations
-from decimal import Decimal, ROUND_HALF_UP
+
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel
 import structlog
+from pydantic import BaseModel
 
-from shital.core.dna.registry import capability, Fabric
+from shital.core.dna.registry import Fabric, capability
 from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
@@ -54,9 +55,11 @@ class MaintenanceInput(BaseModel):
 async def register_asset(ctx: DigitalSpace, data: CreateAssetInput) -> dict[str, Any]:
     ctx.require_permission("assets:write")
 
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import uuid
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     asset_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -99,8 +102,9 @@ async def register_asset(ctx: DigitalSpace, data: CreateAssetInput) -> dict[str,
 async def get_asset_register(ctx: DigitalSpace, category: str = "") -> dict[str, Any]:
     ctx.require_permission("assets:read")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["a.branch_id = :bid", "a.deleted_at IS NULL", "a.status != 'DISPOSED'"]
     params: dict[str, Any] = {"bid": ctx.branch_id}
@@ -142,7 +146,7 @@ async def get_asset_register(ctx: DigitalSpace, category: str = "") -> dict[str,
         years_owned = 0
         if purchase_date:
             pd = purchase_date if isinstance(purchase_date, date) else date.fromisoformat(str(purchase_date))
-            years_owned = (date.today() - pd).days / 365.25
+            years_owned = int((date.today() - pd).days / 365.25)
 
         annual_dep = (Decimal(str(r["purchase_price"] or 0)) * dep_rate).quantize(Decimal("0.01"))
 
@@ -178,9 +182,11 @@ async def get_asset_register(ctx: DigitalSpace, category: str = "") -> dict[str,
 async def schedule_maintenance(ctx: DigitalSpace, data: MaintenanceInput) -> dict[str, Any]:
     ctx.require_permission("assets:write")
 
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import uuid
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     record_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -214,8 +220,9 @@ async def schedule_maintenance(ctx: DigitalSpace, data: MaintenanceInput) -> dic
 async def get_overdue_maintenance(ctx: DigitalSpace) -> dict[str, Any]:
     ctx.require_permission("assets:read")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore } from '../store/kiosk.store'
+import { KioskKeyboard } from '../components/KioskKeyboard'
 
 const AUTO_RESET_SECONDS = 60
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
@@ -18,9 +19,13 @@ export function ConfirmationScreen() {
   const [sentMsg, setSentMsg] = useState('')
   const [autoSent, setAutoSent] = useState(false)
 
+  // Contact prompt (shown prominently when no contact was collected)
+  const [contactPromptDismissed, setContactPromptDismissed] = useState(false)
+  const [showKeyboard, setShowKeyboard] = useState(false)
+
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
   const branchName = branchId === 'main' ? 'Wembley' : branchId === 'leicester' ? 'Leicester'
-    : branchId === 'reading' ? 'Reading' : branchId === 'mk' ? 'Milton Keynes' : 'Shital Temple'
+    : branchId === 'reading' ? 'Reading' : branchId === 'mk' ? 'Milton Keynes' : 'Shital'
 
   const hasContact = contactInfo && !contactInfo.anonymous && (contactInfo.email || contactInfo.phone)
 
@@ -40,7 +45,8 @@ export function ConfirmationScreen() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         order_ref: orderRef, type, destination, total,
-        branch_name: `Shital Temple ${branchName}`,
+        branch_name: `Shital ${branchName}`,
+        customer_name: contactInfo?.anonymous ? '' : (contactInfo?.name || ''),
         items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })),
       }),
     }).then(() => {
@@ -69,27 +75,34 @@ export function ConfirmationScreen() {
           order_ref: orderRef,
           type: isEmail ? 'email' : 'whatsapp',
           destination: receiptContact,
-          total, branch_name: `Shital Temple ${branchName}`,
+          total, branch_name: `Shital ${branchName}`,
+          customer_name: contactInfo?.anonymous ? '' : (contactInfo?.name || ''),
           items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })),
         }),
       })
     } catch {}
     setSentMsg(isEmail ? `Receipt sent to ${receiptContact}` : `WhatsApp sent to ${receiptContact}`)
     setReceiptMode('sent')
+    setContactPromptDismissed(true)
+    setShowKeyboard(false)
   }
 
+  // Use Electron silent print when running in kiosk app; fall back to browser print
   function handlePrint() {
-    // Make the thermal receipt div visible before printing
-    const el = document.querySelector('.print-receipt') as HTMLElement | null
-    if (el) el.style.display = 'block'
-    window.print()
-    if (el) el.style.display = 'none'
+    const api = (window as unknown as { kioskAPI?: { printReceipt: () => void } }).kioskAPI
+    if (api?.printReceipt) {
+      api.printReceipt() // silent — no dialog in Electron
+    } else {
+      window.print()     // fallback for browser dev/web mode
+    }
   }
 
   function handleStarClick(star: number) {
     setRating(star)
     setTimeout(() => setRatedDone(true), 600)
   }
+
+  const showContactPrompt = !hasContact && !contactPromptDismissed && receiptMode !== 'sent'
 
   const { icon, thankYouLine, subMessage } = endScreenTemplate
 
@@ -98,8 +111,12 @@ export function ConfirmationScreen() {
 
       {/* ── Print styles ── */}
       <style>{`
+        @media screen {
+          .print-receipt { display: none; }
+        }
         @media print {
           body * { visibility: hidden !important; }
+          .print-receipt { display: block !important; }
           .print-receipt, .print-receipt * { visibility: visible !important; }
           .print-receipt {
             position: fixed !important;
@@ -154,17 +171,20 @@ export function ConfirmationScreen() {
           </div>
         </motion.div>
 
-        {/* Hidden thermal receipt — only visible when printing */}
-        <div className="print-receipt hidden" style={{ display: 'none' }}>
+        {/* Thermal receipt — hidden on screen, shown by @media print CSS */}
+        <div className="print-receipt">
+          {/* Header */}
           <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: 8, marginBottom: 8 }}>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>🕉 Shital Temple</div>
-            <div style={{ fontSize: 11 }}>{branchName} · Registered UK Charity</div>
-            <div style={{ fontSize: 10, marginTop: 2 }}>{new Date().toLocaleString('en-GB')}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, letterSpacing: 1 }}>🕉 Shital Temple</div>
+            <div style={{ fontSize: 10 }}>{`Shital ${branchName}`} · Registered UK Charity</div>
+            <div style={{ fontSize: 9, marginTop: 2, color: '#555' }}>{new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
           </div>
+          {/* Order ref */}
           <div style={{ textAlign: 'center', marginBottom: 8 }}>
-            <div style={{ fontSize: 10, color: '#555' }}>Order Reference</div>
-            <div style={{ fontSize: 14, fontWeight: 900, letterSpacing: 2 }}>{orderRef}</div>
+            <div style={{ fontSize: 9, color: '#555' }}>ORDER REFERENCE</div>
+            <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: 2 }}>{orderRef}</div>
           </div>
+          {/* Items */}
           <div style={{ borderTop: '1px dashed #000', paddingTop: 6, marginBottom: 6 }}>
             {items.map((item, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
@@ -173,17 +193,24 @@ export function ConfirmationScreen() {
               </div>
             ))}
           </div>
-          <div style={{ borderTop: '2px solid #000', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 900, marginBottom: 10 }}>
-            <span>TOTAL</span>
-            <span>£{total.toFixed(2)}</span>
+          {/* Total */}
+          <div style={{ borderTop: '2px solid #000', paddingTop: 5, marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 900 }}>
+              <span>TOTAL</span>
+              <span>£{total.toFixed(2)}</span>
+            </div>
+            <div style={{ fontSize: 9, textAlign: 'right', color: '#555' }}>CARD PAYMENT</div>
           </div>
+          {/* Donor */}
           {contactInfo?.name && !contactInfo.anonymous && (
-            <div style={{ fontSize: 10, marginBottom: 8 }}>Donor: {contactInfo.name}</div>
+            <div style={{ fontSize: 9, marginBottom: 6 }}>Donor: <strong>{contactInfo.name}</strong></div>
           )}
-          <div style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: 8, fontSize: 10 }}>
-            <div>Thank you for your generous donation 🙏</div>
-            <div style={{ marginTop: 4 }}>Jay Shri Krishna</div>
-            <div style={{ marginTop: 6, fontSize: 9, color: '#555' }}>This receipt is for your records.</div>
+          {/* Footer */}
+          <div style={{ borderTop: '1px dashed #000', paddingTop: 8, textAlign: 'center', fontSize: 9, color: '#444' }}>
+            <div style={{ fontWeight: 900, marginBottom: 2 }}>Thank you for your generous donation 🙏</div>
+            <div>Jay Shri Krishna</div>
+            <div style={{ marginTop: 4, color: '#777' }}>This receipt is your donation record.</div>
+            <div style={{ marginTop: 4 }}>kiosk.shital.org.uk</div>
           </div>
         </div>
 
@@ -219,7 +246,79 @@ export function ConfirmationScreen() {
           </AnimatePresence>
         </motion.div>
 
-        {/* ── Receipt section ── */}
+        {/* ── Prominent contact prompt when no contact was collected ── */}
+        <AnimatePresence>
+          {showContactPrompt && (
+            <motion.div
+              key="contact-prompt"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ delay: 0.6 }}
+              className="w-full max-w-sm rounded-3xl overflow-hidden shadow-lg border-2"
+              style={{ borderColor: '#FF9933' }}>
+              {/* Header */}
+              <div className="px-5 pt-4 pb-3 text-left" style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}>
+                <p className="text-white font-black text-base">📨 Get your receipt</p>
+                <p className="text-orange-100 text-xs mt-0.5">Enter your email or phone number below</p>
+              </div>
+              {/* Input row */}
+              <div className="bg-white px-4 pt-3 pb-2">
+                <div
+                  className="flex items-center gap-2 border-2 rounded-2xl px-4 py-3 cursor-pointer"
+                  style={{ borderColor: showKeyboard ? '#FF9933' : '#e5e7eb', background: showKeyboard ? '#FFF8F0' : '#f9fafb' }}
+                  onClick={() => setShowKeyboard(true)}>
+                  <span className="text-lg">✉️</span>
+                  <span className={`flex-1 text-sm ${receiptContact ? 'text-gray-900 font-semibold' : 'text-gray-400'}`}>
+                    {receiptContact || 'Tap to enter email or phone…'}
+                  </span>
+                  {receiptContact && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setReceiptContact('') }}
+                      className="text-gray-400 text-xs px-1">✕</button>
+                  )}
+                </div>
+
+                {/* Keyboard */}
+                <AnimatePresence>
+                  {showKeyboard && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden mt-2">
+                      <KioskKeyboard
+                        value={receiptContact}
+                        onChange={setReceiptContact}
+                        mode="text"
+                        accent="#FF9933"
+                        onDone={() => setShowKeyboard(false)}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Action buttons */}
+                <div className="flex gap-2 mt-3 mb-1">
+                  <button
+                    onClick={() => { setContactPromptDismissed(true); setShowKeyboard(false) }}
+                    className="flex-1 py-3 rounded-2xl border-2 border-gray-200 text-gray-500 font-bold text-sm active:scale-95 transition-all">
+                    No thanks
+                  </button>
+                  <button
+                    onClick={handleSendReceipt}
+                    disabled={receiptContact.length < 5 || receiptMode === 'sending'}
+                    className="flex-[2] py-3 rounded-2xl text-white font-black text-sm shadow active:scale-95 disabled:opacity-40 transition-all"
+                    style={{ background: receiptContact.length >= 5 ? 'linear-gradient(135deg,#FF9933,#FF6600)' : '#d1d5db' }}>
+                    {receiptMode === 'sending' ? 'Sending…' : '📨 Send Receipt'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Receipt section (when contact prompt dismissed or already has contact) ── */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.65 }}
           className="w-full max-w-xs space-y-2">
           <AnimatePresence mode="wait">
@@ -228,10 +327,10 @@ export function ConfirmationScreen() {
                 className="bg-green-50 border border-green-200 text-green-700 text-sm font-semibold px-4 py-3 rounded-2xl text-center">
                 ✓ {sentMsg}
               </motion.div>
-            ) : (
+            ) : contactPromptDismissed || hasContact ? (
               <motion.div key="input" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-2">
                 <p className="text-xs font-semibold text-gray-500">
-                  {hasContact ? 'Send another copy' : 'Get a receipt (optional)'}
+                  {hasContact ? 'Send another copy' : 'Send a receipt'}
                 </p>
                 <div className="flex gap-2">
                   <input
@@ -251,7 +350,7 @@ export function ConfirmationScreen() {
                   </button>
                 </div>
               </motion.div>
-            )}
+            ) : null}
           </AnimatePresence>
 
           {/* Print button */}

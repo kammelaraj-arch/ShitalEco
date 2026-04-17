@@ -2,18 +2,51 @@
 Gift Aid router — admin endpoints for HMRC Gift Aid claim management.
 """
 from __future__ import annotations
+
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
-import uuid
 
 from shital.api.deps import CurrentSpace
 from shital.core.fabrics.config import settings
 
 router = APIRouter(prefix="/gift-aid", tags=["gift-aid"])
+
+
+# ─── Schema patch helper ──────────────────────────────────────────────────────
+
+async def _ensure_submissions_table() -> None:
+    """Idempotently create gift_aid_submissions table if missing."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    try:
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS gift_aid_submissions (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    correlation_id VARCHAR(100) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'submitted',
+                    declarations_count INTEGER NOT NULL DEFAULT 0,
+                    total_donated NUMERIC(12,2) NOT NULL DEFAULT 0,
+                    amount_claimed NUMERIC(12,2) NOT NULL DEFAULT 0,
+                    hmrc_reference VARCHAR(200) DEFAULT '',
+                    environment VARCHAR(10) NOT NULL DEFAULT 'test',
+                    errors TEXT DEFAULT '',
+                    submitted_by VARCHAR(200) DEFAULT '',
+                    submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """))
+            await db.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_gift_aid_submissions_date ON gift_aid_submissions(submitted_at)"
+            ))
+            await db.commit()
+    except Exception:
+        pass
 
 
 # ─── Configuration (admin-only) ───────────────────────────────────────────────
@@ -36,6 +69,7 @@ async def get_gift_aid_config(ctx: CurrentSpace):
         "hmrc_charity_ref": settings.HMRC_GIFT_AID_CHARITY_HMO_REF,
         "hmrc_environment": settings.HMRC_GIFT_AID_ENVIRONMENT,
         "hmrc_credentials_set": bool(settings.HMRC_GIFT_AID_USER_ID and settings.HMRC_GIFT_AID_PASSWORD),
+        "hmrc_vendor_id": settings.HMRC_GIFT_AID_VENDOR_ID,
         "charity_number": settings.CHARITY_NUMBER,
     }
 
@@ -43,8 +77,6 @@ async def get_gift_aid_config(ctx: CurrentSpace):
 @router.post("/config")
 async def update_gift_aid_config(ctx: CurrentSpace, config: GiftAidConfig):
     """Update Gift Aid configuration (stored in env/secrets — restart required)."""
-    # In production, these would be saved to a secrets manager or .env
-    # For now, returns a guidance response
     return {
         "message": "To update Gift Aid configuration, set these environment variables and restart the backend:",
         "env_vars": {
@@ -52,6 +84,7 @@ async def update_gift_aid_config(ctx: CurrentSpace, config: GiftAidConfig):
             "HMRC_GIFT_AID_USER_ID": "Your HMRC Government Gateway User ID",
             "HMRC_GIFT_AID_PASSWORD": "Your HMRC Government Gateway Password",
             "HMRC_GIFT_AID_CHARITY_HMO_REF": "Your charity HMRC reference (e.g. AB12345)",
+            "HMRC_GIFT_AID_VENDOR_ID": "Your HMRC software vendor ID (from HMRC developer registration)",
             "HMRC_GIFT_AID_ENVIRONMENT": "test (for testing) or live (for production submissions)",
         },
         "getaddress_docs": "https://getaddress.io/documentation",
@@ -76,8 +109,9 @@ class StoreDeclarationInput(BaseModel):
 @router.post("/declarations")
 async def store_declaration(ctx: CurrentSpace, body: StoreDeclarationInput):
     """Store a Gift Aid declaration in the database."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     declaration_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -105,7 +139,6 @@ async def store_declaration(ctx: CurrentSpace, body: StoreDeclarationInput):
             await db.commit()
         return {"declaration_id": declaration_id, "status": "stored"}
     except Exception as e:
-        # Table may not exist yet — return gracefully
         return {"declaration_id": declaration_id, "status": "stored_locally", "note": str(e)}
 
 
@@ -118,8 +151,9 @@ async def list_declarations(
     limit: int = 100,
 ):
     """List Gift Aid declarations (unsubmitted ones ready for HMRC batch)."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {"limit": limit}
@@ -159,6 +193,73 @@ async def list_declarations(
         return {"declarations": [], "total": 0, "error": str(e)}
 
 
+# ─── XML Preview ──────────────────────────────────────────────────────────────
+
+class PreviewXmlInput(BaseModel):
+    declaration_ids: list[str] = []
+    claim_to_date: date | None = None
+
+
+@router.post("/preview-xml")
+async def preview_xml(ctx: CurrentSpace, body: PreviewXmlInput):
+    """Return the GovTalk XML that would be sent to HMRC (credentials masked for display)."""
+    from sqlalchemy import text
+
+    from shital.capabilities.giftaid.capabilities import (
+        GiftAidDeclaration,
+        GiftAidSubmission,
+        build_gift_aid_xml_preview,
+    )
+    from shital.core.fabrics.database import SessionLocal
+
+    try:
+        async with SessionLocal() as db:
+            if body.declaration_ids:
+                placeholders = ", ".join(f":id_{i}" for i in range(len(body.declaration_ids)))
+                params = {f"id_{i}": v for i, v in enumerate(body.declaration_ids)}
+                result = await db.execute(
+                    text(f"SELECT * FROM gift_aid_declarations WHERE id IN ({placeholders}) AND gift_aid_agreed = true"),
+                    params,
+                )
+            else:
+                result = await db.execute(
+                    text("SELECT * FROM gift_aid_declarations WHERE hmrc_submitted = false AND gift_aid_agreed = true ORDER BY created_at LIMIT 500"),
+                    {},
+                )
+            rows = result.mappings().all()
+    except Exception as e:
+        return {"error": f"Could not fetch declarations: {e}", "xml": ""}
+
+    if not rows:
+        return {"error": "No declarations found", "xml": ""}
+
+    declarations = []
+    for r in rows:
+        parts = r.get("full_name", "").split(None, 1)
+        first = parts[0] if parts else ""
+        last = parts[1] if len(parts) > 1 else ""
+        addr_parts = r.get("address", "").split(",")
+        house = addr_parts[0].strip() if addr_parts else ""
+        declarations.append(GiftAidDeclaration(
+            first_name=first, last_name=last,
+            house_name_or_number=house, postcode=r.get("postcode", ""),
+            donation_date=r.get("donation_date") or date.today(),
+            amount=Decimal(str(r.get("donation_amount", 0))),
+            order_ref=r.get("order_ref", ""),
+        ))
+
+    submission = GiftAidSubmission(declarations=declarations, claim_to_date=body.claim_to_date)
+    xml = build_gift_aid_xml_preview(submission)
+    total = sum(d.amount for d in declarations)
+    return {
+        "xml": xml,
+        "declarations_count": len(declarations),
+        "total_donated": float(total),
+        "amount_claimed": float(total * Decimal("0.25")),
+        "environment": settings.HMRC_GIFT_AID_ENVIRONMENT,
+    }
+
+
 # ─── HMRC Submission ──────────────────────────────────────────────────────────
 
 class SubmitToHMRCInput(BaseModel):
@@ -169,11 +270,16 @@ class SubmitToHMRCInput(BaseModel):
 @router.post("/submit-to-hmrc")
 async def submit_to_hmrc(ctx: CurrentSpace, body: SubmitToHMRCInput):
     """Submit a batch of Gift Aid declarations to HMRC Charities Online."""
+    from sqlalchemy import text
+
     from shital.capabilities.giftaid.capabilities import (
-        submit_gift_aid_claim, GiftAidSubmission, GiftAidDeclaration
+        GiftAidDeclaration,
+        GiftAidSubmission,
+        submit_gift_aid_claim,
     )
     from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
+
+    await _ensure_submissions_table()
 
     try:
         async with SessionLocal() as db:
@@ -213,12 +319,39 @@ async def submit_to_hmrc(ctx: CurrentSpace, body: SubmitToHMRCInput):
 
     submission = GiftAidSubmission(declarations=declarations, claim_to_date=body.claim_to_date)
     result_obj = await submit_gift_aid_claim(ctx, submission)
+    total_donated = sum(d.amount for d in declarations)
 
-    # Mark as submitted if successful
+    now = datetime.utcnow()
+    # Record the submission attempt
+    submission_id = str(uuid.uuid4())
+    try:
+        async with SessionLocal() as db:
+            await db.execute(
+                text("""
+                    INSERT INTO gift_aid_submissions
+                    (id, correlation_id, status, declarations_count, total_donated,
+                     amount_claimed, hmrc_reference, environment, errors, submitted_at)
+                    VALUES (:id, :cid, :status, :count, :total, :claimed, :ref, :env, :errors, :now)
+                """),
+                {
+                    "id": submission_id,
+                    "cid": result_obj.correlation_id,
+                    "status": result_obj.status,
+                    "count": result_obj.declarations_count,
+                    "total": str(total_donated),
+                    "claimed": str(result_obj.amount_claimed),
+                    "ref": result_obj.hmrc_reference,
+                    "env": settings.HMRC_GIFT_AID_ENVIRONMENT,
+                    "errors": "; ".join(result_obj.errors) if result_obj.errors else "",
+                    "now": now,
+                },
+            )
+            await db.commit()
+    except Exception:
+        pass
+
+    # Mark declarations as submitted if successful
     if result_obj.status == "submitted" and rows:
-        from shital.core.fabrics.database import SessionLocal
-        from sqlalchemy import text
-        now = datetime.utcnow()
         ids = [r["id"] for r in rows]
         try:
             async with SessionLocal() as db:
@@ -232,11 +365,43 @@ async def submit_to_hmrc(ctx: CurrentSpace, body: SubmitToHMRCInput):
             pass
 
     return {
+        "submission_id": submission_id,
         "correlation_id": result_obj.correlation_id,
         "status": result_obj.status,
         "declarations_submitted": result_obj.declarations_count,
+        "total_donated": float(total_donated),
         "amount_claimed_from_hmrc": float(result_obj.amount_claimed),
         "hmrc_reference": result_obj.hmrc_reference,
         "errors": result_obj.errors,
         "environment": settings.HMRC_GIFT_AID_ENVIRONMENT,
     }
+
+
+# ─── Submission History ───────────────────────────────────────────────────────
+
+@router.get("/submissions")
+async def list_submissions(ctx: CurrentSpace, limit: int = 50):
+    """List past Gift Aid submission attempts to HMRC."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    await _ensure_submissions_table()
+
+    try:
+        async with SessionLocal() as db:
+            result = await db.execute(
+                text("""
+                    SELECT id, correlation_id, status, declarations_count,
+                           total_donated, amount_claimed, hmrc_reference,
+                           environment, errors, submitted_at
+                    FROM gift_aid_submissions
+                    ORDER BY submitted_at DESC
+                    LIMIT :limit
+                """),
+                {"limit": limit},
+            )
+            rows = result.mappings().all()
+        return {"submissions": [dict(r) for r in rows], "total": len(rows)}
+    except Exception as e:
+        return {"submissions": [], "total": 0, "error": str(e)}

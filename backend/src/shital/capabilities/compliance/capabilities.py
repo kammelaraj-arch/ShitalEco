@@ -3,13 +3,14 @@ Compliance Capabilities — Governance, audit, GDPR, trustee declarations.
 The AuditLog is IMMUTABLE — append-only, never update or delete.
 """
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
 import structlog
+from pydantic import BaseModel
 
-from shital.core.dna.registry import capability, Fabric
+from shital.core.dna.registry import Fabric, capability
 from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
@@ -49,8 +50,10 @@ async def write_audit_log(ctx: DigitalSpace, data: AuditLogInput) -> dict[str, A
     """Always succeeds — audit log is fire-and-forget critical infrastructure."""
     import json
     import uuid
-    from shital.core.fabrics.database import SessionLocal
+
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -100,8 +103,9 @@ async def get_audit_logs(
 ) -> dict[str, Any]:
     ctx.require_permission("compliance:read")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["al.branch_id = :bid"]
     params: dict[str, Any] = {"bid": ctx.branch_id, "limit": limit + 1}
@@ -157,9 +161,11 @@ async def get_audit_logs(
 async def get_compliance_dashboard(ctx: DigitalSpace) -> dict[str, Any]:
     ctx.require_permission("compliance:read")
 
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     from datetime import date
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         doc_stats = await db.execute(
@@ -192,7 +198,7 @@ async def get_compliance_dashboard(ctx: DigitalSpace) -> dict[str, Any]:
             """),
             {"bid": ctx.branch_id, "today": date.today()},
         )
-        td = trustee_stats.mappings().first() or {}
+        td: dict = dict(trustee_stats.mappings().first() or {})
 
         recent_audit = await db.execute(
             text("""
@@ -242,8 +248,9 @@ async def get_compliance_dashboard(ctx: DigitalSpace) -> dict[str, Any]:
 async def export_personal_data(ctx: DigitalSpace, subject_user_id: str) -> dict[str, Any]:
     ctx.require_permission("compliance:read")
 
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         user = await db.execute(

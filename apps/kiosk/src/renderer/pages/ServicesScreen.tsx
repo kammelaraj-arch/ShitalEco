@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useKioskStore, t } from '../store/kiosk.store'
+import { cachedFetch } from '../utils/cachedFetch'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
 
@@ -40,8 +41,7 @@ export function ServicesScreen() {
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
 
   useEffect(() => {
-    fetch(`${API_BASE}/kiosk/services`)
-      .then((r) => r.json())
+    cachedFetch<{ services: Service[] }>(`${API_BASE}/kiosk/services`)
       .then((d) => { setServices(d.services || []); setLoading(false) })
       .catch(() => { setServices(MOCK_SERVICES); setLoading(false) })
   }, [])

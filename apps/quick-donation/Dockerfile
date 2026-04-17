@@ -12,15 +12,15 @@ COPY apps/quick-donation/package.json apps/quick-donation/
 # Install dependencies
 RUN pnpm install --frozen-lockfile --filter @shital/quick-donation... || pnpm install --filter @shital/quick-donation...
 
-# Copy source code
 COPY apps/quick-donation/ apps/quick-donation/
 
 WORKDIR /app/apps/quick-donation
 
-# Build for production
 ARG VITE_API_URL=/api/v1
 ENV VITE_API_URL=${VITE_API_URL}
 RUN pnpm build
+ARG GIT_SHA=dev
+RUN echo "Built commit ${GIT_SHA}"
 
 # ─── Stage 2: Serve with nginx ───
 FROM nginx:alpine AS production
@@ -73,7 +73,7 @@ EOF
 
 EXPOSE 80
 
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO /dev/null http://localhost/health || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

@@ -12,7 +12,7 @@ import {
   DomainError,
   PAGINATION,
 } from '@shital/config'
-import { prisma, type Transaction, type TransactionLine } from '@shital/db'
+import { prisma, type Transaction, type TransactionLine, TransactionStatus } from '@shital/db'
 import type { JournalEntry } from './types.js'
 
 const journalLineSchema = z.object({
@@ -100,10 +100,11 @@ export class JournalService {
             branchId,
             description: entry.description,
             date: entry.date,
-            reference: entry.reference,
+            reference: entry.reference ?? `auto-${entry.idempotencyKey}`,
             idempotencyKey: entry.idempotencyKey,
             postedBy,
             status: 'POSTED',
+            totalAmount: entry.lines.reduce((s, l) => s.plus(l.debitAmount), new Decimal(0)).toDecimalPlaces(2).toNumber(),
           },
         })
 
@@ -111,7 +112,7 @@ export class JournalService {
           data: entry.lines.map((line) => ({
             transactionId: transaction.id,
             accountId: line.accountId,
-            description: line.description,
+            description: line.description ?? null,
             debitAmount: line.debitAmount.toDecimalPlaces(2).toNumber(),
             creditAmount: line.creditAmount.toDecimalPlaces(2).toNumber(),
           })),
@@ -177,7 +178,7 @@ export class JournalService {
         // Mark original as void
         await tx.transaction.update({
           where: { id: transactionId },
-          data: { status: 'VOID', voidedBy, voidedAt: new Date() },
+          data: { status: 'VOID' as const },
         })
 
         // Create reversing journal entry
@@ -189,8 +190,8 @@ export class JournalService {
             reference: `VOID-${transaction.reference ?? transactionId}`,
             idempotencyKey: reversingIdempotencyKey,
             postedBy: voidedBy,
-            status: 'POSTED',
-            reversalOf: transactionId,
+            status: 'POSTED' as const,
+            totalAmount: transaction.lines.reduce((s, l) => new Decimal(s).plus(l.debitAmount.toString()), new Decimal(0)).toDecimalPlaces(2).toNumber(),
           },
         })
 
@@ -258,7 +259,7 @@ export class JournalService {
     },
     cursor?: string,
     limit?: number,
-  ): Promise<Result<{ items: (Transaction & { lines: TransactionLine[] })[]; nextCursor: string | null }>> {
+  ): Promise<Result<{ items: (Transaction & { lines: TransactionLine[] })[]; nextCursor: string | null }>> { // eslint-disable-line
     return tryAsync(async () => {
       const take = Math.min(limit ?? PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT)
 
@@ -267,7 +268,7 @@ export class JournalService {
           branchId,
           ...(filters.fromDate !== undefined ? { date: { gte: filters.fromDate } } : {}),
           ...(filters.toDate !== undefined ? { date: { lte: filters.toDate } } : {}),
-          ...(filters.status !== undefined ? { status: filters.status } : {}),
+          ...(filters.status !== undefined ? { status: filters.status as TransactionStatus } : {}),
           ...(filters.accountId !== undefined
             ? { lines: { some: { accountId: filters.accountId } } }
             : {}),
@@ -286,7 +287,7 @@ export class JournalService {
         nextCursor = last !== undefined ? last.id : null
       }
 
-      return { items, nextCursor }
+      return { items: items as (Transaction & { lines: TransactionLine[] })[], nextCursor }
     })
   }
 }

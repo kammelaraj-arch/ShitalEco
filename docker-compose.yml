@@ -25,6 +25,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    ports:
+      - "8000:8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shitaleco_db_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-shitaleco_db}
       APP_ENV: production
@@ -51,9 +53,10 @@ services:
     build:
       context: ./apps/admin
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/v1
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${API_URL:-http://backend:8000}
       NODE_ENV: production
     depends_on:
       - backend
@@ -73,6 +76,32 @@ services:
     networks:
       - internal
 
+  # ─── Kiosk (Vite SPA — web/Android/Electron shared renderer) ──────────────
+  kiosk:
+    build:
+      context: ./apps/kiosk          # standalone — no workspace deps needed
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api/v1
+        VITE_BASE: /kiosk/
+        VITE_BRANCH_ID: ${BRANCH_ID:-main}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - internal
+
+  # ─── Smart Screen (TV / Android TV — pure HTML/jQuery, no build step) ────────
+  screen:
+    build:
+      context: ./apps/screen            # only needs the screen dir
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - internal
+
   # ─── Nginx Reverse Proxy ───────────────────────────────────────────────────
   nginx:
     image: nginx:alpine
@@ -83,12 +112,15 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/hub:/usr/share/nginx/hub:ro
       - certbot-www:/var/www/certbot:ro
       - certbot-certs:/etc/letsencrypt:ro
     depends_on:
       - backend
       - admin
       - quick-donation
+      - kiosk
+      - screen
     networks:
       - internal
 

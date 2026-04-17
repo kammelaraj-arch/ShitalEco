@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from shital.api.deps import RequiredSpace, OptionalSpace
+from shital.api.deps import OptionalSpace, RequiredSpace
 
 router = APIRouter(prefix="/terminal-devices", tags=["terminal-devices"])
 
@@ -29,10 +29,12 @@ class DeviceCreate(BaseModel):
     branch_id: str
     branch_name: str = ""
     label: str
-    provider: str = "stripe_terminal"       # stripe_terminal | square | cash
+    provider: str = "stripe_terminal"   # stripe_terminal | square | clover | sumup | cash
     stripe_reader_id: str = ""
     stripe_location_id: str = ""
     square_device_id: str = ""
+    clover_device_id: str = ""
+    sumup_reader_serial: str = ""
     device_type: str = ""
     serial_number: str = ""
     user_id: str = ""
@@ -49,6 +51,8 @@ class DeviceUpdate(BaseModel):
     stripe_reader_id: str | None = None
     stripe_location_id: str | None = None
     square_device_id: str | None = None
+    clover_device_id: str | None = None
+    sumup_reader_serial: str | None = None
     device_type: str | None = None
     serial_number: str | None = None
     user_id: str | None = None
@@ -86,8 +90,9 @@ async def list_devices(
     active_only: bool = True,
 ):
     """List all registered terminal devices with optional filters."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -108,7 +113,10 @@ async def list_devices(
             text(f"""
                 SELECT id, branch_id, branch_name, user_id, user_name, user_email,
                        label, provider, stripe_reader_id, stripe_location_id,
-                       square_device_id, device_type, serial_number,
+                       square_device_id,
+                       COALESCE(clover_device_id, '') AS clover_device_id,
+                       COALESCE(sumup_reader_serial, '') AS sumup_reader_serial,
+                       device_type, serial_number,
                        status, is_active, last_seen_at, notes,
                        created_at, updated_at
                 FROM terminal_devices
@@ -127,14 +135,18 @@ async def list_devices(
 @router.get("/by-branch/{branch_id}")
 async def list_devices_for_branch(branch_id: str, ctx: OptionalSpace):
     """Public endpoint: list active devices for a branch (used by kiosk)."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
             text("""
                 SELECT id, label, provider, stripe_reader_id, stripe_location_id,
-                       square_device_id, device_type, serial_number,
+                       square_device_id,
+                       COALESCE(clover_device_id, '') AS clover_device_id,
+                       COALESCE(sumup_reader_serial, '') AS sumup_reader_serial,
+                       device_type, serial_number,
                        status, user_id, user_name
                 FROM terminal_devices
                 WHERE branch_id = :bid
@@ -153,8 +165,9 @@ async def list_devices_for_branch(branch_id: str, ctx: OptionalSpace):
 
 @router.get("/{device_id}")
 async def get_device(device_id: str, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -177,8 +190,9 @@ async def get_device(device_id: str, ctx: RequiredSpace):
 @router.post("/")
 async def create_device(body: DeviceCreate, ctx: RequiredSpace):
     """Register a new terminal device and link it to a branch."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     device_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -189,12 +203,14 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
                 INSERT INTO terminal_devices (
                     id, branch_id, branch_name, user_id, user_name, user_email,
                     label, provider, stripe_reader_id, stripe_location_id,
-                    square_device_id, device_type, serial_number,
+                    square_device_id, clover_device_id, sumup_reader_serial,
+                    device_type, serial_number,
                     status, is_active, notes, created_at, updated_at
                 ) VALUES (
                     :id, :branch_id, :branch_name, :user_id, :user_name, :user_email,
                     :label, :provider, :stripe_reader_id, :stripe_location_id,
-                    :square_device_id, :device_type, :serial_number,
+                    :square_device_id, :clover_device_id, :sumup_reader_serial,
+                    :device_type, :serial_number,
                     'offline', TRUE, :notes, :now, :now
                 )
             """),
@@ -210,6 +226,8 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
                 "stripe_reader_id": body.stripe_reader_id,
                 "stripe_location_id": body.stripe_location_id,
                 "square_device_id": body.square_device_id,
+                "clover_device_id": body.clover_device_id,
+                "sumup_reader_serial": body.sumup_reader_serial,
                 "device_type": body.device_type,
                 "serial_number": body.serial_number,
                 "notes": body.notes,
@@ -225,13 +243,15 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
 
 @router.put("/{device_id}")
 async def update_device(device_id: str, body: DeviceUpdate, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     fields: dict[str, Any] = {}
     for field in (
         "branch_id", "branch_name", "label", "provider",
         "stripe_reader_id", "stripe_location_id", "square_device_id",
+        "clover_device_id", "sumup_reader_serial",
         "device_type", "serial_number", "user_id", "user_name", "user_email",
         "is_active", "status", "notes",
     ):
@@ -271,8 +291,9 @@ async def update_device(device_id: str, body: DeviceUpdate, ctx: RequiredSpace):
 @router.post("/{device_id}/assign")
 async def assign_user_to_device(device_id: str, body: AssignUserInput, ctx: RequiredSpace):
     """Assign (or reassign) a staff user as the owner of this terminal."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
 
@@ -306,8 +327,9 @@ async def assign_user_to_device(device_id: str, body: AssignUserInput, ctx: Requ
 
 @router.delete("/{device_id}")
 async def delete_device(device_id: str, ctx: RequiredSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
 
@@ -341,11 +363,15 @@ async def sync_from_stripe(ctx: RequiredSpace, branch_id: str = "", location_id:
     for the admin to fill in later).
     """
     import stripe
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
+
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe API key not configured. Set it in Admin → API Keys.")
 
     try:
         params: dict = {"limit": 100}
@@ -440,11 +466,13 @@ async def sync_from_stripe(ctx: RequiredSpace, branch_id: str = "", location_id:
 async def refresh_device_status(device_id: str, ctx: RequiredSpace):
     """Fetch the latest status for one device from Stripe and save it."""
     import stripe
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
+
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     now = datetime.utcnow()
 
     async with SessionLocal() as db:

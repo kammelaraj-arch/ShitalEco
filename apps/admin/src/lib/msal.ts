@@ -1,12 +1,13 @@
 /**
- * Microsoft Authentication Library (MSAL) configuration for the Shital Admin Portal.
+ * Microsoft / Azure AD sign-in for the Admin Portal.
  *
- * Uses @azure/msal-browser for the SPA OAuth2 / OIDC popup flow.
- * Config values are fetched from the backend GET /api/v1/auth/azure/config
- * at runtime so they can be managed in the server .env without a frontend rebuild.
+ * Uses a manual popup + hash polling instead of @azure/msal-browser, so it
+ * works over plain HTTP (window.crypto is not required).
+ *
+ * Config is fetched at runtime from GET /api/v1/auth/azure/config.
  */
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://sshitaleco.onrender.com/api/v1'
+const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
 
 export interface AzureConfig {
   client_id: string
@@ -16,7 +17,7 @@ export interface AzureConfig {
   enabled: boolean
 }
 
-// ─── Runtime config fetch ──────────────────────────────────────────────────
+// ── Runtime config ────────────────────────────────────────────────────────────
 
 let _azureConfig: AzureConfig | null = null
 
@@ -32,44 +33,10 @@ export async function getAzureConfig(): Promise<AzureConfig> {
   }
 }
 
-// ─── MSAL instance factory (lazy — only created when needed) ─────────────────
+// Invalidate cached config (call after updating keys in admin)
+export function invalidateAzureConfig() { _azureConfig = null }
 
-let _msalInstance: any = null
-
-export async function getMsalInstance() {
-  if (_msalInstance) return _msalInstance
-
-  const config = await getAzureConfig()
-  if (!config.enabled || !config.client_id) return null
-
-  // Dynamically import to avoid SSR issues in Next.js
-  const { PublicClientApplication, LogLevel } = await import('@azure/msal-browser')
-
-  _msalInstance = new PublicClientApplication({
-    auth: {
-      clientId: config.client_id,
-      authority: config.authority,
-      redirectUri: typeof window !== 'undefined' ? window.location.origin : '/',
-    },
-    cache: {
-      cacheLocation: 'sessionStorage',
-      storeAuthStateInCookie: false,
-    },
-    system: {
-      loggerOptions: {
-        logLevel: LogLevel.Warning,
-        loggerCallback: (level: number, message: string, containsPii: boolean) => {
-          if (!containsPii) console.debug('[MSAL]', message)
-        },
-      },
-    },
-  })
-
-  await _msalInstance.initialize()
-  return _msalInstance
-}
-
-// ─── Sign-in with popup ────────────────────────────────────────────────
+// ── Auth result ───────────────────────────────────────────────────────────────
 
 export interface ShitalAuthResult {
   access_token: string
@@ -86,38 +53,73 @@ export interface ShitalAuthResult {
   }
 }
 
+// ── Sign-in with Microsoft (popup, no MSAL / no window.crypto) ───────────────
+
 export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
-  const msal = await getMsalInstance()
-  if (!msal) throw new Error('Azure AD SSO is not configured. Please contact your administrator.')
-
   const config = await getAzureConfig()
-
-  // Try silent first (existing session)
-  let msalResult: any = null
-  const accounts = msal.getAllAccounts()
-
-  if (accounts.length > 0) {
-    try {
-      msalResult = await msal.acquireTokenSilent({
-        scopes: config.scopes,
-        account: accounts[0],
-      })
-    } catch {
-      // Fall through to popup
-    }
+  if (!config.enabled || !config.client_id) {
+    throw new Error('Azure AD SSO is not configured. Add MS_CLIENT_ID and MS_TENANT_ID in Admin → API Keys.')
   }
 
-  if (!msalResult) {
-    msalResult = await msal.loginPopup({
-      scopes: config.scopes,
-      prompt: 'select_account',
-    })
-  }
+  // Use admin-configured redirect URI (MS_REDIRECT_URI secret) so it matches
+  // exactly what's registered in Azure AD app registration.
+  // Falls back to window.location.origin + '/auth-callback'.
+  const redirectUri = (config as any).redirect_uri || `${window.location.origin}/auth-callback`
+  // Use Date.now() as nonce — avoids window.crypto which is HTTPS-only
+  const nonce = String(Date.now())
+  const scope = encodeURIComponent('openid profile email')
+  const authUrl = [
+    `${config.authority}/oauth2/v2.0/authorize`,
+    `?client_id=${config.client_id}`,
+    `&response_type=id_token`,
+    `&redirect_uri=${encodeURIComponent(redirectUri)}`,
+    `&scope=${scope}`,
+    `&response_mode=fragment`,
+    `&nonce=${nonce}`,
+    `&prompt=select_account`,
+  ].join('')
 
-  const idToken: string = msalResult.idToken
-  if (!idToken) throw new Error('No ID token received from Microsoft')
+  const width = 520, height = 640
+  const left = window.screenX + (window.innerWidth - width) / 2
+  const top  = window.screenY + (window.innerHeight - height) / 2
+  const popup = window.open(authUrl, 'AzureAD', `width=${width},height=${height},left=${left},top=${top}`)
 
-  // Exchange with our backend
+  if (!popup) throw new Error('Popup was blocked. Please allow popups for this site.')
+
+  // Poll until the popup navigates back to our redirect URI with id_token in hash
+  const idToken = await new Promise<string>((resolve, reject) => {
+    const timer = setInterval(() => {
+      try {
+        if (!popup || popup.closed) {
+          clearInterval(timer)
+          reject(new Error('Sign-in popup was closed before completing.'))
+          return
+        }
+        const hash = popup.location.hash
+        if (hash && hash.includes('id_token=')) {
+          clearInterval(timer)
+          popup.close()
+          const params = new URLSearchParams(hash.substring(1))
+          const token = params.get('id_token')
+          if (token) resolve(token)
+          else reject(new Error('No id_token in redirect response.'))
+        }
+        if (hash && hash.includes('error=')) {
+          clearInterval(timer)
+          popup.close()
+          const params = new URLSearchParams(hash.substring(1))
+          reject(new Error(params.get('error_description') || params.get('error') || 'Azure AD error'))
+        }
+      } catch {
+        // Cross-origin — keep polling until popup returns to our origin
+      }
+    }, 400)
+
+    // Timeout after 3 minutes
+    setTimeout(() => { clearInterval(timer); popup?.close(); reject(new Error('Sign-in timed out.')) }, 180_000)
+  })
+
+  // Exchange id_token with backend
   const res = await fetch(`${API}/auth/azure/verify-token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -125,18 +127,18 @@ export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
   })
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Authentication failed' }))
-    throw new Error(err.detail || 'Authentication failed')
+    const text = await res.text().catch(() => '')
+    let detail = 'Authentication failed'
+    try {
+      const j = JSON.parse(text)
+      detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+    } catch { detail = text || `HTTP ${res.status}` }
+    throw new Error(detail)
   }
 
   return res.json() as Promise<ShitalAuthResult>
 }
 
 export async function signOutMicrosoft(): Promise<void> {
-  const msal = await getMsalInstance()
-  if (!msal) return
-  const accounts = msal.getAllAccounts()
-  if (accounts.length > 0) {
-    await msal.logoutPopup({ account: accounts[0] }).catch(() => {})
-  }
+  // Nothing to clean up — no MSAL state
 }

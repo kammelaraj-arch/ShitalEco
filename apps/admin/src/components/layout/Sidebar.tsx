@@ -1,9 +1,11 @@
 'use client'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { clsx } from 'clsx'
 import { useBranding } from '@/lib/branding'
+import { useKeyboardEnabled } from '@/components/ui/AdminKeyboard'
 
 const NAV_SECTIONS = [
   {
@@ -11,6 +13,7 @@ const NAV_SECTIONS = [
     items: [
       { href: '/dashboard',         icon: '🏗️', label: 'Dashboard' },
       { href: '/ai',                icon: '🧠', label: 'Digital Brain' },
+      { href: '/ai/functions',      icon: '⚙️', label: 'Function Registry' },
     ],
   },
   {
@@ -18,6 +21,7 @@ const NAV_SECTIONS = [
     items: [
       { href: '/finance',           icon: '💰', label: 'Accounts' },
       { href: '/finance/journal',   icon: '📒', label: 'Journal' },
+      { href: '/finance/recurring', icon: '🔄', label: 'Recurring Payments' },
       { href: '/donations',         icon: '🙏', label: 'Donations' },
       { href: '/gift-aid',          icon: '🇬🇧', label: 'Gift Aid' },
       { href: '/budgets',           icon: '📊', label: 'Budgets' },
@@ -50,10 +54,21 @@ const NAV_SECTIONS = [
   {
     label: 'Kiosk',
     items: [
+      { href: '/kiosk/projects',    icon: '🏗️', label: 'Projects' },
       { href: '/kiosk/services',    icon: '🛕', label: 'Services' },
-      { href: '/kiosk/items',       icon: '📦', label: 'Catalog Items' },
-      { href: '/kiosk/orders',      icon: '🧾', label: 'Orders' },
-      { href: '/terminal-devices',  icon: '💳', label: 'Terminal Devices' },
+      { href: '/kiosk/items',          icon: '📦', label: 'Catalog Items' },
+      { href: '/kiosk/orders',         icon: '🧾', label: 'Orders' },
+      { href: '/kiosk/receipt-test',   icon: '🖨️', label: 'Receipt Printer Test' },
+      { href: '/devices',              icon: '🖥️', label: 'Devices' },
+      { href: '/terminal-devices',     icon: '💳', label: 'Card Readers' },
+    ],
+  },
+  {
+    label: 'Smart Screen',
+    items: [
+      { href: '/screen',            icon: '📺', label: 'Screen Profiles' },
+      { href: '/screen/content',    icon: '🎬', label: 'Content Library' },
+      { href: '/screen/playlists',  icon: '▶️', label: 'Playlists' },
     ],
   },
   {
@@ -64,17 +79,54 @@ const NAV_SECTIONS = [
       { href: '/settings/branches',         icon: '🌿', label: 'Branches' },
       { href: '/settings/users',            icon: '🔐', label: 'Users & Roles' },
       { href: '/settings/azure-ad',         icon: '🔷', label: 'Azure AD / SSO' },
+      { href: '/settings/address-lookup',   icon: '📮', label: 'Address Lookup' },
+      { href: '/settings/api-keys',         icon: '🔑', label: 'API Keys' },
+      { href: '/settings/azure-backup',     icon: '☁️', label: 'Azure Backups' },
+      { href: '/settings/system',           icon: '🛡️', label: 'System & Backups' },
     ],
   },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  open?: boolean
+  onClose?: () => void
+}
+
+export function Sidebar({ open = true, onClose }: SidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const { branding } = useBranding()
+  const { enabled: kbEnabled, setEnabled: setKbEnabled } = useKeyboardEnabled()
+  const [user, setUser] = useState<{ name?: string; role?: string } | null>(null)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('shital_user')
+      if (raw) setUser(JSON.parse(raw))
+    } catch { /* ignore */ }
+  }, [])
+
+  function handleLogout() {
+    localStorage.removeItem('shital_access_token')
+    localStorage.removeItem('shital_refresh_token')
+    localStorage.removeItem('shital_user')
+    document.cookie = 'shital_token=; path=/; max-age=0'
+    router.push('/login')
+  }
+
+  const displayName = user?.name || 'Admin User'
+  const displayRole = user?.role || 'SUPER_ADMIN'
+  const initials = displayName.slice(0, 1).toUpperCase()
 
   return (
     <aside
-      className="w-64 h-screen flex-shrink-0 flex flex-col sticky top-0 overflow-hidden"
+      className={clsx(
+        'w-64 h-screen flex-shrink-0 flex flex-col',
+        // Desktop: sticky in flow; Mobile: fixed overlay with slide transition
+        'fixed md:sticky top-0 left-0 z-50 md:z-auto',
+        'transition-transform duration-300 ease-in-out',
+        open ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+      )}
       style={{
         background: 'linear-gradient(180deg,#180a0a 0%,#0d0404 100%)',
         borderRight: '1px solid rgba(185,28,28,0.2)',
@@ -102,10 +154,19 @@ export function Sidebar() {
             🛕
           </div>
         )}
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-white font-black text-base leading-none truncate">{branding.orgName}</p>
           <p className="text-white/40 text-xs mt-0.5">{branding.orgSubtitle}</p>
         </div>
+        {/* Mobile close button */}
+        <button
+          className="md:hidden w-7 h-7 rounded-full flex items-center justify-center text-white/40 hover:text-white transition-colors flex-shrink-0"
+          style={{ background: 'rgba(255,255,255,0.06)' }}
+          onClick={onClose}
+          aria-label="Close menu"
+        >
+          ✕
+        </button>
       </div>
 
       {/* Navigation */}
@@ -148,6 +209,33 @@ export function Sidebar() {
         ))}
       </nav>
 
+      {/* On-screen keyboard toggle */}
+      <div className="px-4 py-2 flex-shrink-0" style={{ borderTop: '1px solid rgba(185,28,28,0.10)' }}>
+        <button
+          onClick={() => setKbEnabled(!kbEnabled)}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all"
+          style={{
+            background: kbEnabled ? 'rgba(185,28,28,0.15)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${kbEnabled ? 'rgba(185,28,28,0.3)' : 'rgba(255,255,255,0.06)'}`,
+          }}
+          title={kbEnabled ? 'Disable on-screen keyboard' : 'Enable on-screen keyboard'}
+        >
+          <span className="text-base leading-none">{kbEnabled ? '⌨️' : '🖱️'}</span>
+          <span className="flex-1 text-left text-xs font-medium" style={{ color: kbEnabled ? '#f87171' : 'rgba(255,255,255,0.35)' }}>
+            On-screen keyboard
+          </span>
+          <span
+            className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+            style={{
+              background: kbEnabled ? 'rgba(185,28,28,0.3)' : 'rgba(255,255,255,0.08)',
+              color: kbEnabled ? '#fca5a5' : 'rgba(255,255,255,0.3)',
+            }}
+          >
+            {kbEnabled ? 'ON' : 'OFF'}
+          </span>
+        </button>
+      </div>
+
       {/* User profile footer */}
       <div className="px-4 py-4 flex-shrink-0" style={{ borderTop: '1px solid rgba(185,28,28,0.15)' }}>
         <div className="flex items-center gap-3 px-2">
@@ -155,15 +243,22 @@ export function Sidebar() {
             className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0"
             style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}
           >
-            A
+            {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white text-sm font-semibold truncate">Admin User</p>
-            <p className="text-white/30 text-xs truncate">SUPER_ADMIN</p>
+            <p className="text-white text-sm font-semibold truncate">{displayName}</p>
+            <p className="text-white/30 text-xs truncate">{displayRole}</p>
           </div>
           <Link href="/settings/branding" className="text-white/30 hover:text-white/60 text-sm transition-colors" title="Branding Settings">
             🎨
           </Link>
+          <button
+            onClick={handleLogout}
+            className="text-white/30 hover:text-red-400 text-sm transition-colors"
+            title="Sign out"
+          >
+            ⏏
+          </button>
         </div>
       </div>
     </aside>

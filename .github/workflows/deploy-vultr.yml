@@ -5,83 +5,229 @@ on:
     branches: [claude/shital-erp-platform-iR2UF, main]
   workflow_dispatch:
 
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy & verify on Vultr
+      - name: Trigger webhook deployer (preferred — bypasses fail2ban)
+        run: |
+          SECRET="${{ secrets.DEPLOY_SECRET }}"
+          SECRET="${SECRET:-ShitalDeploy2026!}"
+          curl -X POST https://shital.org.uk/deploy \
+            -H "X-Deploy-Secret: ${SECRET}" \
+            --max-time 15 --retry 3 --retry-delay 5 || true
+
+      # SSH fallback: used if webhook deployer is not responding.
+      # IMPORTANT: This script does NOT build images — builds happen in CI.
+      #            It only pulls pre-built images from GHCR and restarts.
+      - name: SSH fallback
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
         with:
           host: 192.248.147.205
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
-          timeout: 300s
+          timeout: 600s
+          command_timeout: 10m
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
           script: |
             set -e
 
-            # Install docker if missing
+            # ── Docker ────────────────────────────────────────────────────────
             if ! command -v docker &>/dev/null; then
               curl -fsSL https://get.docker.com | sh
-              systemctl enable --now docker
             fi
+            systemctl enable docker && systemctl start docker || true
 
-            # Clone repo if missing
-            if [ ! -d /opt/shitaleco/.git ]; then
+            # ── Clone / update repo ───────────────────────────────────────────
+            if [ -d /opt/shitaleco/.git ]; then
+              cd /opt/shitaleco
+              git fetch origin
+              git reset --hard origin/claude/shital-erp-platform-iR2UF
+            else
               apt-get install -y git -q
               git clone --branch claude/shital-erp-platform-iR2UF \
-                https://github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco
+                https://${GH_PAT}@github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco
             fi
-
             cd /opt/shitaleco
 
-            # Pull latest code
-            git fetch origin claude/shital-erp-platform-iR2UF
-            git reset --hard origin/claude/shital-erp-platform-iR2UF
-
-            # Create .env if missing
+            # ── .env ─────────────────────────────────────────────────────────
             if [ ! -f .env ]; then
-              printf 'POSTGRES_DB=shitaleco_db\n' > .env
-              printf 'POSTGRES_USER=shitaleco_db_user\n' >> .env
-              printf 'POSTGRES_PASSWORD=ShitalEco2024Prod!\n' >> .env
-              printf 'JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod\n' >> .env
-              printf 'APP_ENV=production\n' >> .env
-              printf 'CORS_ORIGINS=http://localhost:3001,http://localhost:3002\n' >> .env
-              printf 'API_URL=http://localhost:8000\n' >> .env
-              printf 'ANTHROPIC_API_KEY=\n' >> .env
-              printf 'SENDGRID_API_KEY=\n' >> .env
-              printf 'STRIPE_SECRET_KEY=\n' >> .env
-              printf 'STRIPE_PUBLISHABLE_KEY=\n' >> .env
-              printf 'STRIPE_WEBHOOK_SECRET=\n' >> .env
+              cat > .env << 'ENVEOF'
+            POSTGRES_DB=shitaleco_db
+            POSTGRES_USER=shitaleco_db_user
+            POSTGRES_PASSWORD=ShitalEco2024Prod!
+            JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod
+            APP_ENV=production
+            ENVEOF
             fi
 
-            # Open ports
-            ufw allow 22/tcp
-            ufw allow 80/tcp
-            ufw allow 443/tcp
-            ufw allow 8000/tcp
-            ufw --force enable
+            inject() {
+              local key=$1 val=$2
+              [ -z "$val" ] && return
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${val}|" .env
+              else
+                echo "${key}=${val}" >> .env
+              fi
+            }
+            inject STRIPE_SECRET_KEY      "$STRIPE_SECRET_KEY"
+            inject STRIPE_PUBLISHABLE_KEY "$STRIPE_PUBLISHABLE_KEY"
+            inject ANTHROPIC_API_KEY      "$ANTHROPIC_API_KEY"
+            inject SENDGRID_API_KEY       "$SENDGRID_API_KEY"
+            inject MS_CLIENT_ID           "$MS_CLIENT_ID"
+            inject MS_TENANT_ID           "$MS_TENANT_ID"
+            inject MS_CLIENT_SECRET       "$MS_CLIENT_SECRET"
+            inject GITHUB_TOKEN           "$GH_PAT"
+            inject CORS_ORIGINS           "https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,https://dev.shital.org.uk"
+            inject MS_REDIRECT_URI        "https://admin.shital.org.uk/auth-callback"
 
-            # Start/restart services
-            docker compose up -d --build
+            # ── Weekly cron to prune dangling images (idempotent) ────────────
+            cat > /etc/cron.d/docker-prune << 'CRONEOF'
+            0 3 * * 0 root docker image prune -f && docker container prune -f >> /var/log/docker-prune.log 2>&1
+            CRONEOF
+            chmod 644 /etc/cron.d/docker-prune
 
-            # Wait for backend
-            echo "Waiting for backend..."
+            # ── Firewall ──────────────────────────────────────────────────────
+            ufw allow 22/tcp  2>/dev/null || true
+            ufw allow 80/tcp  2>/dev/null || true
+            ufw allow 443/tcp 2>/dev/null || true
+            ufw --force enable 2>/dev/null || true
+
+            # ── fail2ban: stop banning GitHub Actions IPs ────────────────────
+            if command -v fail2ban-client &>/dev/null; then
+              fail2ban-client unban --all           2>/dev/null || true
+              fail2ban-client set sshd maxretry 100 2>/dev/null || true
+              fail2ban-client set sshd bantime  60  2>/dev/null || true
+            fi
+
+            # ── Ensure DB and nginx are up ────────────────────────────────────
+            docker compose -f docker-compose.prod.yml up -d db nginx 2>/dev/null || true
+            echo "Waiting for DB..."
+            for i in $(seq 1 30); do
+              sleep 2
+              docker compose -f docker-compose.prod.yml exec -T db \
+                pg_isready -U shitaleco_db_user -d shitaleco_db &>/dev/null && break
+              echo "  db attempt $i/30..."
+            done
+
+            # ── Login to GHCR ─────────────────────────────────────────────────
+            echo "$GH_PAT" | docker login ghcr.io -u kammelaraj-arch --password-stdin
+            echo "Logged in to GHCR"
+
+            # ── Checkpoint: tag :latest as :previous ─────────────────────────
+            for svc in backend admin quick-donation kiosk screen; do
+              img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+              docker tag "${img}:latest" "${img}:previous" 2>/dev/null || true
+            done
+
+            # ── Pull images built by CI — zero build load on this server ─────
+            echo "=== Pulling pre-built images from GHCR ==="
+            docker compose -f docker-compose.prod.yml pull backend admin quick-donation kiosk screen
+            docker image prune -f
+            docker container prune -f
+
+            # ── Rolling restart: backend first ────────────────────────────────
+            echo "=== Rolling restart: backend ==="
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
+
+            echo "Waiting for backend health..."
+            BACKEND_OK=0
             for i in $(seq 1 30); do
               sleep 5
-              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-                echo "Backend healthy!"
-                break
+              if curl -sf http://localhost:8000/health > /dev/null; then
+                echo "Backend healthy!"; BACKEND_OK=1; break
               fi
               echo "  attempt $i/30..."
             done
 
-            # Patch schema and seed
-            curl -sf -X POST http://localhost:8000/api/v1/admin/patch-schema && echo "Schema patched"
-            curl -sf -X POST "http://localhost:8000/api/v1/items/seed" && echo "Items seeded"
+            if [ "$BACKEND_OK" -eq 0 ]; then
+              echo "!!! Backend unhealthy — rolling back to :previous !!!"
+              docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
+                         ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
+              docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
+              docker compose -f docker-compose.prod.yml ps
+              exit 1
+            fi
 
-            # Final health check
-            curl -s http://localhost:8000/health
+            curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
+
+            # ── Rolling restart: frontends ────────────────────────────────────
+            echo "=== Rolling restart: frontends ==="
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
+
+            echo "Waiting for admin..."
+            for i in $(seq 1 20); do
+              sleep 5
+              curl -sf http://localhost:3001/admin > /dev/null 2>&1 && break
+              echo "  attempt $i/20..."
+            done
+
+            docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
+              docker compose -f docker-compose.prod.yml up -d --no-deps nginx
+
+            # ── Smoke tests ───────────────────────────────────────────────────
+            echo "=== Smoke tests ==="
+            SMOKE_FAIL=0
+            smoke() {
+              if curl -sf --max-time 10 "$2" > /dev/null 2>&1; then echo "  ✓ $1"
+              else echo "  ✗ $1 FAILED"; SMOKE_FAIL=1; fi
+            }
+            smoke "backend /health"  "http://localhost:8000/health"
+            smoke "admin portal"     "http://localhost:3001/admin"
+            smoke "nginx main"       "http://localhost:80/"
+            smoke "kiosk"            "http://localhost:80/kiosk/"
+            smoke "donation"         "http://localhost:80/donate/"
+
+            if [ "$SMOKE_FAIL" -ne 0 ]; then
+              echo "!!! Smoke tests failed — check logs above !!!"
+              docker compose -f docker-compose.prod.yml logs --tail=30 backend
+              exit 1
+            fi
+
+            # ── SSL cert renewal (idempotent) ─────────────────────────────────
+            docker run --rm \
+              -v /var/www/certbot:/var/www/certbot \
+              -v /etc/letsencrypt:/etc/letsencrypt \
+              certbot/certbot certonly --webroot \
+              --webroot-path /var/www/certbot \
+              -d shital.org.uk -d www.shital.org.uk \
+              -d admin.shital.org.uk -d kiosk.shital.org.uk \
+              -d donate.shital.org.uk -d screen.shital.org.uk \
+              -d dev.shital.org.uk \
+              --expand --non-interactive --agree-tos \
+              -m admin@shirdisai.org.uk \
+              2>&1 | tail -5 || true
+
+            # ── Tag :latest as :dev for dev stack ─────────────────────────────
+            for svc in backend admin quick-donation kiosk screen; do
+              docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
+                         ghcr.io/kammelaraj-arch/shitaleco-${svc}:dev 2>/dev/null || true
+            done
+
+            DEV_DIR=/opt/shitaleco-dev
+            if [ -d "$DEV_DIR/.git" ]; then
+              cd "$DEV_DIR"
+              git fetch origin
+              git reset --hard origin/claude/shital-erp-platform-iR2UF
+              docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
+            fi
+
+            docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || true
+
             echo ""
-            echo "Deploy complete!"
-            docker compose ps
+            echo "=== Deploy complete — all sites live ==="
+            docker compose -f docker-compose.prod.yml ps

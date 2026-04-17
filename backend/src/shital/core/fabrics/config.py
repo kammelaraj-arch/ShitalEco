@@ -39,9 +39,13 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
 
-    # SendGrid
+    # SendGrid (legacy fallback)
     SENDGRID_API_KEY: str = ""
-    SENDGRID_FROM_EMAIL: str = "noreply@shital.org"
+    SENDGRID_FROM_EMAIL: str = "noreply@shital.org.uk"
+
+    # Office 365 SMTP (primary email — overrides SendGrid when password set)
+    OFFICE365_EMAIL: str = "noreply@shital.org.uk"
+    OFFICE365_PASSWORD: str = ""
 
     # Meta WhatsApp
     META_WHATSAPP_TOKEN: str = ""
@@ -63,6 +67,16 @@ class Settings(BaseSettings):
     SQUARE_ACCESS_TOKEN: str = ""
     SQUARE_ENVIRONMENT: str = "sandbox"  # sandbox | production
     SQUARE_LOCATION_ID: str = ""
+
+    # Clover
+    CLOVER_ACCESS_TOKEN: str = ""
+    CLOVER_MERCHANT_ID: str = ""
+    CLOVER_ENVIRONMENT: str = "sandbox"  # sandbox | production
+    CLOVER_DEVICE_ID: str = ""
+
+    # SumUp
+    SUMUP_ACCESS_TOKEN: str = ""
+    SUMUP_MERCHANT_CODE: str = ""
 
     # MeiliSearch
     MEILISEARCH_URL: str = "http://localhost:7700"

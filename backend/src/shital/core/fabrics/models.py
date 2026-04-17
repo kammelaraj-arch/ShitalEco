@@ -3,6 +3,7 @@ SQLAlchemy base model mixins — shared columns for all domain models.
 Import and compose these into every ORM model for consistency.
 """
 from __future__ import annotations
+
 import uuid
 from datetime import datetime
 

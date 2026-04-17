@@ -85,7 +85,7 @@ export class StripeProvider {
       return {
         id: intent.id,
         provider: 'STRIPE' as const,
-        clientSecret: intent.client_secret ?? undefined,
+        ...(intent.client_secret != null ? { clientSecret: intent.client_secret } : {}),
         amount: intent.amount,
         currency: intent.currency.toUpperCase(),
         status: mapStripeStatus(intent.status),
@@ -136,7 +136,7 @@ export class StripeProvider {
       return {
         id: intent.id,
         provider: 'KIOSK' as const,
-        clientSecret: intent.client_secret ?? undefined,
+        ...(intent.client_secret != null ? { clientSecret: intent.client_secret } : {}),
         amount: intent.amount,
         currency: intent.currency.toUpperCase(),
         status: mapStripeStatus(intent.status),

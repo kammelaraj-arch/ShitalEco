@@ -3,14 +3,102 @@ Admin kiosk router — CRUD for temple services and order listing.
 Requires authentication (admin role).
 """
 from __future__ import annotations
+
+import uuid
 from datetime import datetime
 from typing import Any
-import uuid
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/admin", tags=["admin-kiosk"])
+
+
+# ─── Dashboard Stats ─────────────────────────────────────────────────────
+
+@router.get("/stats")
+async def get_stats():
+    """Aggregate dashboard statistics — no auth required (public summary)."""
+    from datetime import date
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    today = date.today()
+    async with SessionLocal() as db:
+        # Items
+        items_r = await db.execute(
+            text("SELECT COUNT(*) AS cnt FROM catalog_items WHERE deleted_at IS NULL")
+        )
+        total_items = items_r.mappings().first()["cnt"]
+
+        # Orders
+        orders_r = await db.execute(
+            text("SELECT COUNT(*) AS cnt, COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) AS rev FROM orders")
+        )
+        orow = orders_r.mappings().first()
+        total_orders = orow["cnt"]
+        total_revenue = float(orow["rev"] or 0)
+
+        # Today's orders
+        today_r = await db.execute(
+            text("SELECT COUNT(*) AS cnt FROM orders WHERE DATE(created_at) = :today"),
+            {"today": today},
+        )
+        today_orders = today_r.mappings().first()["cnt"]
+
+        # Monthly revenue (last 12 months)
+        monthly_r = await db.execute(text("""
+            SELECT TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') AS month,
+                   SUM(CAST(total_amount AS NUMERIC)) AS amount
+            FROM orders
+            WHERE created_at >= NOW() - INTERVAL '12 months'
+            GROUP BY DATE_TRUNC('month', created_at)
+            ORDER BY DATE_TRUNC('month', created_at)
+        """))
+        monthly = [{"month": r["month"], "amount": float(r["amount"] or 0)} for r in monthly_r.mappings()]
+
+        # Recent 5 orders
+        recent_r = await db.execute(text("""
+            SELECT reference, customer_name, total_amount, status, created_at
+            FROM orders ORDER BY created_at DESC LIMIT 5
+        """))
+        recent_orders = []
+        for r in recent_r.mappings():
+            d = dict(r)
+            if d.get("created_at") and hasattr(d["created_at"], "isoformat"):
+                d["created_at"] = d["created_at"].isoformat()
+            if d.get("total_amount"):
+                d["total_amount"] = float(d["total_amount"])
+            recent_orders.append(d)
+
+        # Employees (if table exists)
+        total_employees = 0
+        try:
+            emp_r = await db.execute(
+                text("SELECT COUNT(*) AS cnt FROM employees WHERE deleted_at IS NULL AND is_active = true")
+            )
+            total_employees = emp_r.mappings().first()["cnt"]
+        except Exception:
+            pass
+
+        # Live catalog items
+        live_r = await db.execute(
+            text("SELECT COUNT(*) AS cnt FROM catalog_items WHERE deleted_at IS NULL AND is_live = true")
+        )
+        live_items = live_r.mappings().first()["cnt"]
+
+    return {
+        "total_items": total_items,
+        "live_items": live_items,
+        "total_orders": total_orders,
+        "today_orders": today_orders,
+        "total_revenue": total_revenue,
+        "total_employees": total_employees,
+        "monthly_revenue": monthly,
+        "recent_orders": recent_orders,
+    }
 
 
 # ─── Temple Services ─────────────────────────────────────────────────────
@@ -32,8 +120,9 @@ class ServiceBody(BaseModel):
 
 @router.get("/services")
 async def list_services(branch_id: str = "", category: str = "", include_inactive: bool = True):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -58,8 +147,9 @@ async def list_services(branch_id: str = "", category: str = "", include_inactiv
 
 @router.post("/services", status_code=201)
 async def create_service(body: ServiceBody):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     service_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -86,8 +176,9 @@ async def create_service(body: ServiceBody):
 
 @router.put("/services/{service_id}")
 async def update_service(service_id: str, body: ServiceBody):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
     updates = body.model_dump(exclude_unset=True)
@@ -110,8 +201,9 @@ async def update_service(service_id: str, body: ServiceBody):
 
 @router.delete("/services/{service_id}")
 async def delete_service(service_id: str):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
     async with SessionLocal() as db:
@@ -127,8 +219,9 @@ async def delete_service(service_id: str):
 
 @router.get("/orders")
 async def list_orders(limit: int = 50, offset: int = 0, status: str = "", branch_id: str = ""):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = []
     params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -154,6 +247,7 @@ async def list_orders(limit: int = 50, offset: int = 0, status: str = "", branch
         )
         rows = result.mappings().all()
         count_result = await db.execute(text(f"SELECT COUNT(*) AS cnt FROM orders {where}"), params)
-        total = count_result.mappings().first()["cnt"]
+        _count_row = count_result.mappings().first()
+        total = _count_row["cnt"] if _count_row is not None else 0
 
     return {"orders": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}

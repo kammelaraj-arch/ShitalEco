@@ -2,16 +2,17 @@
 Notifications Capabilities — email (SendGrid), WhatsApp (Meta Cloud API), in-app.
 """
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
 import structlog
+from pydantic import BaseModel
 
-from shital.core.dna.registry import capability, Fabric
-from shital.core.space.context import DigitalSpace
+from shital.core.dna.registry import Fabric, capability
 from shital.core.fabrics.config import settings
+from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
 
@@ -48,16 +49,15 @@ async def send_email(ctx: DigitalSpace, data: EmailInput) -> dict[str, Any]:
         logger.warning("sendgrid_not_configured")
         return {"sent": False, "reason": "SendGrid not configured"}
 
+    content: list[dict[str, str]] = [{"type": "text/html", "value": data.html_body}]
+    if data.text_body:
+        content.append({"type": "text/plain", "value": data.text_body})
     payload = {
         "personalizations": [{"to": [{"email": data.to}]}],
         "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": "Shital Temple"},
         "subject": data.subject,
-        "content": [
-            {"type": "text/html", "value": data.html_body},
-        ],
+        "content": content,
     }
-    if data.text_body:
-        payload["content"].append({"type": "text/plain", "value": data.text_body})
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -128,9 +128,11 @@ async def send_whatsapp(ctx: DigitalSpace, data: WhatsAppInput) -> dict[str, Any
     tags=["notifications", "in-app"],
 )
 async def create_in_app_notification(ctx: DigitalSpace, data: InAppNotificationInput) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import uuid
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     notif_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -164,8 +166,9 @@ async def create_in_app_notification(ctx: DigitalSpace, data: InAppNotificationI
 async def get_unread_notifications(
     ctx: DigitalSpace, limit: int = 20, cursor: str = ""
 ) -> dict[str, Any]:
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     params: dict[str, Any] = {"uid": ctx.user_id, "limit": limit + 1}
     cursor_clause = "AND id > :cursor" if cursor else ""

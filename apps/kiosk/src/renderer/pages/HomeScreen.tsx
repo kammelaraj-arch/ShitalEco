@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, t, THEMES, KioskTheme, Language, LANGUAGE_META } from '../store/kiosk.store'
+import { KioskKeyboard } from '../components/KioskKeyboard'
+import { cachedFetch } from '../utils/cachedFetch'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -200,9 +202,9 @@ function LanguagePicker({ onClose }: { onClose: () => void }) {
 
 // ─── Main HomeScreen ──────────────────────────────────────────────────────────
 export function HomeScreen() {
-  const { language, setScreen, addItem, items, theme, resetKiosk, branchId } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl } = useKioskStore()
   const th = THEMES[theme]
-  const [activeNav, setActiveNav] = useState('donations')
+  const [activeNav, setActiveNav] = useState(() => homeActiveNav || 'donations')
   const [services, setServices] = useState<Service[]>([])
   const [softDonations, setSoftDonations] = useState<DbItem[]>([])
   const [brickTiers, setBrickTiers] = useState<DbItem[]>([])
@@ -215,6 +217,16 @@ export function HomeScreen() {
   const [showLanguagePicker, setShowLanguagePicker] = useState(false)
   const [customAmount, setCustomAmount] = useState('')
   const [customAdded, setCustomAdded] = useState(false)
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
+  // Project donation state
+  interface ApiProject { id: string; project_id: string; name: string; description: string; goal_amount: number; image_url: string; sort_order: number; is_active: boolean }
+  const [projects, setProjects] = useState<ApiProject[]>([])
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [projectItems, setProjectItems] = useState<DbItem[]>([])
+  // Clear the store's homeActiveNav after consuming it on mount
+  useEffect(() => { if (homeActiveNav) setHomeActiveNav('') }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Debounce guard — prevents double-fire from pointerdown + click on touch devices
+  const lastTap = React.useRef<Record<string, number>>({})
 
   const itemCount = items.reduce((s, i) => s + i.quantity, 0)
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
@@ -222,28 +234,49 @@ export function HomeScreen() {
   useEffect(() => {
     const bid = branchId || 'main'
     setLoading(true)
+    const empty = { items: [] }
     Promise.all([
-      fetch(`${API_BASE}/items/kiosk/soft-donations?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/items/kiosk/projects?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/items/kiosk/shop?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/items/kiosk/general-donations`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/items/kiosk/sponsorship?branch_id=${bid}`).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${API_BASE}/kiosk/services`).then(r => r.json()).catch(() => ({ services: [] })),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/soft-donations?branch_id=${bid}`).catch(() => empty),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/projects?branch_id=${bid}`).catch(() => empty),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/shop?branch_id=${bid}`).catch(() => empty),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/general-donations`).catch(() => empty),
+      cachedFetch<{ items: DbItem[] }>(`${API_BASE}/items/kiosk/sponsorship?branch_id=${bid}`).catch(() => empty),
+      cachedFetch<{ services: Service[] }>(`${API_BASE}/kiosk/services`).catch(() => ({ services: [] })),
     ]).then(([sd, proj, shop, gd, spon, svcs]) => {
       setSoftDonations(sd.items ?? [])
       setBrickTiers(proj.items ?? [])
       setShopItems(shop.items ?? [])
       setGeneralDonations(gd.items ?? [])
       setSponsorships(spon.items ?? [])
-      setServices(svcs.services ?? [])
+      setServices((svcs as { services: Service[] }).services ?? [])
     }).finally(() => setLoading(false))
   }, [branchId])
+
+  // Fetch projects when on project_donation tab
+  useEffect(() => {
+    if (activeNav !== 'project_donation') return
+    cachedFetch<{ projects: ApiProject[] }>(`${API_BASE}/projects?branch_id=${branchId || 'main'}`)
+      .catch(() => ({ projects: [] }))
+      .then(data => {
+        const projs: ApiProject[] = data.projects ?? []
+        setProjects(projs)
+        if (projs.length > 0 && !selectedProjectId) setSelectedProjectId(projs[0].project_id)
+      })
+  }, [activeNav, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch items for selected project
+  useEffect(() => {
+    if (!selectedProjectId) { setProjectItems(brickTiers); return }
+    cachedFetch<{ items: DbItem[] }>(`${API_BASE}/projects/${selectedProjectId}/items?branch_id=${branchId || 'main'}`)
+      .catch(() => ({ items: [] }))
+      .then(data => { setProjectItems(data.items?.length ? data.items : brickTiers) })
+  }, [selectedProjectId, brickTiers]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeNavItem = NAV_SECTIONS.flatMap(s => s.items).find(i => i.id === activeNav)
 
   const catalogItems: DbItem[] = (() => {
     if (activeNav === 'soft_donation')    return softDonations
-    if (activeNav === 'project_donation') return brickTiers
+    if (activeNav === 'project_donation') return projectItems
     if (activeNav === 'shop')             return shopItems
     if (activeNav === 'donations')        return generalDonations
     if (activeNav === 'sponsorship')      return sponsorships
@@ -256,6 +289,11 @@ export function HomeScreen() {
   })
 
   const handleAddCatalog = (item: DbItem) => {
+    // Debounce: ignore if this item was tapped within the last 600ms (pointerdown + click guard)
+    const now = Date.now()
+    if (lastTap.current[item.id] && now - lastTap.current[item.id] < 600) return
+    lastTap.current[item.id] = now
+
     addItem({
       type: item.category === 'SHOP' ? 'SERVICE' : 'DONATION',
       name: item.name,
@@ -274,6 +312,10 @@ export function HomeScreen() {
   }
 
   const handleAdd = (svc: Service) => {
+    const now = Date.now()
+    if (lastTap.current[svc.id] && now - lastTap.current[svc.id] < 600) return
+    lastTap.current[svc.id] = now
+
     const giftAidEligible = ['DONATION', 'GENERAL_DONATION', 'PROJECT_DONATION'].includes(svc.category)
     addItem({ type: svc.category.includes('DONATION') ? 'DONATION' : 'SERVICE', name: svc.name, quantity: 1, unitPrice: svc.price, totalPrice: svc.price, referenceId: svc.id, giftAidEligible, category: svc.category })
     setAdded(svc.id)
@@ -302,16 +344,26 @@ export function HomeScreen() {
         style={{ height: 60, background: th.headerBg, borderBottom: '2px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
       >
         {/* Logo */}
-        <div
-          className="w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black flex-shrink-0 shadow border-2 border-white/30"
-          style={{ background: th.logoBg, color: th.logoText }}
-        >
-          🕉
-        </div>
+        {orgLogoUrl ? (
+          <img
+            src={orgLogoUrl}
+            alt={orgName}
+            className="w-11 h-11 rounded-xl object-contain flex-shrink-0 shadow border-2 border-white/30"
+            style={{ background: 'rgba(255,255,255,0.1)' }}
+            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+          />
+        ) : (
+          <div
+            className="w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black flex-shrink-0 shadow border-2 border-white/30"
+            style={{ background: th.logoBg, color: th.logoText }}
+          >
+            🕉
+          </div>
+        )}
 
-        {/* Temple name */}
+        {/* Org name */}
         <div className="flex-1 min-w-0">
-          <h1 className="font-black text-base leading-tight" style={{ color: th.headerText }}>Shital</h1>
+          <h1 className="font-black text-base leading-tight" style={{ color: th.headerText }}>{orgName}</h1>
         </div>
 
         {/* Language picker button */}
@@ -364,39 +416,77 @@ export function HomeScreen() {
         </button>
       </header>
 
+      {/* ══ MOBILE NAV (portrait phones) ══════════════════════════════════════ */}
+      <div
+        className="sm:hidden flex-shrink-0 flex overflow-x-auto bg-white"
+        style={{ borderBottom: '2px solid #e5e7eb', WebkitOverflowScrolling: 'touch' }}
+      >
+        {NAV_SECTIONS.flatMap(s => s.items).map(item => {
+          const isActive = activeNav === item.id
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveNav(item.id)}
+              className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-2.5 transition-all active:scale-95 relative"
+              style={{ borderBottom: isActive ? `3px solid ${th.langActive}` : '3px solid transparent' }}
+            >
+              <span className="text-xl leading-none">{item.icon}</span>
+              <span
+                className="text-[10px] leading-tight font-semibold whitespace-nowrap"
+                style={{ color: isActive ? th.langActive : '#6b7280' }}
+              >
+                {getNavLabel(item, language)}
+              </span>
+            </button>
+          )
+        })}
+        <button
+          onClick={() => setScreen('idle')}
+          className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-2.5 ml-auto transition-all active:scale-95"
+          style={{ borderBottom: '3px solid transparent' }}
+        >
+          <span className="text-xl leading-none">🚪</span>
+          <span className="text-[10px] font-semibold text-gray-400 whitespace-nowrap">Exit</span>
+        </button>
+      </div>
+
       {/* ══ BODY ═══════════════════════════════════════════════════════════════ */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* ── SIDEBAR ──────────────────────────────────────────────────────── */}
+        {/* ── SIDEBAR — hidden on mobile, shown on sm+ ─────────────────────── */}
         <aside
-          className="flex-shrink-0 flex flex-col overflow-y-auto"
+          className="hidden sm:flex flex-shrink-0 flex-col overflow-y-auto"
           style={{
-            width: 160,
-            background: '#fff',
-            borderRight: '1px solid #e5e7eb',
+            width: 168,
+            background: `linear-gradient(180deg, ${th.sidebarFrom} 0%, ${th.sidebarTo} 100%)`,
+            borderRight: `1px solid ${th.sidebarBorder.replace('/30', '').replace('/40', '')}30`,
           }}
         >
           {NAV_SECTIONS.map((section, si) => (
-            <nav key={si} className={si > 0 ? 'border-t border-gray-100 mt-auto' : ''}>
+            <nav key={si} className={si > 0 ? 'mt-auto' : ''}>
+              {si > 0 && <div className="mx-3 my-1" style={{ height: 1, background: `${th.sidebarText}20` }} />}
               {section.items.map(item => {
                 const isActive = activeNav === item.id
                 return (
                   <button
                     key={item.id}
                     onClick={() => setActiveNav(item.id)}
-                    className="w-full flex flex-col items-center gap-1 py-3 px-2 text-center transition-all relative active:scale-95"
+                    className="w-full flex flex-col items-center gap-1.5 py-3.5 px-2 text-center transition-all relative active:scale-95"
                     style={{
-                      background: isActive ? `${th.langActive}15` : 'transparent',
-                      borderLeft: isActive ? `3px solid ${th.langActive}` : '3px solid transparent',
+                      background: isActive ? th.sidebarActiveBg : 'transparent',
+                      borderLeft: isActive ? `3px solid ${th.sidebarIndicator}` : '3px solid transparent',
                     }}
                   >
-                    <span className="text-2xl leading-none">{item.icon}</span>
+                    <span className="text-2xl leading-none drop-shadow">{item.icon}</span>
                     <span
-                      className="text-[11px] leading-tight font-semibold"
-                      style={{ color: isActive ? th.langActive : '#6b7280' }}
+                      className="text-[11px] leading-tight font-bold"
+                      style={{ color: isActive ? th.sidebarActiveText : th.sidebarText, opacity: isActive ? 1 : 0.8 }}
                     >
                       {getNavLabel(item, language)}
                     </span>
+                    {isActive && (
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full" style={{ background: th.sidebarIndicator }} />
+                    )}
                   </button>
                 )
               })}
@@ -406,8 +496,8 @@ export function HomeScreen() {
           {/* Exit */}
           <button
             onClick={() => setScreen('idle')}
-            className="mx-2 mb-3 mt-2 py-2 rounded-xl text-xs font-medium flex items-center justify-center gap-1 text-gray-400 hover:text-gray-600 transition-colors"
-            style={{ border: '1px solid #e5e7eb' }}
+            className="mx-2 mb-3 mt-2 py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all active:scale-95"
+            style={{ background: 'rgba(0,0,0,0.12)', color: th.sidebarText, opacity: 0.7 }}
           >
             ← Exit
           </button>
@@ -418,165 +508,219 @@ export function HomeScreen() {
 
           {/* Category title header */}
           <div
-            className="flex items-center justify-between px-5 py-3 flex-shrink-0"
-            style={{ borderBottom: '1px solid #e5e7eb' }}
+            className="flex items-center justify-between px-4 py-2.5 flex-shrink-0"
+            style={{ background: `${th.langActive}10`, borderBottom: `2px solid ${th.langActive}25` }}
           >
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">{activeNavItem?.icon ?? '✨'}</span>
-              <h2 className="font-black text-xl text-gray-900">{navLabel}</h2>
+            <div className="flex items-center gap-2.5">
+              <span
+                className="w-9 h-9 rounded-xl flex items-center justify-center text-xl shadow-sm flex-shrink-0"
+                style={{ background: `${th.langActive}20`, border: `1.5px solid ${th.langActive}30` }}
+              >
+                {activeNavItem?.icon ?? '✨'}
+              </span>
+              <div>
+                <h2 className="font-black text-lg leading-tight" style={{ color: th.sectionTitleColor }}>{navLabel}</h2>
+                {catalogItems.length > 0 && <p className="text-[11px] font-medium" style={{ color: th.sectionCountColor }}>{catalogItems.length} items</p>}
+              </div>
             </div>
             {isGiftAidSection && (
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-200">
-                ✓ Gift Aid Eligible
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-green-100 text-green-700 border border-green-200 flex items-center gap-1">
+                🇬🇧 <span>Gift Aid</span>
               </span>
             )}
           </div>
 
+          {/* Project selector — shown only on project_donation tab */}
+          {activeNav === 'project_donation' && projects.length > 0 && (
+            <div className="flex-shrink-0 px-4 pt-2 pb-2" style={{ borderBottom: `2px solid ${th.langActive}20`, background: '#fafafa' }}>
+              <div
+                className={projects.length <= 4 ? 'grid gap-2' : 'flex gap-2 overflow-x-auto pb-1'}
+                style={projects.length <= 4 ? { gridTemplateColumns: `repeat(${Math.min(projects.length, 4)}, 1fr)` } : { scrollbarWidth: 'none' }}
+              >
+                {projects.map(p => {
+                  const active = selectedProjectId === p.project_id
+                  return (
+                    <button key={p.project_id}
+                      onClick={() => setSelectedProjectId(p.project_id)}
+                      className="relative overflow-hidden rounded-xl text-left flex-shrink-0 transition-all active:scale-95"
+                      style={{ border: active ? `2px solid ${th.langActive}` : '2px solid #e5e7eb', boxShadow: active ? `0 4px 12px ${th.langActive}40` : undefined, minWidth: projects.length > 4 ? 140 : undefined }}
+                    >
+                      <div className="relative overflow-hidden flex items-center justify-center" style={{ height: 70, background: active ? `${th.langActive}18` : '#f3f4f6' }}>
+                        {p.image_url ? <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" /> : <span className="text-3xl">🏗️</span>}
+                        <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 60%)' }} />
+                        {active && <span className="absolute bottom-1.5 right-1.5 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white" style={{ background: th.langActive }}>✓</span>}
+                      </div>
+                      <div className="px-2 py-1.5" style={{ background: active ? `${th.langActive}08` : '#fff' }}>
+                        <p className="font-black text-xs leading-snug text-gray-900 truncate">{p.name}</p>
+                        {p.goal_amount > 0 && <p className="text-[10px] font-bold truncate" style={{ color: active ? th.langActive : '#9ca3af' }}>£{Number(p.goal_amount).toLocaleString()}</p>}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Items grid — scrollable */}
-          <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}>
+          <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent', touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
             {loading ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-60">
                 <span className="text-4xl animate-spin">⏳</span>
                 <p className="text-sm font-medium text-gray-500">Loading...</p>
               </div>
             ) : (
-              <AnimatePresence mode="popLayout">
+              <AnimatePresence mode="wait">
                 {useDbCatalog ? (
                   catalogItems.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
+                    <div key="empty-db" className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
                       <span className="text-5xl">🛕</span>
                       <p className="text-sm font-medium text-gray-500">No items in this category</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div key={`grid-${activeNav}`} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {catalogItems.map((item, i) => {
                         const isAdded = added === item.id
                         return (
-                          <motion.button
+                          <motion.div
                             key={item.id}
-                            layout
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.025 }}
-                            onClick={() => handleAddCatalog(item)}
-                            className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                            className="relative"
                           >
-                            {/* Image area — per-item photo with emoji fallback */}
-                            <div
-                              className="relative overflow-hidden flex-shrink-0"
-                              style={{ height: 100, background: '#f3f4f6' }}
+                            <button
+                              type="button"
+                              onPointerDown={() => handleAddCatalog(item)}
+                              className="w-full relative overflow-hidden rounded-2xl text-left shadow-md active:scale-95 transition-all flex flex-col"
+                              style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent', background: '#fff', border: `1.5px solid ${isAdded ? '#22C55E' : 'rgba(0,0,0,0.07)'}`, boxShadow: isAdded ? '0 4px 14px rgba(34,197,94,0.25)' : '0 2px 8px rgba(0,0,0,0.08)' }}
                             >
-                              {/* Emoji always present as fallback */}
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.55 }}>{item.emoji ?? '🙏'}</span>
+                              {/* Image area */}
+                              <div
+                                className="relative overflow-hidden flex-shrink-0 pointer-events-none"
+                                style={{ height: 118, background: `linear-gradient(135deg, ${(CATEGORY_META[item.category] ?? CATEGORY_META.OTHER).color}30, ${(CATEGORY_META[item.category] ?? CATEGORY_META.OTHER).color}10)` }}
+                              >
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <span style={{ fontSize: 56, lineHeight: 1, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>{item.emoji ?? '🙏'}</span>
+                                </div>
+                                <img
+                                  src={item.image_url || getCategoryImage(item.category)}
+                                  alt=""
+                                  className="absolute inset-0 w-full h-full object-cover"
+                                  onError={e => (e.currentTarget.style.display = 'none')}
+                                  loading="lazy"
+                                />
+                                {/* Bottom gradient overlay */}
+                                <div className="absolute bottom-0 left-0 right-0 h-8 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.28), transparent)' }} />
+                                {item.gift_aid_eligible && (
+                                  <span className="absolute bottom-1.5 left-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500 text-white shadow-sm z-10">🇬🇧 GA</span>
+                                )}
                               </div>
-                              {/* Per-item photo (falls back to category image) */}
-                              <img
-                                src={item.image_url || getCategoryImage(item.category)}
-                                alt=""
-                                className="absolute inset-0 w-full h-full object-cover"
-                                onError={e => (e.currentTarget.style.display = 'none')}
-                                loading="lazy"
-                              />
-                              {/* Gift Aid badge */}
-                              {item.gift_aid_eligible && (
-                                <span className="absolute top-2 right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500 text-white shadow-sm z-10">GA</span>
-                              )}
-                            </div>
 
-                            {/* Details */}
-                            <div className="p-3 flex-1 flex flex-col justify-between">
-                              <div>
+                              {/* Details */}
+                              <div className="px-3 py-2.5 flex-1 flex flex-col justify-between pointer-events-none">
                                 <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">
                                   {getDbItemName(item, language)}
                                 </p>
-                                {item.unit && <p className="text-gray-400 text-xs mt-0.5">{item.unit}</p>}
+                                {item.unit && <p className="text-gray-400 text-[11px] mt-0.5">{item.unit}</p>}
+                                <div className="flex items-center justify-between mt-2">
+                                  <div>
+                                    <p className="font-black text-xl leading-none" style={{ color: th.sectionTitleColor }}>£{item.price}</p>
+                                    {item.gift_aid_eligible && <p className="text-[10px] text-green-600 font-semibold mt-0.5">+£{(item.price * 0.25).toFixed(2)} GA</p>}
+                                  </div>
+                                  <span className="text-[11px] px-3 py-1.5 rounded-xl text-white font-black shadow-sm" style={{ background: isAdded ? '#22C55E' : `linear-gradient(135deg, ${th.langActive}, ${th.basketBtn})` }}>
+                                    {isAdded ? '✓ Added' : '+ Add'}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex items-center justify-between mt-2.5">
-                                <p className="font-black text-lg text-gray-900">£{item.price}</p>
-                                <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
-                              </div>
-                            </div>
 
-                            <AnimatePresence>
+                              {/* Added overlay */}
                               {isAdded && (
                                 <motion.div
-                                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                  className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  className="absolute inset-0 flex items-center justify-center rounded-2xl pointer-events-none"
+                                  style={{ background: 'rgba(240,253,244,0.92)' }}
                                 >
                                   <div className="text-center">
-                                    <span className="text-4xl block">✓</span>
-                                    <span className="text-sm font-bold text-green-700">Added!</span>
+                                    <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400 }} className="text-5xl block">✅</motion.span>
+                                    <span className="text-sm font-bold text-green-700 mt-1 block">Added!</span>
                                   </div>
                                 </motion.div>
                               )}
-                            </AnimatePresence>
-                          </motion.button>
+                            </button>
+                          </motion.div>
                         )
                       })}
                     </div>
                   )
                 ) : (
                   filteredServices.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
+                    <div key="empty-svc" className="flex flex-col items-center justify-center py-16 gap-3 opacity-40">
                       <span className="text-5xl">🛕</span>
                       <p className="text-sm font-medium text-gray-500">No items in this category</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div key="grid-services" className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {filteredServices.map((svc, i) => {
                         const m = CATEGORY_META[svc.category] ?? CATEGORY_META.OTHER
                         const isAdded = added === svc.id
                         return (
-                          <motion.button
+                          <motion.div
                             key={svc.id}
-                            layout
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.03 }}
-                            onClick={() => handleAdd(svc)}
-                            className="relative overflow-hidden rounded-2xl text-left bg-white border border-gray-200 shadow-sm active:scale-95 hover:shadow-md transition-all flex flex-col"
+                            className="relative"
                           >
-                            {/* Image area */}
-                            <div
-                              className="relative overflow-hidden flex-shrink-0"
-                              style={{ height: 100, background: `${m.color}25` }}
+                            <button
+                              type="button"
+                              onPointerDown={() => handleAdd(svc)}
+                              className="w-full relative overflow-hidden rounded-2xl text-left shadow-md active:scale-95 transition-all flex flex-col"
+                              style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent', background: '#fff', border: `1.5px solid ${isAdded ? '#22C55E' : 'rgba(0,0,0,0.07)'}`, boxShadow: isAdded ? '0 4px 14px rgba(34,197,94,0.25)' : '0 2px 8px rgba(0,0,0,0.08)' }}
                             >
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <span style={{ fontSize: 52, lineHeight: 1, opacity: 0.6 }}>{m.icon}</span>
+                              <div
+                                className="relative overflow-hidden flex-shrink-0 pointer-events-none"
+                                style={{ height: 118, background: `linear-gradient(135deg, ${m.color}30, ${m.color}10)` }}
+                              >
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <span style={{ fontSize: 56, lineHeight: 1, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>{m.icon}</span>
+                                </div>
+                                <img
+                                  src={getCategoryImage(svc.category)}
+                                  alt=""
+                                  className="absolute inset-0 w-full h-full object-cover"
+                                  onError={e => (e.currentTarget.style.display = 'none')}
+                                  loading="lazy"
+                                />
+                                <div className="absolute bottom-0 left-0 right-0 h-8 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.28), transparent)' }} />
+                                <span className="absolute bottom-1.5 left-2 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white shadow-sm z-10" style={{ background: m.color }}>{svc.category.replace('_', ' ')}</span>
                               </div>
-                              <img
-                                src={getCategoryImage(svc.category)}
-                                alt=""
-                                className="absolute inset-0 w-full h-full object-cover"
-                                onError={e => (e.currentTarget.style.display = 'none')}
-                                loading="lazy"
-                              />
-                            </div>
 
-                            {/* Details */}
-                            <div className="p-3 flex-1 flex flex-col justify-between">
-                              <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">{getDbItemName(svc, language)}</p>
-                              <div className="flex items-center justify-between mt-2.5">
-                                <p className="font-black text-lg text-gray-900">£{svc.price}</p>
-                                <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: th.langActive }}>+ Add</span>
+                              <div className="px-3 py-2.5 flex-1 flex flex-col justify-between pointer-events-none">
+                                <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">{getDbItemName(svc, language)}</p>
+                                <div className="flex items-center justify-between mt-2">
+                                  <p className="font-black text-xl leading-none" style={{ color: th.sectionTitleColor }}>£{svc.price}</p>
+                                  <span className="text-[11px] px-3 py-1.5 rounded-xl text-white font-black shadow-sm" style={{ background: isAdded ? '#22C55E' : `linear-gradient(135deg, ${th.langActive}, ${th.basketBtn})` }}>
+                                    {isAdded ? '✓ Added' : '+ Add'}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
 
-                            <AnimatePresence>
                               {isAdded && (
                                 <motion.div
-                                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                  className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  className="absolute inset-0 flex items-center justify-center rounded-2xl pointer-events-none"
+                                  style={{ background: 'rgba(240,253,244,0.92)' }}
                                 >
                                   <div className="text-center">
-                                    <span className="text-4xl block">✓</span>
-                                    <span className="text-sm font-bold text-green-700">Added!</span>
+                                    <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400 }} className="text-5xl block">✅</motion.span>
+                                    <span className="text-sm font-bold text-green-700 mt-1 block">Added!</span>
                                   </div>
                                 </motion.div>
                               )}
-                            </AnimatePresence>
-                          </motion.button>
+                            </button>
+                          </motion.div>
                         )
                       })}
                     </div>
@@ -591,48 +735,52 @@ export function HomeScreen() {
 
       {/* ══ CUSTOM DONATION STRIP — always visible ═════════════════════════════ */}
       <div
-        className="flex-shrink-0 px-4 py-2 flex items-center gap-2"
-        style={{ background: '#FFFBEB', borderTop: '1px solid #FDE68A' }}
+        className="flex-shrink-0 px-3 py-2 flex items-center gap-2"
+        style={{ background: '#FFF3E0', borderTop: '2px solid #FF9933' }}
       >
-        <span className="text-xs font-bold text-amber-700 flex-shrink-0">🙏 Custom:</span>
-        <div className="flex items-center gap-1 flex-1">
-          <span className="text-sm font-bold text-gray-500 flex-shrink-0">£</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            value={customAmount}
-            onChange={e => setCustomAmount(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAddCustom()}
-            placeholder="Enter amount"
-            min="1"
-            className="flex-1 px-3 py-1.5 rounded-xl border-2 text-sm font-bold outline-none bg-white"
-            style={{ borderColor: customAmount && parseFloat(customAmount) > 0 ? '#FF9933' : '#FDE68A' }}
-          />
+        <span className="text-xs font-bold text-amber-700 flex-shrink-0 hidden sm:inline">🙏 Custom:</span>
+        <span className="text-xs font-bold text-amber-700 flex-shrink-0 sm:hidden">🙏</span>
+        <div
+          className="flex items-center gap-1 flex-1 rounded-xl border-2 bg-white cursor-pointer"
+          style={{ borderColor: customAmount && parseFloat(customAmount) > 0 ? '#FF9933' : '#FDE68A' }}
+          onClick={() => setKeyboardOpen(true)}
+        >
+          <span className="text-base font-black text-amber-600 px-2">£</span>
+          <span className={`flex-1 py-2 pr-2 text-base font-black ${customAmount ? 'text-gray-800' : 'text-gray-400'}`}>
+            {customAmount || 'Tap to enter'}
+          </span>
         </div>
         <button
           onClick={handleAddCustom}
           disabled={!customAmount || parseFloat(customAmount) <= 0}
-          className="px-6 py-2.5 rounded-xl text-white font-black text-base transition-all active:scale-95 disabled:opacity-40 flex-shrink-0 shadow-md"
-          style={{ background: customAdded ? '#22C55E' : th.langActive }}
+          className="px-5 py-2 sm:px-20 sm:py-2.5 rounded-xl text-white font-black text-sm sm:text-2xl transition-all active:scale-95 disabled:opacity-40 flex-shrink-0 shadow-xl"
+          style={{ background: customAdded ? '#22C55E' : th.langActive, letterSpacing: '-0.5px' }}
         >
           {customAdded ? '✓ Added' : '+ Add'}
         </button>
       </div>
 
-      {/* ══ BOTTOM BAR — always visible, McDonald's style ══════════════════════ */}
+      {/* ══ BOTTOM BAR — always visible ════════════════════════════════════════ */}
       <div
         className="flex-shrink-0"
-        style={{ background: '#fff', borderTop: '1px solid #e5e7eb', boxShadow: '0 -2px 12px rgba(0,0,0,0.08)' }}
+        style={{
+          background: itemCount > 0 ? th.basketBarBg : '#fff',
+          borderTop: itemCount > 0 ? `2px solid ${th.langActive}40` : '1px solid #e5e7eb',
+          boxShadow: itemCount > 0 ? `0 -4px 20px ${th.langActive}30` : '0 -2px 12px rgba(0,0,0,0.06)',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          transition: 'background 0.3s, box-shadow 0.3s',
+        }}
       >
-        {/* Main row: basket info + View My Order */}
         <div className="flex items-center gap-3 px-4 py-3">
           {/* Basket summary */}
-          <div className="flex items-center gap-2 flex-1">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center relative flex-shrink-0"
-              style={{ background: `${th.langActive}15` }}
+          <div className="flex items-center gap-2.5 flex-1">
+            <motion.div
+              animate={itemCount > 0 ? { scale: [1, 1.12, 1] } : { scale: 1 }}
+              transition={{ duration: 1.8, repeat: itemCount > 0 ? Infinity : 0, ease: 'easeInOut' }}
+              className="w-11 h-11 rounded-xl flex items-center justify-center relative flex-shrink-0"
+              style={{ background: itemCount > 0 ? `${th.langActive}30` : `${th.langActive}12` }}
             >
-              <span className="text-xl">🛒</span>
+              <span className="text-2xl">🛒</span>
               {itemCount > 0 && (
                 <span
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center text-white shadow"
@@ -641,29 +789,36 @@ export function HomeScreen() {
                   {itemCount}
                 </span>
               )}
-            </div>
+            </motion.div>
             <div>
-              <p className="text-xs text-gray-400 leading-none">{itemCount} item{itemCount !== 1 ? 's' : ''}</p>
-              <p className="font-black text-lg text-gray-900 leading-tight">£{total.toFixed(2)}</p>
+              <p className="text-xs leading-none font-medium" style={{ color: itemCount > 0 ? th.basketBarSubText : '#9ca3af' }}>{itemCount} item{itemCount !== 1 ? 's' : ''}</p>
+              <p className="font-black text-xl leading-tight" style={{ color: itemCount > 0 ? th.basketBarText : '#1f2937' }}>£{total.toFixed(2)}</p>
             </div>
           </div>
 
           {/* Start Again */}
-          <button
-            onClick={() => { if (window.confirm('Start a new order?')) resetKiosk() }}
-            className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-500 text-sm font-semibold active:scale-95 transition-all flex-shrink-0"
-          >
-            Start Again
-          </button>
+          {itemCount > 0 && (
+            <button
+              onClick={() => { if (window.confirm('Start a new order?')) resetKiosk() }}
+              className="px-3 py-2.5 rounded-xl text-xs font-bold active:scale-95 transition-all flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.12)', color: th.basketBarSubText, border: `1px solid rgba(255,255,255,0.15)` }}
+            >
+              ✕ Clear
+            </button>
+          )}
 
           {/* View My Order */}
           <button
             onClick={() => setScreen('basket')}
             disabled={itemCount === 0}
-            className="px-6 py-2.5 rounded-xl text-white font-black text-sm shadow-md active:scale-95 transition-all flex-shrink-0 disabled:opacity-40"
-            style={{ background: itemCount > 0 ? th.langActive : '#9ca3af', minWidth: 140 }}
+            className="px-6 py-3 rounded-xl text-white font-black text-sm shadow-lg active:scale-95 transition-all flex-shrink-0 disabled:opacity-30"
+            style={{
+              background: itemCount > 0 ? `linear-gradient(135deg, ${th.langActive}, ${th.basketBtn})` : '#9ca3af',
+              minWidth: 148,
+              boxShadow: itemCount > 0 ? `0 4px 16px ${th.langActive}50` : 'none',
+            }}
           >
-            View My Order →
+            {itemCount > 0 ? `View Order →` : 'Select items'}
           </button>
         </div>
       </div>
@@ -677,6 +832,19 @@ export function HomeScreen() {
       <AnimatePresence>
         {showLanguagePicker && <LanguagePicker onClose={() => setShowLanguagePicker(false)} />}
       </AnimatePresence>
+
+      {/* On-screen numeric keyboard for custom donation amount */}
+      <KioskKeyboard
+        value={customAmount}
+        onChange={v => { setCustomAmount(v); setCustomAdded(false) }}
+        mode="numeric"
+        visible={keyboardOpen}
+        onDone={() => setKeyboardOpen(false)}
+        accent={th.langActive}
+        actionLabel={customAdded ? '✓ Added' : '+ Add to Basket'}
+        onAction={() => { handleAddCustom(); setKeyboardOpen(false) }}
+        actionDisabled={!customAmount || parseFloat(customAmount) <= 0}
+      />
     </div>
   )
 }

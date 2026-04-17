@@ -3,6 +3,7 @@ Digital Space — The enterprise environment where approved building blocks come
 Provides runtime context, scoping, and governance for every capability execution.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any
 

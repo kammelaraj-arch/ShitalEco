@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shital Temple ERP — Platform Hub</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #1C0000 0%, #2d0a00 50%, #1a0a2e 100%);
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      padding: 32px 24px 24px;
+      text-align: center;
+      border-bottom: 1px solid rgba(255,153,51,0.2);
+    }
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    .logo-icon {
+      width: 56px; height: 56px; border-radius: 16px;
+      background: linear-gradient(135deg, #FF9933, #FF6600);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; box-shadow: 0 4px 20px rgba(255,153,51,0.4);
+    }
+    .logo-text { text-align: left; }
+    .logo-text h1 { font-size: 1.6rem; font-weight: 900; color: #FFD700; letter-spacing: -0.5px; }
+    .logo-text p  { font-size: 0.8rem; color: rgba(255,153,51,0.7); margin-top: 2px; }
+    header > p { color: rgba(255,255,255,0.4); font-size: 0.85rem; margin-top: 8px; }
+
+    /* ── Grid ── */
+    main {
+      flex: 1;
+      max-width: 960px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    .section-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,153,51,0.6);
+      margin-bottom: 16px;
+      margin-top: 36px;
+    }
+    .section-title:first-child { margin-top: 0; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+
+    .card {
+      display: flex; flex-direction: column;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 24px 20px;
+      text-decoration: none;
+      color: #fff;
+      transition: transform 0.18s, background 0.18s, border-color 0.18s, box-shadow 0.18s;
+      cursor: pointer;
+    }
+    .card:hover {
+      background: rgba(255,153,51,0.1);
+      border-color: rgba(255,153,51,0.35);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 32px rgba(255,153,51,0.15);
+    }
+    .card-icon { font-size: 2.2rem; margin-bottom: 14px; }
+    .card-name { font-size: 0.95rem; font-weight: 800; color: #fff; margin-bottom: 4px; }
+    .card-desc { font-size: 0.75rem; color: rgba(255,255,255,0.4); line-height: 1.4; flex: 1; }
+    .card-badge {
+      margin-top: 14px; align-self: flex-start;
+      font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
+      padding: 3px 10px; border-radius: 20px;
+    }
+    .badge-live   { background: rgba(22,163,74,0.15); color: #4ade80; border: 1px solid rgba(22,163,74,0.3); }
+    .badge-soon   { background: rgba(234,179,8,0.12);  color: #fbbf24; border: 1px solid rgba(234,179,8,0.25); }
+    .badge-device { background: rgba(99,102,241,0.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3); }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center;
+      padding: 24px;
+      color: rgba(255,255,255,0.2);
+      font-size: 0.75rem;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    footer span { color: rgba(255,153,51,0.5); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🪔</div>
+    <div class="logo-text">
+      <h1>Shital ERP</h1>
+      <p>Temple Management Platform</p>
+    </div>
+  </div>
+  <p>Integrated suite for worship, donations, HR &amp; operations</p>
+</header>
+
+<main>
+
+  <p class="section-title">Management &amp; Administration</p>
+  <div class="grid">
+    <a class="card" href="https://admin.shital.org.uk/admin/">
+      <div class="card-icon">🏛️</div>
+      <div class="card-name">Business</div>
+      <div class="card-desc">Full ERP dashboard — finance, HR, donations, catalog, settings</div>
+      <span class="card-badge badge-live">Live</span>
+    </a>
+    <a class="card" href="https://api.shital.org.uk/api/docs">
+      <div class="card-icon">⚡</div>
+      <div class="card-name">API Explorer</div>
+      <div class="card-desc">FastAPI docs — browse and test all backend endpoints</div>
+      <span class="card-badge badge-live">Live</span>
+    </a>
+  </div>
+
+  <p class="section-title">Kiosk &amp; Donation Apps</p>
+  <div class="grid">
+    <a class="card" href="https://kiosk.shital.org.uk">
+      <div class="card-icon">🖥️</div>
+      <div class="card-name">Temple Kiosk</div>
+      <div class="card-desc">Self-service donation kiosk — tap to donate, card payments, Gift Aid</div>
+      <span class="card-badge badge-device">Kiosk Device</span>
+    </a>
+    <a class="card" href="https://donate.shital.org.uk">
+      <div class="card-icon">🪙</div>
+      <div class="card-name">Quick Donation</div>
+      <div class="card-desc">Fast QR-code donation page for worshippers on mobile</div>
+      <span class="card-badge badge-device">Mobile</span>
+    </a>
+    <a class="card" href="https://screen.shital.org.uk">
+      <div class="card-icon">📺</div>
+      <div class="card-name">Display Screen</div>
+      <div class="card-desc">TV/projector display showing live donation feed and announcements</div>
+      <span class="card-badge badge-device">Screen</span>
+    </a>
+  </div>
+
+  <p class="section-title">Coming Soon</p>
+  <div class="grid">
+    <div class="card">
+      <div class="card-icon">🌐</div>
+      <div class="card-name">Public Website</div>
+      <div class="card-desc">Temple public website with services, events and online giving</div>
+      <span class="card-badge badge-soon">In Development</span>
+    </div>
+    <div class="card">
+      <div class="card-icon">📱</div>
+      <div class="card-name">Mobile App</div>
+      <div class="card-desc">iOS &amp; Android app for members — events, donations, notifications</div>
+      <span class="card-badge badge-soon">Planned</span>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  &copy; 2026 Shital Temple &nbsp;·&nbsp; <span>Powered by Shital ERP</span> &nbsp;·&nbsp; All rights reserved
+</footer>
+
+</body>
+</html>

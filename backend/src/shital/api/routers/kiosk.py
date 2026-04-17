@@ -1,10 +1,11 @@
 from __future__ import annotations
+
+import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import uuid
 
 from shital.api.deps import OptionalSpace
 from shital.core.space.context import DigitalSpace
@@ -14,14 +15,15 @@ router = APIRouter(prefix="/kiosk", tags=["kiosk"])
 
 @router.get("/services")
 async def get_services(ctx: OptionalSpace, category: str = "", branch_id: str = "main"):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
-    conditions = ["ts.is_active = true", "ts.deleted_at IS NULL"]
+
+    from shital.core.fabrics.database import SessionLocal
+    conditions = ["is_active = true", "deleted_at IS NULL"]
     params: dict[str, Any] = {"bid": branch_id}
     if category:
-        conditions.append("ts.category = :cat")
+        conditions.append("category = :cat")
         params["cat"] = category
-    conditions.append("ts.branch_id = :bid")
+    conditions.append("branch_id = :bid")
     async with SessionLocal() as db:
         result = await db.execute(
             text(f"SELECT id, name, name_gu, name_hi, description, category, price, currency, duration, capacity, image_url FROM temple_services WHERE {' AND '.join(conditions)} ORDER BY category, name"),
@@ -63,8 +65,9 @@ class AddItemInput(BaseModel):
 
 @router.post("/basket")
 async def create_basket(body: CreateBasketInput):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     basket_id = str(uuid.uuid4())
     session_id = body.session_id or str(uuid.uuid4())
     now = datetime.utcnow()
@@ -79,8 +82,9 @@ async def create_basket(body: CreateBasketInput):
 
 @router.get("/basket/{basket_id}")
 async def get_basket(basket_id: str):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         items_result = await db.execute(
             text("SELECT id, item_type, reference_id, name, description, quantity, unit_price, total_price, metadata FROM basket_items WHERE basket_id = :bid ORDER BY created_at"),
@@ -93,9 +97,11 @@ async def get_basket(basket_id: str):
 
 @router.post("/basket/item")
 async def add_item(body: AddItemInput):
-    from shital.core.fabrics.database import SessionLocal
-    from sqlalchemy import text
     import json
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     item_id = str(uuid.uuid4())
     total = body.unit_price * body.quantity
     now = datetime.utcnow()
@@ -110,8 +116,9 @@ async def add_item(body: AddItemInput):
 
 @router.delete("/basket/{basket_id}/item/{item_id}")
 async def remove_item(basket_id: str, item_id: str):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         await db.execute(text("DELETE FROM basket_items WHERE id = :iid AND basket_id = :bid"), {"iid": item_id, "bid": basket_id})
         await db.commit()
@@ -129,20 +136,22 @@ class CheckoutInput(BaseModel):
 
 @router.post("/checkout")
 async def checkout(body: CheckoutInput, ctx: OptionalSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         items_result = await db.execute(text("SELECT SUM(total_price) AS total FROM basket_items WHERE basket_id = :bid"), {"bid": body.basket_id})
         row = items_result.mappings().first()
+        if row is None:
+            raise HTTPException(status_code=400, detail="Basket is empty")
         total = float(str(row["total"] or 0))
     if total <= 0:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Basket is empty")
     order_id = str(uuid.uuid4())
     ref = f"ORD-{order_id[:8].upper()}"
     now = datetime.utcnow()
     amount_pence = int(total * 100)
-    from shital.capabilities.payments.capabilities import create_payment, CreatePaymentInput
+    from shital.capabilities.payments.capabilities import CreatePaymentInput, create_payment
     safe_ctx = ctx or DigitalSpace(user_id="kiosk", user_email="kiosk@shital.org", role="KIOSK", branch_id=body.branch_id, permissions=[], session_id=str(uuid.uuid4()))
     payment = await create_payment(safe_ctx, CreatePaymentInput(provider=body.payment_provider, amount_pence=amount_pence, currency="GBP", order_id=order_id, description=f"Shital Temple Order {ref}", idempotency_key=order_id))
     async with SessionLocal() as db:
@@ -158,8 +167,10 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
 @router.post("/terminal/connection-token")
 async def stripe_connection_token():
     import stripe
+
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         token = stripe.terminal.ConnectionToken.create()
         return {"secret": token.secret}
@@ -178,8 +189,10 @@ class TerminalPaymentInput(BaseModel):
 @router.post("/terminal/payment-intent")
 async def create_terminal_payment_intent(body: TerminalPaymentInput):
     import stripe
+
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         intent = stripe.PaymentIntent.create(
             amount=body.amount_pence, currency=body.currency.lower(),
@@ -198,9 +211,13 @@ class ReaderActionInput(BaseModel):
 
 @router.post("/terminal/process-payment")
 async def process_payment_on_reader(body: ReaderActionInput):
+    if not body.reader_id or not body.reader_id.strip():
+        return {"error": "No card reader configured. Please assign a Stripe Terminal reader in Admin → Devices."}
     import stripe
+
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         action = stripe.terminal.Reader.process_payment_intent(body.reader_id, payment_intent=body.payment_intent_id)
         return {"reader_id": body.reader_id, "status": action.action.status if action.action else "unknown"}
@@ -211,8 +228,10 @@ async def process_payment_on_reader(body: ReaderActionInput):
 @router.post("/terminal/cancel-action")
 async def cancel_reader_action(body: ReaderActionInput):
     import stripe
+
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         stripe.terminal.Reader.cancel_action(body.reader_id)
         return {"cancelled": True}
@@ -224,8 +243,10 @@ async def cancel_reader_action(body: ReaderActionInput):
 async def get_payment_intent_status(id: str):
     """Poll a PaymentIntent status — used by kiosk to detect card tap success."""
     import stripe
+
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         intent = stripe.PaymentIntent.retrieve(id)
         return {"status": intent.status, "id": intent.id}
@@ -236,8 +257,10 @@ async def get_payment_intent_status(id: str):
 @router.get("/terminal/readers")
 async def list_terminal_readers(location_id: str = ""):
     import stripe
+
     from shital.core.fabrics.config import settings
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from shital.core.fabrics.secrets import SecretsManager
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         params: dict = {"limit": 20}
         if location_id:
@@ -261,6 +284,7 @@ class SquareCheckoutInput(BaseModel):
 @router.post("/square/terminal-checkout")
 async def square_terminal_checkout(body: SquareCheckoutInput):
     import httpx
+
     from shital.core.fabrics.config import settings
     base = "https://connect.squareup.com" if settings.SQUARE_ENVIRONMENT == "production" else "https://connect.squareupsandbox.com"
     headers = {"Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}", "Content-Type": "application/json", "Square-Version": "2024-06-04"}
@@ -279,6 +303,7 @@ async def square_terminal_checkout(body: SquareCheckoutInput):
 @router.get("/square/devices")
 async def list_square_devices():
     import httpx
+
     from shital.core.fabrics.config import settings
     base = "https://connect.squareup.com" if settings.SQUARE_ENVIRONMENT == "production" else "https://connect.squareupsandbox.com"
     headers = {"Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}", "Square-Version": "2024-06-04"}
@@ -289,6 +314,306 @@ async def list_square_devices():
         return {"devices": [{"id": d["id"], "name": d.get("attributes", {}).get("name", d["id"]), "status": d.get("status", {}).get("category", "unknown"), "model": d.get("attributes", {}).get("model", "")} for d in data.get("devices", [])]}
     except Exception as e:
         return {"devices": [], "error": str(e)}
+
+
+@router.get("/square/terminal-checkout/{checkout_id}")
+async def square_checkout_status(checkout_id: str):
+    """Poll Square Terminal checkout status."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    base = "https://connect.squareup.com" if settings.SQUARE_ENVIRONMENT == "production" else "https://connect.squareupsandbox.com"
+    headers = {"Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}", "Square-Version": "2024-06-04"}
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{base}/v2/terminals/checkouts/{checkout_id}", headers=headers, timeout=10)
+        data = resp.json()
+        checkout = data.get("checkout", {})
+        return {
+            "status": checkout.get("status", "UNKNOWN"),
+            "checkout_id": checkout_id,
+            "amount": checkout.get("amount_money", {}).get("amount", 0) / 100,
+        }
+    except Exception as e:
+        return {"status": "UNKNOWN", "error": str(e)}
+
+
+# ─── Clover Flex / Cloud Pay Display ─────────────────────────────────────────
+
+def _clover_base(environment: str) -> str:
+    return "https://api.clover.com" if environment == "production" else "https://sandbox.dev.clover.com"
+
+
+class CloverPaymentInput(BaseModel):
+    amount_pence: int
+    order_id: str
+    description: str = "Shital Temple Payment"
+    device_id: str = ""
+    items: list[dict[str, Any]] = []
+
+
+@router.post("/clover/payment")
+async def clover_payment(body: CloverPaymentInput):
+    """
+    Create a Clover order with line items and push it to the Clover Flex device display.
+    The customer then taps/inserts their card on the device.
+    Poll GET /clover/payment/{clover_order_id} to check completion.
+    """
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("CLOVER_ACCESS_TOKEN") or settings.CLOVER_ACCESS_TOKEN
+    merchant_id = await SecretsManager.get("CLOVER_MERCHANT_ID") or settings.CLOVER_MERCHANT_ID
+    environment = await SecretsManager.get("CLOVER_ENVIRONMENT") or settings.CLOVER_ENVIRONMENT or "sandbox"
+    device_id = body.device_id or await SecretsManager.get("CLOVER_DEVICE_ID") or ""
+
+    if not access_token or not merchant_id:
+        return {"error": "Clover is not configured. Add CLOVER_ACCESS_TOKEN and CLOVER_MERCHANT_ID in Admin → API Keys."}
+
+    base = _clover_base(environment)
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # 1. Create an order
+            order_resp = await client.post(
+                f"{base}/v3/merchants/{merchant_id}/orders",
+                headers=headers,
+                json={"currency": "GBP", "manualTransaction": False, "testMode": environment != "production"},
+            )
+            if not order_resp.is_success:
+                return {"error": f"Clover order creation failed ({order_resp.status_code}): {order_resp.text[:200]}"}
+            clover_order_id = order_resp.json()["id"]
+
+            # 2. Add line items
+            line_items = body.items or [{"name": body.description, "unit_price_pence": body.amount_pence, "quantity": 1}]
+            for item in line_items:
+                await client.post(
+                    f"{base}/v3/merchants/{merchant_id}/orders/{clover_order_id}/line_items",
+                    headers=headers,
+                    json={
+                        "price": item.get("unit_price_pence", body.amount_pence),
+                        "name": item.get("name", body.description),
+                        "quantity": item.get("quantity", 1),
+                    },
+                )
+
+            # 3. Push to device display (Cloud Pay Display)
+            if device_id:
+                await client.post(
+                    f"{base}/v3/merchants/{merchant_id}/devices/{device_id}/displays",
+                    headers=headers,
+                    json={"type": "TRANSACTION", "order": {"id": clover_order_id}},
+                )
+
+        return {
+            "clover_order_id": clover_order_id,
+            "device_id": device_id,
+            "amount": body.amount_pence / 100,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/clover/payment/{order_id}")
+async def clover_payment_status(order_id: str):
+    """Poll Clover order for payment completion (expand=payments)."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("CLOVER_ACCESS_TOKEN") or settings.CLOVER_ACCESS_TOKEN
+    merchant_id = await SecretsManager.get("CLOVER_MERCHANT_ID") or settings.CLOVER_MERCHANT_ID
+    environment = await SecretsManager.get("CLOVER_ENVIRONMENT") or settings.CLOVER_ENVIRONMENT or "sandbox"
+
+    if not access_token or not merchant_id:
+        return {"status": "error", "error": "Clover not configured"}
+
+    base = _clover_base(environment)
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{base}/v3/merchants/{merchant_id}/orders/{order_id}?expand=payments",
+                headers=headers,
+            )
+        data = resp.json()
+        payments = data.get("payments", {}).get("elements", [])
+        for p in payments:
+            if p.get("result") == "SUCCESS":
+                return {"status": "COMPLETED", "payment_id": p.get("id"), "amount": p.get("amount", 0) / 100}
+            if p.get("result") in ("FAIL", "VOIDED"):
+                return {"status": "FAILED"}
+        if data.get("state") == "LOCKED":
+            return {"status": "CANCELLED"}
+        return {"status": "PENDING"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/clover/devices")
+async def list_clover_devices():
+    """List Clover devices registered to the configured merchant."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("CLOVER_ACCESS_TOKEN") or settings.CLOVER_ACCESS_TOKEN
+    merchant_id = await SecretsManager.get("CLOVER_MERCHANT_ID") or settings.CLOVER_MERCHANT_ID
+    environment = await SecretsManager.get("CLOVER_ENVIRONMENT") or settings.CLOVER_ENVIRONMENT or "sandbox"
+
+    if not access_token or not merchant_id:
+        return {"devices": [], "error": "Clover not configured. Add CLOVER_ACCESS_TOKEN and CLOVER_MERCHANT_ID in Admin → API Keys."}
+
+    base = _clover_base(environment)
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{base}/v3/merchants/{merchant_id}/devices", headers=headers)
+        elements = resp.json().get("devices", {}).get("elements", [])
+        devices = [
+            {
+                "id": d.get("id"),
+                "name": d.get("name") or d.get("id"),
+                "model": d.get("model", "Clover Flex"),
+                "serial": d.get("serial", ""),
+                "status": "online" if d.get("online") else "offline",
+            }
+            for d in elements
+        ]
+        return {"devices": devices}
+    except Exception as e:
+        return {"devices": [], "error": str(e)}
+
+
+# ─── SumUp ────────────────────────────────────────────────────────────────────
+
+class SumUpCheckoutInput(BaseModel):
+    amount_pence: int
+    order_id: str
+    description: str = "Temple Payment"
+    reader_serial: str = ""     # SumUp Solo/Air Plus serial number
+
+
+@router.post("/sumup/checkout")
+async def sumup_checkout(body: SumUpCheckoutInput):
+    """
+    Create a SumUp checkout and push it to the configured SumUp reader.
+    Poll GET /sumup/checkout/{checkout_id} to check completion.
+    """
+    import uuid as _uuid
+
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+
+    if not access_token or not merchant_code:
+        return {"error": "SumUp is not configured. Add SUMUP_ACCESS_TOKEN and SUMUP_MERCHANT_CODE in Admin → API Keys."}
+
+    base = "https://api.sumup.com"
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    amount = round(body.amount_pence / 100, 2)
+    checkout_ref = f"SHT-{body.order_id[:12].upper()}-{_uuid.uuid4().hex[:6].upper()}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # 1. Create checkout
+            create_resp = await client.post(
+                f"{base}/v0.1/checkouts",
+                headers=headers,
+                json={
+                    "checkout_reference": checkout_ref,
+                    "amount": amount,
+                    "currency": "GBP",
+                    "merchant_code": merchant_code,
+                    "description": body.description,
+                },
+            )
+            if not create_resp.is_success:
+                return {"error": f"SumUp checkout creation failed ({create_resp.status_code}): {create_resp.text[:200]}"}
+
+            checkout = create_resp.json()
+            checkout_id = checkout.get("id")
+
+            # 2. Push to physical reader if serial provided
+            reader_serial = body.reader_serial or await SecretsManager.get("SUMUP_READER_SERIAL") or ""
+            if reader_serial and checkout_id:
+                await client.post(
+                    f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_serial}/checkout",
+                    headers=headers,
+                    json={"id": checkout_id},
+                )
+
+        return {
+            "checkout_id": checkout_id,
+            "checkout_reference": checkout_ref,
+            "amount": amount,
+            "reader_serial": reader_serial,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/sumup/checkout/{checkout_id}")
+async def sumup_checkout_status(checkout_id: str):
+    """Poll SumUp checkout status (PENDING / COMPLETED / FAILED / EXPIRED)."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    if not access_token:
+        return {"status": "error", "error": "SumUp not configured"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        data = resp.json()
+        return {"status": data.get("status", "PENDING"), "raw": data}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/sumup/readers")
+async def list_sumup_readers():
+    """List SumUp readers registered to the merchant."""
+    import httpx
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+
+    if not access_token or not merchant_code:
+        return {"readers": [], "error": "SumUp not configured. Add SUMUP_ACCESS_TOKEN and SUMUP_MERCHANT_CODE."}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.sumup.com/v0.1/merchants/{merchant_code}/readers",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        readers = resp.json() if resp.is_success else []
+        if isinstance(readers, list):
+            return {"readers": [{"serial": r.get("serial_number", ""), "name": r.get("name", r.get("serial_number", "")), "status": r.get("status", "unknown")} for r in readers]}
+        return {"readers": []}
+    except Exception as e:
+        return {"readers": [], "error": str(e)}
 
 
 class QuickDonationRecordInput(BaseModel):
@@ -336,8 +661,9 @@ async def record_quick_donation(body: QuickDonationRecordInput):
     Record a quick donation as an anonymous entry in both the orders and donations tables.
     All quick donations are stored as anonymous — no personal data is captured.
     """
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     order_id = body.basket_id
     donation_id = str(uuid.uuid4())
     total = body.amount_pence / 100
@@ -412,8 +738,9 @@ async def donation_amounts():
 @router.get("/postcode/{postcode}")
 async def postcode_lookup(postcode: str):
     """Proxy postcode lookup for kiosk Gift Aid address lookup."""
-    from shital.capabilities.giftaid.capabilities import lookup_postcode
     import uuid
+
+    from shital.capabilities.giftaid.capabilities import lookup_postcode
     ctx = DigitalSpace(user_id="kiosk", user_email="kiosk@shital.org", role="KIOSK", branch_id="main", permissions=[], session_id=str(uuid.uuid4()))
     return await lookup_postcode(ctx, postcode)
 
@@ -425,99 +752,246 @@ class ReceiptInput(BaseModel):
     total: float = 0.0
     items: list[dict[str, Any]] = []
     branch_name: str = "Shital Temple"
+    customer_name: str = ""
 
 
 @router.post("/receipt")
 async def send_receipt(body: ReceiptInput):
-    """Send email or WhatsApp receipt after payment. Uses DB-stored email template."""
-    from shital.core.fabrics.config import settings
+    """Send email or WhatsApp receipt after payment.
+    Email priority: Office 365 SMTP (OFFICE365_PASSWORD set) → SendGrid fallback.
+    Credentials are loaded from the encrypted API Keys store (Admin → Settings → API Keys).
+    """
+    import asyncio
+    import logging
+    import smtplib
+    import ssl
     from datetime import date as _date
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    from shital.core.fabrics.secrets import SecretsManager
+
+    _log = logging.getLogger("shital.receipt")
 
     if not body.destination.strip():
         return {"sent": False, "error": "No destination provided"}
 
     variables = {
         "order_ref":     body.order_ref,
-        "customer_name": "",
+        "customer_name": body.customer_name or "",
         "total":         body.total,
         "items":         body.items,
         "branch_name":   body.branch_name,
         "date":          _date.today().strftime("%-d %B %Y"),
     }
 
-    if body.type == "email" and settings.SENDGRID_API_KEY:
+    # ── Helper: load donation_receipt template from DB ────────────────────────
+    async def _load_email_template() -> dict | None:
+        from sqlalchemy import text
+
+        from shital.core.fabrics.database import SessionLocal
+        try:
+            async with SessionLocal() as db:
+                result = await db.execute(
+                    text("SELECT subject, html_body, text_body FROM email_templates WHERE template_key = 'donation_receipt' AND is_active"),
+                )
+                row = result.mappings().first()
+                return dict(row) if row else None
+        except Exception as db_err:
+            _log.error("receipt_template_load_failed: %s", db_err)
+            return None
+
+    # ── Helper: build inline fallback email content ───────────────────────────
+    def _build_fallback_email() -> tuple[str, str, str]:
+        items_lines = "".join(
+            f"<tr><td style='padding:8px 0;font-size:14px;border-bottom:1px solid #f0f0f0;'>{i.get('name','Item')} ×{i.get('quantity',1)}</td>"
+            f"<td align='right' style='padding:8px 0;font-size:14px;font-weight:700;border-bottom:1px solid #f0f0f0;'>£{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}</td></tr>"
+            for i in body.items
+        ) or "<tr><td colspan='2' style='padding:8px 0;'>Temple Donation</td></tr>"
+        subj = f"Your Donation Receipt — {body.branch_name} ({body.order_ref})"
+        greeting = f"<p style='font-size:17px;font-weight:700;'>Dear {body.customer_name},</p>" if body.customer_name else ""
+        html = f"""<!DOCTYPE html><html><body style="margin:0;font-family:Arial,sans-serif;background:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:20px 0;"><tr><td align="center">
+<table width="560" style="max-width:560px;background:white;border-radius:12px;overflow:hidden;">
+  <tr><td style="background:linear-gradient(135deg,#FF9933,#FF6600);padding:28px;text-align:center;">
+    <div style="font-size:30px;">🕉</div>
+    <div style="color:white;font-size:22px;font-weight:900;">Shital Temple</div>
+    <div style="color:rgba(255,255,255,0.85);font-size:13px;">{body.branch_name}</div>
+  </td></tr>
+  <tr><td style="background:#22C55E;padding:10px;text-align:center;">
+    <span style="color:white;font-weight:700;">✓ Donation Confirmed — Thank You!</span>
+  </td></tr>
+  <tr><td style="padding:28px;">
+    {greeting}
+    <p style="color:#555;font-size:14px;">Thank you for your generous donation to {body.branch_name}.</p>
+    <div style="background:#FFF8F0;border-left:4px solid #FF9933;padding:16px;border-radius:6px;margin:20px 0;">
+      <div style="font-size:11px;color:#999;text-transform:uppercase;letter-spacing:1px;">Order Reference</div>
+      <div style="font-size:20px;font-weight:900;letter-spacing:3px;font-family:monospace;">{body.order_ref}</div>
+      <div style="font-size:12px;color:#999;margin-top:4px;">{variables['date']}</div>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr><th align="left" style="font-size:11px;color:#999;text-transform:uppercase;padding-bottom:8px;border-bottom:2px solid #f0f0f0;">Donation</th>
+          <th align="right" style="font-size:11px;color:#999;text-transform:uppercase;padding-bottom:8px;border-bottom:2px solid #f0f0f0;">Amount</th></tr>
+      {items_lines}
+      <tr><td style="padding-top:14px;font-size:16px;font-weight:900;">Total Donated</td>
+          <td align="right" style="padding-top:14px;font-size:20px;font-weight:900;color:#FF6600;">£{body.total:.2f}</td></tr>
+    </table>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px;margin:20px 0;">
+      <div style="font-size:13px;font-weight:700;color:#15803d;">🎁 Gift Aid</div>
+      <div style="font-size:13px;color:#166534;">If you are a UK taxpayer, we can claim Gift Aid on your donation at no extra cost to you.</div>
+    </div>
+    <p style="color:#FF9933;font-size:18px;font-weight:900;text-align:center;">🙏 Jay Shri Krishna</p>
+  </td></tr>
+  <tr><td style="background:#f9f9f9;padding:16px;text-align:center;font-size:12px;color:#999;">
+    {body.branch_name} · Registered UK Charity
+  </td></tr>
+</table></td></tr></table></body></html>"""
+        text = (
+            f"Shital Temple — {body.branch_name}\n\n"
+            + (f"Dear {body.customer_name},\n\n" if body.customer_name else "")
+            + f"Thank you for your generous donation!\n\nOrder: {body.order_ref}\nDate: {variables['date']}\n\n"
+            + "\n".join(f"- {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}" for i in body.items)
+            + f"\n\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}"
+        )
+        return subj, html, text
+
+    # ── Email ─────────────────────────────────────────────────────────────────
+    if body.type == "email":
+        # Credentials loaded from API Keys DB store (Admin → Settings → API Keys)
+        office365_email    = await SecretsManager.get("OFFICE365_EMAIL",    fallback="noreply@shital.org.uk")
+        office365_password = await SecretsManager.get("OFFICE365_PASSWORD", fallback="")
+        sendgrid_key       = await SecretsManager.get("SENDGRID_API_KEY",   fallback="")
+
+        if not office365_password and not sendgrid_key:
+            _log.warning("receipt_skipped: no email provider configured")
+            return {"sent": False, "error": "Email not configured — add OFFICE365_PASSWORD (or SENDGRID_API_KEY) in Admin → Settings → API Keys"}
+
+        # Build content
         try:
             from shital.api.routers.email_templates import render_template
-            from shital.core.fabrics.database import SessionLocal
-            from sqlalchemy import text
-
-            # Load template from DB; fall back to plain text
-            template: dict | None = None
-            try:
-                async with SessionLocal() as db:
-                    result = await db.execute(
-                        text("SELECT subject, html_body, text_body FROM email_templates WHERE template_key = 'donation_receipt' AND is_active"),
-                    )
-                    row = result.mappings().first()
-                    if row:
-                        template = dict(row)
-            except Exception:
-                pass
-
-            if template:
-                subject, html_body, text_body = render_template(template, variables)
+            tpl = await _load_email_template()
+            if tpl:
+                subject, html_body, text_body = render_template(tpl, variables)
             else:
-                # Minimal fallback
-                items_text = "\n".join(
-                    f"  • {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}"
-                    for i in body.items
-                ) or "  • Temple donation"
-                subject = f"Receipt from {body.branch_name} — {body.order_ref}"
-                html_body = f"<p>Thank you! Order: <strong>{body.order_ref}</strong><br>Total: £{body.total:.2f}</p><p>Jay Shri Krishna 🙏</p>"
-                text_body = f"Thank you for your donation!\n\nOrder: {body.order_ref}\n{items_text}\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}"
+                subject, html_body, text_body = _build_fallback_email()
+        except Exception as e:
+            _log.error("receipt_render_failed: %s", e)
+            subject, html_body, text_body = _build_fallback_email()
 
+        # ── Office 365 SMTP (primary) ─────────────────────────────────────────
+        if office365_password:
+            def _smtp_send() -> None:
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"]    = f"Shital Temple <{office365_email}>"
+                msg["To"]      = body.destination
+                if text_body:
+                    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+                msg.attach(MIMEText(html_body, "html", "utf-8"))
+                ctx = ssl.create_default_context()
+                with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
+                    srv.ehlo()
+                    srv.starttls(context=ctx)
+                    srv.login(office365_email, office365_password)
+                    srv.sendmail(office365_email, body.destination, msg.as_string())
+
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, _smtp_send)
+                _log.info("receipt_sent_office365 to=%s ref=%s", body.destination, body.order_ref)
+                return {"sent": True, "method": "office365"}
+            except Exception as e:
+                _log.error("office365_smtp_error: %s", e)
+                return {"sent": False, "error": f"Office 365 SMTP error: {e}"}
+
+        # ── SendGrid fallback ─────────────────────────────────────────────────
+        try:
             import httpx
             content = [{"type": "text/html", "value": html_body}]
             if text_body:
                 content.append({"type": "text/plain", "value": text_body})
-
             resp = await httpx.AsyncClient().post(
                 "https://api.sendgrid.com/v3/mail/send",
-                headers={"Authorization": f"Bearer {settings.SENDGRID_API_KEY}"},
+                headers={"Authorization": f"Bearer {sendgrid_key}"},
                 json={
                     "personalizations": [{"to": [{"email": body.destination}]}],
-                    "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": body.branch_name},
+                    "from": {"email": office365_email, "name": body.branch_name},
                     "subject": subject,
                     "content": content,
                 },
                 timeout=10,
             )
-            return {"sent": resp.status_code in (200, 202), "method": "sendgrid"}
+            sent = resp.status_code in (200, 202)
+            if not sent:
+                _log.error("sendgrid_error: %s %s", resp.status_code, resp.text[:200])
+            return {"sent": sent, "method": "sendgrid", "status_code": resp.status_code}
         except Exception as e:
+            _log.error("sendgrid_exception: %s", e)
             return {"sent": False, "error": str(e)}
 
-    if body.type in ("sms", "whatsapp") and settings.META_WHATSAPP_TOKEN and settings.META_WHATSAPP_PHONE_ID:
+    # ── WhatsApp via Meta Cloud API ───────────────────────────────────────────
+    if body.type in ("sms", "whatsapp"):
+        wa_token    = await SecretsManager.get("META_WHATSAPP_TOKEN",    fallback="")
+        wa_phone_id = await SecretsManager.get("META_WHATSAPP_PHONE_ID", fallback="")
+
+        if not (wa_token and wa_phone_id):
+            _log.warning("receipt_skipped: WhatsApp not configured")
+            return {"sent": False, "error": "WhatsApp not configured — add META_WHATSAPP_TOKEN and META_WHATSAPP_PHONE_ID in Admin → Settings → API Keys"}
+
         try:
+            from sqlalchemy import text
+
+            from shital.api.routers.email_templates import render_template
+            from shital.core.fabrics.database import SessionLocal
+
+            wa_template: dict | None = None
+            try:
+                async with SessionLocal() as db:
+                    result = await db.execute(
+                        text("SELECT text_body FROM email_templates WHERE template_key = 'whatsapp_receipt' AND is_active"),
+                    )
+                    row = result.mappings().first()
+                    if row and row["text_body"]:
+                        wa_template = {"subject": "", "html_body": "", "text_body": row["text_body"]}
+            except Exception:
+                pass
+
+            if wa_template:
+                _, _, message = render_template(wa_template, variables)
+            else:
+                items_text = "\n".join(
+                    f"• {i.get('name','Item')} ×{i.get('quantity',1)} — £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}"
+                    for i in body.items
+                ) or "• Temple Donation"
+                message = (
+                    f"🕉 *Shital Temple Receipt*\n*{body.branch_name}*\n\n"
+                    f"✅ Thank you{', ' + body.customer_name if body.customer_name else ''}!\n\n"
+                    f"📋 *Order:* {body.order_ref}\n📅 *Date:* {variables['date']}\n\n"
+                    f"{items_text}\n\n"
+                    f"💰 *Total: £{body.total:.2f}*\n\n"
+                    f"🙏 *Jay Shri Krishna*\n_{body.branch_name} — Registered UK Charity_"
+                )
+
             import httpx
-            items_text = "\n".join(
-                f"• {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}"
-                for i in body.items
-            ) or "• Temple donation"
-            message = f"Thank you! 🙏\n\nOrder: {body.order_ref}\n{items_text}\nTotal: £{body.total:.2f}\n\nJay Shri Krishna\n{body.branch_name}"
             phone = body.destination.replace(" ", "").replace("+", "")
             if phone.startswith("0"):
                 phone = "44" + phone[1:]
+
             resp = await httpx.AsyncClient().post(
-                f"https://graph.facebook.com/v19.0/{settings.META_WHATSAPP_PHONE_ID}/messages",
-                headers={"Authorization": f"Bearer {settings.META_WHATSAPP_TOKEN}"},
+                f"https://graph.facebook.com/v19.0/{wa_phone_id}/messages",
+                headers={"Authorization": f"Bearer {wa_token}"},
                 json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": message}},
                 timeout=10,
             )
-            return {"sent": resp.status_code == 200, "method": "whatsapp"}
+            sent = resp.status_code == 200
+            if not sent:
+                _log.error("whatsapp_error: %s %s", resp.status_code, resp.text[:200])
+            return {"sent": sent, "method": "whatsapp", "status_code": resp.status_code}
         except Exception as e:
+            _log.error("receipt_whatsapp_exception: %s", e)
             return {"sent": False, "error": str(e)}
 
-    return {"sent": True, "method": "logged", "note": "SendGrid/WhatsApp not configured"}
+    return {"sent": False, "method": "none", "error": f"Unsupported type '{body.type}' or service not configured"}
 
 
 BRANCHES = [
@@ -569,8 +1043,9 @@ async def seed_quick_kiosk_accounts():
     Auto-creates the kiosk_profiles table if it doesn't exist (no migration needed).
     """
     import bcrypt
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     def _hash(plain: str) -> str:
         return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(12)).decode()
@@ -729,8 +1204,9 @@ async def assign_device_to_profile(body: AssignDeviceInput):
     Assign a Stripe Terminal card reader to a kiosk profile.
     Links the device in the kiosk_profiles mapping table.
     """
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
 
     async with SessionLocal() as db:
@@ -764,8 +1240,9 @@ async def assign_device_to_profile(body: AssignDeviceInput):
 @router.get("/quick-donation/profiles")
 async def list_kiosk_profiles(branch_id: str = ""):
     """List all kiosk profiles with their branch, user, and device assignments."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -815,8 +1292,9 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     Supports both password auth and Azure AD-linked accounts.
     """
     import bcrypt
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
         # Authenticate user
@@ -868,6 +1346,34 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         )
         await db.commit()
 
+    # Look up the card reader assigned to the QUICK_DONATION device for this branch
+    # in the admin Devices page (kiosk_devices → terminal_devices).
+    device_reader_id = None
+    device_reader_label = None
+    async with SessionLocal() as db:
+        dev_res = await db.execute(
+            text("""
+                SELECT td.stripe_reader_id, td.label AS reader_label
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                WHERE kd.branch_id = :branch_id
+                  AND kd.device_type = 'QUICK_DONATION'
+                  AND kd.deleted_at IS NULL
+                  AND kd.status = 'active'
+                ORDER BY kd.updated_at DESC
+                LIMIT 1
+            """),
+            {"branch_id": user["branch_id"]},
+        )
+        dev_row = dev_res.mappings().first()
+        if dev_row and dev_row["stripe_reader_id"]:
+            device_reader_id = dev_row["stripe_reader_id"]
+            device_reader_label = dev_row["reader_label"]
+
+    # Prefer admin device assignment over the profile's manually-set reader
+    effective_reader_id = device_reader_id or (profile.get("stripe_reader_id") if profile else None)
+    effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
+
     return {
         "authenticated": True,
         "user": {
@@ -881,6 +1387,8 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "name": user["branch_name"] or "Unknown",
         },
         "profile": profile,
+        "stripe_reader_id": effective_reader_id,
+        "reader_label": effective_reader_label,
     }
 
 
@@ -895,16 +1403,19 @@ async def quick_kiosk_login_azure(body: AzureKioskLoginInput):
     Validates the Microsoft ID token, finds the linked KIOSK user,
     and returns branch + profile + device config.
     """
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
 
-    if not settings.MS_CLIENT_ID:
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
+
+    ms_client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
+    if not ms_client_id:
         return {"authenticated": False, "error": "Azure AD SSO is not configured"}
 
     # Validate token via existing Azure AD endpoint
     try:
-        from shital.api.routers.auth_azure import verify_azure_token, VerifyTokenInput
+        from shital.api.routers.auth_azure import VerifyTokenInput, verify_azure_token
         azure_result = await verify_azure_token(VerifyTokenInput(id_token=body.id_token, default_role="KIOSK"))
     except Exception as e:
         return {"authenticated": False, "error": f"Azure AD token validation failed: {e}"}

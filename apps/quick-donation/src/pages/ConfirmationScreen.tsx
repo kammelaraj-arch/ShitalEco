@@ -13,7 +13,7 @@ export function ConfirmationScreen() {
     branchId === 'leicester' ? 'Leicester' :
     branchId === 'reading' ? 'Reading' :
     branchId === 'mk' ? 'Milton Keynes' :
-    'Shital Temple'
+    'Shital'
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -77,7 +77,7 @@ export function ConfirmationScreen() {
             Ref: <span className="font-black text-gray-600">{orderRef}</span>
           </p>
           <p className="text-xs text-gray-400 mt-1">
-            Shital Temple {branchName}
+            Shital {branchName}
           </p>
         </motion.div>
 

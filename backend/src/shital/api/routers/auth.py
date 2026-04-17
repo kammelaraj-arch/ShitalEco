@@ -1,10 +1,16 @@
 """Auth router — login, register, token refresh."""
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
 import uuid
 
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+
+from shital.capabilities.auth.capabilities import (
+    LoginInput,
+    RegisterInput,
+    login_with_email,
+    register_devotee,
+)
 from shital.core.space.context import DigitalSpace
-from shital.capabilities.auth.capabilities import login_with_email, register_devotee, LoginInput, RegisterInput
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -65,11 +71,12 @@ class RefreshInput(BaseModel):
 
 @router.post("/refresh")
 async def refresh(body: RefreshInput):
-    from jose import jwt, JWTError
-    from shital.core.fabrics.config import settings
-    from shital.capabilities.auth.capabilities import _create_access_token
-    from shital.core.fabrics.database import SessionLocal
+    from jose import JWTError, jwt
     from sqlalchemy import text
+
+    from shital.capabilities.auth.capabilities import _create_access_token
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         payload = jwt.decode(body.refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])

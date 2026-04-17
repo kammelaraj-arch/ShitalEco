@@ -8,27 +8,32 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = '003'
+revision = '003_gift_aid_declarations'
 down_revision = '002_catalog_items'
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
-    # Add gift_aid_eligible to temple_services if the table exists
+    conn = op.get_bind()
+
+    # Add gift_aid_eligible to temple_services if the table exists (use SAVEPOINT to avoid tx abort)
+    conn.execute(sa.text("SAVEPOINT sp_temple"))
     try:
         op.add_column('temple_services', sa.Column('gift_aid_eligible', sa.Boolean(), nullable=False, server_default='false'))
+        conn.execute(sa.text("RELEASE SAVEPOINT sp_temple"))
     except Exception:
-        pass
+        conn.execute(sa.text("ROLLBACK TO SAVEPOINT sp_temple"))
 
-    # Add gift_aid_eligible to basket_items if the table exists
+    # Add gift_aid_eligible to basket_items if the table exists (use SAVEPOINT to avoid tx abort)
+    conn.execute(sa.text("SAVEPOINT sp_basket"))
     try:
         op.add_column('basket_items', sa.Column('gift_aid_eligible', sa.Boolean(), nullable=False, server_default='false'))
+        conn.execute(sa.text("RELEASE SAVEPOINT sp_basket"))
     except Exception:
-        pass
+        conn.execute(sa.text("ROLLBACK TO SAVEPOINT sp_basket"))
 
     # Gift Aid declarations table
-    conn = op.get_bind()
     conn.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS gift_aid_declarations (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

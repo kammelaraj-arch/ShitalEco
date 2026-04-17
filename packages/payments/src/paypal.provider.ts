@@ -187,7 +187,7 @@ export class PayPalProvider {
       return {
         id: order.id,
         provider: 'PAYPAL' as const,
-        approvalUrl,
+        ...(approvalUrl !== undefined ? { approvalUrl } : {}),
         amount: input.amount,
         currency: input.currency,
         status: 'PENDING' as const,

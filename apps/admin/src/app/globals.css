@@ -86,8 +86,8 @@ body {
 
 /* Button variants */
 .btn-primary {
-  @apply bg-crimson-gradient text-white font-semibold px-6 py-3 rounded-xl
-         hover:opacity-90 active:scale-[0.98] transition-all shadow-crimson;
+  @apply bg-saffron-gradient text-white font-bold px-5 py-2.5 rounded-xl
+         hover:opacity-90 active:scale-[0.98] transition-all shadow-saffron;
 }
 .btn-secondary {
   @apply glass text-white/70 font-medium px-6 py-3 rounded-xl

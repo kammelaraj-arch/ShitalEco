@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
+import { KioskKeyboard } from '../components/KioskKeyboard'
 
 // ─── Address lookup — Ideal Postcodes (client-side, CORS-enabled) ────────────
 
@@ -57,6 +58,23 @@ function GiftAidScreen({
   const [phone,     setPhone]    = useState('')
   const [email,     setEmail]    = useState('')
   const [error,     setError]    = useState('')
+
+  // On-screen keyboard
+  const [activeField, setActiveField] = useState<string | null>(null)
+  const [kbValue, setKbValue] = useState('')
+  const kbMode = activeField === 'postcode' ? 'postcode' as const
+               : activeField === 'phone' ? 'numeric' as const
+               : 'text' as const
+
+  const openKb = (field: string, initial: string) => { setKbValue(initial); setActiveField(field) }
+  const closeKb = () => setActiveField(null)
+  const handleKbChange = (v: string) => {
+    setKbValue(v)
+    if (activeField === 'fullname') setFullName(v)
+    else if (activeField === 'postcode') setPostcode(v.toUpperCase())
+    else if (activeField === 'phone') setPhone(v)
+    else if (activeField === 'email') setEmail(v)
+  }
 
   async function handleFind() {
     if (!postcode.trim()) return
@@ -129,7 +147,7 @@ function GiftAidScreen({
       </div>
 
       {/* Scrollable form */}
-      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#16a34a40 transparent' }}>
+      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#16a34a40 transparent', paddingBottom: activeField ? 320 : undefined }}>
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-2xl font-medium">
@@ -187,13 +205,13 @@ function GiftAidScreen({
         {/* Full Name */}
         <div>
           <label className="block text-sm font-black text-gray-800 mb-1.5">Full Name <span className="text-red-500">*</span></label>
-          <input
-            value={fullName}
-            onChange={e => setFullName(e.target.value)}
-            placeholder="e.g. Priya Patel"
-            className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
-            style={{ borderColor: fullName.length > 1 ? '#16a34a' : '#e5e7eb' }}
-          />
+          <div
+            onClick={() => openKb('fullname', fullName)}
+            className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+            style={{ borderColor: activeField === 'fullname' ? '#16a34a' : fullName.length > 1 ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'fullname' ? '0 0 0 3px #16a34a25' : 'none' }}
+          >
+            {fullName ? <span className="text-gray-900">{fullName}</span> : <span className="text-gray-400">Tap to enter full name</span>}
+          </div>
         </div>
 
         {/* Postcode → Address */}
@@ -202,15 +220,13 @@ function GiftAidScreen({
             Postcode &amp; Address <span className="text-red-500">*</span>
           </label>
           <div className="flex gap-2">
-            <input
-              value={postcode}
-              onChange={e => { setPostcode(e.target.value.toUpperCase()); setAddresses([]); setAddress(''); setResolvedPc('') }}
-              onKeyDown={e => e.key === 'Enter' && handleFind()}
-              placeholder="e.g. HA9 0WS"
-              maxLength={8}
-              className="flex-1 border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-lg font-mono tracking-widest focus:outline-none bg-white transition-colors"
-              style={{ borderColor: addresses.length > 0 ? '#16a34a' : '#e5e7eb' }}
-            />
+            <div
+              onClick={() => openKb('postcode', postcode)}
+              className="flex-1 border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-lg font-mono tracking-widest cursor-pointer flex items-center min-h-[52px] bg-white transition-colors uppercase"
+              style={{ borderColor: activeField === 'postcode' ? '#16a34a' : addresses.length > 0 ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'postcode' ? '0 0 0 3px #16a34a25' : 'none' }}
+            >
+              {postcode || <span className="text-gray-400 normal-case text-base font-medium">Tap to enter postcode</span>}
+            </div>
             <button
               onClick={handleFind}
               disabled={lookingUp || postcode.trim().replace(/\s/g,'').length < 5}
@@ -267,14 +283,13 @@ function GiftAidScreen({
           <label className="block text-sm font-black text-gray-800 mb-1.5">
             Phone Number <span className="text-gray-400 text-xs font-normal">(required if no email)</span>
           </label>
-          <input
-            type="tel"
-            value={phone}
-            onChange={e => setPhone(e.target.value)}
-            placeholder="07xxx xxxxxx"
-            className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
-            style={{ borderColor: phone.length > 7 ? '#16a34a' : '#e5e7eb' }}
-          />
+          <div
+            onClick={() => openKb('phone', phone)}
+            className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+            style={{ borderColor: activeField === 'phone' ? '#16a34a' : phone.length > 7 ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'phone' ? '0 0 0 3px #16a34a25' : 'none' }}
+          >
+            {phone ? <span className="text-gray-900">{phone}</span> : <span className="text-gray-400">Tap to enter phone number</span>}
+          </div>
         </div>
 
         {/* Email */}
@@ -282,14 +297,13 @@ function GiftAidScreen({
           <label className="block text-sm font-black text-gray-800 mb-1.5">
             Email Address <span className="text-gray-400 text-xs font-normal">(required if no phone)</span>
           </label>
-          <input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="your@email.com"
-            className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
-            style={{ borderColor: email.includes('@') ? '#16a34a' : '#e5e7eb' }}
-          />
+          <div
+            onClick={() => openKb('email', email)}
+            className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+            style={{ borderColor: activeField === 'email' ? '#16a34a' : email.includes('@') ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'email' ? '0 0 0 3px #16a34a25' : 'none' }}
+          >
+            {email ? <span className="text-gray-900">{email}</span> : <span className="text-gray-400">Tap to enter email address</span>}
+          </div>
         </div>
 
         <div className="h-4" />
@@ -311,6 +325,23 @@ function GiftAidScreen({
           Continue to Pay · £{total.toFixed(2)} →
         </button>
       </div>
+
+      {/* On-screen keyboard */}
+      <KioskKeyboard
+        value={kbValue}
+        onChange={handleKbChange}
+        mode={kbMode}
+        visible={activeField !== null}
+        onDone={() => {
+          if (activeField === 'postcode' && postcode.trim().length >= 3) {
+            closeKb()
+            handleFind()
+          } else {
+            closeKb()
+          }
+        }}
+        accent="#16a34a"
+      />
     </motion.div>
   )
 }
@@ -333,6 +364,20 @@ function ContactCaptureScreen({
   const [gdpr,  setGdpr]  = useState(true)
   const [terms, setTerms] = useState(true)
   const [error, setError] = useState('')
+
+  // On-screen keyboard
+  const [activeField, setActiveField] = useState<string | null>(null)
+  const [kbValue, setKbValue] = useState('')
+  const kbMode = activeField === 'phone' ? 'numeric' as const : 'text' as const
+
+  const openKb = (field: string, initial: string) => { setKbValue(initial); setActiveField(field) }
+  const closeKb = () => setActiveField(null)
+  const handleKbChange = (v: string) => {
+    setKbValue(v)
+    if (activeField === 'name') setName(v)
+    else if (activeField === 'email') setEmail(v)
+    else if (activeField === 'phone') setPhone(v)
+  }
 
   function handleContinue() {
     if (!anonymous) {
@@ -366,7 +411,7 @@ function ContactCaptureScreen({
       </div>
 
       {/* Scrollable form */}
-      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4" style={{ scrollbarWidth: 'thin' }}>
+      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4" style={{ scrollbarWidth: 'thin', paddingBottom: activeField ? 320 : undefined }}>
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-2xl font-medium">
@@ -429,23 +474,35 @@ function ContactCaptureScreen({
           <>
             <div>
               <label className="block text-sm font-black text-gray-800 mb-1.5">Full Name <span className="text-red-500">*</span></label>
-              <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Priya Patel"
-                className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
-                style={{ borderColor: name.length > 1 ? '#FF9933' : '#e5e7eb' }} />
+              <div
+                onClick={() => openKb('name', name)}
+                className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+                style={{ borderColor: activeField === 'name' ? '#FF9933' : name.length > 1 ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'name' ? '0 0 0 3px #FF993325' : 'none' }}
+              >
+                {name ? <span className="text-gray-900">{name}</span> : <span className="text-gray-400">Tap to enter full name</span>}
+              </div>
             </div>
 
             <div>
               <label className="block text-sm font-black text-gray-800 mb-1.5">Email Address <span className="text-gray-400 font-normal text-xs">(required if no phone)</span></label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com"
-                className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
-                style={{ borderColor: email.includes('@') ? '#FF9933' : '#e5e7eb' }} />
+              <div
+                onClick={() => openKb('email', email)}
+                className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+                style={{ borderColor: activeField === 'email' ? '#FF9933' : email.includes('@') ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'email' ? '0 0 0 3px #FF993325' : 'none' }}
+              >
+                {email ? <span className="text-gray-900">{email}</span> : <span className="text-gray-400">Tap to enter email address</span>}
+              </div>
             </div>
 
             <div>
               <label className="block text-sm font-black text-gray-800 mb-1.5">Phone / WhatsApp <span className="text-gray-400 font-normal text-xs">(required if no email)</span></label>
-              <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="07xxx xxxxxx"
-                className="w-full border-2 rounded-2xl px-4 py-3.5 text-gray-900 text-base font-medium focus:outline-none bg-white transition-colors"
-                style={{ borderColor: phone.length > 7 ? '#FF9933' : '#e5e7eb' }} />
+              <div
+                onClick={() => openKb('phone', phone)}
+                className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+                style={{ borderColor: activeField === 'phone' ? '#FF9933' : phone.length > 7 ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'phone' ? '0 0 0 3px #FF993325' : 'none' }}
+              >
+                {phone ? <span className="text-gray-900">{phone}</span> : <span className="text-gray-400">Tap to enter phone number</span>}
+              </div>
             </div>
 
             {/* GDPR */}
@@ -493,6 +550,16 @@ function ContactCaptureScreen({
           {anonymous ? 'Pay Anonymously' : 'Continue to Pay'} · £{total.toFixed(2)} →
         </button>
       </div>
+
+      {/* On-screen keyboard */}
+      <KioskKeyboard
+        value={kbValue}
+        onChange={handleKbChange}
+        mode={kbMode}
+        visible={activeField !== null}
+        onDone={closeKb}
+        accent="#FF9933"
+      />
     </motion.div>
   )
 }
@@ -731,7 +798,7 @@ export function BasketScreen() {
               }
             >
               {hasEligible && <div className="text-[10px] font-semibold opacity-60 mb-0.5">Without Gift Aid</div>}
-              <div>Confirm &amp; Pay · £{total.toFixed(2)}</div>
+              <div>Pay · £{total.toFixed(2)}</div>
             </button>
           )}
 
@@ -744,7 +811,7 @@ export function BasketScreen() {
             >
               <div className="flex items-center justify-center gap-1 mb-0.5">
                 <span className="text-base">🇬🇧</span>
-                <span className="text-xs text-green-200">Boost with Gift Aid</span>
+                <span className="text-xs text-green-200">Boost with Gift Aid (£{giftAidBonus.toFixed(2)} for free)</span>
               </div>
               <div>Temple gets £{(total + giftAidBonus).toFixed(2)}</div>
             </button>

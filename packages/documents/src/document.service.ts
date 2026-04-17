@@ -13,7 +13,7 @@ import {
   PAGINATION,
   env,
 } from '@shital/config'
-import { prisma, type DocumentPermission } from '@shital/db'
+import { prisma, type DocumentPermission, DocumentCategory } from '@shital/db'
 import type { UploadDocumentInput, DocumentListItem } from './types.js'
 
 const log = createContextLogger({ module: 'document.service' })
@@ -159,7 +159,7 @@ export class DocumentService {
         where: {
           branchId,
           deletedAt: null,
-          ...(category !== undefined ? { category: category as DocumentListItem['category'] } : {}),
+          ...(category !== undefined ? { category: category as unknown as DocumentCategory } : {}),
           ...(cursor !== undefined ? { id: { lt: cursor } } : {}),
         },
         orderBy: { createdAt: 'desc' },

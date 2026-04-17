@@ -3,6 +3,7 @@ Logging fabric — structured logging via structlog.
 Configures JSON output in production and pretty console output in development.
 """
 from __future__ import annotations
+
 import logging
 
 import structlog

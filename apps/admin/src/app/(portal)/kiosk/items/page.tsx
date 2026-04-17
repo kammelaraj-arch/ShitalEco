@@ -1,11 +1,11 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { apiFetch } from '@/lib/api'
+import { SearchSelect } from '@/components/ui/SearchSelect'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
-
-const CATEGORIES = ['GENERAL_DONATION', 'SOFT_DONATION', 'PROJECT_DONATION', 'SHOP', 'SERVICE']
-const BRANCHES = ['main', 'leicester', 'reading', 'mk']
+const CATEGORIES = ['GENERAL_DONATION', 'SOFT_DONATION', 'PROJECT_DONATION', 'SHOP', 'SERVICE', 'SPONSORSHIP']
+const BRANCH_STOCK_IDS = ['main', 'leicester', 'reading', 'mk']
 const BRANCH_LABELS: Record<string, string> = { main: 'Wembley', leicester: 'Leicester', reading: 'Reading', mk: 'Milton Keynes' }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -16,11 +16,15 @@ const CATEGORY_COLORS: Record<string, string> = {
   SERVICE:          'bg-orange-500/20 text-orange-300 border-orange-500/30',
 }
 
+interface Branch { branch_id: string; name: string }
+interface Project { id: string; project_id: string; name: string; branch_id: string }
+
 interface Item {
   id: string
   name: string
   name_gu: string
   name_hi: string
+  name_te: string
   description: string
   category: string
   price: number
@@ -32,6 +36,7 @@ interface Item {
   is_live: boolean
   scope: string
   branch_id: string
+  project_id: string
   stock_qty: number | null
   sort_order: number
   available_from: string | null
@@ -43,10 +48,10 @@ interface Item {
 type FormState = Omit<Item, 'id' | 'price'> & { price: string }
 
 const EMPTY_FORM: FormState = {
-  name: '', name_gu: '', name_hi: '', description: '',
+  name: '', name_gu: '', name_hi: '', name_te: '', description: '',
   category: 'GENERAL_DONATION', price: '0', unit: '', emoji: '', image_url: '',
   gift_aid_eligible: false, is_active: true, is_live: true,
-  scope: 'GLOBAL', branch_id: '',
+  scope: 'GLOBAL', branch_id: '', project_id: '',
   stock_qty: null, sort_order: 0,
   available_from: '', available_until: '',
   display_channel: 'both',
@@ -55,6 +60,8 @@ const EMPTY_FORM: FormState = {
 
 export default function CatalogItemsPage() {
   const [items, setItems] = useState<Item[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
@@ -63,17 +70,29 @@ export default function CatalogItemsPage() {
   const [editing, setEditing] = useState<Item | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [imageUploading, setImageUploading] = useState(false)
+  const [reordering, setReordering] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const [csvDownloading, setCsvDownloading] = useState(false)
+  const [csvImporting, setCsvImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; error: string }[] } | null>(null)
+
+  const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
+  const authToken = () => typeof window !== 'undefined' ? (localStorage.getItem('shital_access_token') || '') : ''
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const res = await fetch(`${API}/items/?active_only=false`, {
-        headers: { 'X-Space-Id': 'main', 'X-User-Id': 'admin' },
-      })
-      const data = await res.json()
-      setItems(data.items || [])
+      const [itemData, brData, prData] = await Promise.all([
+        apiFetch<{ items: Item[] }>('/items/?active_only=false'),
+        apiFetch<{ branches: Branch[] }>('/branches'),
+        apiFetch<{ projects: Project[] }>('/projects?include_inactive=true').catch(() => ({ projects: [] })),
+      ])
+      setItems(itemData.items || [])
+      setBranches(brData.branches || [])
+      setProjects(prData.projects || [])
     } catch { setError('Failed to load items') }
     finally { setLoading(false) }
   }, [])
@@ -84,12 +103,13 @@ export default function CatalogItemsPage() {
   const openEdit = (item: Item) => {
     setEditing(item)
     setForm({
-      name: item.name, name_gu: item.name_gu || '', name_hi: item.name_hi || '',
+      name: item.name, name_gu: item.name_gu || '', name_hi: item.name_hi || '', name_te: item.name_te || '',
       description: item.description || '', category: item.category,
       price: String(item.price), unit: item.unit || '', emoji: item.emoji || '', image_url: item.image_url || '',
       gift_aid_eligible: item.gift_aid_eligible, is_active: item.is_active,
       is_live: item.is_live ?? true,
       scope: item.scope, branch_id: item.branch_id || '',
+      project_id: item.project_id || '',
       stock_qty: item.stock_qty, sort_order: item.sort_order || 0,
       available_from: item.available_from ? item.available_from.slice(0, 10) : '',
       available_until: item.available_until ? item.available_until.slice(0, 10) : '',
@@ -99,11 +119,22 @@ export default function CatalogItemsPage() {
     setShowForm(true)
   }
 
+  const remove = async (item: Item) => {
+    if (!confirm(`Delete "${item.name}"? Cannot be undone.`)) return
+    setDeleting(item.id)
+    try {
+      await apiFetch(`/items/${item.id}`, { method: 'DELETE' })
+      setItems(prev => prev.filter(x => x.id !== item.id))
+    } catch { setError('Failed to delete item') }
+    finally { setDeleting(null) }
+  }
+
   const save = async () => {
     if (!form.name.trim()) return
     setSaving(true)
+    setError('')
     try {
-      const url = editing ? `${API}/items/${editing.id}` : `${API}/items/`
+      const url = editing ? `/items/${editing.id}` : `/items/`
       const method = editing ? 'PUT' : 'POST'
       const body = {
         ...form,
@@ -111,36 +142,86 @@ export default function CatalogItemsPage() {
         available_from: form.available_from || null,
         available_until: form.available_until || null,
         stock_qty: form.stock_qty ?? null,
+        // Empty strings for FK fields — backend converts '' to None internally
+        branch_id: form.branch_id || '',
+        project_id: form.project_id || '',
       }
-      await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Space-Id': 'main', 'X-User-Id': 'admin',
-        },
-        body: JSON.stringify(body),
-      })
+      await apiFetch(url, { method, body: JSON.stringify(body) })
       setShowForm(false)
       await load()
-    } catch { setError('Failed to save item') }
-    finally { setSaving(false) }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save item')
+    } finally { setSaving(false) }
   }
 
   const toggleLive = async (item: Item) => {
     try {
-      await fetch(`${API}/items/${item.id}`, {
+      await apiFetch(`/items/${item.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Space-Id': 'main', 'X-User-Id': 'admin' },
         body: JSON.stringify({ is_live: !item.is_live }),
       })
       setItems(prev => prev.map(x => x.id === item.id ? { ...x, is_live: !x.is_live } : x))
     } catch { setError('Failed to update') }
   }
 
-  const filtered = items.filter(i =>
-    (catFilter === 'ALL' || i.category === catFilter) &&
-    i.name.toLowerCase().includes(search.toLowerCase())
-  )
+  const moveSortOrder = async (item: Item, direction: 'up' | 'down') => {
+    // Find the sorted list (by sort_order) for items in same category
+    const sorted = [...items].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+    const idx = sorted.findIndex(x => x.id === item.id)
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= sorted.length) return
+    const swapItem = sorted[swapIdx]
+    // Swap their sort_order values (or use neighbour +/- 1 if equal)
+    const newOrder = swapItem.sort_order === item.sort_order
+      ? (direction === 'up' ? item.sort_order - 1 : item.sort_order + 1)
+      : swapItem.sort_order
+    const swapOrder = item.sort_order
+    setReordering(item.id)
+    try {
+      await apiFetch(`/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ sort_order: newOrder }) })
+      await apiFetch(`/items/${swapItem.id}`, { method: 'PUT', body: JSON.stringify({ sort_order: swapOrder }) })
+      setItems(prev => prev.map(x =>
+        x.id === item.id ? { ...x, sort_order: newOrder }
+        : x.id === swapItem.id ? { ...x, sort_order: swapOrder }
+        : x
+      ))
+    } catch { setError('Failed to reorder') }
+    finally { setReordering(null) }
+  }
+
+  async function downloadCsv() {
+    setCsvDownloading(true)
+    try {
+      const res = await fetch(`${API}/items/export.csv`, { headers: { Authorization: `Bearer ${authToken()}` } })
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = 'catalog-items.csv'; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Export failed') }
+    finally { setCsvDownloading(false) }
+  }
+
+  async function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; if (!file) return
+    setCsvImporting(true); setImportResult(null); setError('')
+    try {
+      const fd = new FormData(); fd.append('file', file)
+      const res = await fetch(`${API}/items/import`, { method: 'POST', headers: { Authorization: `Bearer ${authToken()}` }, body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Import failed')
+      setImportResult(data)
+      if (data.imported > 0) await load()
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Import failed') }
+    finally { setCsvImporting(false); if (csvInputRef.current) csvInputRef.current.value = '' }
+  }
+
+  const filtered = items
+    .filter(i =>
+      (catFilter === 'ALL' || i.category === catFilter) &&
+      i.name.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
 
   const handleImageFile = (file: File) => {
     if (file.size > 3 * 1024 * 1024) { setError('Image must be under 3MB'); return }
@@ -154,6 +235,7 @@ export default function CatalogItemsPage() {
   }
 
   const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson-700/50'
+  const sel = 'w-full border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson-700/50 bg-gray-900'
   const label = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5'
 
   return (
@@ -163,18 +245,47 @@ export default function CatalogItemsPage() {
           <h1 className="text-3xl font-black text-white">Catalog Items</h1>
           <p className="text-white/40 mt-1">Manage donations, shop items, and catalog — with scheduling and availability</p>
         </div>
-        <button onClick={openNew}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-saffron-gradient text-white font-bold shadow-saffron hover:opacity-90">
-          + Add Item
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={downloadCsv} disabled={csvDownloading}
+            className="px-4 py-2.5 rounded-xl border border-white/10 text-white/70 text-sm font-semibold hover:bg-white/5 transition-all disabled:opacity-40">
+            {csvDownloading ? '⏳' : '⬇'} Export CSV
+          </button>
+          <button onClick={() => csvInputRef.current?.click()} disabled={csvImporting}
+            className="px-4 py-2.5 rounded-xl border border-white/10 text-white/70 text-sm font-semibold hover:bg-white/5 transition-all disabled:opacity-40">
+            {csvImporting ? '⏳' : '⬆'} Import CSV
+          </button>
+          <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvUpload} />
+          <button onClick={openNew}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-saffron-gradient text-white font-bold shadow-saffron hover:opacity-90">
+            + Add Item
+          </button>
+        </div>
       </div>
 
       {error && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
 
+      {importResult && (
+        <div className="px-4 py-3 rounded-xl text-sm border flex items-start gap-3"
+          style={{ background: importResult.imported > 0 ? 'rgba(21,128,61,0.1)' : 'rgba(185,28,28,0.1)', border: `1px solid ${importResult.imported > 0 ? 'rgba(21,128,61,0.25)' : 'rgba(185,28,28,0.25)'}` }}>
+          <div className="flex-1">
+            <p className="font-bold text-sm" style={{ color: importResult.imported > 0 ? '#4ade80' : '#f87171' }}>
+              {importResult.imported > 0 ? `✅ Imported ${importResult.imported} item${importResult.imported !== 1 ? 's' : ''}` : '❌ Import completed with errors'}
+              {importResult.skipped > 0 && <span className="text-white/40 font-normal ml-2">({importResult.skipped} skipped)</span>}
+            </p>
+            {importResult.errors.length > 0 && (
+              <ul className="mt-1 space-y-0.5">{importResult.errors.map((e, i) => (
+                <li key={i} className="text-red-300/70 text-xs">Row {e.row}: {e.error}</li>
+              ))}</ul>
+            )}
+          </div>
+          <button onClick={() => setImportResult(null)} className="text-white/30 hover:text-white/60 text-lg leading-none">✕</button>
+        </div>
+      )}
+
       <div className="flex gap-3 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search items…"
-          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 w-64" />
+          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 w-full sm:w-64" />
         <div className="flex gap-2 flex-wrap">
           {['ALL', ...CATEGORIES].map(c => (
             <button key={c} onClick={() => setCatFilter(c)}
@@ -191,10 +302,10 @@ export default function CatalogItemsPage() {
         <div className="text-center py-20 text-white/30"><p className="text-4xl mb-3">📦</p><p>No items found.</p></div>
       ) : (
         <div className="glass rounded-2xl overflow-hidden border border-temple-border">
-          <table className="w-full">
+          <div className="overflow-x-auto"><table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
-                {['Item', 'Category', 'Price', 'Channel', 'Schedule', 'Live', ''].map(h => (
+                {['Order', 'Item', 'Category', 'Price', 'Channel', 'Schedule', 'Live', ''].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -209,6 +320,24 @@ export default function CatalogItemsPage() {
                   <motion.tr key={item.id}
                     initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                     className="border-b border-white/5 hover:bg-white/3 transition-colors">
+                    {/* Sort order controls */}
+                    <td className="px-2 py-3 w-14">
+                      <div className="flex flex-col items-center gap-0.5">
+                        <button
+                          onClick={() => moveSortOrder(item, 'up')}
+                          disabled={reordering === item.id || i === 0}
+                          className="w-6 h-5 rounded text-white/30 hover:text-white/70 hover:bg-white/8 disabled:opacity-20 transition-colors text-xs leading-none flex items-center justify-center"
+                          title="Move up"
+                        >▲</button>
+                        <span className="text-white/25 text-[10px] font-mono w-6 text-center">{item.sort_order}</span>
+                        <button
+                          onClick={() => moveSortOrder(item, 'down')}
+                          disabled={reordering === item.id || i === filtered.length - 1}
+                          className="w-6 h-5 rounded text-white/30 hover:text-white/70 hover:bg-white/8 disabled:opacity-20 transition-colors text-xs leading-none flex items-center justify-center"
+                          title="Move down"
+                        >▼</button>
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {item.image_url ? (
@@ -247,15 +376,19 @@ export default function CatalogItemsPage() {
                         <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${item.is_live ? 'left-5' : 'left-0.5'}`} />
                       </button>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
                       <button onClick={() => openEdit(item)}
-                        className="text-white/40 hover:text-saffron-400 text-sm font-medium px-3 py-1">Edit</button>
+                        className="text-white/40 hover:text-saffron-400 text-sm font-medium px-2 py-1 mr-1">Edit</button>
+                      <button onClick={() => remove(item)} disabled={deleting === item.id}
+                        className="text-red-400/50 hover:text-red-400 text-sm px-2 py-1 disabled:opacity-30">
+                        {deleting === item.id ? '…' : 'Del'}
+                      </button>
                     </td>
                   </motion.tr>
                 )
               })}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 
@@ -267,7 +400,7 @@ export default function CatalogItemsPage() {
               onClick={() => setShowForm(false)} className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed right-0 top-0 h-full w-full sm:max-w-[520px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">{editing ? 'Edit Item' : 'New Item'}</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>
@@ -280,7 +413,7 @@ export default function CatalogItemsPage() {
                   <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                     placeholder="e.g. General Donation" className={inp} />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
                     <label className={label}>Gujarati</label>
                     <input value={form.name_gu} onChange={e => setForm(p => ({ ...p, name_gu: e.target.value }))} className={inp} placeholder="ગણેશ પૂજા" />
@@ -289,15 +422,19 @@ export default function CatalogItemsPage() {
                     <label className={label}>Hindi</label>
                     <input value={form.name_hi} onChange={e => setForm(p => ({ ...p, name_hi: e.target.value }))} className={inp} placeholder="गणेश पूजा" />
                   </div>
+                  <div>
+                    <label className={label}>Telugu</label>
+                    <input value={form.name_te} onChange={e => setForm(p => ({ ...p, name_te: e.target.value }))} className={inp} placeholder="గణేష పూజ" />
+                  </div>
                 </div>
 
                 {/* Category, Price, Emoji */}
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
                     <label className={label}>Category *</label>
                     <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}
-                      className={inp}>
-                      {CATEGORIES.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+                      className={sel}>
+                      {CATEGORIES.map(c => <option key={c} value={c} style={{ background: '#111827', color: '#fff' }}>{c.replace('_', ' ')}</option>)}
                     </select>
                   </div>
                   <div>
@@ -415,13 +552,40 @@ export default function CatalogItemsPage() {
                   </div>
                 </div>
 
-                {/* Scope / Branch */}
+                {/* Branch */}
+                <div>
+                  <label className={label}>Branch <span className="normal-case font-normal text-white/30">(if branch-specific)</span></label>
+                  <SearchSelect
+                    options={[
+                      { value: '', label: 'All branches (Global)' },
+                      ...branches.map(b => ({ value: b.branch_id, label: b.name })),
+                    ]}
+                    value={form.branch_id}
+                    onChange={v => setForm(p => ({ ...p, branch_id: v }))}
+                    placeholder="All branches (Global)"
+                  />
+                </div>
+
+                {/* Project (for PROJECT_DONATION) */}
+                {form.category === 'PROJECT_DONATION' && (
+                  <div>
+                    <label className={label}>Project</label>
+                    <select value={form.project_id} onChange={e => setForm(p => ({ ...p, project_id: e.target.value }))} className={sel}>
+                      <option value="" style={{ background: '#111827', color: '#fff' }}>No project / General</option>
+                      {projects.map(pr => (
+                        <option key={pr.id} value={pr.project_id} style={{ background: '#111827', color: '#fff' }}>{pr.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Scope / Sort */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={label}>Scope</label>
-                    <select value={form.scope} onChange={e => setForm(p => ({ ...p, scope: e.target.value }))} className={inp}>
-                      <option value="GLOBAL">Global (all branches)</option>
-                      <option value="BRANCH">Branch-specific</option>
+                    <select value={form.scope} onChange={e => setForm(p => ({ ...p, scope: e.target.value }))} className={sel}>
+                      <option value="GLOBAL" style={{ background: '#111827', color: '#fff' }}>Global (all branches)</option>
+                      <option value="BRANCH" style={{ background: '#111827', color: '#fff' }}>Branch-specific</option>
                     </select>
                   </div>
                   <div>
@@ -435,7 +599,7 @@ export default function CatalogItemsPage() {
                   <div>
                     <label className={label}>Stock per Branch</label>
                     <div className="grid grid-cols-2 gap-2">
-                      {BRANCHES.map(b => (
+                      {BRANCH_STOCK_IDS.map(b => (
                         <div key={b} className="flex items-center gap-2">
                           <span className="text-white/50 text-xs w-20 flex-shrink-0">{BRANCH_LABELS[b]}</span>
                           <input type="number" min="0"

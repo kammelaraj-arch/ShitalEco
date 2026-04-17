@@ -6,8 +6,10 @@ node_modules/
 # Build outputs
 .next/
 dist/
+dist-electron/
 build/
 out/
+release/
 
 # Environment files — NEVER commit secrets
 .env

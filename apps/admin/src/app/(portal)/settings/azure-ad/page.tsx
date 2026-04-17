@@ -79,7 +79,7 @@ function ConfigRow({ label, value, mono = false, secret = false }: {
 
 function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-4">
+    <div className="flex flex-col md:flex-row gap-4">
       <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-amber-600 to-orange-500 flex items-center justify-center text-white font-black text-sm shadow-lg mt-0.5">
         {n}
       </div>

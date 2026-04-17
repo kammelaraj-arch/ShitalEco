@@ -241,7 +241,7 @@ export class PaymentService {
         if (customId !== undefined) {
           await prisma.order.updateMany({
             where: { id: customId, status: 'PENDING' },
-            data: { status: 'PROCESSING', paymentProvider: 'PAYPAL', paymentRef: orderId },
+            data: { status: 'PROCESSING', paymentProvider: 'PAYPAL', paymentRef: orderId ?? null },
           })
         }
         break
@@ -254,7 +254,7 @@ export class PaymentService {
         if (customId !== undefined) {
           await prisma.order.updateMany({
             where: { id: customId },
-            data: { status: 'COMPLETED', paymentProvider: 'PAYPAL', paymentRef: captureId },
+            data: { status: 'COMPLETED', paymentProvider: 'PAYPAL', paymentRef: captureId ?? null },
           })
         }
         break

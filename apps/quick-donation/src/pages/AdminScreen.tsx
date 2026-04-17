@@ -60,11 +60,14 @@ export function AdminScreen() {
       .catch(() => {})
   }, [])
 
-  function applyProfile(data: { branch: { id: string; name: string }; user: { name: string; email: string }; profile: KioskProfile | null }) {
+  function applyProfile(data: { branch: { id: string; name: string }; user: { name: string; email: string }; profile: KioskProfile | null; stripe_reader_id?: string | null; reader_label?: string | null }) {
     setBranchId(data.branch.id)
-    // Apply device from profile if assigned
-    if (data.profile?.stripe_reader_id) {
-      setReader(data.profile.stripe_reader_id, data.profile.device_label || data.profile.stripe_reader_id)
+    // Prefer the card reader assigned in admin Devices page (top-level),
+    // fall back to the kiosk_profiles reader if set.
+    const readerId = data.stripe_reader_id || data.profile?.stripe_reader_id || ''
+    const readerLabel = data.reader_label || data.profile?.device_label || readerId
+    if (readerId) {
+      setReader(readerId, readerLabel)
     }
     setLoggedIn({
       name: data.user.name,

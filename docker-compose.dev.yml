@@ -1,0 +1,150 @@
+name: shitaleco-dev
+
+# ── Dev stack — same server, isolated from production ─────────────────────────
+# Dev nginx: port 8080 (HTTP only — no SSL needed for dev)
+# Dev backend: port 8001 exposed for direct debugging
+# All data in separate named volumes (pgdata-dev) — never touches prod DB
+# Memory limits prevent dev stack from starving the prod stack on a 2GB VPS
+
+services:
+  db-dev:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    environment:
+      POSTGRES_DB: shitaleco_dev_db
+      POSTGRES_USER: shitaleco_dev_user
+      POSTGRES_PASSWORD: ShitalEcoDev2024!
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shitaleco_dev_user -d shitaleco_dev_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dev-internal
+
+  backend-dev:
+    image: ghcr.io/kammelaraj-arch/shitaleco-backend:dev
+    # on-failure: stop crashing indefinitely rather than consuming CPU in a loop
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 384M
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql://shitaleco_dev_user:ShitalEcoDev2024!@db-dev:5432/shitaleco_dev_db
+      APP_ENV: development
+      JWT_SECRET: ${JWT_SECRET:-shital-dev-jwt-secret-not-for-prod}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS: https://dev.shital.org.uk,http://192.248.147.205:8080,http://localhost:8080
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      MS_CLIENT_ID: ${MS_CLIENT_ID:-}
+      MS_TENANT_ID: ${MS_TENANT_ID:-}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
+      MS_REDIRECT_URI: https://dev.shital.org.uk/auth-callback
+    depends_on:
+      db-dev:
+        condition: service_healthy
+    networks:
+      - dev-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  admin-dev:
+    image: ghcr.io/kammelaraj-arch/shitaleco-admin:dev
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - backend-dev
+    networks:
+      - dev-internal
+
+  quick-donation-dev:
+    image: ghcr.io/kammelaraj-arch/shitaleco-quick-donation:dev
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 48M
+    depends_on:
+      - backend-dev
+    networks:
+      - dev-internal
+
+  kiosk-dev:
+    image: ghcr.io/kammelaraj-arch/shitaleco-kiosk:dev
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 48M
+    depends_on:
+      - backend-dev
+    networks:
+      - dev-internal
+
+  screen-dev:
+    image: ghcr.io/kammelaraj-arch/shitaleco-screen:dev
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 48M
+    depends_on:
+      - backend-dev
+    networks:
+      - dev-internal
+
+  nginx-dev:
+    image: nginx:alpine
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 32M
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf-dev/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/hub:/usr/share/nginx/hub:ro
+    depends_on:
+      - backend-dev
+      - admin-dev
+      - quick-donation-dev
+      - kiosk-dev
+      - screen-dev
+    networks:
+      - dev-internal
+
+volumes:
+  pgdata-dev:
+
+networks:
+  dev-internal:
+    driver: bridge

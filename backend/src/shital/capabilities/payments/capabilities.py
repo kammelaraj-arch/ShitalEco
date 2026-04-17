@@ -2,16 +2,16 @@
 Payments Capabilities — PayPal, Stripe, Cash abstraction layer.
 """
 from __future__ import annotations
-from datetime import datetime
+
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
 import structlog
+from pydantic import BaseModel
 
-from shital.core.dna.registry import capability, Fabric
-from shital.core.space.context import DigitalSpace
+from shital.core.dna.registry import Fabric, capability
 from shital.core.fabrics.config import settings
+from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
 
@@ -105,7 +105,7 @@ async def _create_paypal_order(data: CreatePaymentInput, amount: float) -> dict[
         order = order_resp.json()
 
     approval_url = next(
-        (l["href"] for l in order.get("links", []) if l["rel"] == "approve"), ""
+        (lnk["href"] for lnk in order.get("links", []) if lnk["rel"] == "approve"), ""
     )
 
     return {

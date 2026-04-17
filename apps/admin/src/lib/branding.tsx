@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 
 export interface BrandingConfig {
   logoUrl: string       // URL to logo image (empty = use text)
@@ -11,8 +11,8 @@ export interface BrandingConfig {
 
 const DEFAULTS: BrandingConfig = {
   logoUrl:      '',
-  orgName:      'Shital Temple',
-  orgSubtitle:  'Admin Portal',
+  orgName:      'Shital',
+  orgSubtitle:  'Business Portal',
   primaryColor: '#B91C1C',
   accentColor:  '#FFD700',
 }
@@ -39,11 +39,8 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(b)) } catch {}
   }
 
-  return (
-    <BrandingContext.Provider value={{ branding, setBranding }}>
-      {children}
-    </BrandingContext.Provider>
-  )
+  const P = BrandingContext.Provider as unknown as React.FC<{ value: { branding: BrandingConfig; setBranding: (b: BrandingConfig) => void }; children: ReactNode }>
+  return <P value={{ branding, setBranding }}>{children}</P>
 }
 
 export function useBranding() {

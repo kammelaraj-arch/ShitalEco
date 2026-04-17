@@ -85,13 +85,18 @@ class AzureCallbackInput(BaseModel):
 @router.get("/config")
 async def azure_config():
     """Return MSAL client configuration for the admin frontend."""
-    tenant = settings.MS_TENANT_ID or "common"
+    from shital.core.fabrics.secrets import SecretsManager
+    client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
+    tenant_id = await SecretsManager.get("MS_TENANT_ID") or settings.MS_TENANT_ID
+    redirect_uri = await SecretsManager.get("MS_REDIRECT_URI") or ""
+    tenant = tenant_id or "common"
     return {
-        "client_id": settings.MS_CLIENT_ID,
+        "client_id": client_id,
         "authority": f"https://login.microsoftonline.com/{tenant}",
         "tenant_id": tenant,
         "scopes": ["openid", "profile", "email", "User.Read"],
-        "enabled": bool(settings.MS_CLIENT_ID and settings.MS_TENANT_ID),
+        "enabled": bool(client_id and tenant_id),
+        "redirect_uri": redirect_uri,  # If set, overrides the frontend-derived redirect URI
     }
 
 
@@ -103,14 +108,15 @@ async def verify_azure_token(body: VerifyTokenInput):
     Validate a Microsoft ID token from MSAL, create or link the user in our DB,
     and return our own JWT access + refresh tokens.
     """
-    from jose import jwt as jose_jwt, JWTError
-    from shital.core.fabrics.database import SessionLocal
+    from jose import JWTError
+    from jose import jwt as jose_jwt
     from sqlalchemy import text
-    from shital.capabilities.auth.capabilities import (
-        _create_access_token, _create_refresh_token
-    )
 
-    if not settings.MS_CLIENT_ID:
+    from shital.capabilities.auth.capabilities import _create_access_token, _create_refresh_token
+    from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
+    ms_client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
+    if not ms_client_id:
         raise HTTPException(status_code=501, detail="Azure AD SSO is not configured on this server")
 
     # ── 1. Decode header to get kid ───────────────────────────────────────────
@@ -136,27 +142,34 @@ async def verify_azure_token(body: VerifyTokenInput):
 
     jwk = jwks[kid]
 
-    # ── 3. Validate the token signature + claims ──────────────────────────────
-    tenant = settings.MS_TENANT_ID or "common"
-    valid_issuers = [
-        f"https://login.microsoftonline.com/{tenant}/v2.0",
-        f"https://sts.windows.net/{tenant}/",
-    ]
-    if tenant == "common":
-        # Multi-tenant: accept any issuer (validate iss manually if needed)
-        algorithms = ["RS256"]
-        options = {"verify_iss": False}
-    else:
-        algorithms = ["RS256"]
-        options = {}
+    # ── 3. Build RSA public key from JWK and validate the token ─────────────
+    # python-jose can struggle with Microsoft's JWK format (x5c fields etc).
+    # We extract the RSA public key directly using the cryptography library
+    # (already a dependency) and pass the key object to jose for decoding.
+    try:
+        import base64 as _b64
+
+        from cryptography.hazmat.backends import default_backend as _backend
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+
+        def _b64url_to_int(s: str) -> int:
+            s += "=" * (-len(s) % 4)
+            return int.from_bytes(_b64.urlsafe_b64decode(s), "big")
+
+        public_key = RSAPublicNumbers(
+            e=_b64url_to_int(jwk["e"]),
+            n=_b64url_to_int(jwk["n"]),
+        ).public_key(_backend())
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Failed to build signing key: {e}")
 
     try:
         payload = jose_jwt.decode(
             body.id_token,
-            jwk,
-            algorithms=algorithms,
-            audience=settings.MS_CLIENT_ID,
-            options=options,
+            public_key,
+            algorithms=["RS256"],
+            audience=ms_client_id,
+            options={"verify_iss": False},   # issuer varies by tenant/flow
         )
     except JWTError as e:
         raise HTTPException(status_code=401, detail=f"Token validation failed: {e}")

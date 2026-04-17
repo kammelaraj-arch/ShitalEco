@@ -44,14 +44,15 @@ export async function sendEmail(payload: EmailPayload): Promise<Result<void>> {
 
     const toAddresses = Array.isArray(payload.to) ? payload.to : [payload.to]
 
-    await sgMail.send({
+    const mailData = {
       to: toAddresses,
       from: payload.from ?? DEFAULT_FROM,
-      replyTo: payload.replyTo,
       subject: payload.subject,
       html: payload.html,
-      text: payload.text,
-    })
+      ...(payload.replyTo !== undefined ? { replyTo: payload.replyTo } : {}),
+      ...(payload.text !== undefined ? { text: payload.text } : {}),
+    }
+    await sgMail.send(mailData as Parameters<typeof sgMail.send>[0])
 
     incrementDailyCount()
     log.info({ to: toAddresses, subject: payload.subject }, 'Email sent')

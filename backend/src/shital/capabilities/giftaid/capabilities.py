@@ -3,18 +3,19 @@ Gift Aid capabilities — HMRC Gift Aid submission via SOAP API (Charities Onlin
 Also provides GetAddress.io postcode lookup proxy.
 """
 from __future__ import annotations
-from datetime import date, datetime
+
+import uuid
+from datetime import date
 from decimal import Decimal
 from typing import Any
-import uuid
 
 import httpx
-from pydantic import BaseModel
 import structlog
+from pydantic import BaseModel
 
-from shital.core.dna.registry import capability, Fabric
-from shital.core.space.context import DigitalSpace
+from shital.core.dna.registry import Fabric, capability
 from shital.core.fabrics.config import settings
+from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
 
@@ -50,67 +51,112 @@ class GiftAidSubmissionResult(BaseModel):
     errors: list[str] = []
 
 
-def _build_gift_aid_soap(submission: GiftAidSubmission, correlation_id: str) -> str:
-    """Build HMRC Charities Online SOAP envelope for Gift Aid R68 claim."""
+def _escape_xml(value: str) -> str:
+    """Escape special XML characters in text content."""
+    return (value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;"))
+
+
+def _build_govtalk_xml(submission: GiftAidSubmission, correlation_id: str) -> str:
+    """Build HMRC GovTalk XML envelope for Gift Aid R68 claim (Charities Online format).
+
+    Uses GovTalkMessage wrapper as required by HMRC — NOT SOAP.
+    Reference: https://www.gov.uk/government/publications/charities-online-gift-aid
+    """
     charity_ref = submission.charity_ref or settings.HMRC_GIFT_AID_CHARITY_HMO_REF
     claim_date = (submission.claim_to_date or date.today()).isoformat()
     total = sum(d.amount for d in submission.declarations)
+    user_id = settings.HMRC_GIFT_AID_USER_ID
+    password = settings.HMRC_GIFT_AID_PASSWORD
 
     declarations_xml = "\n".join([
-        f"""        <Repayment>
-          <Donor>
-            <Fore>{d.first_name}</Fore>
-            <Sur>{d.last_name}</Sur>
-            <House>{d.house_name_or_number}</House>
-            <Postcode>{d.postcode}</Postcode>
-          </Donor>
-          <AggDonation>
-            <GiftAidDate>{d.donation_date.isoformat()}</GiftAidDate>
-            <Total>{d.amount:.2f}</Total>
-          </AggDonation>
-        </Repayment>"""
+        f"""            <Repayment>
+              <Donor>
+                <Fore>{_escape_xml(d.first_name)}</Fore>
+                <Sur>{_escape_xml(d.last_name)}</Sur>
+                <House>{_escape_xml(d.house_name_or_number)}</House>
+                <Postcode>{_escape_xml(d.postcode.upper().strip())}</Postcode>
+              </Donor>
+              <AggDonation>
+                <GiftAidDate>{d.donation_date.isoformat()}</GiftAidDate>
+                <Total>{d.amount:.2f}</Total>
+              </AggDonation>
+            </Repayment>"""
         for d in submission.declarations
     ])
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope
-  xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
-  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <SOAP-ENV:Header>
-    <GovTalkDetails xmlns="http://www.govtalk.gov.uk/CM/envelope">
-      <Keys>
-        <Key Type="CorrelationID">{correlation_id}</Key>
-      </Keys>
-      <Authentication>
-        <Method>clear</Method>
-        <Role>principal</Role>
-        <Value>{settings.HMRC_GIFT_AID_PASSWORD}</Value>
-      </Authentication>
-    </GovTalkDetails>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
+<GovTalkMessage xmlns="http://www.govtalk.gov.uk/CM/envelope">
+  <EnvelopeVersion>2.0</EnvelopeVersion>
+  <Header>
+    <MessageDetails>
+      <Class>CHARITIESR68</Class>
+      <Qualifier>request</Qualifier>
+      <Function>submit</Function>
+      <CorrelationID>{correlation_id}</CorrelationID>
+      <Transformation>XML</Transformation>
+      <GatewayTest>0</GatewayTest>
+    </MessageDetails>
+    <SenderDetails>
+      <IDAuthentication>
+        <SenderID>{_escape_xml(user_id)}</SenderID>
+        <Authentication>
+          <Method>clear</Method>
+          <Role>principal</Role>
+          <Value>{_escape_xml(password)}</Value>
+        </Authentication>
+      </IDAuthentication>
+      <EmailAddress></EmailAddress>
+    </SenderDetails>
+  </Header>
+  <GovTalkDetails>
+    <Keys/>
+    <ChannelRouting>
+      <Channel>
+        <URI>https://online.hmrc.gov.uk/charities</URI>
+        <Product>Shital Temple ERP</Product>
+        <Version>1.0</Version>
+      </Channel>
+    </ChannelRouting>
+  </GovTalkDetails>
+  <Body>
     <IRenvelope xmlns="http://www.govtalk.gov.uk/taxation/charities/r68/2">
       <IRheader>
         <Keys>
-          <Key Type="CharityRef">{charity_ref}</Key>
+          <Key Type="CharityRef">{_escape_xml(charity_ref)}</Key>
         </Keys>
         <PeriodEnd>{claim_date}</PeriodEnd>
         <DefaultCurrency>GBP</DefaultCurrency>
-        <IRmark Type="generic">HMRC</IRmark>
+        <IRmark Type="generic">generic</IRmark>
         <Sender>Charity</Sender>
       </IRheader>
       <R68>
         <AuthOfficialCorrelationID>{correlation_id}</AuthOfficialCorrelationID>
         <Claim>
-          <OfficialName>{charity_ref}</OfficialName>
+          <OfficialName>{_escape_xml(charity_ref)}</OfficialName>
           <Amount>{total:.2f}</Amount>
-          {declarations_xml}
+{declarations_xml}
         </Claim>
       </R68>
     </IRenvelope>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>"""
+  </Body>
+</GovTalkMessage>"""
+
+
+def build_gift_aid_xml_preview(submission: GiftAidSubmission, correlation_id: str = "PREVIEW") -> str:
+    """Public wrapper — returns the GovTalk XML that would be sent to HMRC (credentials masked)."""
+    xml = _build_govtalk_xml(submission, correlation_id)
+    # Mask the password in the preview
+    if settings.HMRC_GIFT_AID_PASSWORD:
+        xml = xml.replace(
+            _escape_xml(settings.HMRC_GIFT_AID_PASSWORD),
+            "***MASKED***",
+        )
+    return xml
 
 
 @capability(
@@ -134,18 +180,16 @@ async def submit_gift_aid_claim(
         else "https://test-transaction-engine.tax.service.gov.uk/submission"
     )
 
-    soap_body = _build_gift_aid_soap(submission, correlation_id)
+    govtalk_xml = _build_govtalk_xml(submission, correlation_id)
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 endpoint,
-                content=soap_body.encode("utf-8"),
+                content=govtalk_xml.encode("utf-8"),
                 headers={
                     "Content-Type": "text/xml; charset=utf-8",
-                    "SOAPAction": "submit",
-                    "GovTalk-UserID": settings.HMRC_GIFT_AID_USER_ID,
-                    "GovTalk-Password": settings.HMRC_GIFT_AID_PASSWORD,
+                    "Accept": "text/xml",
                 },
             )
 
@@ -208,17 +252,63 @@ async def _postcodes_io_fallback(postcode: str, reason: str = "") -> dict[str, A
     return {"postcode": postcode, "addresses": [], "error": reason}
 
 
+async def _ideal_postcodes_lookup(postcode: str, api_key: str) -> dict[str, Any]:
+    """Look up UK addresses via Ideal Postcodes API."""
+    clean = postcode.strip().upper().replace(" ", "")
+    url = f"https://api.ideal-postcodes.co.uk/v1/postcodes/{clean}?api_key={api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url)
+        if resp.status_code == 404:
+            return {"postcode": clean, "addresses": [], "error": "Postcode not found"}
+        if resp.status_code in (400, 402):
+            return await _postcodes_io_fallback(postcode, reason=f"ideal-postcodes HTTP {resp.status_code}")
+        if resp.status_code in (401, 403):
+            return await _postcodes_io_fallback(postcode, reason="ideal-postcodes key invalid or limit reached")
+        if resp.status_code != 200:
+            return await _postcodes_io_fallback(postcode, reason=f"ideal-postcodes HTTP {resp.status_code}")
+
+        data = resp.json()
+        addresses = []
+        for r in (data.get("result") or []):
+            parts = [
+                r.get("line_1", ""), r.get("line_2", ""), r.get("line_3", ""),
+                r.get("post_town", ""), r.get("county", ""), r.get("postcode", clean),
+            ]
+            formatted = ", ".join(p for p in parts if p)
+            if formatted:
+                addresses.append(formatted)
+        if not addresses:
+            return await _postcodes_io_fallback(postcode, reason="ideal-postcodes returned empty")
+        return {"postcode": clean, "addresses": addresses, "source": "ideal_postcodes"}
+    except Exception as exc:
+        return await _postcodes_io_fallback(postcode, reason=str(exc))
+
+
 @capability(
     name="lookup_postcode",
-    description="Look up UK addresses by postcode using GetAddress.io. Returns list of formatted addresses.",
+    description="Look up UK addresses by postcode using the configured provider (GetAddress.io or Ideal Postcodes). Returns list of formatted addresses.",
     fabric=Fabric.PAYMENTS,
     requires=[],
     tags=["address", "gift_aid"],
 )
 async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
-    """Proxy GetAddress.io lookup — returns formatted address list."""
-    if not settings.GETADDRESS_API_KEY:
-        # Return mock addresses for development
+    """Proxy postcode lookup — provider determined by ADDRESS_LOOKUP_PROVIDER setting."""
+    from shital.core.fabrics.secrets import SecretsManager
+
+    provider = await SecretsManager.get("ADDRESS_LOOKUP_PROVIDER", fallback="") or "getaddress"
+
+    # ── Ideal Postcodes ──────────────────────────────────────────────────────
+    if provider == "ideal_postcodes":
+        api_key = await SecretsManager.get("IDEAL_POSTCODES_API_KEY", fallback="")
+        if not api_key:
+            # Key not set — fall back to postcodes.io
+            return await _postcodes_io_fallback(postcode, reason="IDEAL_POSTCODES_API_KEY not set")
+        return await _ideal_postcodes_lookup(postcode, api_key)
+
+    # ── GetAddress.io (default) ──────────────────────────────────────────────
+    api_key = await SecretsManager.get("GETADDRESS_API_KEY", fallback="") or settings.GETADDRESS_API_KEY
+    if not api_key:
         return {
             "postcode": postcode.upper().strip(),
             "addresses": [
@@ -231,8 +321,7 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
 
     # getAddress.io requires lowercase postcode with NO space (e.g. "hp79nq")
     clean = postcode.strip().lower().replace(" ", "")
-    # Without expand=true, addresses are already formatted strings — simpler and more reliable
-    url = f"https://api.getaddress.io/find/{clean}?api-key={settings.GETADDRESS_API_KEY}"
+    url = f"https://api.getaddress.io/find/{clean}?api-key={api_key}"
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -241,8 +330,6 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
         if resp.status_code == 400:
             return {"postcode": postcode, "addresses": [], "error": "Invalid postcode format"}
         if resp.status_code in (401, 403, 404):
-            # 401 = bad key, 403 = no permission, 404 = not found or key issue
-            # Always fall back to postcodes.io so the user gets something useful
             return await _postcodes_io_fallback(postcode, reason=f"getAddress HTTP {resp.status_code}")
         if resp.status_code in (402, 429):
             return await _postcodes_io_fallback(postcode, reason="getAddress limit reached")
@@ -250,20 +337,15 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
             return await _postcodes_io_fallback(postcode, reason=f"getAddress HTTP {resp.status_code}")
 
         data = resp.json()
-        # Non-expanded format: each address is a comma-separated string like
-        # "10 Watkin Terrace, , , , , Northampton, Northamptonshire"
-        # Append the postcode and strip empty parts.
         pc = postcode.upper().strip()
         raw = data.get("addresses", [])
         addresses = []
         for a in raw:
             if isinstance(a, str):
-                # Clean up empty segments and append postcode
                 parts = [p.strip() for p in a.split(",") if p.strip()]
                 parts.append(pc)
                 addresses.append(", ".join(parts))
             elif isinstance(a, dict):
-                # expand=true dict fallback
                 parts = [
                     a.get("line_1", ""), a.get("line_2", ""), a.get("line_3", ""),
                     a.get("town_or_city", ""), a.get("county", ""), pc,

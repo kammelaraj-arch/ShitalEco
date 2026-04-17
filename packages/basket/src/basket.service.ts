@@ -78,7 +78,7 @@ export class BasketService {
     userId?: string,
     sessionId?: string,
   ): Promise<Result<{ id: string }>> {
-    const ctxLog = createContextLogger({ module: 'basket.service', userId })
+    const ctxLog = createContextLogger({ module: 'basket.service', ...(userId ? { userId } : {}) })
 
     return tryAsync(async () => {
       if (!userId && !sessionId) {
@@ -178,7 +178,7 @@ export class BasketService {
               quantity: newQty,
               totalPrice: newTotal,
               unitPrice,
-              ...(metadata !== undefined ? { metadata } : {}),
+              ...(metadata !== undefined ? { metadata: metadata as object } : {}),
             },
           })
 
@@ -202,7 +202,7 @@ export class BasketService {
           quantity,
           unitPrice,
           totalPrice,
-          metadata: metadata ?? null,
+          ...(metadata !== undefined ? { metadata: metadata as object } : {}),
         },
       })
 

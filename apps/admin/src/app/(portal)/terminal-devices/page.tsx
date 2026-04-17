@@ -1,8 +1,8 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+import { apiFetch } from '@/lib/api'
+import { BranchSelect } from '@/components/ui/SearchSelect'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,10 +14,12 @@ interface TerminalDevice {
   user_name: string
   user_email: string
   label: string
-  provider: 'stripe_terminal' | 'square' | 'cash'
+  provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash'
   stripe_reader_id: string
   stripe_location_id: string
   square_device_id: string
+  clover_device_id: string
+  sumup_reader_serial: string
   device_type: string
   serial_number: string
   status: 'online' | 'offline' | 'busy'
@@ -30,12 +32,14 @@ interface TerminalDevice {
 
 interface FormState {
   branch_id: string
-  branch_name: string
+  branch_name: string  // derived from branch selection, kept for backwards compat
   label: string
   provider: string
   stripe_reader_id: string
   stripe_location_id: string
   square_device_id: string
+  clover_device_id: string
+  sumup_reader_serial: string
   device_type: string
   serial_number: string
   user_id: string
@@ -49,6 +53,7 @@ const DEFAULT_LOCATION_ID = 'tml_Gcuz0gCsvSvQZg'
 const EMPTY_FORM: FormState = {
   branch_id: '', branch_name: '', label: '', provider: 'stripe_terminal',
   stripe_reader_id: '', stripe_location_id: DEFAULT_LOCATION_ID, square_device_id: '',
+  clover_device_id: '', sumup_reader_serial: '',
   device_type: '', serial_number: '',
   user_id: '', user_name: '', user_email: '', notes: '',
 }
@@ -69,6 +74,8 @@ function providerBadge(provider: string) {
   const map: Record<string, { icon: string; label: string; cls: string }> = {
     stripe_terminal: { icon: '⚡', label: 'Stripe Terminal', cls: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/20' },
     square:          { icon: '◼', label: 'Square',          cls: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
+    clover:          { icon: '🍀', label: 'Clover Flex',     cls: 'bg-orange-500/15 text-orange-400 border-orange-500/20' },
+    sumup:           { icon: '💳', label: 'SumUp',           cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20' },
     cash:            { icon: '💵', label: 'Cash',            cls: 'bg-green-500/15 text-green-400 border-green-500/20' },
   }
   return map[provider] ?? { icon: '?', label: provider, cls: 'bg-white/10 text-white/50 border-white/10' }
@@ -99,6 +106,8 @@ function DeviceModal({
           stripe_reader_id: device.stripe_reader_id,
           stripe_location_id: device.stripe_location_id,
           square_device_id: device.square_device_id,
+          clover_device_id: device.clover_device_id,
+          sumup_reader_serial: device.sumup_reader_serial,
           device_type: device.device_type,   serial_number: device.serial_number,
           user_id: device.user_id ?? '',     user_name: device.user_name,
           user_email: device.user_email,     notes: device.notes,
@@ -119,14 +128,9 @@ function DeviceModal({
     setSaving(true)
     setError('')
     try {
-      const url = isEdit ? `${API}/terminal-devices/${device!.id}` : `${API}/terminal-devices/`
+      const url = isEdit ? `/terminal-devices/${device!.id}` : `/terminal-devices/`
       const method = isEdit ? 'PUT' : 'POST'
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      if (!res.ok) throw new Error(await res.text())
+      await apiFetch(url, { method, body: JSON.stringify(form) })
       onSaved()
       onClose()
     } catch (e: any) {
@@ -139,21 +143,21 @@ function DeviceModal({
   const PROVIDERS = [
     { id: 'stripe_terminal', label: 'Stripe Terminal (WisePOS E)', icon: '⚡' },
     { id: 'square',          label: 'Square Terminal',             icon: '◼' },
-    { id: 'cash',            label: 'Cash / Manual',              icon: '💵' },
+    { id: 'clover',          label: 'Clover Flex',                 icon: '🍀' },
+    { id: 'sumup',           label: 'SumUp Solo',                  icon: '💳' },
+    { id: 'cash',            label: 'Cash / Manual',               icon: '💵' },
   ]
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}
-    >
+    <>
       <motion.div
-        initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-        className="w-full max-w-xl rounded-2xl overflow-hidden"
-        style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.08)' }}
-        onClick={e => e.stopPropagation()}
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full sm:max-w-[560px] z-50 flex flex-col overflow-hidden"
+        style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
@@ -165,7 +169,7 @@ function DeviceModal({
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto">
           {error && (
             <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>
           )}
@@ -173,7 +177,7 @@ function DeviceModal({
           {/* Provider */}
           <div>
             <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider mb-2">Provider</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {PROVIDERS.map(p => (
                 <button
                   key={p.id}
@@ -194,10 +198,18 @@ function DeviceModal({
           {/* Label */}
           <Field label="Device Label *" value={form.label} onChange={v => set('label', v)} placeholder="e.g. Wembley Kiosk 1" />
 
-          {/* Branch */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Branch ID *" value={form.branch_id} onChange={v => set('branch_id', v)} placeholder="wembley" />
-            <Field label="Branch Name" value={form.branch_name} onChange={v => set('branch_name', v)} placeholder="Wembley Temple" />
+          {/* Branch — search & select */}
+          <div>
+            <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider mb-2">Branch *</label>
+            <BranchSelect
+              value={form.branch_id}
+              onChange={(branchId, branch) => setForm(f => ({
+                ...f,
+                branch_id: branchId,
+                branch_name: branch?.name ?? f.branch_name,
+              }))}
+              placeholder="Search branch…"
+            />
           </div>
 
           {/* Provider-specific IDs */}
@@ -209,6 +221,12 @@ function DeviceModal({
           )}
           {form.provider === 'square' && (
             <Field label="Square Device ID" value={form.square_device_id} onChange={v => set('square_device_id', v)} placeholder="device_xxxxxxxxx" mono />
+          )}
+          {form.provider === 'clover' && (
+            <Field label="Clover Device ID" value={form.clover_device_id} onChange={v => set('clover_device_id', v)} placeholder="CLOVER_DEVICE_XXXXXXXXX" mono />
+          )}
+          {form.provider === 'sumup' && (
+            <Field label="SumUp Reader Serial" value={form.sumup_reader_serial} onChange={v => set('sumup_reader_serial', v)} placeholder="e.g. SNR-XXXXXXX" mono />
           )}
 
           {/* Hardware */}
@@ -256,7 +274,7 @@ function DeviceModal({
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </>
   )
 }
 
@@ -298,12 +316,10 @@ function AssignUserModal({
     setSaving(true)
     setError('')
     try {
-      const res = await fetch(`${API}/terminal-devices/${device.id}/assign`, {
+      await apiFetch(`/terminal-devices/${device.id}/assign`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, user_name: userName, user_email: userEmail }),
       })
-      if (!res.ok) throw new Error(await res.text())
       onSaved()
       onClose()
     } catch (e: any) {
@@ -314,23 +330,18 @@ function AssignUserModal({
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-        className="w-full max-w-sm rounded-2xl overflow-hidden"
-        style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.08)' }}
-        onClick={e => e.stopPropagation()}
-      >
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full max-w-sm z-50 flex flex-col overflow-hidden"
+        style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}>
         <div className="px-6 py-4 border-b border-white/5">
           <h2 className="text-white font-black">Assign Staff to Device</h2>
           <p className="text-white/40 text-xs mt-0.5">{device.label}</p>
         </div>
-        <div className="px-6 py-5 space-y-3">
+        <div className="px-6 py-5 space-y-3 flex-1 overflow-y-auto">
           {error && <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>}
           <Field label="User ID *" value={userId} onChange={setUserId} placeholder="UUID or staff ID" mono />
           <Field label="Full Name" value={userName} onChange={setUserName} placeholder="e.g. Priya Patel" />
@@ -343,18 +354,25 @@ function AssignUserModal({
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </>
   )
 }
 
 // ─── Sync modal ───────────────────────────────────────────────────────────────
 
 function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [branches, setBranches] = useState<Array<{branch_id: string; name: string}>>([])
   const [branchId, setBranchId] = useState('')
   const [locationId, setLocationId] = useState(DEFAULT_LOCATION_ID)
   const [syncing, setSyncing] = useState(false)
   const [result, setResult] = useState<{ synced: number; created: number; updated: number } | null>(null)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    apiFetch<{ branches: Array<{branch_id: string; name: string}> }>('/branches')
+      .then(d => setBranches(d.branches || []))
+      .catch(() => {})
+  }, [])
 
   async function doSync() {
     setSyncing(true)
@@ -364,54 +382,61 @@ function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
       const params = new URLSearchParams()
       if (branchId) params.set('branch_id', branchId)
       if (locationId) params.set('location_id', locationId)
-      const res = await fetch(`${API}/terminal-devices/sync-stripe?${params}`, { method: 'POST' })
-      if (!res.ok) throw new Error(await res.text())
-      const data = await res.json()
+      const data = await apiFetch<{ synced: number; created: number; updated: number }>(
+        `/terminal-devices/sync-stripe?${params}`, { method: 'POST' }
+      )
       setResult(data)
       onDone()
     } catch (e: any) {
-      setError(e.message || 'Sync failed')
+      const msg: string = e.message || 'Sync failed'
+      if (msg.includes('401') || msg.includes('Not authenticated')) {
+        setError('Session expired — please refresh the page and log in again.')
+      } else {
+        setError(msg)
+      }
     } finally {
       setSyncing(false)
     }
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-        className="w-full max-w-sm rounded-2xl overflow-hidden"
-        style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.08)' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="px-6 py-4 border-b border-white/5">
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full sm:max-w-sm z-50 flex flex-col overflow-hidden"
+        style={{ background: '#0f0008', borderLeft: '1px solid rgba(185,28,28,0.3)' }}>
+        <div className="px-5 py-4 border-b border-white/5">
           <h2 className="text-white font-black">⚡ Sync from Stripe</h2>
           <p className="text-white/40 text-xs mt-0.5">Pull registered readers from the Stripe API</p>
         </div>
-        <div className="px-6 py-5 space-y-3">
+        <div className="px-5 py-5 space-y-3 flex-1 overflow-y-auto">
           {error && <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>}
           {result && (
             <div className="bg-green-500/15 border border-green-500/20 text-green-400 text-sm px-4 py-3 rounded-xl">
               ✓ Synced {result.synced} readers — {result.created} new, {result.updated} updated
             </div>
           )}
-          <Field label="Assign to Branch ID (optional)" value={branchId} onChange={setBranchId} placeholder="wembley" />
+          <div>
+            <label className="block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5">Assign to Branch (optional)</label>
+            <select value={branchId} onChange={e => setBranchId(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-saffron-400/50">
+              <option value="">Leave unassigned</option>
+              {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
+            </select>
+          </div>
           <Field label="Stripe Location ID (optional)" value={locationId} onChange={setLocationId} placeholder={DEFAULT_LOCATION_ID} mono />
-          <p className="text-white/25 text-xs">Leave blank to use defaults from server config. New readers will be marked unassigned if no branch is provided.</p>
+          <p className="text-white/25 text-xs">Leave location blank to use server default. Readers will be assigned to the selected branch.</p>
         </div>
-        <div className="flex gap-3 px-6 py-4 border-t border-white/5">
-          <button onClick={onClose} className="flex-1 py-2 rounded-xl bg-white/5 text-white/60 text-sm font-semibold">Close</button>
-          <button onClick={doSync} disabled={syncing} className="flex-1 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white text-sm font-black disabled:opacity-50">
+        <div className="flex gap-3 px-5 py-4 border-t border-white/5">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 text-white/60 text-sm font-semibold">Close</button>
+          <button onClick={doSync} disabled={syncing} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white text-sm font-black disabled:opacity-50">
             {syncing ? 'Syncing…' : 'Sync Now'}
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </>
   )
 }
 
@@ -435,8 +460,7 @@ export default function TerminalDevicesPage() {
       if (filterBranch) params.set('branch_id', filterBranch)
       if (filterProvider) params.set('provider', filterProvider)
       params.set('active_only', showInactive ? 'false' : 'true')
-      const res = await fetch(`${API}/terminal-devices/?${params}`)
-      const data = await res.json()
+      const data = await apiFetch<{ devices: TerminalDevice[] }>(`/terminal-devices/?${params}`)
       setDevices(data.devices ?? [])
     } catch {
       setDevices([])
@@ -449,14 +473,14 @@ export default function TerminalDevicesPage() {
 
   async function deleteDevice(id: string) {
     if (!confirm('Deactivate this device? It can be re-enabled by editing.')) return
-    await fetch(`${API}/terminal-devices/${id}`, { method: 'DELETE' })
+    await apiFetch(`/terminal-devices/${id}`, { method: 'DELETE' })
     load()
   }
 
   async function refreshStatus(device: TerminalDevice) {
     setRefreshing(device.id)
     try {
-      await fetch(`${API}/terminal-devices/${device.id}/refresh-status`, { method: 'POST' })
+      await apiFetch(`/terminal-devices/${device.id}/refresh-status`, { method: 'POST' })
       load()
     } finally {
       setRefreshing(null)
@@ -492,7 +516,7 @@ export default function TerminalDevicesPage() {
       </div>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: 'Total Devices', value: devices.length, icon: '🖥️', cls: 'from-amber-600 to-orange-500' },
           { label: 'Online Now',    value: devices.filter(d => d.status === 'online').length, icon: '🟢', cls: 'from-green-600 to-emerald-500' },
@@ -715,7 +739,7 @@ export default function TerminalDevicesPage() {
       {/* Setup guide */}
       <div className="glass rounded-2xl p-6">
         <h3 className="text-white font-black text-base mb-4">📋 Setup Guide</h3>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
             {
               step: '1', title: 'Register Stripe Location',

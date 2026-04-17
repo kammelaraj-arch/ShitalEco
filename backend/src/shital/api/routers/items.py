@@ -4,14 +4,17 @@ Admin endpoints require auth. Kiosk endpoints are public (no auth).
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace, OptionalSpace
@@ -21,8 +24,9 @@ router = APIRouter(prefix="/items", tags=["items"])
 
 # ─── Enums ────────────────────────────────────────────────────────────────────
 
-class ItemCategory(str, Enum):
+class ItemCategory(StrEnum):
     GENERAL_DONATION = "GENERAL_DONATION"
+    QUICK_DONATION = "QUICK_DONATION"
     SOFT_DONATION = "SOFT_DONATION"
     PROJECT_DONATION = "PROJECT_DONATION"
     SHOP = "SHOP"
@@ -30,14 +34,14 @@ class ItemCategory(str, Enum):
     SPONSORSHIP = "SPONSORSHIP"
 
 
-class ItemScope(str, Enum):
+class ItemScope(StrEnum):
     GLOBAL = "GLOBAL"
     BRANCH = "BRANCH"
 
 
 # ─── Pydantic Models ──────────────────────────────────────────────────────────
 
-class DisplayChannel(str, Enum):
+class DisplayChannel(StrEnum):
     KIOSK = "kiosk"
     WEB = "web"
     BOTH = "both"
@@ -58,7 +62,8 @@ class ItemBase(BaseModel):
     gift_aid_eligible: bool = False
     is_active: bool = True
     scope: ItemScope = ItemScope.GLOBAL
-    branch_id: str = ""
+    branch_id: str | None = ""
+    project_id: str | None = ""
     stock_qty: int | None = None
     sort_order: int = 0
     metadata_json: dict = {}
@@ -89,6 +94,7 @@ class ItemUpdate(BaseModel):
     is_active: bool | None = None
     scope: ItemScope | None = None
     branch_id: str | None = None
+    project_id: str | None = None
     stock_qty: int | None = None
     sort_order: int | None = None
     metadata_json: dict | None = None
@@ -142,8 +148,9 @@ async def ping_items():
 @router.get("/schema-check")
 async def schema_check():
     """Return catalog_items column list from information_schema."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     try:
         async with SessionLocal() as db:
             r = await db.execute(text("""
@@ -161,11 +168,13 @@ async def schema_check():
 async def debug_conn():
     """Raw Postgres protocol test after TLS to see what server sends post-StartupMessage."""
     try:
-        import asyncpg
-        import ssl
-        import socket
         import asyncio
+        import socket
+        import ssl
         from urllib.parse import urlparse
+
+        import asyncpg
+
         from shital.core.fabrics.config import settings
 
         raw_url = settings.DATABASE_URL
@@ -223,6 +232,153 @@ async def debug_conn():
         return {"ok": False, "outer_error": f"{type(outer).__name__}: {outer}"}
 
 
+@router.get("/export.csv")
+async def export_items_csv(ctx: CurrentSpace) -> StreamingResponse:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(status_code=403, detail="ADMIN required")
+
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            SELECT name, name_gu, name_hi, name_te, description, category,
+                   price, unit, emoji, image_url, gift_aid_eligible,
+                   is_active, is_live, scope, branch_id, project_id,
+                   stock_qty, sort_order, display_channel
+            FROM catalog_items
+            WHERE deleted_at IS NULL
+            ORDER BY sort_order ASC, category, name
+        """))
+        rows = result.mappings().all()
+
+    buf = io.StringIO()
+    buf.write('\ufeff')  # UTF-8 BOM — Excel reads Gujarati/Hindi correctly
+    writer = csv.writer(buf)
+    writer.writerow([
+        "name", "name_gu", "name_hi", "name_te", "description", "category",
+        "price", "unit", "emoji", "image_url", "gift_aid_eligible",
+        "is_active", "is_live", "scope", "branch_id", "project_id",
+        "stock_qty", "sort_order", "display_channel",
+    ])
+    for r in rows:
+        img = r["image_url"] or ""
+        if img.startswith("data:"):
+            img = ""
+        writer.writerow([
+            r["name"], r["name_gu"] or "", r["name_hi"] or "", r["name_te"] or "",
+            r["description"] or "", r["category"],
+            float(r["price"] or 0), r["unit"] or "", r["emoji"] or "", img,
+            "true" if r["gift_aid_eligible"] else "false",
+            "true" if r["is_active"] else "false",
+            "true" if r["is_live"] else "false",
+            r["scope"] or "GLOBAL", r["branch_id"] or "", r["project_id"] or "",
+            r["stock_qty"] if r["stock_qty"] is not None else "",
+            r["sort_order"] or 0, r["display_channel"] or "both",
+        ])
+
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="catalog-items.csv"'},
+    )
+
+
+@router.post("/import")
+async def import_items_csv(ctx: CurrentSpace, file: UploadFile = File(...)) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(status_code=403, detail="ADMIN required")
+
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        content = raw.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(content))
+    imported = 0
+    errors: list[dict[str, Any]] = []
+    now = datetime.utcnow()
+
+    async with SessionLocal() as db:
+        for row_num, row in enumerate(reader, start=2):
+            try:
+                name = (row.get("name") or "").strip()
+                if not name:
+                    errors.append({"row": row_num, "error": "Missing name"})
+                    continue
+
+                category = (row.get("category") or "GENERAL_DONATION").strip().upper()
+                price_str = (row.get("price") or "0").strip()
+                try:
+                    price = float(price_str)
+                except ValueError:
+                    errors.append({"row": row_num, "error": f"Invalid price: {price_str}"})
+                    continue
+
+                def _bool(val: str, default: bool = True) -> bool:
+                    return (val or ("true" if default else "false")).strip().lower() not in ("false", "0", "no")
+
+                gift_aid = _bool(row.get("gift_aid_eligible", ""), False)
+                is_active = _bool(row.get("is_active", ""), True)
+                is_live = _bool(row.get("is_live", ""), True)
+
+                stock_qty_str = (row.get("stock_qty") or "").strip()
+                stock_qty = int(stock_qty_str) if stock_qty_str.isdigit() else None
+                sort_order = 0
+                try:
+                    sort_order = int((row.get("sort_order") or "0").strip())
+                except ValueError:
+                    pass
+
+                await db.execute(text("""
+                    INSERT INTO catalog_items
+                        (id, name, name_gu, name_hi, name_te, description, category,
+                         price, currency, unit, emoji, image_url,
+                         gift_aid_eligible, is_active, is_live, scope, branch_id, project_id,
+                         stock_qty, sort_order, display_channel,
+                         metadata_json, branch_stock,
+                         created_at, updated_at)
+                    VALUES
+                        (gen_random_uuid(),
+                         :name, :name_gu, :name_hi, :name_te, :desc, :cat,
+                         :price, 'GBP', :unit, :emoji, :img,
+                         :ga, :active, :live, :scope, :bid, :pid,
+                         :stock, :sort, :channel,
+                         '{}', '{}',
+                         :now, :now)
+                """), {
+                    "name": name,
+                    "name_gu": (row.get("name_gu") or "").strip(),
+                    "name_hi": (row.get("name_hi") or "").strip(),
+                    "name_te": (row.get("name_te") or "").strip(),
+                    "desc": (row.get("description") or "").strip(),
+                    "cat": category,
+                    "price": price,
+                    "unit": (row.get("unit") or "").strip(),
+                    "emoji": (row.get("emoji") or "").strip(),
+                    "img": (row.get("image_url") or "").strip(),
+                    "ga": gift_aid, "active": is_active, "live": is_live,
+                    "scope": (row.get("scope") or "GLOBAL").strip().upper(),
+                    "bid": (row.get("branch_id") or "").strip(),
+                    "pid": (row.get("project_id") or "").strip(),
+                    "stock": stock_qty, "sort": sort_order,
+                    "channel": (row.get("display_channel") or "both").strip().lower(),
+                    "now": now,
+                })
+                imported += 1
+            except Exception as exc:
+                errors.append({"row": row_num, "error": str(exc)[:120]})
+
+        if imported > 0:
+            await db.commit()
+
+    return {"imported": imported, "skipped": len(errors), "errors": errors[:20]}
+
+
 @router.get("/")
 async def list_items(
     ctx: OptionalSpace,
@@ -231,8 +387,9 @@ async def list_items(
     scope: str = "",
     active_only: bool = True,
 ):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -255,9 +412,9 @@ async def list_items(
         async with SessionLocal() as db:
             result = await db.execute(
                 text(f"""
-                    SELECT id, name, name_gu, name_hi, '' AS name_te, description, category,
+                    SELECT id, name, name_gu, name_hi, name_te, description, category,
                            price, currency, unit, emoji, image_url,
-                           gift_aid_eligible, is_active, scope, branch_id,
+                           gift_aid_eligible, is_active, scope, branch_id, project_id,
                            stock_qty, sort_order, metadata_json,
                            available_from, available_until, display_channel, branch_stock, is_live,
                            created_at, updated_at
@@ -289,8 +446,9 @@ async def list_items(
 @router.get("/kiosk/soft-donations")
 async def kiosk_soft_donations(branch_id: str = "main"):
     """Public: SOFT_DONATION items for a branch (global + branch-specific)."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -319,8 +477,9 @@ async def kiosk_soft_donations(branch_id: str = "main"):
 @router.get("/kiosk/projects")
 async def kiosk_projects(branch_id: str = "main"):
     """Public: PROJECT_DONATION items + project list."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -359,8 +518,9 @@ async def kiosk_projects(branch_id: str = "main"):
 @router.get("/kiosk/shop")
 async def kiosk_shop(branch_id: str = "main"):
     """Public: SHOP items for a branch."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -395,8 +555,9 @@ async def kiosk_shop(branch_id: str = "main"):
 @router.get("/kiosk/general-donations")
 async def kiosk_general_donations():
     """Public: GENERAL_DONATION preset items."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
@@ -422,17 +583,19 @@ async def kiosk_general_donations():
 
 @router.get("/{item_id}")
 async def get_item(item_id: str, ctx: OptionalSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     try:
         async with SessionLocal() as db:
             result = await db.execute(
                 text("""
-                    SELECT id, name, name_gu, name_hi, description, category,
+                    SELECT id, name, name_gu, name_hi, name_te, description, category,
                            price, currency, unit, emoji, image_url,
-                           gift_aid_eligible, is_active, scope, branch_id,
+                           gift_aid_eligible, is_active, scope, branch_id, project_id,
                            stock_qty, sort_order, metadata_json,
+                           available_from, available_until, display_channel, branch_stock, is_live,
                            created_at, updated_at
                     FROM catalog_items
                     WHERE id = :id AND deleted_at IS NULL
@@ -450,65 +613,75 @@ async def get_item(item_id: str, ctx: OptionalSpace):
 
 @router.post("/")
 async def create_item(body: ItemCreate, ctx: OptionalSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     item_id = str(uuid.uuid4())
     now = datetime.utcnow()
 
-    async with SessionLocal() as db:
-        await db.execute(
-            text("""
-                INSERT INTO catalog_items
-                (id, name, name_gu, name_hi, name_te, description, category, price, currency,
-                 unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id,
-                 stock_qty, sort_order, metadata_json,
-                 available_from, available_until, display_channel, branch_stock, is_live,
-                 created_at, updated_at)
-                VALUES
-                (:id, :name, :name_gu, :name_hi, :name_te, :desc, :category, :price, :currency,
-                 :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id,
-                 :stock_qty, :sort_order, :metadata_json::jsonb,
-                 :available_from, :available_until, :display_channel, :branch_stock::jsonb, :is_live,
-                 :now, :now)
-            """),
-            {
-                "id": item_id,
-                "name": body.name,
-                "name_gu": body.name_gu,
-                "name_hi": body.name_hi,
-                "name_te": body.name_te,
-                "desc": body.description,
-                "category": body.category.value,
-                "price": str(body.price),
-                "currency": body.currency,
-                "unit": body.unit,
-                "emoji": body.emoji,
-                "image_url": body.image_url,
-                "gift_aid": body.gift_aid_eligible,
-                "is_active": body.is_active,
-                "scope": body.scope.value,
-                "branch_id": body.branch_id,
-                "stock_qty": body.stock_qty,
-                "sort_order": body.sort_order,
-                "metadata_json": json.dumps(body.metadata_json),
-                "available_from": body.available_from,
-                "available_until": body.available_until,
-                "display_channel": body.display_channel.value,
-                "branch_stock": json.dumps(body.branch_stock),
-                "is_live": body.is_live,
-                "now": now,
-            },
-        )
-        await db.commit()
+    # Coerce None to empty string — branch_id/project_id are NOT NULL DEFAULT ''
+    branch_id = body.branch_id or ''
+    project_id = body.project_id or ''
+
+    try:
+        async with SessionLocal() as db:
+            await db.execute(
+                text("""
+                    INSERT INTO catalog_items
+                    (id, name, name_gu, name_hi, name_te, description, category, price, currency,
+                     unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id, project_id,
+                     stock_qty, sort_order, metadata_json,
+                     available_from, available_until, display_channel, branch_stock, is_live,
+                     created_at, updated_at)
+                    VALUES
+                    (:id, :name, :name_gu, :name_hi, :name_te, :desc, :category, :price, :currency,
+                     :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id, :project_id,
+                     :stock_qty, :sort_order, :metadata_json,
+                     :available_from, :available_until, :display_channel, :branch_stock, :is_live,
+                     :now, :now)
+                """),
+                {
+                    "id": item_id,
+                    "name": body.name,
+                    "name_gu": body.name_gu,
+                    "name_hi": body.name_hi,
+                    "name_te": body.name_te,
+                    "desc": body.description,
+                    "category": body.category.value,
+                    "price": str(body.price),
+                    "currency": body.currency,
+                    "unit": body.unit,
+                    "emoji": body.emoji,
+                    "image_url": body.image_url,
+                    "gift_aid": body.gift_aid_eligible,
+                    "is_active": body.is_active,
+                    "scope": body.scope.value,
+                    "branch_id": branch_id,
+                    "project_id": project_id,
+                    "stock_qty": body.stock_qty,
+                    "sort_order": body.sort_order,
+                    "metadata_json": json.dumps(body.metadata_json),
+                    "available_from": body.available_from,
+                    "available_until": body.available_until,
+                    "display_channel": body.display_channel.value,
+                    "branch_stock": json.dumps(body.branch_stock),
+                    "is_live": body.is_live,
+                    "now": now,
+                },
+            )
+            await db.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
     return {"id": item_id, "created": True}
 
 
 @router.put("/{item_id}")
 async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     # Build dynamic SET clause from non-None fields
     updates: dict[str, Any] = {}
@@ -527,7 +700,8 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
         "gift_aid_eligible": body.gift_aid_eligible,
         "is_active": body.is_active,
         "scope": body.scope.value if body.scope else None,
-        "branch_id": body.branch_id,
+        "branch_id": body.branch_id,  # None = skip; '' = clear
+        "project_id": body.project_id,  # None = skip; '' = clear
         "stock_qty": body.stock_qty,
         "sort_order": body.sort_order,
         "available_from": body.available_from,
@@ -552,7 +726,7 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
     updates["id"] = item_id
 
     set_clause = ", ".join(
-        f"{col} = :{col}" + ("::jsonb" if col == "metadata_json" else "")
+        f"{col} = :{col}"
         for col in updates
         if col != "id"
     )
@@ -567,7 +741,7 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
             updates,
         )
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Item not found")
 
     return {"id": item_id, "updated": True}
@@ -576,8 +750,9 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
 @router.delete("/{item_id}")
 async def delete_item(item_id: str, ctx: OptionalSpace):
     """Soft delete — sets deleted_at timestamp."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
 
     now = datetime.utcnow()
 
@@ -591,7 +766,7 @@ async def delete_item(item_id: str, ctx: OptionalSpace):
             {"now": now, "id": item_id},
         )
         await db.commit()
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Item not found")
 
     return {"id": item_id, "deleted": True}
@@ -698,8 +873,9 @@ _SEED_ITEMS: list[dict] = [
 @router.get("/kiosk/sponsorship")
 async def kiosk_sponsorship(branch_id: str = "main"):
     """Public: SPONSORSHIP items."""
-    from shital.core.fabrics.database import SessionLocal
     from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     try:
         async with SessionLocal() as db:
             result = await db.execute(
@@ -727,71 +903,77 @@ async def kiosk_sponsorship(branch_id: str = "main"):
 @router.post("/seed")
 async def seed_items(force: bool = False):
     """Seed the catalog_items table with default items. Use force=true to replace existing data."""
-    from shital.core.fabrics.database import SessionLocal
+    import traceback
+
     from sqlalchemy import text
 
-    async with SessionLocal() as db:
-        # Check if table already has data
-        count_result = await db.execute(
-            text("SELECT COUNT(*) AS cnt FROM catalog_items WHERE deleted_at IS NULL")
-        )
-        count_row = count_result.mappings().first()
-        existing_count = count_row["cnt"] if count_row else 0
+    from shital.core.fabrics.database import SessionLocal
 
-        if existing_count > 0 and not force:
-            return {
-                "seeded": False,
-                "message": f"Table already contains {existing_count} items. Use force=true to replace.",
-                "existing_count": existing_count,
-            }
-
-        if force and existing_count > 0:
-            # Soft-delete all existing items
-            await db.execute(
-                text("UPDATE catalog_items SET deleted_at = NOW() WHERE deleted_at IS NULL")
+    try:
+        async with SessionLocal() as db:
+            # Check if table already has data
+            count_result = await db.execute(
+                text("SELECT COUNT(*) AS cnt FROM catalog_items WHERE deleted_at IS NULL")
             )
+            count_row = count_result.mappings().first()
+            existing_count = count_row["cnt"] if count_row else 0
+
+            if existing_count > 0 and not force:
+                return {
+                    "seeded": False,
+                    "message": f"Table already contains {existing_count} items. Use force=true to replace.",
+                    "existing_count": existing_count,
+                }
+
+            if force and existing_count > 0:
+                # Soft-delete all existing items
+                await db.execute(
+                    text("UPDATE catalog_items SET deleted_at = NOW() WHERE deleted_at IS NULL")
+                )
+                await db.commit()
+
+            now = datetime.utcnow()
+            inserted = 0
+
+            for item in _SEED_ITEMS:
+                item_id = str(uuid.uuid4())
+                meta = item.get("metadata_json", {})
+                await db.execute(
+                    text("""
+                        INSERT INTO catalog_items
+                        (id, name, name_gu, name_hi, description, category, price, currency,
+                         unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id,
+                         stock_qty, sort_order, metadata_json, created_at, updated_at)
+                        VALUES
+                        (:id, :name, :name_gu, :name_hi, :description, :category, :price, 'GBP',
+                         :unit, :emoji, :image_url, :gift_aid, true, 'GLOBAL', '',
+                         NULL, :sort_order, CAST(:metadata_json AS JSONB), :now, :now)
+                    """),
+                    {
+                        "id": item_id,
+                        "name": item["name"],
+                        "name_gu": item.get("name_gu", ""),
+                        "name_hi": item.get("name_hi", ""),
+                        "description": item.get("description", ""),
+                        "category": item["category"],
+                        "price": item["price"],
+                        "unit": item.get("unit", ""),
+                        "emoji": item.get("emoji", ""),
+                        "image_url": item.get("image_url", ""),
+                        "gift_aid": item.get("gift_aid_eligible", False),
+                        "sort_order": item.get("sort_order", 0),
+                        "metadata_json": json.dumps(meta),
+                        "now": now,
+                    },
+                )
+                inserted += 1
+
             await db.commit()
 
-        now = datetime.utcnow()
-        inserted = 0
-
-        for item in _SEED_ITEMS:
-            item_id = str(uuid.uuid4())
-            meta = item.get("metadata_json", {})
-            await db.execute(
-                text("""
-                    INSERT INTO catalog_items
-                    (id, name, name_gu, name_hi, description, category, price, currency,
-                     unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id,
-                     stock_qty, sort_order, metadata_json, created_at, updated_at)
-                    VALUES
-                    (:id, :name, :name_gu, :name_hi, :description, :category, :price, 'GBP',
-                     :unit, :emoji, :image_url, :gift_aid, true, 'GLOBAL', '',
-                     NULL, :sort_order, :metadata_json::jsonb, :now, :now)
-                """),
-                {
-                    "id": item_id,
-                    "name": item["name"],
-                    "name_gu": item.get("name_gu", ""),
-                    "name_hi": item.get("name_hi", ""),
-                    "description": item.get("description", ""),
-                    "category": item["category"],
-                    "price": item["price"],
-                    "unit": item.get("unit", ""),
-                    "emoji": item.get("emoji", ""),
-                    "image_url": item.get("image_url", ""),
-                    "gift_aid": item.get("gift_aid_eligible", False),
-                    "sort_order": item.get("sort_order", 0),
-                    "metadata_json": json.dumps(meta),
-                    "now": now,
-                },
-            )
-            inserted += 1
-
-        await db.commit()
-
-    return {
-        "seeded": True,
-        "inserted": inserted,
-        "message": f"Successfully seeded {inserted} catalog items.",
-    }
+        return {
+            "seeded": True,
+            "inserted": inserted,
+            "message": f"Successfully seeded {inserted} catalog items.",
+        }
+    except Exception as exc:
+        return {"seeded": False, "error": str(exc), "trace": traceback.format_exc()}

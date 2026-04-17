@@ -2,7 +2,8 @@
 Digital Brain router — conversational AI endpoint for all agentic interactions.
 """
 from __future__ import annotations
-from typing import AsyncIterator
+
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse

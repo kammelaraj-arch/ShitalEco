@@ -1,8 +1,8 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+import { apiFetch } from '@/lib/api'
+import { BranchSelect } from '@/components/ui/SearchSelect'
 
 const CATEGORIES = ['PUJA', 'HAVAN', 'CLASS', 'HALL_HIRE', 'FESTIVAL', 'DONATION', 'OTHER']
 const CATEGORY_COLORS: Record<string, string> = {
@@ -29,12 +29,15 @@ interface Service {
   image_url: string | null
   is_active: boolean
   branch_id: string
+  start_date: string | null
+  end_date: string | null
 }
 
 const EMPTY: Omit<Service, 'id' | 'currency' | 'is_active'> = {
   name: '', name_gu: '', name_hi: '', description: '',
   category: 'PUJA', price: 0, duration: null, capacity: null,
   image_url: '', branch_id: 'main',
+  start_date: null, end_date: null,
 }
 
 export default function KioskServicesPage() {
@@ -52,8 +55,7 @@ export default function KioskServicesPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`${API}/kiosk/services?branch_id=main`)
-      const data = await res.json()
+      const data = await apiFetch<{ services: Service[] }>('/admin/services?include_inactive=true')
       setServices(data.services || [])
     } catch {
       setError('Failed to load services')
@@ -70,7 +72,10 @@ export default function KioskServicesPage() {
     setForm({ name: s.name, name_gu: s.name_gu || '', name_hi: s.name_hi || '',
       description: s.description || '', category: s.category, price: s.price,
       duration: s.duration, capacity: s.capacity, image_url: s.image_url || '',
-      branch_id: s.branch_id })
+      branch_id: s.branch_id,
+      start_date: s.start_date ? s.start_date.slice(0, 10) : null,
+      end_date: s.end_date ? s.end_date.slice(0, 10) : null,
+    })
     setShowForm(true)
   }
 
@@ -78,11 +83,10 @@ export default function KioskServicesPage() {
     if (!form.name.trim() || form.price < 0) return
     setSaving(true)
     try {
-      const url = editing ? `${API}/admin/services/${editing.id}` : `${API}/admin/services`
+      const url = editing ? `/admin/services/${editing.id}` : `/admin/services`
       const method = editing ? 'PUT' : 'POST'
-      await fetch(url, {
+      await apiFetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, price: Number(form.price) }),
       })
       setShowForm(false)
@@ -96,9 +100,8 @@ export default function KioskServicesPage() {
 
   const toggle = async (s: Service) => {
     try {
-      await fetch(`${API}/admin/services/${s.id}`, {
+      await apiFetch(`/admin/services/${s.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: !s.is_active }),
       })
       setServices(prev => prev.map(x => x.id === s.id ? { ...x, is_active: !x.is_active } : x))
@@ -114,7 +117,7 @@ export default function KioskServicesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-black text-white">Kiosk Services</h1>
           <p className="text-white/40 mt-1">Manage puja, havan, and other temple services shown on the kiosk</p>
@@ -131,7 +134,7 @@ export default function KioskServicesPage() {
       <div className="flex gap-3 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search services…"
-          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 w-64" />
+          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 w-full sm:w-64" />
         <div className="flex gap-2 flex-wrap">
           {['ALL', ...CATEGORIES].map(c => (
             <button key={c} onClick={() => setCatFilter(c)}
@@ -154,7 +157,7 @@ export default function KioskServicesPage() {
         </div>
       ) : (
         <div className="glass rounded-2xl overflow-hidden border border-temple-border">
-          <table className="w-full">
+          <div className="overflow-x-auto"><table className="w-full">
             <thead>
               <tr className="border-b border-white/5">
                 <th className="text-left px-5 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">Service</th>
@@ -175,6 +178,13 @@ export default function KioskServicesPage() {
                     {s.description && <p className="text-white/30 text-xs mt-0.5 truncate max-w-xs">{s.description}</p>}
                     {(s.name_gu || s.name_hi) && (
                       <p className="text-white/20 text-xs mt-0.5">{[s.name_gu, s.name_hi].filter(Boolean).join(' · ')}</p>
+                    )}
+                    {(s.start_date || s.end_date) && (
+                      <p className="text-amber-400/70 text-[11px] mt-0.5">
+                        {s.start_date && `From ${s.start_date.slice(0, 10)}`}
+                        {s.start_date && s.end_date && ' → '}
+                        {s.end_date && `Until ${s.end_date.slice(0, 10)}`}
+                      </p>
                     )}
                   </td>
                   <td className="px-5 py-4">
@@ -199,7 +209,7 @@ export default function KioskServicesPage() {
                 </motion.tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 
@@ -212,7 +222,7 @@ export default function KioskServicesPage() {
               className="fixed inset-0 bg-black/60 z-40" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-[480px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed right-0 top-0 h-full w-full sm:max-w-[480px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
                 <h2 className="text-white font-black text-lg">{editing ? 'Edit Service' : 'New Service'}</h2>
                 <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white text-xl">✕</button>
@@ -282,9 +292,29 @@ export default function KioskServicesPage() {
                 {/* Branch */}
                 <div>
                   <label className="block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5">Branch</label>
-                  <input value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))}
-                    placeholder="main"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50" />
+                  <BranchSelect
+                    value={form.branch_id}
+                    onChange={v => setForm(p => ({ ...p, branch_id: v }))}
+                    placeholder="All branches (Global)"
+                    allowAny
+                  />
+                </div>
+                {/* Date restrictions */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5">Start Date</label>
+                    <input type="date" value={form.start_date || ''}
+                      onChange={e => setForm(p => ({ ...p, start_date: e.target.value || null }))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50" />
+                    <p className="text-white/25 text-[11px] mt-1">Leave blank = always available</p>
+                  </div>
+                  <div>
+                    <label className="block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5">End Date</label>
+                    <input type="date" value={form.end_date || ''}
+                      onChange={e => setForm(p => ({ ...p, end_date: e.target.value || null }))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50" />
+                    <p className="text-white/25 text-[11px] mt-1">Leave blank = no end restriction</p>
+                  </div>
                 </div>
                 {/* Image URL */}
                 <div>

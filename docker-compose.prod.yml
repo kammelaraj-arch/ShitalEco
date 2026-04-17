@@ -1,0 +1,228 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-shitaleco_db}
+      POSTGRES_USER: ${POSTGRES_USER:-shitaleco_db_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shitaleco_db_user} -d ${POSTGRES_DB:-shitaleco_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  backend:
+    image: ghcr.io/kammelaraj-arch/shitaleco-backend:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 512M
+    # Use alembic upgrade head only — never stamp base (would wipe migration history)
+    command: >
+      sh -c "alembic upgrade head 2>&1 || echo 'WARNING: alembic failed';
+             exec uvicorn shital.main:app --host 0.0.0.0 --port 8000
+                  --workers 1 --loop uvloop --http httptools"
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shitaleco_db_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-shitaleco_db}
+      APP_ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001,http://localhost:3002}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      MS_CLIENT_ID: ${MS_CLIENT_ID:-}
+      MS_TENANT_ID: ${MS_TENANT_ID:-}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
+      MS_REDIRECT_URI: ${MS_REDIRECT_URI:-https://admin.shital.org.uk/auth-callback}
+    volumes:
+      - /opt/shitaleco/backups:/opt/shitaleco/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  admin:
+    image: ghcr.io/kammelaraj-arch/shitaleco-admin:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 384M
+    depends_on:
+      - backend
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3001/admin/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  quick-donation:
+    image: ghcr.io/kammelaraj-arch/shitaleco-quick-donation:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+    depends_on:
+      - backend
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  kiosk:
+    image: ghcr.io/kammelaraj-arch/shitaleco-kiosk:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+    depends_on:
+      - backend
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  screen:
+    image: ghcr.io/kammelaraj-arch/shitaleco-screen:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+    depends_on:
+      - backend
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  backup-scheduler:
+    build:
+      context: ./infra/cron
+    container_name: shitaleco-backup-cron
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+    environment:
+      TZ: Europe/London
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-shitaleco_db}
+      POSTGRES_USER: ${POSTGRES_USER:-shitaleco_db_user}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./infra/backup.sh:/opt/shitaleco/infra/backup.sh:ro
+      - /opt/shitaleco/backups:/opt/shitaleco/backups
+      - ./.env:/opt/shitaleco/.env:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  deployer:
+    build:
+      context: ./deployer
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 128M
+    environment:
+      DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
+      DOCKER_BUILDKIT: "1"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    volumes:
+      - /opt/shitaleco:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - internal
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 64M
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/hub:/usr/share/nginx/hub:ro
+      - ./nginx/errors:/usr/share/nginx/errors:ro
+      - /var/www/certbot:/var/www/certbot:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - backend
+      - admin
+      - quick-donation
+      - kiosk
+      - screen
+    networks:
+      - internal
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - /var/www/certbot:/var/www/certbot
+      - /etc/letsencrypt:/etc/letsencrypt
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done"
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+    driver: bridge
