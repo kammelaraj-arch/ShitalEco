@@ -102,28 +102,43 @@ export function BasketPage() {
       </div>
 
       {/* Summary Card */}
-      <div className="temple-card p-5 mb-5 space-y-3">
+      <div className="temple-card p-5 mb-4 space-y-2.5">
         <div className="flex justify-between text-sm">
-          <span style={{ color: 'rgba(255,248,220,0.5)' }}>Subtotal</span>
+          <span style={{ color: 'rgba(255,248,220,0.5)' }}>Sub Total</span>
           <span className="font-semibold text-ivory-200 price-display">£{total.toFixed(2)}</span>
         </div>
         {giftAidTotal > 0 && (
-          <div className="flex justify-between text-sm" style={{ color: '#4ade80' }}>
-            <span>🇬🇧 Gift Aid boost (HMRC +25%)</span>
-            <span className="font-bold price-display">+£{(giftAidTotal * 0.25).toFixed(2)}</span>
+          <div className="flex justify-between text-sm font-semibold" style={{ color: '#4ade80' }}>
+            <span>🇬🇧 Gift Aid (on £{giftAidTotal.toFixed(2)})</span>
+            <span className="price-display">+£{(giftAidTotal * 0.25).toFixed(2)}</span>
           </div>
         )}
-        <div className="pt-3 flex justify-between" style={{ borderTop: '1px dashed rgba(212,175,55,0.2)' }}>
-          <span className="font-bold text-ivory-200">Total you pay</span>
+        <div className="pt-2.5 flex justify-between" style={{ borderTop: '1px solid rgba(212,175,55,0.2)' }}>
+          <span className="font-black text-ivory-200">Total</span>
           <span className="font-black text-xl text-gold-400 price-display">£{total.toFixed(2)}</span>
         </div>
-        {giftAidTotal > 0 && (
-          <div className="rounded-xl px-3 py-2 text-xs"
-            style={{ background: 'rgba(22,163,74,0.1)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }}>
-            🎁 HMRC adds <strong>£{(giftAidTotal * 0.25).toFixed(2)}</strong> to your donation at no extra cost.
-          </div>
-        )}
       </div>
+
+      {/* Gift Aid promotion banner */}
+      {giftAidTotal > 0 && (
+        <div className="rounded-2xl p-4 mb-4"
+          style={{ background: 'linear-gradient(135deg,rgba(22,163,74,0.18),rgba(15,107,50,0.12))', border: '1px solid rgba(74,222,128,0.3)' }}>
+          <div className="flex items-start gap-3">
+            <span className="text-2xl flex-shrink-0">🇬🇧</span>
+            <div>
+              <p className="font-black text-sm" style={{ color: '#4ade80' }}>
+                Are you a UK taxpayer? Claim Gift Aid!
+              </p>
+              <p className="text-xs mt-1" style={{ color: 'rgba(74,222,128,0.8)' }}>
+                HMRC will add <strong>£{(giftAidTotal * 0.25).toFixed(2)}</strong> to your £{giftAidTotal.toFixed(2)} donation — completely FREE. The temple gets more at no extra cost to you.
+              </p>
+              <p className="text-xs mt-1.5 font-semibold" style={{ color: 'rgba(74,222,128,0.6)' }}>
+                ✓ Takes just 30 seconds · ✓ No extra payment · ✓ HMRC approved
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PayPal note */}
       <div className="temple-card px-4 py-3 mb-5 flex items-center gap-3">
@@ -140,19 +155,25 @@ export function BasketPage() {
       <div className="space-y-3">
         {giftAidTotal > 0 ? (
           <>
+            {/* PRIMARY — Gift Aid boost (prominent) */}
             <button
               onClick={() => { setGiftAidDeclaration(null); setScreen('contact') }}
-              className="w-full py-4 rounded-2xl font-black text-base active:scale-[0.99] transition-transform"
-              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff', boxShadow: '0 4px 20px rgba(22,163,74,0.35)' }}
+              className="w-full rounded-2xl font-black active:scale-[0.99] transition-transform"
+              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff',
+                boxShadow: '0 6px 24px rgba(22,163,74,0.45), 0 2px 8px rgba(0,0,0,0.3)', padding: '1.1rem 1.5rem' }}
             >
-              <div className="flex flex-col items-center leading-tight gap-0.5">
-                <span className="text-sm font-bold opacity-90">🇬🇧 Boost with Gift Aid — +£{(giftAidTotal * 0.25).toFixed(2)} FREE</span>
-                <span className="text-lg font-black">Temple receives £{(total + giftAidTotal * 0.25).toFixed(2)}</span>
+              <div className="flex flex-col items-center leading-tight gap-1">
+                <span className="text-xs font-bold uppercase tracking-widest opacity-80">🇬🇧 Recommended · UK Taxpayers</span>
+                <span className="text-lg font-black">Boost with Gift Aid (+£{(giftAidTotal * 0.25).toFixed(2)} for free)</span>
+                <span className="text-sm font-bold opacity-90">Temple gets £{(total + giftAidTotal * 0.25).toFixed(2)}</span>
               </div>
             </button>
+            {/* SECONDARY — Without Gift Aid */}
             <button
               onClick={() => { setGiftAidDeclaration(DECLINED); setScreen('contact') }}
-              className="btn-ghost"
+              className="w-full py-3.5 rounded-2xl text-sm font-bold transition-all"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)',
+                color: 'rgba(255,248,220,0.45)' }}
             >
               Without Gift Aid · Pay £{total.toFixed(2)}
             </button>
