@@ -10,12 +10,12 @@ import structlog
 from pydantic import BaseModel
 
 from shital.core.dna.registry import Fabric, capability
-
-# Guard: only run DDL once per worker process lifetime
-_hr_tables_ready = False
 from shital.core.space.context import DigitalSpace
 
 logger = structlog.get_logger()
+
+# Guard: only run DDL once per worker process lifetime
+_hr_tables_ready = False
 
 
 class CreateEmployeeInput(BaseModel):
