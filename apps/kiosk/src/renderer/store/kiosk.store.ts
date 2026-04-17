@@ -13,7 +13,7 @@ export function generateId(): string {
   })
 }
 
-export type KioskTheme = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine'
+export type KioskTheme = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine' | 'crimson'
 
 export const THEMES: Record<KioskTheme, {
   name: string; emoji: string; desc: string
@@ -93,6 +93,37 @@ export const THEMES: Record<KioskTheme, {
     basketBtn: '#FF8F00', basketBtnHover: '#E65100',
     langActive: '#FF8F00', langInactive: '#FF8F00/40',
   },
+  crimson: {
+    name: 'Crimson Fire', emoji: '🔴', desc: 'Bold & passionate',
+    headerBg: '#7A0000', headerBorder: '#DC143C/40', headerText: '#FFFFFF', headerSub: '#FF8080',
+    logoBg: 'linear-gradient(135deg,#DC143C,#8B0000)', logoText: '#FFFFFF',
+    sidebarFrom: '#8B0000', sidebarTo: '#5C0000', sidebarBorder: '#DC143C/30',
+    sidebarText: '#FECACA', sidebarActiveBg: 'rgba(220,20,60,0.25)', sidebarActiveText: '#FFB3B3', sidebarIndicator: '#FF6B6B',
+    mainBg: '#FFF5F5', sectionHeaderBg: '#FFFFFF', sectionHeaderBorder: '#DC143C/15',
+    sectionTitleColor: '#5C0000', sectionCountColor: '#DC143C',
+    promotedBg: 'linear-gradient(to right,#FEE2E2,#FEF3C7)', promotedBorder: '#DC143C/20', promotedTitleColor: '#991B1B',
+    basketBarBg: '#5C0000', basketBarBorder: '#DC143C/40', basketBarText: '#FFFFFF', basketBarSubText: '#FF8080',
+    basketBtn: '#DC143C', basketBtnHover: '#B91C1C',
+    langActive: '#DC143C', langInactive: '#DC143C/40',
+  },
+}
+
+export const IDLE_BACKGROUNDS: Record<KioskTheme, string> = {
+  lotus:   'linear-gradient(160deg, #1a0a00 0%, #2d1200 40%, #1a0a00 100%)',
+  saffron: 'linear-gradient(160deg, #1a0a00 0%, #2d1200 40%, #1a0a00 100%)',
+  royal:   'linear-gradient(160deg, #0D0D2B 0%, #1A1A4E 40%, #0D0D2B 100%)',
+  peacock: 'linear-gradient(160deg, #003333 0%, #004D40 40%, #003333 100%)',
+  jasmine: 'linear-gradient(160deg, #3d1a00 0%, #2d1200 40%, #3d1a00 100%)',
+  crimson: 'linear-gradient(160deg, #5C0000 0%, #9B0000 40%, #5C0000 100%)',
+}
+
+export const IDLE_RING_COLORS: Record<KioskTheme, string> = {
+  lotus:   'rgba(255,153,51,0.45)',
+  saffron: 'rgba(255,153,51,0.45)',
+  royal:   'rgba(255,215,0,0.45)',
+  peacock: 'rgba(77,208,225,0.45)',
+  jasmine: 'rgba(255,202,40,0.45)',
+  crimson: 'rgba(220,20,60,0.55)',
 }
 
 export type KioskScreen =
@@ -181,6 +212,8 @@ interface KioskState {
   idleTimer: number
   branchId: string
   theme: KioskTheme
+  orgName: string
+  orgLogoUrl: string
   cardProvider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash'
   stripeReaderId: string
   stripeReaderLabel: string
@@ -211,6 +244,8 @@ interface KioskState {
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
   setBranchId: (id: string) => void
+  setOrgName: (name: string) => void
+  setOrgLogoUrl: (url: string) => void
   setCardDevice: (provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash', deviceId: string, deviceLabel: string) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
@@ -237,6 +272,8 @@ export const useKioskStore = create<KioskState>()(
   idleTimer: 120,
   branchId: 'main',
   theme: 'lotus',
+  orgName: 'Shital',
+  orgLogoUrl: '',
   giftAidDeclaration: null,
   contactInfo: null,
   pendingPayment: false,
@@ -261,6 +298,8 @@ export const useKioskStore = create<KioskState>()(
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
   setBranchId: (branchId) => set({ branchId }),
+  setOrgName: (orgName) => set({ orgName }),
+  setOrgLogoUrl: (orgLogoUrl) => set({ orgLogoUrl }),
   setCardDevice: (provider, deviceId, deviceLabel) => set(
     provider === 'stripe_terminal'
       ? { cardProvider: provider, stripeReaderId: deviceId, stripeReaderLabel: deviceLabel }
@@ -295,6 +334,8 @@ export const useKioskStore = create<KioskState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         theme: state.theme,
+        orgName: state.orgName,
+        orgLogoUrl: state.orgLogoUrl,
         language: state.language,
         cardProvider: state.cardProvider,
         stripeReaderId: state.stripeReaderId,

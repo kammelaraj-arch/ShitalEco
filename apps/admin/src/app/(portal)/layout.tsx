@@ -46,7 +46,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
               >
                 ☰
               </button>
-              <span className="text-white font-black text-sm">Shital Admin</span>
+              <span className="text-white font-black text-sm">Shital</span>
             </div>
 
             <div className="flex-1 p-4 md:p-8">

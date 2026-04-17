@@ -12,7 +12,7 @@ export interface BrandingConfig {
 const DEFAULTS: BrandingConfig = {
   logoUrl:      '',
   orgName:      'Shital',
-  orgSubtitle:  'Admin Portal',
+  orgSubtitle:  'Business Portal',
   primaryColor: '#B91C1C',
   accentColor:  '#FFD700',
 }

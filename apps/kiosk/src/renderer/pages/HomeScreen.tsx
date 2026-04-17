@@ -202,7 +202,7 @@ function LanguagePicker({ onClose }: { onClose: () => void }) {
 
 // ─── Main HomeScreen ──────────────────────────────────────────────────────────
 export function HomeScreen() {
-  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl } = useKioskStore()
   const th = THEMES[theme]
   const [activeNav, setActiveNav] = useState(() => homeActiveNav || 'donations')
   const [services, setServices] = useState<Service[]>([])
@@ -344,16 +344,26 @@ export function HomeScreen() {
         style={{ height: 60, background: th.headerBg, borderBottom: '2px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
       >
         {/* Logo */}
-        <div
-          className="w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black flex-shrink-0 shadow border-2 border-white/30"
-          style={{ background: th.logoBg, color: th.logoText }}
-        >
-          🕉
-        </div>
+        {orgLogoUrl ? (
+          <img
+            src={orgLogoUrl}
+            alt={orgName}
+            className="w-11 h-11 rounded-xl object-contain flex-shrink-0 shadow border-2 border-white/30"
+            style={{ background: 'rgba(255,255,255,0.1)' }}
+            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+          />
+        ) : (
+          <div
+            className="w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black flex-shrink-0 shadow border-2 border-white/30"
+            style={{ background: th.logoBg, color: th.logoText }}
+          >
+            🕉
+          </div>
+        )}
 
-        {/* Temple name */}
+        {/* Org name */}
         <div className="flex-1 min-w-0">
-          <h1 className="font-black text-base leading-tight" style={{ color: th.headerText }}>Shital</h1>
+          <h1 className="font-black text-base leading-tight" style={{ color: th.headerText }}>{orgName}</h1>
         </div>
 
         {/* Language picker button */}

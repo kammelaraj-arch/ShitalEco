@@ -5,6 +5,8 @@ import { apiFetch } from '@/lib/api'
 import { BranchSelect, SearchSelect } from '@/components/ui/SearchSelect'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+type KioskThemeId = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine' | 'crimson'
+
 interface KioskDevice {
   id: string
   name: string
@@ -24,9 +26,21 @@ interface KioskDevice {
   device_token: string
   last_seen_at: string | null
   notes: string
+  kiosk_theme: KioskThemeId
+  org_name: string
+  org_logo_url: string
   created_at: string
   updated_at: string
 }
+
+const KIOSK_THEMES: { id: KioskThemeId; name: string; emoji: string; bg: string; accent: string }[] = [
+  { id: 'lotus',   name: 'Lotus Light',    emoji: '🪷', bg: '#FFF3E0', accent: '#FF9933' },
+  { id: 'saffron', name: 'Saffron Temple', emoji: '🪔', bg: '#1C0000', accent: '#FF9933' },
+  { id: 'royal',   name: 'Royal Gold',     emoji: '👑', bg: '#0D0D2B', accent: '#FFD700' },
+  { id: 'peacock', name: 'Peacock Blue',   emoji: '🦚', bg: '#003333', accent: '#4DD0E1' },
+  { id: 'jasmine', name: 'Jasmine Breeze', emoji: '🌸', bg: '#FFF8E1', accent: '#FF8F00' },
+  { id: 'crimson', name: 'Crimson Fire',   emoji: '🔴', bg: '#5C0000', accent: '#DC143C' },
+]
 
 interface CardReader {
   id: string
@@ -51,6 +65,8 @@ const EMPTY_FORM = {
   off_peak_playlist_id: '', default_donate_amount: 5,
   card_reader_id: '',
   serial_number: '', ip_address: '', notes: '',
+  kiosk_theme: 'lotus' as KioskThemeId,
+  org_name: '', org_logo_url: '',
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -140,6 +156,8 @@ export default function DevicesPage() {
       default_donate_amount: d.default_donate_amount,
       card_reader_id: d.card_reader_id || '',
       serial_number: d.serial_number, ip_address: d.ip_address, notes: d.notes,
+      kiosk_theme: (d.kiosk_theme || 'lotus') as KioskThemeId,
+      org_name: d.org_name || '', org_logo_url: d.org_logo_url || '',
     })
     setError('')
     setDrawerOpen(true)
@@ -570,6 +588,58 @@ export default function DevicesPage() {
                         onChange={e => setForm(f => ({ ...f, default_donate_amount: parseFloat(e.target.value) || 5 }))}
                       />
                       <p className="text-white/30 text-[10px] mt-1">This tile is pre-selected when the device starts up</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Kiosk Branding ─────────────────────────────────── */}
+                {(form.device_type === 'KIOSK' || form.device_type === 'QUICK_DONATION') && (
+                  <div className="rounded-2xl p-4 space-y-4" style={{ background: 'rgba(255,153,51,0.06)', border: '1px solid rgba(255,153,51,0.18)' }}>
+                    <p className="text-amber-400 text-xs font-bold uppercase tracking-wide">🎨 Kiosk Appearance</p>
+
+                    <div>
+                      <p className={lbl}>Theme</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {KIOSK_THEMES.map(t => {
+                          const active = form.kiosk_theme === t.id
+                          return (
+                            <button
+                              key={t.id} type="button"
+                              onClick={() => setForm(f => ({ ...f, kiosk_theme: t.id }))}
+                              className="rounded-xl p-2.5 text-left transition-all flex flex-col items-center gap-1"
+                              style={{
+                                background: active ? `${t.accent}20` : 'rgba(255,255,255,0.04)',
+                                border: active ? `1.5px solid ${t.accent}80` : '1.5px solid rgba(255,255,255,0.08)',
+                              }}
+                            >
+                              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-lg" style={{ background: t.bg }}>
+                                {t.emoji}
+                              </div>
+                              <p className="text-white text-[10px] font-bold text-center leading-tight">{t.name}</p>
+                              {active && <span className="text-[9px] font-black" style={{ color: t.accent }}>✓ Active</span>}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <p className="text-white/30 text-[10px] mt-1">Theme applied when device loads via token URL</p>
+                    </div>
+
+                    <div>
+                      <p className={lbl}>Organisation Name</p>
+                      <input className={inp} value={form.org_name} onChange={e => setForm(f => ({ ...f, org_name: e.target.value }))} placeholder="e.g. Shital (leave blank to use default)" />
+                    </div>
+
+                    <div>
+                      <p className={lbl}>Logo URL</p>
+                      <input className={inp} value={form.org_logo_url} onChange={e => setForm(f => ({ ...f, org_logo_url: e.target.value }))} placeholder="https://… (leave blank for Om symbol)" />
+                      {form.org_logo_url && (
+                        <div className="mt-2 flex items-center gap-3">
+                          <img src={form.org_logo_url} alt="Logo preview" className="w-12 h-12 rounded-xl object-contain"
+                            style={{ background: 'rgba(255,255,255,0.08)' }}
+                            onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = '0.3' }} />
+                          <p className="text-white/30 text-[10px]">Logo preview</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

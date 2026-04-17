@@ -1,6 +1,8 @@
 import React, { useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useKioskStore } from './store/kiosk.store'
+import { useKioskStore, KioskTheme } from './store/kiosk.store'
+
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 import { IdleScreen } from './pages/IdleScreen'
 import { HomeScreen } from './pages/HomeScreen'
 import { ServicesScreen } from './pages/ServicesScreen'
@@ -18,8 +20,25 @@ import { AdminScreen } from './pages/AdminScreen'
 const IDLE_TIMEOUT_MS = 120_000
 
 export function KioskApp() {
-  const { screen, resetKiosk } = useKioskStore()
+  const { screen, resetKiosk, setTheme, setBranchId, setOrgName, setOrgLogoUrl } = useKioskStore()
   let idleTimeout: ReturnType<typeof setTimeout>
+
+  // On startup, read ?token= from URL and fetch device config
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('token')
+    if (!token) return
+    fetch(`${API_BASE}/kiosk-devices/by-token/${encodeURIComponent(token)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => {
+        if (!cfg) return
+        if (cfg.branch_id) setBranchId(cfg.branch_id)
+        if (cfg.kiosk_theme) setTheme(cfg.kiosk_theme as KioskTheme)
+        if (cfg.org_name)   setOrgName(cfg.org_name)
+        if (cfg.org_logo_url) setOrgLogoUrl(cfg.org_logo_url)
+      })
+      .catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const resetIdle = useCallback(() => {
     clearTimeout(idleTimeout)

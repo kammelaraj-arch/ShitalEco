@@ -85,7 +85,7 @@ export default function DashboardPage() {
     <div className="space-y-8 animate-fade-in">
       <div>
         <h1 className="text-3xl font-black text-white">{greeting} 🙏</h1>
-        <p className="text-white/40 mt-1">Here&apos;s what&apos;s happening at Shital Temple today</p>
+        <p className="text-white/40 mt-1">Here&apos;s what&apos;s happening at Shital today</p>
       </div>
 
       {loading ? (

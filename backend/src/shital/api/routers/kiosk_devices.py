@@ -61,6 +61,10 @@ class DeviceIn(BaseModel):
     serial_number: str = ""
     ip_address: str = ""
     notes: str = ""
+    # Kiosk branding & appearance
+    kiosk_theme: str = "lotus"          # lotus | saffron | royal | peacock | jasmine | crimson
+    org_name: str = ""
+    org_logo_url: str = ""
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -97,6 +101,7 @@ async def list_devices(
                        status, screen_profile_id, peak_start, peak_end,
                        off_peak_playlist_id, default_donate_amount, card_reader_id,
                        serial_number, ip_address, device_token,
+                       kiosk_theme, org_name, org_logo_url,
                        last_seen_at, notes, created_at, updated_at
                 FROM kiosk_devices
                 WHERE {where}
@@ -151,7 +156,8 @@ async def get_device_by_token(token: str, ctx: OptionalSpace) -> dict[str, Any]:
                 WHERE device_token = :token AND deleted_at IS NULL
                 RETURNING id, name, device_type, branch_id, location, status,
                           screen_profile_id, peak_start, peak_end,
-                          off_peak_playlist_id, default_donate_amount, card_reader_id
+                          off_peak_playlist_id, default_donate_amount, card_reader_id,
+                          kiosk_theme, org_name, org_logo_url
             """),
             {"token": token},
         )
@@ -202,12 +208,14 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                 (id, name, description, device_type, branch_id, location, status,
                  screen_profile_id, peak_start, peak_end, off_peak_playlist_id,
                  default_donate_amount, card_reader_id, serial_number, ip_address,
-                 device_token, notes, created_at, updated_at)
+                 device_token, notes, kiosk_theme, org_name, org_logo_url,
+                 created_at, updated_at)
             VALUES
                 (:id, :name, :desc, :dtype, :bid, :loc, :status,
                  :prof_id, :peak_s, :peak_e, :offpeak_pl,
                  :dda, :card_rid, :serial, :ip,
-                 :token, :notes, :now, :now)
+                 :token, :notes, :ktheme, :oname, :ologo,
+                 :now, :now)
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
             "dtype": body.device_type, "bid": body.branch_id, "loc": body.location,
@@ -217,7 +225,9 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "dda": body.default_donate_amount,
             "card_rid": body.card_reader_id,
             "serial": body.serial_number, "ip": body.ip_address,
-            "token": token, "notes": body.notes, "now": now,
+            "token": token, "notes": body.notes,
+            "ktheme": body.kiosk_theme, "oname": body.org_name, "ologo": body.org_logo_url,
+            "now": now,
         })
         await db.commit()
 
@@ -244,7 +254,9 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 off_peak_playlist_id = :offpeak_pl, default_donate_amount = :dda,
                 card_reader_id = :card_rid,
                 serial_number = :serial, ip_address = :ip,
-                notes = :notes, updated_at = :now
+                notes = :notes, kiosk_theme = :ktheme,
+                org_name = :oname, org_logo_url = :ologo,
+                updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
@@ -255,7 +267,9 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "dda": body.default_donate_amount,
             "card_rid": body.card_reader_id,
             "serial": body.serial_number, "ip": body.ip_address,
-            "notes": body.notes, "now": now,
+            "notes": body.notes,
+            "ktheme": body.kiosk_theme, "oname": body.org_name, "ologo": body.org_logo_url,
+            "now": now,
         })
         await db.commit()
         if result.rowcount == 0:  # type: ignore[attr-defined]
