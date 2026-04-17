@@ -72,22 +72,30 @@ export function BrowsePage() {
   }
 
   return (
-    <div className="min-h-screen pb-32" style={{ background: '#B80000' }}>
+    <div className="min-h-screen pb-32" style={{ background: 'var(--bg)' }}>
 
-      {/* Hero Banner */}
+      {/* Hero Banner — travertine stone */}
       <div className="relative overflow-hidden px-4 py-8"
         style={{
-          background: 'linear-gradient(135deg, rgba(150,0,0,0.97), rgba(120,0,0,0.99))',
-          borderBottom: '1px solid rgba(212,175,55,0.15)',
+          background: 'linear-gradient(160deg, #D8BC90 0%, #C8A870 40%, #B89858 100%)',
+          borderBottom: '2px solid rgba(212,175,55,0.5)',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
         }}>
-        <div className="absolute inset-0 pointer-events-none"
-          style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 100%, rgba(212,175,55,0.06) 0%, transparent 65%)' }} />
+        {/* Stone texture overlay */}
+        <div className="absolute inset-0 pointer-events-none" style={{
+          backgroundImage: 'radial-gradient(ellipse 60% 40% at 20% 30%, rgba(255,245,210,0.35) 0%, transparent 60%), radial-gradient(ellipse 50% 60% at 80% 70%, rgba(160,110,40,0.25) 0%, transparent 55%)',
+        }} />
+        {/* Gold shimmer bottom edge */}
+        <div className="absolute bottom-0 left-0 right-0 h-px"
+          style={{ background: 'linear-gradient(90deg, transparent, #D4AF37, #FFD700, #D4AF37, transparent)' }} />
         <div className="max-w-5xl mx-auto relative z-10">
-          <p className="text-saffron-400 text-xs font-semibold tracking-widest uppercase mb-1">🕉 Jai Sai Baba</p>
-          <h1 className="font-display font-bold text-2xl text-gold-400 tracking-wide mb-1">
+          <p className="text-xs font-semibold tracking-widest uppercase mb-1"
+            style={{ color: 'rgba(100,60,10,0.7)' }}>🕉 Jai Sai Baba</p>
+          <h1 className="font-display font-bold text-2xl tracking-wide mb-1"
+            style={{ color: '#3D1A00', textShadow: '0 1px 0 rgba(255,240,180,0.6)' }}>
             Donate &amp; Support
           </h1>
-          <p className="text-sm" style={{ color: 'rgba(255,248,220,0.5)' }}>
+          <p className="text-sm" style={{ color: 'rgba(80,40,5,0.65)' }}>
             Make a donation, book services &amp; support our temple
           </p>
         </div>
@@ -95,7 +103,7 @@ export function BrowsePage() {
 
       {/* Category Tabs */}
       <div className="sticky top-16 z-30"
-        style={{ background: 'rgba(140,0,0,0.99)', borderBottom: '1px solid rgba(212,175,55,0.12)' }}>
+        style={{ background: 'var(--bg-sticky)', borderBottom: '1px solid rgba(212,175,55,0.18)' }}>
         <div
           ref={tabsRef}
           className="max-w-5xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1.5 py-2.5"
