@@ -7,12 +7,12 @@ import { api } from '../api'
 type Tab = 'donate' | 'soft_donation' | 'project' | 'shop' | 'sponsorship' | 'services'
 
 const TABS: { id: Tab; emoji: string }[] = [
-  { id: 'donate',       emoji: '🙏' },
-  { id: 'soft_donation',emoji: '🌾' },
-  { id: 'project',      emoji: '🧱' },
-  { id: 'shop',         emoji: '🛍️' },
-  { id: 'sponsorship',  emoji: '💛' },
-  { id: 'services',     emoji: '🛕' },
+  { id: 'donate',        emoji: '🙏' },
+  { id: 'soft_donation', emoji: '🌾' },
+  { id: 'project',       emoji: '🧱' },
+  { id: 'shop',          emoji: '🛍️' },
+  { id: 'sponsorship',   emoji: '💛' },
+  { id: 'services',      emoji: '🛕' },
 ]
 
 interface CatalogItem {
@@ -21,9 +21,7 @@ interface CatalogItem {
   gift_aid_eligible?: boolean; unit?: string; stock_qty?: number | null; category?: string
 }
 
-interface Project {
-  id: string; name: string
-}
+interface Project { id: string; name: string }
 
 export function BrowsePage() {
   const { language, branchId, itemCount, total, setScreen } = useStore()
@@ -34,9 +32,7 @@ export function BrowsePage() {
   const [loading, setLoading] = useState(false)
   const tabsRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    load(activeTab)
-  }, [activeTab, branchId])
+  useEffect(() => { load(activeTab) }, [activeTab, branchId])
 
   async function load(tab: Tab) {
     setLoading(true)
@@ -76,34 +72,48 @@ export function BrowsePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-32">
+    <div className="min-h-screen pb-32" style={{ background: '#060100' }}>
+
       {/* Hero Banner */}
-      <div className="bg-gradient-to-r from-maroon-900 to-maroon-800 text-white px-4 py-6">
-        <div className="max-w-5xl mx-auto">
-          <h1 className="text-2xl font-black tracking-tight mb-1">
-            🕉 Jai Shri Krishna
+      <div className="relative overflow-hidden px-4 py-8"
+        style={{
+          background: 'linear-gradient(135deg, rgba(26,6,6,0.95), rgba(14,3,3,0.98))',
+          borderBottom: '1px solid rgba(212,175,55,0.15)',
+        }}>
+        <div className="absolute inset-0 pointer-events-none"
+          style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 100%, rgba(212,175,55,0.06) 0%, transparent 65%)' }} />
+        <div className="max-w-5xl mx-auto relative z-10">
+          <p className="text-saffron-400 text-xs font-semibold tracking-widest uppercase mb-1">🕉 Jai Sai Baba</p>
+          <h1 className="font-display font-bold text-2xl text-gold-400 tracking-wide mb-1">
+            Donate &amp; Support
           </h1>
-          <p className="text-orange-200 text-sm">Make a donation, book services & support our temple</p>
+          <p className="text-sm" style={{ color: 'rgba(255,248,220,0.5)' }}>
+            Make a donation, book services &amp; support our temple
+          </p>
         </div>
       </div>
 
       {/* Category Tabs */}
-      <div className="sticky top-16 z-30 bg-white border-b border-gray-100 shadow-sm">
+      <div className="sticky top-16 z-30"
+        style={{ background: 'rgba(6,1,0,0.97)', borderBottom: '1px solid rgba(212,175,55,0.12)' }}>
         <div
           ref={tabsRef}
-          className="max-w-5xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1 py-2"
+          className="max-w-5xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1.5 py-2.5"
         >
           {TABS.map((tab) => (
             <button
               key={tab.id}
               data-tab={tab.id}
               onClick={() => scrollToTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm whitespace-nowrap transition-all flex-shrink-0 ${
-                activeTab === tab.id
-                  ? 'text-white shadow-md'
-                  : 'text-gray-600 bg-gray-50 hover:bg-orange-50 hover:text-orange-600'
-              }`}
-              style={activeTab === tab.id ? { background: 'linear-gradient(135deg,#FF9933,#FF6600)' } : {}}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all flex-shrink-0"
+              style={activeTab === tab.id ? {
+                background: 'linear-gradient(135deg,#D4AF37,#C5A028)',
+                color: '#1A0606',
+              } : {
+                background: 'rgba(255,255,255,0.04)',
+                color: 'rgba(255,248,220,0.55)',
+                border: '1px solid rgba(212,175,55,0.12)',
+              }}
             >
               <span>{tab.emoji}</span>
               <span>{t(tab.id, language)}</span>
@@ -118,17 +128,19 @@ export function BrowsePage() {
           <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
             <button
               onClick={() => setSelectedProject('')}
-              className={`px-3 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors flex-shrink-0 ${
-                !selectedProject ? 'bg-orange-500 text-white' : 'bg-white text-gray-600 border border-gray-200'
-              }`}
+              className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors flex-shrink-0"
+              style={!selectedProject
+                ? { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1A0606' }
+                : { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.55)', border: '1px solid rgba(212,175,55,0.2)' }}
             >All Projects</button>
             {projects.map((p) => (
               <button
                 key={p.id}
                 onClick={() => setSelectedProject(p.id === selectedProject ? '' : p.id)}
-                className={`px-3 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors flex-shrink-0 ${
-                  selectedProject === p.id ? 'bg-orange-500 text-white' : 'bg-white text-gray-600 border border-gray-200'
-                }`}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors flex-shrink-0"
+                style={selectedProject === p.id
+                  ? { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1A0606' }
+                  : { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.55)', border: '1px solid rgba(212,175,55,0.2)' }}
               >{p.name}</button>
             ))}
           </div>
@@ -138,18 +150,19 @@ export function BrowsePage() {
       {/* Items Grid */}
       <div className="max-w-5xl mx-auto px-4 pt-5">
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-4">
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
             <motion.div
               animate={{ rotate: 360 }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
               className="text-5xl"
             >🕉</motion.div>
-            <p className="text-gray-400 font-medium">Loading…</p>
+            <p className="text-xs tracking-widest uppercase font-semibold"
+              style={{ color: 'rgba(212,175,55,0.5)' }}>Loading…</p>
           </div>
         ) : filteredItems.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
+          <div className="text-center py-20">
             <div className="text-5xl mb-3">🙏</div>
-            <p className="font-medium">Nothing here yet</p>
+            <p className="font-medium text-sm" style={{ color: 'rgba(255,248,220,0.35)' }}>Nothing here yet</p>
           </div>
         ) : (
           <AnimatePresence mode="popLayout">
@@ -182,14 +195,19 @@ export function BrowsePage() {
             <div className="max-w-5xl mx-auto px-4 pb-4 pt-2">
               <button
                 onClick={() => setScreen('basket')}
-                className="w-full py-4 rounded-2xl text-white font-black text-base flex items-center justify-between px-5 shadow-2xl active:scale-[0.99] transition-transform"
-                style={{ background: 'linear-gradient(135deg,#1C0000,#3d0000)' }}
+                className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-between px-5 shadow-2xl active:scale-[0.99] transition-transform"
+                style={{
+                  background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)',
+                  color: '#1A0606',
+                  boxShadow: '0 8px 32px rgba(212,175,55,0.4)',
+                }}
               >
-                <span className="bg-white/20 rounded-xl px-3 py-1 text-sm font-bold">
+                <span className="rounded-xl px-3 py-1 text-sm font-bold"
+                  style={{ background: 'rgba(26,6,6,0.2)' }}>
                   {itemCount} {t('items', language)}
                 </span>
-                <span>{t('basket', language)} →</span>
-                <span className="font-black text-saffron-300">£{total.toFixed(2)}</span>
+                <span className="font-black">{t('basket', language)} →</span>
+                <span className="font-black price-display">£{total.toFixed(2)}</span>
               </button>
             </div>
           </motion.div>

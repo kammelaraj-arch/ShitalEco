@@ -8,14 +8,20 @@ export function BasketPage() {
 
   if (items.length === 0) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-16 text-center">
-        <div className="text-7xl mb-4">🛒</div>
-        <h2 className="text-xl font-black text-gray-900 mb-2">Your basket is empty</h2>
-        <p className="text-gray-400 mb-6">Add items from the catalogue to get started</p>
+      <div className="max-w-5xl mx-auto px-4 py-20 text-center">
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="text-7xl mb-5"
+        >🛒</motion.div>
+        <h2 className="font-display font-bold text-xl text-gold-400 mb-2">Your basket is empty</h2>
+        <p className="text-sm mb-8" style={{ color: 'rgba(255,248,220,0.45)' }}>
+          Add offerings from the catalogue to get started
+        </p>
         <button
           onClick={() => setScreen('browse')}
-          className="px-6 py-3 rounded-2xl text-white font-bold"
-          style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
+          className="btn-saffron"
+          style={{ width: 'auto', padding: '0.875rem 2rem', display: 'inline-block' }}
         >
           Browse Items
         </button>
@@ -27,14 +33,17 @@ export function BasketPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-5 pb-32">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-xl font-black text-gray-900">{t('basket', language)}</h1>
-          <p className="text-sm text-gray-400">{items.length} {t('items', language)}</p>
+          <h1 className="font-display font-bold text-xl text-gold-400">{t('basket', language)}</h1>
+          <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>
+            {items.length} {t('items', language)}
+          </p>
         </div>
         <button
           onClick={() => { clearBasket(); setScreen('browse') }}
-          className="text-sm text-red-400 hover:text-red-600 font-medium"
+          className="text-xs font-semibold transition-colors"
+          style={{ color: 'rgba(198,40,40,0.7)' }}
         >
           Clear all
         </button>
@@ -50,38 +59,40 @@ export function BasketPage() {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20, height: 0 }}
-              className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex items-center gap-4"
+              className="temple-card p-4 flex items-center gap-4"
             >
               <div className="flex-1 min-w-0">
-                <p className="font-bold text-gray-900 text-sm leading-snug truncate">{item.name}</p>
-                <p className="text-xs text-gray-400 mt-0.5">
+                <p className="font-bold text-ivory-200 text-sm leading-snug truncate">{item.name}</p>
+                <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.4)' }}>
                   £{item.unitPrice.toFixed(2)} each
                   {item.giftAidEligible && (
-                    <span className="ml-2 text-green-600 font-semibold">· Gift Aid ✓</span>
+                    <span className="ml-2" style={{ color: '#4ade80' }}>· Gift Aid ✓</span>
                   )}
                 </p>
               </div>
 
-              {/* Quantity controls */}
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
                   onClick={() => updateQty(item.id, item.quantity - 1)}
-                  className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-red-50 hover:text-red-500 flex items-center justify-center font-bold text-gray-600 transition-colors"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-sm transition-colors"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.6)' }}
                 >−</button>
-                <span className="w-6 text-center font-bold text-gray-900 text-sm">{item.quantity}</span>
+                <span className="w-6 text-center font-bold text-ivory-200 text-sm">{item.quantity}</span>
                 <button
                   onClick={() => updateQty(item.id, item.quantity + 1)}
-                  className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-green-50 hover:text-green-600 flex items-center justify-center font-bold text-gray-600 transition-colors"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-sm transition-colors"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.6)' }}
                 >+</button>
               </div>
 
-              <p className="font-black text-gray-900 text-base w-16 text-right flex-shrink-0">
+              <p className="font-black text-gold-400 text-base w-16 text-right flex-shrink-0 price-display">
                 £{item.totalPrice.toFixed(2)}
               </p>
 
               <button
                 onClick={() => removeItem(item.id)}
-                className="text-gray-300 hover:text-red-400 transition-colors ml-1"
+                className="transition-colors ml-1"
+                style={{ color: 'rgba(255,248,220,0.2)' }}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -93,54 +104,59 @@ export function BasketPage() {
       </div>
 
       {/* Summary Card */}
-      <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 mb-5 space-y-3">
-        <div className="flex justify-between text-sm text-gray-500">
-          <span>Subtotal</span>
-          <span className="font-semibold text-gray-700">£{total.toFixed(2)}</span>
+      <div className="temple-card p-5 mb-5 space-y-3">
+        <div className="flex justify-between text-sm">
+          <span style={{ color: 'rgba(255,248,220,0.5)' }}>Subtotal</span>
+          <span className="font-semibold text-ivory-200 price-display">£{total.toFixed(2)}</span>
         </div>
         {giftAidTotal > 0 && (
-          <div className="flex justify-between text-sm text-green-600">
+          <div className="flex justify-between text-sm" style={{ color: '#4ade80' }}>
             <span>Gift Aid boost (HMRC +25%)</span>
-            <span className="font-bold">+£{boostAmount.toFixed(2)}</span>
+            <span className="font-bold price-display">+£{boostAmount.toFixed(2)}</span>
           </div>
         )}
-        <div className="border-t border-dashed border-gray-100 pt-3 flex justify-between">
-          <span className="font-bold text-gray-900">Total you pay</span>
-          <span className="font-black text-xl text-gray-900">£{total.toFixed(2)}</span>
+        <div className="pt-3 flex justify-between" style={{ borderTop: '1px dashed rgba(212,175,55,0.2)' }}>
+          <span className="font-bold text-ivory-200">Total you pay</span>
+          <span className="font-black text-xl text-gold-400 price-display">£{total.toFixed(2)}</span>
         </div>
         {giftAidTotal > 0 && (
-          <div className="bg-green-50 rounded-xl px-3 py-2 text-xs text-green-700">
-            🎁 HMRC will add <strong>£{boostAmount.toFixed(2)}</strong> to your donation at no extra cost to you.
+          <div className="rounded-xl px-3 py-2 text-xs"
+            style={{ background: 'rgba(22,163,74,0.12)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }}>
+            🎁 HMRC will add <strong>£{boostAmount.toFixed(2)}</strong> to your donation at no extra cost.
           </div>
         )}
       </div>
 
       {/* PayPal note */}
-      <div className="bg-blue-50 rounded-xl px-4 py-3 mb-5 flex items-center gap-3">
+      <div className="temple-card px-4 py-3 mb-5 flex items-center gap-3">
         <span className="text-2xl">🔒</span>
         <div>
-          <p className="text-sm font-semibold text-blue-800">Secure PayPal Checkout</p>
-          <p className="text-xs text-blue-600">Pay safely with your PayPal account or card. Your details are never stored.</p>
+          <p className="text-sm font-semibold text-gold-400">Secure PayPal Checkout</p>
+          <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>
+            Pay safely with your PayPal account or card. Your details are never stored.
+          </p>
         </div>
       </div>
 
-      {/* Actions — match kiosk two-button Gift Aid pattern */}
+      {/* Actions — two-button Gift Aid pattern */}
       <div className="space-y-3">
         {giftAidTotal > 0 ? (
           <>
             <button
               onClick={() => { setGiftAidDeclaration(null); setScreen('contact') }}
-              className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.99] transition-transform"
-              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}
+              className="w-full py-4 rounded-2xl font-black text-base shadow-lg active:scale-[0.99] transition-transform"
+              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff' }}
             >
               <div className="flex flex-col items-center leading-tight">
-                <span className="text-sm font-bold opacity-90">🇬🇧 Boost with Gift Aid (+£{boostAmount.toFixed(2)} free)</span>
+                <span className="text-sm font-bold opacity-90">
+                  🇬🇧 Boost with Gift Aid (+£{boostAmount.toFixed(2)} free)
+                </span>
                 <span className="text-lg font-black">Temple receives £{(total + boostAmount).toFixed(2)}</span>
               </div>
             </button>
             <button
               onClick={() => { setGiftAidDeclaration(DECLINED); setScreen('contact') }}
-              className="w-full py-4 rounded-2xl border-2 border-gray-200 text-gray-600 font-bold text-sm hover:bg-gray-50 active:scale-[0.99] transition-transform"
+              className="btn-ghost"
             >
               Without Gift Aid · Pay £{total.toFixed(2)}
             </button>
@@ -148,15 +164,15 @@ export function BasketPage() {
         ) : (
           <button
             onClick={() => setScreen('contact')}
-            className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.99] transition-transform"
-            style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
+            className="btn-gold"
           >
             Continue to Checkout →
           </button>
         )}
         <button
           onClick={() => setScreen('browse')}
-          className="w-full py-3 rounded-2xl text-gray-400 font-medium text-sm hover:text-gray-600"
+          className="w-full py-3 text-sm font-medium transition-colors"
+          style={{ color: 'rgba(255,248,220,0.35)' }}
         >
           ← Continue Shopping
         </button>

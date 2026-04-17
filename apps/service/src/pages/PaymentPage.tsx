@@ -9,7 +9,6 @@ import {
 import { useStore, t } from '../store'
 import { api } from '../api'
 
-// Cast to ComponentType<any> to avoid React 18/19 JSX type incompatibility
 const PayPalScriptProvider = _PayPalScriptProvider as ComponentType<{
   options: ReactPayPalScriptOptions; children: React.ReactNode
 }>
@@ -27,7 +26,6 @@ export function PaymentPage() {
   const [capturing, setCapturing] = useState(false)
 
   useEffect(() => {
-    // Load PayPal config + create basket in parallel
     Promise.all([
       api.paypalConfig().then((cfg) => setPaypalClientId(cfg.client_id)),
       (async () => {
@@ -76,7 +74,6 @@ export function PaymentPage() {
           paypal_order_id: data.orderID,
           amount: total,
         })
-        // Send receipt if email was provided
         if (contactInfo?.email && result.order_ref) {
           await api.sendReceipt({
             basket_id: basketId || result.order_id,
@@ -107,58 +104,70 @@ export function PaymentPage() {
     <div className="max-w-lg mx-auto px-4 py-6 pb-32">
       <button
         onClick={() => setScreen(giftAidTotal > 0 ? 'gift-aid' : 'contact')}
-        className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-600 mb-5 font-medium"
+        className="flex items-center gap-2 text-sm font-medium mb-6 transition-colors"
+        style={{ color: 'rgba(255,248,220,0.4)' }}
       >
         ← {t('back', language)}
       </button>
 
-      <h1 className="text-xl font-black text-gray-900 mb-1">Complete Payment</h1>
-      <p className="text-sm text-gray-400 mb-5">Pay securely via PayPal. No account required — pay with card too.</p>
+      <h1 className="font-display font-bold text-xl text-gold-400 mb-1">Complete Payment</h1>
+      <p className="text-sm mb-5" style={{ color: 'rgba(255,248,220,0.45)' }}>
+        Pay securely via PayPal. No account required — pay with card too.
+      </p>
 
       {/* Order Summary */}
-      <div className="bg-white rounded-2xl p-4 mb-5 border border-gray-100 shadow-sm space-y-2">
+      <div className="temple-card p-4 mb-5 space-y-2">
         {items.map((item) => (
-          <div key={item.id} className="flex justify-between text-sm text-gray-600">
-            <span className="truncate mr-2">{item.name} × {item.quantity}</span>
-            <span className="font-semibold text-gray-800 flex-shrink-0">£{item.totalPrice.toFixed(2)}</span>
+          <div key={item.id} className="flex justify-between text-sm">
+            <span className="truncate mr-2" style={{ color: 'rgba(255,248,220,0.6)' }}>
+              {item.name} × {item.quantity}
+            </span>
+            <span className="font-semibold text-ivory-200 flex-shrink-0 price-display">
+              £{item.totalPrice.toFixed(2)}
+            </span>
           </div>
         ))}
         {giftAidDeclaration?.agreed && boost > 0 && (
-          <div className="flex justify-between text-sm text-green-600 pt-1 border-t border-dashed border-gray-100">
+          <div className="flex justify-between text-sm pt-1"
+            style={{ borderTop: '1px dashed rgba(212,175,55,0.15)', color: '#4ade80' }}>
             <span>🇬🇧 Gift Aid boost (HMRC)</span>
-            <span className="font-bold">+£{boost.toFixed(2)}</span>
+            <span className="font-bold price-display">+£{boost.toFixed(2)}</span>
           </div>
         )}
-        <div className="flex justify-between pt-2 border-t border-gray-100">
-          <span className="font-bold text-gray-900">You pay</span>
-          <span className="font-black text-xl text-gray-900">£{total.toFixed(2)}</span>
+        <div className="flex justify-between pt-2" style={{ borderTop: '1px solid rgba(212,175,55,0.15)' }}>
+          <span className="font-bold text-ivory-200">You pay</span>
+          <span className="font-black text-xl text-gold-400 price-display">£{total.toFixed(2)}</span>
         </div>
       </div>
 
       {/* PayPal Button */}
       {configLoading ? (
         <div className="flex flex-col items-center py-12 gap-4">
-          <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+          <motion.div animate={{ rotate: 360 }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
             className="text-5xl">🕉</motion.div>
-          <p className="text-gray-400 text-sm">Preparing payment…</p>
+          <p className="text-xs tracking-widest uppercase font-semibold"
+            style={{ color: 'rgba(212,175,55,0.5)' }}>Preparing payment…</p>
         </div>
       ) : capturing ? (
         <div className="flex flex-col items-center py-12 gap-4">
-          <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+          <motion.div animate={{ rotate: 360 }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
             className="text-5xl">🕉</motion.div>
-          <p className="text-gray-700 font-semibold">Processing your payment…</p>
-          <p className="text-gray-400 text-sm">Please wait, do not close this page</p>
+          <p className="font-bold text-ivory-200">Processing your payment…</p>
+          <p className="text-xs" style={{ color: 'rgba(255,248,220,0.4)' }}>Please wait, do not close this page</p>
         </div>
       ) : !paypalClientId ? (
-        <div className="bg-amber-50 rounded-2xl p-5 text-center">
+        <div className="temple-card p-5 text-center">
           <div className="text-3xl mb-3">⚠️</div>
-          <p className="text-sm font-bold text-amber-800">PayPal not configured</p>
-          <p className="text-xs text-amber-600 mt-1">
+          <p className="text-sm font-bold text-gold-400">PayPal not configured</p>
+          <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.45)' }}>
             An administrator needs to add PAYPAL_CLIENT_ID in Admin → API Keys.
           </p>
           <button
             onClick={() => setScreen('browse')}
-            className="mt-4 px-4 py-2 rounded-xl bg-amber-200 text-amber-800 font-bold text-sm"
+            className="mt-4 px-4 py-2 rounded-xl font-bold text-sm"
+            style={{ background: 'rgba(212,175,55,0.15)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.3)' }}
           >Back to Browse</button>
         </div>
       ) : (
@@ -170,13 +179,7 @@ export function PaymentPage() {
           }}>
             <div className="paypal-buttons-container">
               <PayPalButtons
-                style={{
-                  layout: 'vertical',
-                  color: 'gold',
-                  shape: 'rect',
-                  label: 'pay',
-                  height: 48,
-                }}
+                style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'pay', height: 48 }}
                 createOrder={handleCreateOrder}
                 onApprove={handleApprove}
                 onError={(err) => {
@@ -192,15 +195,18 @@ export function PaymentPage() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="mt-4 bg-red-50 text-red-600 text-sm font-medium px-4 py-3 rounded-xl"
+              className="mt-4 rounded-xl px-4 py-3 text-sm font-medium"
+              style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.3)' }}
             >
               {error}
             </motion.div>
           )}
 
-          <div className="mt-4 flex items-center justify-center gap-2 text-xs text-gray-400">
+          <div className="mt-5 flex items-center justify-center gap-2 text-xs"
+            style={{ color: 'rgba(255,248,220,0.3)' }}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
             <span>Secured by PayPal · 256-bit SSL encryption</span>
           </div>

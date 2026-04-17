@@ -45,7 +45,6 @@ export function ContactPage() {
       termsConsent: anonymous ? false : terms,
       anonymous,
     })
-    // Route to gift-aid only if eligible, not anonymous, and user hasn't already declined at basket
     if (hasGiftAidItems && !anonymous && giftAidDeclaration === null) {
       setScreen('gift-aid')
     } else {
@@ -57,25 +56,29 @@ export function ContactPage() {
     <div className="max-w-lg mx-auto px-4 py-6 pb-32">
       <button
         onClick={() => setScreen('basket')}
-        className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-600 mb-5 font-medium"
+        className="flex items-center gap-2 text-sm font-medium mb-6 transition-colors"
+        style={{ color: 'rgba(255,248,220,0.4)' }}
       >
         ← {t('back', language)}
       </button>
 
-      <h1 className="text-xl font-black text-gray-900 mb-1">Your Details</h1>
-      <p className="text-sm text-gray-400 mb-6">Provide your details to receive a receipt. All fields are optional.</p>
+      <h1 className="font-display font-bold text-xl text-gold-400 mb-1">Your Details</h1>
+      <p className="text-sm mb-6" style={{ color: 'rgba(255,248,220,0.45)' }}>
+        Provide your details to receive a receipt. All fields are optional.
+      </p>
 
       {/* Anonymous toggle */}
-      <div className="bg-white rounded-2xl p-4 mb-4 border border-gray-100 shadow-sm">
+      <div className="temple-card p-4 mb-4">
         <button
           onClick={() => setAnonymous(!anonymous)}
           className="flex items-center justify-between w-full"
         >
-          <div>
-            <p className="font-bold text-gray-900 text-sm">Donate Anonymously</p>
-            <p className="text-xs text-gray-400 mt-0.5">Your details will not be recorded</p>
+          <div className="text-left">
+            <p className="font-bold text-ivory-200 text-sm">Donate Anonymously</p>
+            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.4)' }}>Your details will not be recorded</p>
           </div>
-          <div className={`w-12 h-6 rounded-full transition-colors relative ${anonymous ? 'bg-orange-500' : 'bg-gray-200'}`}>
+          <div className={`w-12 h-6 rounded-full transition-colors relative flex-shrink-0 ${anonymous ? '' : ''}`}
+            style={{ background: anonymous ? '#FF9933' : 'rgba(255,255,255,0.1)' }}>
             <motion.div
               animate={{ x: anonymous ? 24 : 2 }}
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
@@ -93,21 +96,23 @@ export function ContactPage() {
         >
           {/* Name */}
           <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-              Full Name {requiresContact && <span className="text-red-400">*</span>}
+            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+              style={{ color: 'rgba(212,175,55,0.6)' }}>
+              Full Name {requiresContact && <span style={{ color: '#C62828' }}>*</span>}
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your full name"
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm bg-white"
+              className="w-full px-4 py-3 rounded-xl text-sm"
             />
           </div>
 
           {/* Email */}
           <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+              style={{ color: 'rgba(212,175,55,0.6)' }}>
               Email Address
             </label>
             <input
@@ -115,16 +120,17 @@ export function ContactPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="your@email.com"
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm bg-white"
+              className="w-full px-4 py-3 rounded-xl text-sm"
             />
             {email && (
-              <p className="text-xs text-blue-500 mt-1 ml-1">📧 We'll send your receipt here</p>
+              <p className="text-xs mt-1 ml-1" style={{ color: '#60a5fa' }}>📧 We'll send your receipt here</p>
             )}
           </div>
 
           {/* Phone */}
           <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+              style={{ color: 'rgba(212,175,55,0.6)' }}>
               Phone Number
             </label>
             <input
@@ -132,7 +138,7 @@ export function ContactPage() {
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="+44 7700 000 000"
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm bg-white"
+              className="w-full px-4 py-3 rounded-xl text-sm"
             />
           </div>
 
@@ -140,18 +146,19 @@ export function ContactPage() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="space-y-2 pt-1"
+              className="space-y-3 pt-1"
             >
               <label className="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={gdpr}
                   onChange={(e) => setGdpr(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded accent-orange-500"
+                  className="mt-0.5 w-4 h-4 rounded flex-shrink-0"
+                  style={{ accentColor: '#D4AF37' }}
                 />
                 <div>
-                  <p className="text-xs font-semibold text-gray-700">Data Protection (GDPR)</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
+                  <p className="text-xs font-semibold text-ivory-200">Data Protection (GDPR)</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.4)' }}>
                     Your data will be held securely in accordance with UK GDPR and will not be shared with third parties.
                   </p>
                 </div>
@@ -162,11 +169,12 @@ export function ContactPage() {
                   type="checkbox"
                   checked={terms}
                   onChange={(e) => setTerms(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded accent-orange-500"
+                  className="mt-0.5 w-4 h-4 rounded flex-shrink-0"
+                  style={{ accentColor: '#D4AF37' }}
                 />
                 <div>
-                  <p className="text-xs font-semibold text-gray-700">Terms & Conditions</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
+                  <p className="text-xs font-semibold text-ivory-200">Terms &amp; Conditions</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.4)' }}>
                     By proceeding you confirm your donation is made voluntarily and you agree to our donation terms.
                   </p>
                 </div>
@@ -178,11 +186,12 @@ export function ContactPage() {
 
       {/* Gift Aid notice */}
       {hasGiftAidItems && !anonymous && (
-        <div className="bg-green-50 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
+        <div className="rounded-xl px-4 py-3 mb-4 flex items-start gap-3"
+          style={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(74,222,128,0.2)' }}>
           <span className="text-xl">🇬🇧</span>
           <div>
-            <p className="text-sm font-bold text-green-800">You may be eligible for Gift Aid!</p>
-            <p className="text-xs text-green-600 mt-0.5">
+            <p className="text-sm font-bold" style={{ color: '#4ade80' }}>You may be eligible for Gift Aid!</p>
+            <p className="text-xs mt-0.5" style={{ color: 'rgba(74,222,128,0.7)' }}>
               On the next step we'll ask if you're a UK taxpayer — HMRC will add 25% to your donation at no extra cost.
             </p>
           </div>
@@ -193,17 +202,14 @@ export function ContactPage() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="bg-red-50 text-red-600 text-sm font-medium px-4 py-3 rounded-xl mb-4"
+          className="rounded-xl px-4 py-3 mb-4 text-sm font-medium"
+          style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.3)' }}
         >
           {error}
         </motion.div>
       )}
 
-      <button
-        onClick={proceed}
-        className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.99] transition-transform"
-        style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
-      >
+      <button onClick={proceed} className="btn-gold">
         {t('continue', language)} →
       </button>
     </div>

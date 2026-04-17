@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, t } from '../store'
 import { api } from '../api'
 
-type Step = 'choice' | 'form' | 'decline'
+type Step = 'choice' | 'form'
 
 export function GiftAidPage() {
   const { language, setScreen, setGiftAidDeclaration, contactInfo, giftAidTotal, total } = useStore()
@@ -64,7 +64,8 @@ export function GiftAidPage() {
     <div className="max-w-lg mx-auto px-4 py-6 pb-32">
       <button
         onClick={() => setScreen('contact')}
-        className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-600 mb-5 font-medium"
+        className="flex items-center gap-2 text-sm font-medium mb-6 transition-colors"
+        style={{ color: 'rgba(255,248,220,0.4)' }}
       >
         ← {t('back', language)}
       </button>
@@ -77,42 +78,44 @@ export function GiftAidPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
           >
-            <div className="text-center mb-6">
-              <div className="text-5xl mb-3">🇬🇧</div>
-              <h1 className="text-xl font-black text-gray-900 mb-2">Boost Your Donation</h1>
-              <p className="text-sm text-gray-500">
-                If you're a UK taxpayer, HMRC will add <strong className="text-green-600">£{boost.toFixed(2)}</strong> to your
-                £{giftAidTotal.toFixed(2)} at no cost to you.
+            <div className="text-center mb-8">
+              <div className="text-5xl mb-4">🇬🇧</div>
+              <h1 className="font-display font-bold text-xl text-gold-400 mb-2">Boost Your Donation</h1>
+              <p className="text-sm" style={{ color: 'rgba(255,248,220,0.5)' }}>
+                If you're a UK taxpayer, HMRC will add{' '}
+                <strong style={{ color: '#4ade80' }}>£{boost.toFixed(2)}</strong>{' '}
+                to your £{giftAidTotal.toFixed(2)} at no cost to you.
               </p>
             </div>
 
             {/* Summary */}
-            <div className="bg-green-50 rounded-2xl p-4 mb-6 space-y-2">
-              <div className="flex justify-between text-sm text-gray-600">
-                <span>Your donation</span>
-                <span className="font-bold">£{total.toFixed(2)}</span>
+            <div className="temple-card p-4 mb-6 space-y-2.5">
+              <div className="flex justify-between text-sm">
+                <span style={{ color: 'rgba(255,248,220,0.5)' }}>Your donation</span>
+                <span className="font-bold text-ivory-200 price-display">£{total.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between text-sm text-green-700">
+              <div className="flex justify-between text-sm" style={{ color: '#4ade80' }}>
                 <span>HMRC Gift Aid (+25%)</span>
-                <span className="font-bold">+£{boost.toFixed(2)}</span>
+                <span className="font-bold price-display">+£{boost.toFixed(2)}</span>
               </div>
-              <div className="border-t border-green-200 pt-2 flex justify-between">
-                <span className="font-bold text-gray-900">Temple receives</span>
-                <span className="font-black text-green-700 text-lg">£{totalWithBoost.toFixed(2)}</span>
+              <div className="pt-2.5 flex justify-between"
+                style={{ borderTop: '1px solid rgba(212,175,55,0.15)' }}>
+                <span className="font-bold text-ivory-200">Temple receives</span>
+                <span className="font-black text-gold-400 text-lg price-display">£{totalWithBoost.toFixed(2)}</span>
               </div>
             </div>
 
             <div className="space-y-3">
               <button
                 onClick={() => setStep('form')}
-                className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg"
-                style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}
+                className="w-full py-4 rounded-2xl font-black text-base shadow-lg active:scale-[0.99] transition-transform"
+                style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff' }}
               >
                 Yes — Boost with Gift Aid 🎉
               </button>
               <button
                 onClick={decline}
-                className="w-full py-3.5 rounded-2xl border-2 border-gray-200 text-gray-600 font-bold text-sm hover:bg-gray-50"
+                className="btn-ghost"
               >
                 No thanks — continue without
               </button>
@@ -129,23 +132,27 @@ export function GiftAidPage() {
             className="space-y-4"
           >
             <div>
-              <h1 className="text-xl font-black text-gray-900 mb-1">Gift Aid Declaration</h1>
-              <p className="text-sm text-gray-400">HMRC requires your name and UK address</p>
+              <h1 className="font-display font-bold text-xl text-gold-400 mb-1">Gift Aid Declaration</h1>
+              <p className="text-sm" style={{ color: 'rgba(255,248,220,0.45)' }}>
+                HMRC requires your name and UK address
+              </p>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Full Name *</label>
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                style={{ color: 'rgba(212,175,55,0.6)' }}>Full Name *</label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm bg-white"
+                className="w-full px-4 py-3 rounded-xl text-sm"
               />
             </div>
 
             {/* Postcode lookup */}
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Postcode *</label>
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                style={{ color: 'rgba(212,175,55,0.6)' }}>Postcode *</label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -153,27 +160,30 @@ export function GiftAidPage() {
                   onChange={(e) => setPostcode(e.target.value.toUpperCase())}
                   onKeyDown={(e) => e.key === 'Enter' && lookupPostcode()}
                   placeholder="e.g. HA9 0BB"
-                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm bg-white uppercase"
+                  className="flex-1 px-4 py-3 rounded-xl text-sm uppercase"
                 />
                 <button
                   onClick={lookupPostcode}
                   disabled={lookingUp}
-                  className="px-4 py-3 rounded-xl text-white font-bold text-sm disabled:opacity-60"
-                  style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
+                  className="px-4 py-3 rounded-xl font-bold text-sm disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1A0606' }}
                 >
                   {lookingUp ? '…' : 'Find'}
                 </button>
               </div>
-              {addressError && <p className="text-xs text-red-500 mt-1">{addressError}</p>}
+              {addressError && (
+                <p className="text-xs mt-1" style={{ color: '#f87171' }}>{addressError}</p>
+              )}
             </div>
 
             {addresses.length > 0 && (
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Select Address *</label>
+                <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                  style={{ color: 'rgba(212,175,55,0.6)' }}>Select Address *</label>
                 <select
                   value={selectedAddress}
                   onChange={(e) => setSelectedAddress(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm bg-white"
+                  className="w-full px-4 py-3 rounded-xl text-sm"
                 >
                   <option value="">— Select your address —</option>
                   {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
@@ -182,38 +192,42 @@ export function GiftAidPage() {
             )}
 
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Email *</label>
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                style={{ color: 'rgba(212,175,55,0.6)' }}>Email *</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm bg-white"
+                className="w-full px-4 py-3 rounded-xl text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Phone</label>
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                style={{ color: 'rgba(212,175,55,0.6)' }}>Phone</label>
               <input
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm bg-white"
+                className="w-full px-4 py-3 rounded-xl text-sm"
               />
             </div>
 
-            <div className="bg-amber-50 rounded-xl p-4 space-y-3">
+            <div className="temple-card p-4 space-y-3">
               <label className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 accent-green-600" />
-                <p className="text-xs text-gray-700">
-                  <strong>Gift Aid Declaration:</strong> I confirm I am a UK taxpayer and understand that if I pay less Income Tax or Capital Gains Tax than the amount of Gift Aid claimed on all my donations in that tax year, it is my responsibility to pay any difference.
+                  className="mt-0.5 w-4 h-4 flex-shrink-0"
+                  style={{ accentColor: '#4ade80' }} />
+                <p className="text-xs text-ivory-200">
+                  <strong className="text-gold-400">Gift Aid Declaration:</strong> I confirm I am a UK taxpayer and understand that if I pay less Income Tax or Capital Gains Tax than the amount of Gift Aid claimed on all my donations in that tax year, it is my responsibility to pay any difference.
                 </p>
               </label>
 
               <label className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" checked={termsOk} onChange={(e) => setTermsOk(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 accent-green-600" />
-                <p className="text-xs text-gray-700">
+                  className="mt-0.5 w-4 h-4 flex-shrink-0"
+                  style={{ accentColor: '#4ade80' }} />
+                <p className="text-xs text-ivory-200">
                   I agree to the terms and conditions and consent to my data being held in accordance with UK GDPR for Gift Aid purposes.
                 </p>
               </label>
@@ -221,19 +235,20 @@ export function GiftAidPage() {
 
             {error && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="bg-red-50 text-red-600 text-sm font-medium px-4 py-3 rounded-xl">
+                className="rounded-xl px-4 py-3 text-sm font-medium"
+                style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.3)' }}>
                 {error}
               </motion.div>
             )}
 
             <div className="space-y-3 pt-1">
               <button onClick={confirm}
-                className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg"
-                style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
-                Confirm Gift Aid & Pay →
+                className="w-full py-4 rounded-2xl font-black text-base shadow-lg active:scale-[0.99] transition-transform"
+                style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff' }}>
+                Confirm Gift Aid &amp; Pay →
               </button>
               <button onClick={() => setStep('choice')}
-                className="w-full py-3.5 rounded-2xl border-2 border-gray-200 text-gray-500 font-bold text-sm">
+                className="btn-ghost">
                 ← Back
               </button>
             </div>

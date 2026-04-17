@@ -9,12 +9,118 @@
   }
 
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    background: #060100;
+    color: #FFF8DC;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+    /* Subtle temple-stone texture */
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(212,175,55,0.08) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 110%, rgba(183,28,28,0.12) 0%, transparent 55%);
   }
 
-  * {
-    box-sizing: border-box;
+  * { box-sizing: border-box; }
+
+  input, select, textarea {
+    background: rgba(255,255,255,0.06) !important;
+    border-color: rgba(212,175,55,0.25) !important;
+    color: #FFF8DC !important;
+  }
+  input::placeholder, textarea::placeholder {
+    color: rgba(255,248,220,0.35) !important;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: rgba(212,175,55,0.6) !important;
+    box-shadow: 0 0 0 3px rgba(212,175,55,0.12) !important;
+  }
+  select option { background: #1A0606; color: #FFF8DC; }
+}
+
+@layer components {
+  /* Glass card — the core temple card style */
+  .temple-card {
+    background: linear-gradient(135deg, rgba(255,255,255,0.055), rgba(255,255,255,0.02));
+    border: 1px solid rgba(212,175,55,0.2);
+    backdrop-filter: blur(8px);
+    border-radius: 1.25rem;
+    transition: all 0.2s ease;
+  }
+  .temple-card:hover {
+    border-color: rgba(212,175,55,0.45);
+    box-shadow: 0 0 24px rgba(212,175,55,0.2), 0 8px 32px rgba(0,0,0,0.5);
+    transform: translateY(-2px);
+  }
+
+  /* Gold CTA button */
+  .btn-gold {
+    background: linear-gradient(135deg, #D4AF37, #FFD700, #C5A028);
+    background-size: 200% 200%;
+    color: #1A0606;
+    font-weight: 900;
+    border-radius: 1rem;
+    padding: 1rem 1.5rem;
+    width: 100%;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    animation: goldShimmer 3s ease-in-out infinite;
+    box-shadow: 0 4px 20px rgba(212,175,55,0.35);
+  }
+  .btn-gold:hover { box-shadow: 0 4px 30px rgba(212,175,55,0.55); transform: translateY(-1px); }
+  .btn-gold:active { transform: scale(0.98); }
+
+  /* Saffron button */
+  .btn-saffron {
+    background: linear-gradient(135deg, #FF9933, #E65C00);
+    color: #fff;
+    font-weight: 900;
+    border-radius: 1rem;
+    padding: 1rem 1.5rem;
+    width: 100%;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 20px rgba(255,153,51,0.3);
+  }
+  .btn-saffron:hover { box-shadow: 0 4px 30px rgba(255,153,51,0.5); transform: translateY(-1px); }
+  .btn-saffron:active { transform: scale(0.98); }
+
+  /* Ghost button */
+  .btn-ghost {
+    background: transparent;
+    color: rgba(255,248,220,0.55);
+    border: 1px solid rgba(212,175,55,0.2);
+    font-weight: 600;
+    border-radius: 1rem;
+    padding: 0.875rem 1.5rem;
+    width: 100%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .btn-ghost:hover { border-color: rgba(212,175,55,0.4); color: rgba(255,248,220,0.8); }
+
+  /* Gold divider */
+  .divider-gold {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(212,175,55,0.3), transparent);
+    margin: 1.25rem 0;
+  }
+
+  /* Gift Aid green badge */
+  .badge-ga {
+    background: linear-gradient(135deg,#1B5E20,#2E7D32);
+    color: #A5D6A7;
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.5rem;
+    border-radius: 99px;
+    border: 1px solid rgba(165,214,167,0.3);
   }
 }
 
@@ -23,26 +129,39 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .safe-top    { padding-top:    env(safe-area-inset-top, 0px);    }
+
+  .text-gold       { color: #D4AF37; }
+  .text-ivory      { color: #FFF8DC; }
+  .text-ivory-mute { color: rgba(255,248,220,0.55); }
+  .text-saffron    { color: #FF9933; }
+
+  .border-gold     { border-color: rgba(212,175,55,0.3); }
+  .border-gold-hi  { border-color: rgba(212,175,55,0.6); }
+
+  .bg-temple-surface { background: rgba(255,255,255,0.04); }
+  .bg-temple-raised  { background: rgba(255,255,255,0.07); }
+
+  .font-display { font-family: 'Cinzel', Georgia, serif; }
+
+  .price-display {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
   }
 
-  .safe-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+  @keyframes goldShimmer {
+    0%,100% { background-position: 0% 50%; }
+    50%     { background-position: 100% 50%; }
   }
 
-  .safe-top {
-    padding-top: env(safe-area-inset-top, 0px);
+  @keyframes diyaPulse {
+    0%,100% { box-shadow: 0 0 10px rgba(212,175,55,0.25); }
+    50%     { box-shadow: 0 0 30px rgba(212,175,55,0.55), 0 0 60px rgba(255,153,51,0.2); }
   }
 }
 
-/* PayPal button tweaks */
-.paypal-buttons-container {
-  min-height: 150px;
-}
-
-/* Smooth number transitions */
-.price-display {
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum";
-}
+/* PayPal button area */
+.paypal-buttons-container { min-height: 150px; }

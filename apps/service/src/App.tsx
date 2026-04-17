@@ -10,33 +10,39 @@ import { GiftAidPage } from './pages/GiftAidPage'
 import { PaymentPage } from './pages/PaymentPage'
 import { ConfirmationPage } from './pages/ConfirmationPage'
 
-const PAGE_ORDER = ['browse', 'basket', 'contact', 'gift-aid', 'payment', 'confirmation']
-
-// Progress bar steps shown in header area during checkout
 const CHECKOUT_STEPS = ['basket', 'contact', 'gift-aid', 'payment', 'confirmation']
 
 function ProgressBar({ screen }: { screen: string }) {
   const idx = CHECKOUT_STEPS.indexOf(screen)
   if (idx < 0) return null
+
+  const stepLabels: Record<string, string> = {
+    basket: 'Basket', contact: 'Details', 'gift-aid': 'Gift Aid',
+    payment: 'Payment', confirmation: 'Complete',
+  }
+
   return (
-    <div className="bg-white border-b border-gray-100">
-      <div className="max-w-5xl mx-auto px-4 py-2">
+    <div style={{ background: 'rgba(6,1,0,0.95)', borderBottom: '1px solid rgba(212,175,55,0.15)' }}>
+      <div className="max-w-5xl mx-auto px-4 py-2.5">
         <div className="flex items-center gap-1">
           {CHECKOUT_STEPS.map((step, i) => (
             <div key={step} className="flex items-center gap-1 flex-1">
-              <div
-                className={`flex-1 h-1 rounded-full transition-colors duration-300 ${
-                  i <= idx ? 'bg-orange-400' : 'bg-gray-200'
-                }`}
-              />
+              <div className={`flex-1 h-0.5 rounded-full transition-all duration-500 ${
+                i <= idx
+                  ? 'bg-gradient-to-r from-gold-400 to-gold-glow'
+                  : 'bg-white/10'
+              }`} />
               {i < CHECKOUT_STEPS.length - 1 && (
-                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${i < idx ? 'bg-orange-400' : 'bg-gray-200'}`} />
+                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors duration-500 ${
+                  i < idx ? 'bg-gold-400' : 'bg-white/10'
+                }`} />
               )}
             </div>
           ))}
         </div>
-        <p className="text-xs text-gray-400 mt-1 text-right capitalize">
-          {screen.replace('-', ' ')}
+        <p className="text-[10px] text-right mt-1 font-semibold tracking-widest uppercase"
+          style={{ color: 'rgba(212,175,55,0.6)' }}>
+          {stepLabels[screen] || screen}
         </p>
       </div>
     </div>
@@ -49,7 +55,6 @@ export default function App() {
   const branchLocked = useStore((s) => s.branchLocked)
   const setBranch = useStore((s) => s.setBranch)
 
-  // Auto-detect branch from subdomain on mount (e.g. mk.shital.org.uk → 'mk')
   useEffect(() => {
     const sub = detectBranchFromHostname()
     if (sub) setBranch(sub, sub, true)
@@ -58,7 +63,7 @@ export default function App() {
   const pageVariants = {
     initial: { opacity: 0, x: 20 },
     animate: { opacity: 1, x: 0 },
-    exit: { opacity: 0, x: -20 },
+    exit:    { opacity: 0, x: -20 },
   }
 
   const renderPage = () => {
@@ -73,14 +78,12 @@ export default function App() {
     }
   }
 
-  // Show branch picker when no branch has been selected yet (branchName is empty)
-  // and the branch isn't locked from a subdomain
   if (!branchName && !branchLocked) {
     return <BranchPicker />
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen flex flex-col" style={{ background: '#060100' }}>
       <Header />
       <ProgressBar screen={screen} />
 
@@ -99,14 +102,17 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      {/* Footer */}
       {screen === 'browse' && (
-        <footer className="bg-maroon-900 text-white py-6 px-4 mt-8">
-          <div className="max-w-5xl mx-auto text-center">
-            <p className="text-orange-200 text-xs">
-              🕉 SHITAL · Shri Shirdi Saibaba Temple Association · UK Charity No. 1138530
+        <footer className="py-8 px-4 mt-8"
+          style={{ borderTop: '1px solid rgba(212,175,55,0.15)', background: 'rgba(26,6,6,0.8)' }}>
+          <div className="max-w-5xl mx-auto text-center space-y-1">
+            <p className="font-display text-gold-500 text-xs tracking-widest uppercase">
+              🕉 SHITAL · Shri Shirdi Saibaba Temple Association
             </p>
-            <p className="text-white/40 text-xs mt-1">
+            <p className="text-xs" style={{ color: 'rgba(255,248,220,0.3)' }}>
+              UK Registered Charity No. 1138530
+            </p>
+            <p className="text-xs" style={{ color: 'rgba(255,248,220,0.2)' }}>
               Secure payments powered by PayPal · All donations subject to our charity terms
             </p>
           </div>

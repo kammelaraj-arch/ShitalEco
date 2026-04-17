@@ -4,36 +4,63 @@ export default {
   theme: {
     extend: {
       colors: {
-        saffron: {
-          50:  '#fff8ec',
-          100: '#ffefd0',
-          200: '#ffd99a',
-          300: '#ffbd5e',
-          400: '#ffa030',
-          500: '#FF9933',
-          600: '#f07a00',
-          700: '#c05c00',
-          800: '#974800',
-          900: '#7a3c00',
+        temple: {
+          bg:      '#060100',
+          deep:    '#0E0303',
+          mid:     '#1A0606',
+          surface: '#261010',
+          raised:  '#321414',
         },
-        maroon: {
-          900: '#1C0000',
-          800: '#3d0000',
-          700: '#5c0000',
+        gold: {
+          100: '#FFF8DC',
+          200: '#FAE28A',
+          300: '#F5C842',
+          400: '#D4AF37',
+          500: '#C5A028',
+          600: '#B8860B',
+          glow: '#FFD700',
+        },
+        saffron: {
+          300: '#FFB347',
+          400: '#FF9933',
+          500: '#FF7700',
+          600: '#E65C00',
+        },
+        crimson: {
+          500: '#C62828',
+          600: '#B71C1C',
+          700: '#7F0000',
+        },
+        ivory: {
+          100: '#FFFFF0',
+          200: '#FFF8DC',
+          300: '#FAF0E6',
+          400: '#F5DEB3',
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        display: ['Cinzel', 'Georgia', 'serif'],
+        sans:    ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
       },
       animation: {
-        'spin-slow': 'spin 3s linear infinite',
-        'bounce-soft': 'bounce 1s ease-in-out infinite',
-        'fade-in': 'fadeIn 0.3s ease-out',
-        'slide-up': 'slideUp 0.35s ease-out',
+        'spin-slow':    'spin 3s linear infinite',
+        'gold-shimmer': 'goldShimmer 3s ease-in-out infinite',
+        'diya-pulse':   'diyaPulse 2s ease-in-out infinite',
+        'float':        'float 4s ease-in-out infinite',
       },
       keyframes: {
-        fadeIn: { from: { opacity: '0' }, to: { opacity: '1' } },
-        slideUp: { from: { transform: 'translateY(20px)', opacity: '0' }, to: { transform: 'translateY(0)', opacity: '1' } },
+        goldShimmer: {
+          '0%,100%': { backgroundPosition: '0% 50%' },
+          '50%':     { backgroundPosition: '100% 50%' },
+        },
+        diyaPulse: {
+          '0%,100%': { boxShadow: '0 0 10px rgba(212,175,55,0.25)' },
+          '50%':     { boxShadow: '0 0 30px rgba(212,175,55,0.55), 0 0 60px rgba(255,153,51,0.2)' },
+        },
+        float: {
+          '0%,100%': { transform: 'translateY(0)' },
+          '50%':     { transform: 'translateY(-8px)' },
+        },
       },
     },
   },

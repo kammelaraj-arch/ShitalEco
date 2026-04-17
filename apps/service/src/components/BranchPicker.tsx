@@ -23,46 +23,65 @@ export function BranchPicker() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-12">
+    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12"
+      style={{ background: '#060100' }}>
+
+      {/* Ambient glow */}
+      <div className="fixed inset-0 pointer-events-none"
+        style={{
+          background: 'radial-gradient(ellipse 70% 50% at 50% 30%, rgba(212,175,55,0.07) 0%, transparent 65%)',
+        }} />
+
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-sm"
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-sm relative z-10"
       >
         {/* Hero */}
-        <div className="text-center mb-8">
-          <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4 shadow-lg"
-            style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
-          >🕉</div>
-          <h1 className="text-2xl font-black text-gray-900 mb-1">Shri Shirdi Saibaba Temple</h1>
-          <p className="text-orange-600 text-xs font-semibold tracking-wide mb-0.5">SHITAL · Charity No. 1138530</p>
-          <p className="text-gray-400 text-sm">Which temple would you like to donate to?</p>
+        <div className="text-center mb-10">
+          <motion.div
+            animate={{ boxShadow: ['0 0 20px rgba(212,175,55,0.2)', '0 0 50px rgba(212,175,55,0.5)', '0 0 20px rgba(212,175,55,0.2)'] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+            className="w-20 h-20 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-6"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#1A0606' }}
+          >
+            🛕
+          </motion.div>
+          <h1 className="font-display font-bold text-2xl text-gold-400 mb-1 tracking-wide">
+            Shri Shirdi Saibaba Temple
+          </h1>
+          <p className="text-xs font-semibold tracking-widest uppercase mb-3" style={{ color: '#FF9933' }}>
+            SHITAL · Charity No. 1138530
+          </p>
+          <p style={{ color: 'rgba(255,248,220,0.5)' }} className="text-sm">
+            Which temple would you like to visit?
+          </p>
         </div>
 
-        {/* Branch list */}
+        {/* Divider */}
+        <div className="divider-gold mb-6" />
+
         {loading ? (
-          <div className="flex justify-center py-8">
+          <div className="flex flex-col items-center justify-center py-10 gap-4">
             <motion.div
               animate={{ rotate: 360 }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
               className="text-4xl"
             >🕉</motion.div>
+            <p className="text-xs tracking-widest uppercase" style={{ color: 'rgba(212,175,55,0.5)' }}>
+              Loading…
+            </p>
           </div>
         ) : branches.length === 0 ? (
-          /* No branches in DB — go straight to main */
-          <div className="text-center">
-            <button
-              onClick={() => setBranch('main', 'Shital Temple', false)}
-              className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg"
-              style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
-            >
-              Enter →
-            </button>
-          </div>
+          <button
+            onClick={() => setBranch('main', 'Shital Temple', false)}
+            className="btn-gold"
+          >
+            Enter the Temple →
+          </button>
         ) : (
           <div className="space-y-3">
-            {/* Always include "All / Main" option */}
             <BranchCard
               name="All Temples"
               city="General donation"
@@ -80,6 +99,10 @@ export function BranchPicker() {
             ))}
           </div>
         )}
+
+        <p className="text-center text-xs mt-8" style={{ color: 'rgba(255,248,220,0.2)' }}>
+          🙏 Jai Sai Baba
+        </p>
       </motion.div>
     </div>
   )
@@ -92,22 +115,23 @@ function BranchCard({
 }) {
   return (
     <motion.button
-      whileHover={{ y: -2 }}
+      whileHover={{ y: -2, borderColor: 'rgba(212,175,55,0.5)' }}
       whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className="w-full bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex items-center gap-4 text-left hover:border-orange-200 transition-colors"
+      className="w-full temple-card p-4 flex items-center gap-4 text-left"
     >
       <div
         className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0"
-        style={{ background: 'linear-gradient(135deg,#FFF3E0,#FFE0B2)' }}
+        style={{ background: 'rgba(212,175,55,0.12)' }}
       >
         {emoji}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-bold text-gray-900 truncate">{name}</p>
-        {city && <p className="text-sm text-gray-400 truncate">{city}</p>}
+        <p className="font-bold text-ivory-200 truncate text-sm">{name}</p>
+        {city && <p className="text-xs truncate mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>{city}</p>}
       </div>
-      <svg className="w-5 h-5 text-orange-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        style={{ color: '#D4AF37' }}>
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
       </svg>
     </motion.button>
