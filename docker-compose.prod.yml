@@ -229,7 +229,6 @@ services:
       - quick-donation
       - kiosk
       - screen
-      - service
     networks:
       - internal
 
