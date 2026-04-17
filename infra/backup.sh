@@ -18,9 +18,15 @@ APP_DIR="/opt/shitaleco"
 BACKUP_DIR="$APP_DIR/backups"
 ENV_FILE="$APP_DIR/.env"
 LOG_FILE="$BACKUP_DIR/backup.log"
-DB_CONTAINER="shitaleco-db-1"
-DB_NAME="shitaleco_db"
-DB_USER="shitaleco_db_user"
+DB_CONTAINER="shital-postgres"
+DB_NAME="shital"
+DB_USER="shital"
+
+# Load POSTGRES_PASSWORD from .env if available
+if [ -f "$ENV_FILE" ]; then
+  POSTGRES_PASSWORD_VAL=$(grep -E '^POSTGRES_PASSWORD=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)
+  export PGPASSWORD="${POSTGRES_PASSWORD_VAL:-shital_dev_password}"
+fi
 
 mkdir -p "$BACKUP_DIR/daily" "$BACKUP_DIR/weekly" "$BACKUP_DIR/monthly"
 
@@ -69,7 +75,7 @@ if ! docker ps --format '{{.Names}}' | grep -q "^${DB_CONTAINER}$"; then
   exit 1
 fi
 
-if docker exec "$DB_CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" --clean --if-exists 2>>"$LOG_FILE" | gzip > "$DAILY_FILE"; then
+if docker exec -e PGPASSWORD="${PGPASSWORD:-shital_dev_password}" "$DB_CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" --clean --if-exists 2>>"$LOG_FILE" | gzip > "$DAILY_FILE"; then
   SIZE=$(du -h "$DAILY_FILE" | cut -f1)
   log "✓ Daily backup complete ($SIZE)"
 else

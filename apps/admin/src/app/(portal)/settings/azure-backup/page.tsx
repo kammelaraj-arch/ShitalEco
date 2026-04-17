@@ -78,6 +78,7 @@ export default function AzureBackupPage() {
   const [showConn, setShowConn] = useState(false)
   const [saving, setSaving] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [testing, setTesting] = useState(false)
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   useEffect(() => {
@@ -112,6 +113,19 @@ export default function AzureBackupPage() {
       }
     } catch { setMsg({ text: 'Network error — please try again', ok: false }) }
     finally { setSaving(false) }
+  }
+
+  async function testConnection() {
+    setTesting(true); setMsg(null)
+    try {
+      const res = await fetch(`${API}/settings/azure-backup/test`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token()}` },
+      })
+      const d = await res.json()
+      setMsg({ text: d.ok ? `✅ ${d.message}` : `❌ ${d.error}`, ok: d.ok })
+    } catch { setMsg({ text: '❌ Network error — could not reach server', ok: false }) }
+    finally { setTesting(false) }
   }
 
   async function clear() {
@@ -265,7 +279,7 @@ export default function AzureBackupPage() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
           {[
-            { label: 'Daily', value: 'Every day 2:00 AM', sub: '30 days retained' },
+            { label: 'Daily', value: 'Every day 2:00 AM (London)', sub: '30 days retained' },
             { label: 'Weekly', value: 'Every Sunday', sub: '12 weeks retained' },
             { label: 'Monthly', value: '1st of month', sub: '12 months retained' },
           ].map(({ label, value, sub }) => (
@@ -323,19 +337,37 @@ export default function AzureBackupPage() {
         </ol>
       </div>
 
-      {/* Manual test */}
+      {/* Test connection */}
       <div className={card} style={{ background: 'rgba(21,128,61,0.06)', border: '1px solid rgba(21,128,61,0.2)' }}>
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">🧪</span>
-          <h2 className="text-white font-bold text-base">Test Backup</h2>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🧪</span>
+            <div>
+              <h2 className="text-white font-bold text-base">Test Connection</h2>
+              <p className="text-white/45 text-xs">Uploads and deletes a tiny test blob to verify credentials</p>
+            </div>
+          </div>
+          <button
+            onClick={testConnection}
+            disabled={testing || !status?.connection_string_set}
+            className="px-5 py-2.5 rounded-xl font-black text-sm text-white transition-all disabled:opacity-40 hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
+            style={{ background: 'linear-gradient(135deg, #166534, #15803d)', boxShadow: '0 4px 16px rgba(21,128,61,0.3)' }}
+          >
+            {testing ? 'Testing…' : 'Test Now'}
+          </button>
         </div>
-        <p className="text-white/45 text-sm">Run on the server to trigger an immediate backup and verify Azure upload:</p>
-        <code className="block bg-black/40 rounded-xl px-4 py-3 font-mono text-xs text-green-300 whitespace-pre overflow-x-auto">
-          bash /opt/shitaleco/infra/backup.sh
-        </code>
-        <p className="text-white/30 text-xs">
-          Check <span className="font-mono">/opt/shitaleco/backups/backup.log</span> for results.
-        </p>
+        {!status?.connection_string_set && (
+          <p className="text-yellow-400/60 text-xs">Save credentials first before testing.</p>
+        )}
+        <div className="border-t border-white/5 pt-4 mt-1 space-y-1">
+          <p className="text-white/30 text-xs">To run a full backup immediately on the server:</p>
+          <code className="block bg-black/40 rounded-xl px-4 py-3 font-mono text-xs text-green-300 whitespace-pre overflow-x-auto">
+            bash /opt/shitaleco/infra/backup.sh
+          </code>
+          <p className="text-white/25 text-xs">
+            Logs: <span className="font-mono">/opt/shitaleco/backups/backup.log</span>
+          </p>
+        </div>
       </div>
     </div>
   )

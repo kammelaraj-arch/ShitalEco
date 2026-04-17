@@ -1,0 +1,3 @@
+# ShitalEco automated backup schedule (times are UK/London)
+# Daily backup at 02:00 every day
+0 2 * * * bash /opt/shitaleco/infra/backup.sh >> /opt/shitaleco/backups/cron.log 2>&1

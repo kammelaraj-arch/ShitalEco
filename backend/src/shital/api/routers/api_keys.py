@@ -248,6 +248,34 @@ async def clear_azure_backup_config(
     return {"ok": True}
 
 
+@settings_router.post("/azure-backup/test")
+async def test_azure_backup_connection(ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    import asyncio
+    from shital.core.fabrics.secrets import SecretsManager
+
+    conn = await SecretsManager.get("AZURE_STORAGE_CONNECTION_STRING")
+    container = await SecretsManager.get("AZURE_STORAGE_CONTAINER", fallback="shitaleco-backups") or "shitaleco-backups"
+    if not conn:
+        return {"ok": False, "error": "Azure Storage connection string is not configured"}
+
+    def _test_sync() -> dict[str, Any]:
+        from azure.storage.blob import BlobServiceClient
+        client = BlobServiceClient.from_connection_string(conn)
+        cc = client.get_container_client(container)
+        if not cc.exists():
+            cc.create_container()
+        test_blob = "shital-connectivity-test.txt"
+        cc.upload_blob(test_blob, b"ShitalEco backup connectivity test", overwrite=True)
+        cc.delete_blob(test_blob)
+        return {"ok": True, "message": f"Connected successfully to container '{container}'"}
+
+    try:
+        return await asyncio.get_event_loop().run_in_executor(None, _test_sync)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:300]}
+
+
 _AZURE_CREDS_FILE = "/opt/shitaleco/backups/.azure-creds.env"
 
 
