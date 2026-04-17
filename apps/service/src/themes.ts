@@ -156,7 +156,7 @@ export const THEMES: Theme[] = [
   },
 ]
 
-export const DEFAULT_THEME: ThemeId = 'crimson'
+export const DEFAULT_THEME: ThemeId = 'dark'
 
 export function applyTheme(theme: Theme) {
   const root = document.documentElement
