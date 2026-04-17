@@ -1,6 +1,7 @@
 'use client'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { clsx } from 'clsx'
 import { useBranding } from '@/lib/branding'
@@ -93,8 +94,29 @@ interface SidebarProps {
 
 export function Sidebar({ open = true, onClose }: SidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const { branding } = useBranding()
   const { enabled: kbEnabled, setEnabled: setKbEnabled } = useKeyboardEnabled()
+  const [user, setUser] = useState<{ name?: string; role?: string } | null>(null)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('shital_user')
+      if (raw) setUser(JSON.parse(raw))
+    } catch { /* ignore */ }
+  }, [])
+
+  function handleLogout() {
+    localStorage.removeItem('shital_access_token')
+    localStorage.removeItem('shital_refresh_token')
+    localStorage.removeItem('shital_user')
+    document.cookie = 'shital_token=; path=/; max-age=0'
+    router.push('/login')
+  }
+
+  const displayName = user?.name || 'Admin User'
+  const displayRole = user?.role || 'SUPER_ADMIN'
+  const initials = displayName.slice(0, 1).toUpperCase()
 
   return (
     <aside
@@ -221,15 +243,22 @@ export function Sidebar({ open = true, onClose }: SidebarProps) {
             className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0"
             style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}
           >
-            A
+            {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white text-sm font-semibold truncate">Admin User</p>
-            <p className="text-white/30 text-xs truncate">SUPER_ADMIN</p>
+            <p className="text-white text-sm font-semibold truncate">{displayName}</p>
+            <p className="text-white/30 text-xs truncate">{displayRole}</p>
           </div>
           <Link href="/settings/branding" className="text-white/30 hover:text-white/60 text-sm transition-colors" title="Branding Settings">
             🎨
           </Link>
+          <button
+            onClick={handleLogout}
+            className="text-white/30 hover:text-red-400 text-sm transition-colors"
+            title="Sign out"
+          >
+            ⏏
+          </button>
         </div>
       </div>
     </aside>
