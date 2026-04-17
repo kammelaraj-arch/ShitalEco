@@ -133,6 +133,10 @@ async def _patch_schema() -> None:
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_live         BOOLEAN NOT NULL DEFAULT true",
         # Migration 009 column on catalog_items
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS name_te         VARCHAR(200) NOT NULL DEFAULT ''",
+        # Missing columns referenced by list_items / kiosk queries
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS metadata_json   JSONB        NOT NULL DEFAULT '{}'",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS stock_qty       INTEGER",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS sort_order      INTEGER      NOT NULL DEFAULT 0",
         # Migration 007 columns on temple_services (if table exists)
         "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS available_from  TIMESTAMPTZ",
         "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS available_until TIMESTAMPTZ",
