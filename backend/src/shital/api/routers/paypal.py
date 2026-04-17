@@ -114,8 +114,8 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
     now       = datetime.utcnow()
 
     try:
-        from sqlalchemy import text
         from shital.core.fabrics.database import SessionLocal
+        from sqlalchemy import text
         async with SessionLocal() as db:
             decl_id: str | None = None
             if body.gift_aid and body.contact_name:
