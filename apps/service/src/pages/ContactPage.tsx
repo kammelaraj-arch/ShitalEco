@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { useStore, t } from '../store'
 
 export function ContactPage() {
-  const { language, setScreen, setContactInfo, giftAidTotal, giftAidDeclaration, items } = useStore()
+  const { language, setScreen, setContactInfo, items } = useStore()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
@@ -12,7 +12,6 @@ export function ContactPage() {
   const [terms, setTerms] = useState(false)
   const [error, setError] = useState('')
 
-  const hasGiftAidItems = giftAidTotal > 0
   const requiresContact = items.some((i) =>
     ['SOFT_DONATION', 'PROJECT_DONATION', 'SPONSORSHIP', 'SHOP'].includes(i.category || '')
   )
@@ -45,11 +44,7 @@ export function ContactPage() {
       termsConsent: anonymous ? false : terms,
       anonymous,
     })
-    if (hasGiftAidItems && !anonymous && giftAidDeclaration === null) {
-      setScreen('gift-aid')
-    } else {
-      setScreen('payment')
-    }
+    setScreen('payment')
   }
 
   return (
@@ -182,20 +177,6 @@ export function ContactPage() {
             </motion.div>
           )}
         </motion.div>
-      )}
-
-      {/* Gift Aid notice */}
-      {hasGiftAidItems && !anonymous && (
-        <div className="rounded-xl px-4 py-3 mb-4 flex items-start gap-3"
-          style={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(74,222,128,0.2)' }}>
-          <span className="text-xl">🇬🇧</span>
-          <div>
-            <p className="text-sm font-bold" style={{ color: '#4ade80' }}>You may be eligible for Gift Aid!</p>
-            <p className="text-xs mt-0.5" style={{ color: 'rgba(74,222,128,0.7)' }}>
-              On the next step we'll ask if you're a UK taxpayer — HMRC will add 25% to your donation at no extra cost.
-            </p>
-          </div>
-        </div>
       )}
 
       {error && (
