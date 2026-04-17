@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useStore, detectBranchFromHostname } from './store'
+import { applyTheme, getTheme } from './themes'
 import { Header } from './components/Header'
 import { BranchPicker } from './components/BranchPicker'
 import { BrowsePage } from './pages/BrowsePage'
@@ -54,6 +55,11 @@ export default function App() {
   const branchName = useStore((s) => s.branchName)
   const branchLocked = useStore((s) => s.branchLocked)
   const setBranch = useStore((s) => s.setBranch)
+  const themeId = useStore((s) => s.themeId)
+
+  useEffect(() => {
+    applyTheme(getTheme(themeId))
+  }, [themeId])
 
   useEffect(() => {
     const sub = detectBranchFromHostname()

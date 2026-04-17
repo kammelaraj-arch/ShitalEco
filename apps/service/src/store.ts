@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { type ThemeId, DEFAULT_THEME, applyTheme, getTheme } from './themes'
 
 export type Screen =
   | 'browse' | 'basket' | 'contact' | 'gift-aid' | 'payment' | 'confirmation'
@@ -98,6 +99,7 @@ function genId(): string {
 interface ServiceStore {
   screen: Screen
   language: Language
+  themeId: ThemeId
   branchId: string
   branchName: string          // human-readable name from DB, e.g. "Wembley Temple"
   branchLocked: boolean       // true when branch comes from subdomain (not user-selected)
@@ -109,6 +111,7 @@ interface ServiceStore {
 
   setScreen: (s: Screen) => void
   setLanguage: (l: Language) => void
+  setTheme: (id: ThemeId) => void
   setBranchId: (id: string) => void
   setBranch: (id: string, name: string, locked?: boolean) => void
   setBasketId: (id: string) => void
@@ -131,6 +134,7 @@ export const useStore = create<ServiceStore>()(
     (set, get) => ({
       screen: 'browse',
       language: 'en',
+      themeId: DEFAULT_THEME,
       branchId: 'main',
       branchName: '',
       branchLocked: false,
@@ -142,6 +146,7 @@ export const useStore = create<ServiceStore>()(
 
       setScreen: (screen) => set({ screen }),
       setLanguage: (language) => set({ language }),
+      setTheme: (themeId) => { applyTheme(getTheme(themeId)); set({ themeId }) },
       setBranchId: (branchId) => set({ branchId }),
       setBranch: (branchId, branchName, locked = false) => set({ branchId, branchName, branchLocked: locked }),
       setBasketId: (basketId) => set({ basketId }),
@@ -195,6 +200,7 @@ export const useStore = create<ServiceStore>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         language: s.language,
+        themeId: s.themeId,
         // never persist branchId — always re-detect from URL / user picks fresh
       }),
     }
