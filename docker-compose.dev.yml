@@ -1,4 +1,3 @@
-version: "3.9"
 name: shitaleco-dev
 
 # ── Dev stack — same server, isolated from production ─────────────────────────
