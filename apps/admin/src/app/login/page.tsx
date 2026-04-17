@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://sshitaleco.onrender.com/api/v1'
+const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
 
 // ─── Storage helpers ──────────────────────────────────────────────────
 
