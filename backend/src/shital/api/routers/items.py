@@ -4,6 +4,8 @@ Admin endpoints require auth. Kiosk endpoints are public (no auth).
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
 import uuid
 from datetime import datetime
@@ -11,10 +13,11 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from shital.api.deps import OptionalSpace
+from shital.api.deps import CurrentSpace, OptionalSpace
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -227,6 +230,149 @@ async def debug_conn():
         return {"ok": False, "host": host, "port": port, "results": results}
     except BaseException as outer:
         return {"ok": False, "outer_error": f"{type(outer).__name__}: {outer}"}
+
+
+@router.get("/export.csv")
+async def export_items_csv(ctx: CurrentSpace) -> StreamingResponse:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(status_code=403, detail="ADMIN required")
+
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            SELECT name, name_gu, name_hi, name_te, description, category,
+                   price, unit, emoji, image_url, gift_aid_eligible,
+                   is_active, is_live, scope, branch_id, project_id,
+                   stock_qty, sort_order, display_channel
+            FROM catalog_items
+            WHERE deleted_at IS NULL
+            ORDER BY sort_order ASC, category, name
+        """))
+        rows = result.mappings().all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "name", "name_gu", "name_hi", "name_te", "description", "category",
+        "price", "unit", "emoji", "image_url", "gift_aid_eligible",
+        "is_active", "is_live", "scope", "branch_id", "project_id",
+        "stock_qty", "sort_order", "display_channel",
+    ])
+    for r in rows:
+        writer.writerow([
+            r["name"], r["name_gu"] or "", r["name_hi"] or "", r["name_te"] or "",
+            r["description"] or "", r["category"],
+            float(r["price"] or 0), r["unit"] or "", r["emoji"] or "", r["image_url"] or "",
+            "true" if r["gift_aid_eligible"] else "false",
+            "true" if r["is_active"] else "false",
+            "true" if r["is_live"] else "false",
+            r["scope"] or "GLOBAL", r["branch_id"] or "", r["project_id"] or "",
+            r["stock_qty"] if r["stock_qty"] is not None else "",
+            r["sort_order"] or 0, r["display_channel"] or "both",
+        ])
+
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="catalog-items.csv"'},
+    )
+
+
+@router.post("/import")
+async def import_items_csv(ctx: CurrentSpace, file: UploadFile = File(...)) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(status_code=403, detail="ADMIN required")
+
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        content = raw.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(content))
+    imported = 0
+    errors: list[dict[str, Any]] = []
+    now = datetime.utcnow()
+
+    async with SessionLocal() as db:
+        for row_num, row in enumerate(reader, start=2):
+            try:
+                name = (row.get("name") or "").strip()
+                if not name:
+                    errors.append({"row": row_num, "error": "Missing name"})
+                    continue
+
+                category = (row.get("category") or "GENERAL_DONATION").strip().upper()
+                price_str = (row.get("price") or "0").strip()
+                try:
+                    price = float(price_str)
+                except ValueError:
+                    errors.append({"row": row_num, "error": f"Invalid price: {price_str}"})
+                    continue
+
+                def _bool(val: str, default: bool = True) -> bool:
+                    return (val or ("true" if default else "false")).strip().lower() not in ("false", "0", "no")
+
+                gift_aid = _bool(row.get("gift_aid_eligible", ""), False)
+                is_active = _bool(row.get("is_active", ""), True)
+                is_live = _bool(row.get("is_live", ""), True)
+
+                stock_qty_str = (row.get("stock_qty") or "").strip()
+                stock_qty = int(stock_qty_str) if stock_qty_str.isdigit() else None
+                sort_order = 0
+                try:
+                    sort_order = int((row.get("sort_order") or "0").strip())
+                except ValueError:
+                    pass
+
+                await db.execute(text("""
+                    INSERT INTO catalog_items
+                        (id, name, name_gu, name_hi, name_te, description, category,
+                         price, currency, unit, emoji, image_url,
+                         gift_aid_eligible, is_active, is_live, scope, branch_id, project_id,
+                         stock_qty, sort_order, display_channel,
+                         metadata_json, branch_stock,
+                         created_at, updated_at)
+                    VALUES
+                        (gen_random_uuid(),
+                         :name, :name_gu, :name_hi, :name_te, :desc, :cat,
+                         :price, 'GBP', :unit, :emoji, :img,
+                         :ga, :active, :live, :scope, :bid, :pid,
+                         :stock, :sort, :channel,
+                         '{}', '{}',
+                         :now, :now)
+                """), {
+                    "name": name,
+                    "name_gu": (row.get("name_gu") or "").strip(),
+                    "name_hi": (row.get("name_hi") or "").strip(),
+                    "name_te": (row.get("name_te") or "").strip(),
+                    "desc": (row.get("description") or "").strip(),
+                    "cat": category,
+                    "price": price,
+                    "unit": (row.get("unit") or "").strip(),
+                    "emoji": (row.get("emoji") or "").strip(),
+                    "img": (row.get("image_url") or "").strip(),
+                    "ga": gift_aid, "active": is_active, "live": is_live,
+                    "scope": (row.get("scope") or "GLOBAL").strip().upper(),
+                    "bid": (row.get("branch_id") or "").strip(),
+                    "pid": (row.get("project_id") or "").strip(),
+                    "stock": stock_qty, "sort": sort_order,
+                    "channel": (row.get("display_channel") or "both").strip().lower(),
+                    "now": now,
+                })
+                imported += 1
+            except Exception as exc:
+                errors.append({"row": row_num, "error": str(exc)[:120]})
+
+        if imported > 0:
+            await db.commit()
+
+    return {"imported": imported, "skipped": len(errors), "errors": errors[:20]}
 
 
 @router.get("/")

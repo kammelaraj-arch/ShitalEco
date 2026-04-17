@@ -4,10 +4,15 @@ Each project can have catalog_items linked to it (brick donations etc).
 """
 from __future__ import annotations
 
+import csv
+import io
+import re
+import uuid as _uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace, OptionalSpace
@@ -51,6 +56,126 @@ async def list_projects(ctx: OptionalSpace, branch_id: str = "", include_inactiv
         ), params)
         rows = result.mappings().all()
     return {"projects": [dict(r) for r in rows]}
+
+
+@router.get("/export.csv")
+async def export_projects_csv(ctx: CurrentSpace) -> StreamingResponse:
+    _require_admin(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            SELECT project_id, name, description, branch_id, goal_amount,
+                   start_date, end_date, is_active, sort_order, image_url
+            FROM projects
+            ORDER BY sort_order ASC, name ASC
+        """))
+        rows = result.mappings().all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["project_id", "name", "description", "branch_id", "goal_amount",
+                     "start_date", "end_date", "is_active", "sort_order", "image_url"])
+    for r in rows:
+        writer.writerow([
+            r["project_id"], r["name"], r["description"] or "",
+            r["branch_id"], float(r["goal_amount"] or 0),
+            r["start_date"].isoformat() if r["start_date"] else "",
+            r["end_date"].isoformat() if r["end_date"] else "",
+            "true" if r["is_active"] else "false",
+            r["sort_order"] or 0,
+            r["image_url"] or "",
+        ])
+
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="projects.csv"'},
+    )
+
+
+@router.post("/import")
+async def import_projects_csv(ctx: CurrentSpace, file: UploadFile = File(...)) -> dict[str, Any]:
+    _require_admin(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        content = raw.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(content))
+    imported = 0
+    errors: list[dict[str, Any]] = []
+    now = datetime.utcnow()
+
+    async with SessionLocal() as db:
+        for row_num, row in enumerate(reader, start=2):
+            try:
+                name = (row.get("name") or "").strip()
+                if not name:
+                    errors.append({"row": row_num, "error": "Missing name"})
+                    continue
+
+                pid = (row.get("project_id") or "").strip()
+                if not pid:
+                    pid = re.sub(r"[^a-z0-9]", "_", name.lower())[:40].strip("_")
+
+                goal = 0.0
+                try:
+                    goal = float((row.get("goal_amount") or "0").strip())
+                except ValueError:
+                    pass
+
+                is_active = (row.get("is_active") or "true").strip().lower() not in ("false", "0", "no")
+                start_date = (row.get("start_date") or "").strip() or None
+                end_date = (row.get("end_date") or "").strip() or None
+                sort_order = 0
+                try:
+                    sort_order = int((row.get("sort_order") or "0").strip())
+                except ValueError:
+                    pass
+
+                existing = await db.execute(
+                    text("SELECT id FROM projects WHERE project_id = :pid"), {"pid": pid}
+                )
+                params: dict[str, Any] = {
+                    "name": name, "desc": (row.get("description") or "").strip(),
+                    "bid": (row.get("branch_id") or "main").strip(),
+                    "goal": goal, "img": (row.get("image_url") or "").strip(),
+                    "start": start_date, "end": end_date,
+                    "active": is_active, "sort": sort_order, "now": now, "pid": pid,
+                }
+                if existing.first():
+                    await db.execute(text("""
+                        UPDATE projects SET
+                            name=:name, description=:desc, branch_id=:bid,
+                            goal_amount=:goal, image_url=:img,
+                            start_date=:start, end_date=:end,
+                            is_active=:active, sort_order=:sort, updated_at=:now
+                        WHERE project_id=:pid
+                    """), params)
+                else:
+                    await db.execute(text("""
+                        INSERT INTO projects
+                            (id, project_id, name, description, branch_id, goal_amount,
+                             image_url, start_date, end_date, is_active, sort_order,
+                             created_at, updated_at)
+                        VALUES
+                            (:id, :pid, :name, :desc, :bid, :goal,
+                             :img, :start, :end, :active, :sort, :now, :now)
+                    """), {**params, "id": str(_uuid.uuid4())})
+                imported += 1
+            except Exception as exc:
+                errors.append({"row": row_num, "error": str(exc)[:120]})
+
+        if imported > 0:
+            await db.commit()
+
+    return {"imported": imported, "skipped": len(errors), "errors": errors[:20]}
 
 
 @router.post("", status_code=201)

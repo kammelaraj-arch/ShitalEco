@@ -74,6 +74,13 @@ export default function CatalogItemsPage() {
   const [imageUploading, setImageUploading] = useState(false)
   const [reordering, setReordering] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const [csvDownloading, setCsvDownloading] = useState(false)
+  const [csvImporting, setCsvImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; error: string }[] } | null>(null)
+
+  const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
+  const authToken = () => typeof window !== 'undefined' ? (localStorage.getItem('shital_access_token') || '') : ''
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -182,6 +189,33 @@ export default function CatalogItemsPage() {
     finally { setReordering(null) }
   }
 
+  async function downloadCsv() {
+    setCsvDownloading(true)
+    try {
+      const res = await fetch(`${API}/items/export.csv`, { headers: { Authorization: `Bearer ${authToken()}` } })
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = 'catalog-items.csv'; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Export failed') }
+    finally { setCsvDownloading(false) }
+  }
+
+  async function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; if (!file) return
+    setCsvImporting(true); setImportResult(null); setError('')
+    try {
+      const fd = new FormData(); fd.append('file', file)
+      const res = await fetch(`${API}/items/import`, { method: 'POST', headers: { Authorization: `Bearer ${authToken()}` }, body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Import failed')
+      setImportResult(data)
+      if (data.imported > 0) await load()
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Import failed') }
+    finally { setCsvImporting(false); if (csvInputRef.current) csvInputRef.current.value = '' }
+  }
+
   const filtered = items
     .filter(i =>
       (catFilter === 'ALL' || i.category === catFilter) &&
@@ -211,13 +245,42 @@ export default function CatalogItemsPage() {
           <h1 className="text-3xl font-black text-white">Catalog Items</h1>
           <p className="text-white/40 mt-1">Manage donations, shop items, and catalog — with scheduling and availability</p>
         </div>
-        <button onClick={openNew}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-saffron-gradient text-white font-bold shadow-saffron hover:opacity-90">
-          + Add Item
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={downloadCsv} disabled={csvDownloading}
+            className="px-4 py-2.5 rounded-xl border border-white/10 text-white/70 text-sm font-semibold hover:bg-white/5 transition-all disabled:opacity-40">
+            {csvDownloading ? '⏳' : '⬇'} Export CSV
+          </button>
+          <button onClick={() => csvInputRef.current?.click()} disabled={csvImporting}
+            className="px-4 py-2.5 rounded-xl border border-white/10 text-white/70 text-sm font-semibold hover:bg-white/5 transition-all disabled:opacity-40">
+            {csvImporting ? '⏳' : '⬆'} Import CSV
+          </button>
+          <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvUpload} />
+          <button onClick={openNew}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-saffron-gradient text-white font-bold shadow-saffron hover:opacity-90">
+            + Add Item
+          </button>
+        </div>
       </div>
 
       {error && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
+
+      {importResult && (
+        <div className="px-4 py-3 rounded-xl text-sm border flex items-start gap-3"
+          style={{ background: importResult.imported > 0 ? 'rgba(21,128,61,0.1)' : 'rgba(185,28,28,0.1)', border: `1px solid ${importResult.imported > 0 ? 'rgba(21,128,61,0.25)' : 'rgba(185,28,28,0.25)'}` }}>
+          <div className="flex-1">
+            <p className="font-bold text-sm" style={{ color: importResult.imported > 0 ? '#4ade80' : '#f87171' }}>
+              {importResult.imported > 0 ? `✅ Imported ${importResult.imported} item${importResult.imported !== 1 ? 's' : ''}` : '❌ Import completed with errors'}
+              {importResult.skipped > 0 && <span className="text-white/40 font-normal ml-2">({importResult.skipped} skipped)</span>}
+            </p>
+            {importResult.errors.length > 0 && (
+              <ul className="mt-1 space-y-0.5">{importResult.errors.map((e, i) => (
+                <li key={i} className="text-red-300/70 text-xs">Row {e.row}: {e.error}</li>
+              ))}</ul>
+            )}
+          </div>
+          <button onClick={() => setImportResult(null)} className="text-white/30 hover:text-white/60 text-lg leading-none">✕</button>
+        </div>
+      )}
 
       <div className="flex gap-3 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)}

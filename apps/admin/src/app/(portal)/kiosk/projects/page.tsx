@@ -1,7 +1,10 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+
+const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
+function authToken() { return typeof window !== 'undefined' ? (localStorage.getItem('shital_access_token') || '') : '' }
 
 interface Project {
   id: string
@@ -66,6 +69,12 @@ export default function ProjectsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [addItemSearch, setAddItemSearch] = useState('')
   const [addingSaving, setAddingSaving] = useState(false)
+
+  // CSV
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [csvDownloading, setCsvDownloading] = useState(false)
+  const [csvImporting, setCsvImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; error: string }[] } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -192,6 +201,33 @@ export default function ProjectsPage() {
 
   const branchName = (bid: string) => BRANCHES.find(b => b.id === bid)?.name || bid
 
+  async function downloadCsv() {
+    setCsvDownloading(true)
+    try {
+      const res = await fetch(`${API}/projects/export.csv`, { headers: { Authorization: `Bearer ${authToken()}` } })
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = 'projects.csv'; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Export failed') }
+    finally { setCsvDownloading(false) }
+  }
+
+  async function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; if (!file) return
+    setCsvImporting(true); setImportResult(null); setError('')
+    try {
+      const fd = new FormData(); fd.append('file', file)
+      const res = await fetch(`${API}/projects/import`, { method: 'POST', headers: { Authorization: `Bearer ${authToken()}` }, body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Import failed')
+      setImportResult(data)
+      if (data.imported > 0) await load()
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Import failed') }
+    finally { setCsvImporting(false); if (fileInputRef.current) fileInputRef.current.value = '' }
+  }
+
   const filteredAddItems = allItems.filter(i =>
     i.name.toLowerCase().includes(addItemSearch.toLowerCase()) ||
     i.category.toLowerCase().includes(addItemSearch.toLowerCase())
@@ -204,14 +240,43 @@ export default function ProjectsPage() {
           <h1 className="text-3xl font-black text-white">Fundraising Projects</h1>
           <p className="text-white/40 mt-1">Manage projects like Temple Hall, Prayer Room — with donation tiers</p>
         </div>
-        <button onClick={openNew}
-          className="px-5 py-2.5 rounded-xl text-white text-sm font-black transition-all hover:scale-105 active:scale-95"
-          style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
-          + New Project
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={downloadCsv} disabled={csvDownloading}
+            className="px-4 py-2.5 rounded-xl border border-white/10 text-white/70 text-sm font-semibold hover:bg-white/5 transition-all disabled:opacity-40">
+            {csvDownloading ? '⏳' : '⬇'} Export CSV
+          </button>
+          <button onClick={() => fileInputRef.current?.click()} disabled={csvImporting}
+            className="px-4 py-2.5 rounded-xl border border-white/10 text-white/70 text-sm font-semibold hover:bg-white/5 transition-all disabled:opacity-40">
+            {csvImporting ? '⏳' : '⬆'} Import CSV
+          </button>
+          <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvUpload} />
+          <button onClick={openNew}
+            className="px-5 py-2.5 rounded-xl text-white text-sm font-black transition-all hover:scale-105 active:scale-95"
+            style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
+            + New Project
+          </button>
+        </div>
       </div>
 
       {error && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
+
+      {importResult && (
+        <div className="px-4 py-3 rounded-xl text-sm border flex items-start gap-3"
+          style={{ background: importResult.imported > 0 ? 'rgba(21,128,61,0.1)' : 'rgba(185,28,28,0.1)', border: `1px solid ${importResult.imported > 0 ? 'rgba(21,128,61,0.25)' : 'rgba(185,28,28,0.25)'}` }}>
+          <div className="flex-1">
+            <p className="font-bold text-sm" style={{ color: importResult.imported > 0 ? '#4ade80' : '#f87171' }}>
+              {importResult.imported > 0 ? `✅ Imported ${importResult.imported} project${importResult.imported !== 1 ? 's' : ''}` : '❌ Import completed with errors'}
+              {importResult.skipped > 0 && <span className="text-white/40 font-normal ml-2">({importResult.skipped} skipped)</span>}
+            </p>
+            {importResult.errors.length > 0 && (
+              <ul className="mt-1 space-y-0.5">{importResult.errors.map((e, i) => (
+                <li key={i} className="text-red-300/70 text-xs">Row {e.row}: {e.error}</li>
+              ))}</ul>
+            )}
+          </div>
+          <button onClick={() => setImportResult(null)} className="text-white/30 hover:text-white/60 text-lg leading-none">✕</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">
