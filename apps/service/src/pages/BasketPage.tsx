@@ -1,8 +1,10 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore, t } from '../store'
+import { useStore, t, type GiftAidDeclaration } from '../store'
+
+const DECLINED: GiftAidDeclaration = { agreed: false, fullName: '', postcode: '', address: '', contactEmail: '', contactPhone: '' }
 
 export function BasketPage() {
-  const { language, items, removeItem, updateQty, total, giftAidTotal, setScreen, clearBasket } = useStore()
+  const { language, items, removeItem, updateQty, total, giftAidTotal, setScreen, clearBasket, setGiftAidDeclaration } = useStore()
 
   if (items.length === 0) {
     return (
@@ -122,18 +124,39 @@ export function BasketPage() {
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Actions — match kiosk two-button Gift Aid pattern */}
       <div className="space-y-3">
-        <button
-          onClick={() => setScreen('contact')}
-          className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.99] transition-transform"
-          style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
-        >
-          Continue to Checkout →
-        </button>
+        {giftAidTotal > 0 ? (
+          <>
+            <button
+              onClick={() => { setGiftAidDeclaration(null); setScreen('contact') }}
+              className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.99] transition-transform"
+              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}
+            >
+              <div className="flex flex-col items-center leading-tight">
+                <span className="text-sm font-bold opacity-90">🇬🇧 Boost with Gift Aid (+£{boostAmount.toFixed(2)} free)</span>
+                <span className="text-lg font-black">Temple receives £{(total + boostAmount).toFixed(2)}</span>
+              </div>
+            </button>
+            <button
+              onClick={() => { setGiftAidDeclaration(DECLINED); setScreen('contact') }}
+              className="w-full py-4 rounded-2xl border-2 border-gray-200 text-gray-600 font-bold text-sm hover:bg-gray-50 active:scale-[0.99] transition-transform"
+            >
+              Without Gift Aid · Pay £{total.toFixed(2)}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setScreen('contact')}
+            className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.99] transition-transform"
+            style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
+          >
+            Continue to Checkout →
+          </button>
+        )}
         <button
           onClick={() => setScreen('browse')}
-          className="w-full py-3.5 rounded-2xl border-2 border-gray-200 text-gray-600 font-bold text-sm hover:bg-gray-50"
+          className="w-full py-3 rounded-2xl text-gray-400 font-medium text-sm hover:text-gray-600"
         >
           ← Continue Shopping
         </button>

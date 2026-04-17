@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { useStore, t } from '../store'
 
 export function ContactPage() {
-  const { language, setScreen, setContactInfo, giftAidTotal, items } = useStore()
+  const { language, setScreen, setContactInfo, giftAidTotal, giftAidDeclaration, items } = useStore()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
@@ -45,7 +45,8 @@ export function ContactPage() {
       termsConsent: anonymous ? false : terms,
       anonymous,
     })
-    if (hasGiftAidItems && !anonymous) {
+    // Route to gift-aid only if eligible, not anonymous, and user hasn't already declined at basket
+    if (hasGiftAidItems && !anonymous && giftAidDeclaration === null) {
       setScreen('gift-aid')
     } else {
       setScreen('payment')
