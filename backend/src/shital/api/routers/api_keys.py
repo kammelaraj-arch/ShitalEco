@@ -252,6 +252,7 @@ async def clear_azure_backup_config(
 async def test_azure_backup_connection(ctx: CurrentSpace) -> dict[str, Any]:
     _require_admin(ctx)
     import asyncio
+
     from shital.core.fabrics.secrets import SecretsManager
 
     conn = await SecretsManager.get("AZURE_STORAGE_CONNECTION_STRING")
