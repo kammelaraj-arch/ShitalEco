@@ -457,32 +457,36 @@ export function HomeScreen() {
         <aside
           className="hidden sm:flex flex-shrink-0 flex-col overflow-y-auto"
           style={{
-            width: 160,
-            background: '#fff',
-            borderRight: '1px solid #e5e7eb',
+            width: 168,
+            background: `linear-gradient(180deg, ${th.sidebarFrom} 0%, ${th.sidebarTo} 100%)`,
+            borderRight: `1px solid ${th.sidebarBorder.replace('/30', '').replace('/40', '')}30`,
           }}
         >
           {NAV_SECTIONS.map((section, si) => (
-            <nav key={si} className={si > 0 ? 'border-t border-gray-100 mt-auto' : ''}>
+            <nav key={si} className={si > 0 ? 'mt-auto' : ''}>
+              {si > 0 && <div className="mx-3 my-1" style={{ height: 1, background: `${th.sidebarText}20` }} />}
               {section.items.map(item => {
                 const isActive = activeNav === item.id
                 return (
                   <button
                     key={item.id}
                     onClick={() => setActiveNav(item.id)}
-                    className="w-full flex flex-col items-center gap-1 py-3 px-2 text-center transition-all relative active:scale-95"
+                    className="w-full flex flex-col items-center gap-1.5 py-3.5 px-2 text-center transition-all relative active:scale-95"
                     style={{
-                      background: isActive ? `${th.langActive}15` : 'transparent',
-                      borderLeft: isActive ? `3px solid ${th.langActive}` : '3px solid transparent',
+                      background: isActive ? th.sidebarActiveBg : 'transparent',
+                      borderLeft: isActive ? `3px solid ${th.sidebarIndicator}` : '3px solid transparent',
                     }}
                   >
-                    <span className="text-2xl leading-none">{item.icon}</span>
+                    <span className="text-2xl leading-none drop-shadow">{item.icon}</span>
                     <span
-                      className="text-[11px] leading-tight font-semibold"
-                      style={{ color: isActive ? th.langActive : '#6b7280' }}
+                      className="text-[11px] leading-tight font-bold"
+                      style={{ color: isActive ? th.sidebarActiveText : th.sidebarText, opacity: isActive ? 1 : 0.8 }}
                     >
                       {getNavLabel(item, language)}
                     </span>
+                    {isActive && (
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full" style={{ background: th.sidebarIndicator }} />
+                    )}
                   </button>
                 )
               })}
@@ -492,8 +496,8 @@ export function HomeScreen() {
           {/* Exit */}
           <button
             onClick={() => setScreen('idle')}
-            className="mx-2 mb-3 mt-2 py-2 rounded-xl text-xs font-medium flex items-center justify-center gap-1 text-gray-400 hover:text-gray-600 transition-colors"
-            style={{ border: '1px solid #e5e7eb' }}
+            className="mx-2 mb-3 mt-2 py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all active:scale-95"
+            style={{ background: 'rgba(0,0,0,0.12)', color: th.sidebarText, opacity: 0.7 }}
           >
             ← Exit
           </button>
@@ -504,16 +508,24 @@ export function HomeScreen() {
 
           {/* Category title header */}
           <div
-            className="flex items-center justify-between px-5 py-3 flex-shrink-0"
-            style={{ borderBottom: '1px solid #e5e7eb' }}
+            className="flex items-center justify-between px-4 py-2.5 flex-shrink-0"
+            style={{ background: `${th.langActive}10`, borderBottom: `2px solid ${th.langActive}25` }}
           >
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">{activeNavItem?.icon ?? '✨'}</span>
-              <h2 className="font-black text-xl text-gray-900">{navLabel}</h2>
+            <div className="flex items-center gap-2.5">
+              <span
+                className="w-9 h-9 rounded-xl flex items-center justify-center text-xl shadow-sm flex-shrink-0"
+                style={{ background: `${th.langActive}20`, border: `1.5px solid ${th.langActive}30` }}
+              >
+                {activeNavItem?.icon ?? '✨'}
+              </span>
+              <div>
+                <h2 className="font-black text-lg leading-tight" style={{ color: th.sectionTitleColor }}>{navLabel}</h2>
+                {catalogItems.length > 0 && <p className="text-[11px] font-medium" style={{ color: th.sectionCountColor }}>{catalogItems.length} items</p>}
+              </div>
             </div>
             {isGiftAidSection && (
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-200">
-                ✓ Gift Aid Eligible
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-green-100 text-green-700 border border-green-200 flex items-center gap-1">
+                🇬🇧 <span>Gift Aid</span>
               </span>
             )}
           </div>
@@ -579,16 +591,16 @@ export function HomeScreen() {
                             <button
                               type="button"
                               onPointerDown={() => handleAddCatalog(item)}
-                              className="w-full relative overflow-hidden rounded-2xl text-left bg-white border border-gray-100 shadow-md active:scale-95 hover:shadow-lg transition-all flex flex-col"
-                              style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
+                              className="w-full relative overflow-hidden rounded-2xl text-left shadow-md active:scale-95 transition-all flex flex-col"
+                              style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent', background: '#fff', border: `1.5px solid ${isAdded ? '#22C55E' : 'rgba(0,0,0,0.07)'}`, boxShadow: isAdded ? '0 4px 14px rgba(34,197,94,0.25)' : '0 2px 8px rgba(0,0,0,0.08)' }}
                             >
-                              {/* Image area — per-item photo with emoji fallback */}
+                              {/* Image area */}
                               <div
                                 className="relative overflow-hidden flex-shrink-0 pointer-events-none"
-                                style={{ height: 100, background: `${(CATEGORY_META[item.category] ?? CATEGORY_META.OTHER).color}22` }}
+                                style={{ height: 118, background: `linear-gradient(135deg, ${(CATEGORY_META[item.category] ?? CATEGORY_META.OTHER).color}30, ${(CATEGORY_META[item.category] ?? CATEGORY_META.OTHER).color}10)` }}
                               >
                                 <div className="absolute inset-0 flex items-center justify-center">
-                                  <span style={{ fontSize: 52, lineHeight: 1 }}>{item.emoji ?? '🙏'}</span>
+                                  <span style={{ fontSize: 56, lineHeight: 1, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>{item.emoji ?? '🙏'}</span>
                                 </div>
                                 <img
                                   src={item.image_url || getCategoryImage(item.category)}
@@ -597,35 +609,43 @@ export function HomeScreen() {
                                   onError={e => (e.currentTarget.style.display = 'none')}
                                   loading="lazy"
                                 />
+                                {/* Bottom gradient overlay */}
+                                <div className="absolute bottom-0 left-0 right-0 h-8 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.28), transparent)' }} />
                                 {item.gift_aid_eligible && (
-                                  <span className="absolute top-2 right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500 text-white shadow-sm z-10">GA</span>
+                                  <span className="absolute bottom-1.5 left-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500 text-white shadow-sm z-10">🇬🇧 GA</span>
                                 )}
                               </div>
 
                               {/* Details */}
-                              <div className="p-3 flex-1 flex flex-col justify-between pointer-events-none">
-                                <div>
-                                  <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">
-                                    {getDbItemName(item, language)}
-                                  </p>
-                                  {item.unit && <p className="text-gray-400 text-xs mt-0.5">{item.unit}</p>}
-                                </div>
-                                <div className="flex items-center justify-between mt-2.5">
-                                  <p className="font-black text-lg text-gray-900">£{item.price}</p>
-                                  <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: isAdded ? '#22C55E' : th.langActive }}>
-                                    {isAdded ? '✓' : '+ Add'}
+                              <div className="px-3 py-2.5 flex-1 flex flex-col justify-between pointer-events-none">
+                                <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">
+                                  {getDbItemName(item, language)}
+                                </p>
+                                {item.unit && <p className="text-gray-400 text-[11px] mt-0.5">{item.unit}</p>}
+                                <div className="flex items-center justify-between mt-2">
+                                  <div>
+                                    <p className="font-black text-xl leading-none" style={{ color: th.sectionTitleColor }}>£{item.price}</p>
+                                    {item.gift_aid_eligible && <p className="text-[10px] text-green-600 font-semibold mt-0.5">+£{(item.price * 0.25).toFixed(2)} GA</p>}
+                                  </div>
+                                  <span className="text-[11px] px-3 py-1.5 rounded-xl text-white font-black shadow-sm" style={{ background: isAdded ? '#22C55E' : `linear-gradient(135deg, ${th.langActive}, ${th.basketBtn})` }}>
+                                    {isAdded ? '✓ Added' : '+ Add'}
                                   </span>
                                 </div>
                               </div>
 
                               {/* Added overlay */}
                               {isAdded && (
-                                <div className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl pointer-events-none">
+                                <motion.div
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  className="absolute inset-0 flex items-center justify-center rounded-2xl pointer-events-none"
+                                  style={{ background: 'rgba(240,253,244,0.92)' }}
+                                >
                                   <div className="text-center">
-                                    <span className="text-4xl block">✓</span>
-                                    <span className="text-sm font-bold text-green-700">Added!</span>
+                                    <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400 }} className="text-5xl block">✅</motion.span>
+                                    <span className="text-sm font-bold text-green-700 mt-1 block">Added!</span>
                                   </div>
-                                </div>
+                                </motion.div>
                               )}
                             </button>
                           </motion.div>
@@ -655,15 +675,15 @@ export function HomeScreen() {
                             <button
                               type="button"
                               onPointerDown={() => handleAdd(svc)}
-                              className="w-full relative overflow-hidden rounded-2xl text-left bg-white border border-gray-100 shadow-md active:scale-95 hover:shadow-lg transition-all flex flex-col"
-                              style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
+                              className="w-full relative overflow-hidden rounded-2xl text-left shadow-md active:scale-95 transition-all flex flex-col"
+                              style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent', background: '#fff', border: `1.5px solid ${isAdded ? '#22C55E' : 'rgba(0,0,0,0.07)'}`, boxShadow: isAdded ? '0 4px 14px rgba(34,197,94,0.25)' : '0 2px 8px rgba(0,0,0,0.08)' }}
                             >
                               <div
                                 className="relative overflow-hidden flex-shrink-0 pointer-events-none"
-                                style={{ height: 100, background: `${m.color}20` }}
+                                style={{ height: 118, background: `linear-gradient(135deg, ${m.color}30, ${m.color}10)` }}
                               >
                                 <div className="absolute inset-0 flex items-center justify-center">
-                                  <span style={{ fontSize: 52, lineHeight: 1 }}>{m.icon}</span>
+                                  <span style={{ fontSize: 56, lineHeight: 1, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>{m.icon}</span>
                                 </div>
                                 <img
                                   src={getCategoryImage(svc.category)}
@@ -672,25 +692,32 @@ export function HomeScreen() {
                                   onError={e => (e.currentTarget.style.display = 'none')}
                                   loading="lazy"
                                 />
+                                <div className="absolute bottom-0 left-0 right-0 h-8 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.28), transparent)' }} />
+                                <span className="absolute bottom-1.5 left-2 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white shadow-sm z-10" style={{ background: m.color }}>{svc.category.replace('_', ' ')}</span>
                               </div>
 
-                              <div className="p-3 flex-1 flex flex-col justify-between pointer-events-none">
+                              <div className="px-3 py-2.5 flex-1 flex flex-col justify-between pointer-events-none">
                                 <p className="font-bold text-gray-900 text-sm leading-snug line-clamp-2">{getDbItemName(svc, language)}</p>
-                                <div className="flex items-center justify-between mt-2.5">
-                                  <p className="font-black text-lg text-gray-900">£{svc.price}</p>
-                                  <span className="text-xs px-2.5 py-1 rounded-lg text-white font-black" style={{ background: isAdded ? '#22C55E' : th.langActive }}>
-                                    {isAdded ? '✓' : '+ Add'}
+                                <div className="flex items-center justify-between mt-2">
+                                  <p className="font-black text-xl leading-none" style={{ color: th.sectionTitleColor }}>£{svc.price}</p>
+                                  <span className="text-[11px] px-3 py-1.5 rounded-xl text-white font-black shadow-sm" style={{ background: isAdded ? '#22C55E' : `linear-gradient(135deg, ${th.langActive}, ${th.basketBtn})` }}>
+                                    {isAdded ? '✓ Added' : '+ Add'}
                                   </span>
                                 </div>
                               </div>
 
                               {isAdded && (
-                                <div className="absolute inset-0 bg-green-50/95 flex items-center justify-center rounded-2xl pointer-events-none">
+                                <motion.div
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  className="absolute inset-0 flex items-center justify-center rounded-2xl pointer-events-none"
+                                  style={{ background: 'rgba(240,253,244,0.92)' }}
+                                >
                                   <div className="text-center">
-                                    <span className="text-4xl block">✓</span>
-                                    <span className="text-sm font-bold text-green-700">Added!</span>
+                                    <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400 }} className="text-5xl block">✅</motion.span>
+                                    <span className="text-sm font-bold text-green-700 mt-1 block">Added!</span>
                                   </div>
-                                </div>
+                                </motion.div>
                               )}
                             </button>
                           </motion.div>
@@ -733,20 +760,27 @@ export function HomeScreen() {
         </button>
       </div>
 
-      {/* ══ BOTTOM BAR — always visible, McDonald's style ══════════════════════ */}
+      {/* ══ BOTTOM BAR — always visible ════════════════════════════════════════ */}
       <div
         className="flex-shrink-0"
-        style={{ background: '#fff', borderTop: '1px solid #e5e7eb', boxShadow: '0 -2px 12px rgba(0,0,0,0.08)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        style={{
+          background: itemCount > 0 ? th.basketBarBg : '#fff',
+          borderTop: itemCount > 0 ? `2px solid ${th.langActive}40` : '1px solid #e5e7eb',
+          boxShadow: itemCount > 0 ? `0 -4px 20px ${th.langActive}30` : '0 -2px 12px rgba(0,0,0,0.06)',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          transition: 'background 0.3s, box-shadow 0.3s',
+        }}
       >
-        {/* Main row: basket info + View My Order */}
         <div className="flex items-center gap-3 px-4 py-3">
           {/* Basket summary */}
-          <div className="flex items-center gap-2 flex-1">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center relative flex-shrink-0"
-              style={{ background: `${th.langActive}15` }}
+          <div className="flex items-center gap-2.5 flex-1">
+            <motion.div
+              animate={itemCount > 0 ? { scale: [1, 1.12, 1] } : { scale: 1 }}
+              transition={{ duration: 1.8, repeat: itemCount > 0 ? Infinity : 0, ease: 'easeInOut' }}
+              className="w-11 h-11 rounded-xl flex items-center justify-center relative flex-shrink-0"
+              style={{ background: itemCount > 0 ? `${th.langActive}30` : `${th.langActive}12` }}
             >
-              <span className="text-xl">🛒</span>
+              <span className="text-2xl">🛒</span>
               {itemCount > 0 && (
                 <span
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center text-white shadow"
@@ -755,29 +789,36 @@ export function HomeScreen() {
                   {itemCount}
                 </span>
               )}
-            </div>
+            </motion.div>
             <div>
-              <p className="text-xs text-gray-400 leading-none">{itemCount} item{itemCount !== 1 ? 's' : ''}</p>
-              <p className="font-black text-lg text-gray-900 leading-tight">£{total.toFixed(2)}</p>
+              <p className="text-xs leading-none font-medium" style={{ color: itemCount > 0 ? th.basketBarSubText : '#9ca3af' }}>{itemCount} item{itemCount !== 1 ? 's' : ''}</p>
+              <p className="font-black text-xl leading-tight" style={{ color: itemCount > 0 ? th.basketBarText : '#1f2937' }}>£{total.toFixed(2)}</p>
             </div>
           </div>
 
           {/* Start Again */}
-          <button
-            onClick={() => { if (window.confirm('Start a new order?')) resetKiosk() }}
-            className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-500 text-sm font-semibold active:scale-95 transition-all flex-shrink-0"
-          >
-            Start Again
-          </button>
+          {itemCount > 0 && (
+            <button
+              onClick={() => { if (window.confirm('Start a new order?')) resetKiosk() }}
+              className="px-3 py-2.5 rounded-xl text-xs font-bold active:scale-95 transition-all flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.12)', color: th.basketBarSubText, border: `1px solid rgba(255,255,255,0.15)` }}
+            >
+              ✕ Clear
+            </button>
+          )}
 
           {/* View My Order */}
           <button
             onClick={() => setScreen('basket')}
             disabled={itemCount === 0}
-            className="px-6 py-2.5 rounded-xl text-white font-black text-sm shadow-md active:scale-95 transition-all flex-shrink-0 disabled:opacity-40"
-            style={{ background: itemCount > 0 ? th.langActive : '#9ca3af', minWidth: 140 }}
+            className="px-6 py-3 rounded-xl text-white font-black text-sm shadow-lg active:scale-95 transition-all flex-shrink-0 disabled:opacity-30"
+            style={{
+              background: itemCount > 0 ? `linear-gradient(135deg, ${th.langActive}, ${th.basketBtn})` : '#9ca3af',
+              minWidth: 148,
+              boxShadow: itemCount > 0 ? `0 4px 16px ${th.langActive}50` : 'none',
+            }}
           >
-            View My Order →
+            {itemCount > 0 ? `View Order →` : 'Select items'}
           </button>
         </div>
       </div>

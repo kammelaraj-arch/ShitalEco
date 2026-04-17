@@ -15,6 +15,15 @@ export function IdleScreen() {
       onClick={() => setScreen('home')}
       onTouchStart={() => setScreen('home')}
     >
+      {/* Subtle dot-grid background pattern */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: `radial-gradient(${ringColor}20 1px, transparent 1px)`,
+          backgroundSize: '32px 32px',
+        }}
+      />
+
       {/* Animated background rings */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         {[1, 2, 3, 4, 5].map((i) => (
@@ -45,6 +54,13 @@ export function IdleScreen() {
           style={{ width: 160, height: 160, border: `2px solid ${ringColor}`, borderStyle: 'dashed' }}
           animate={{ rotate: [0, 360] }}
           transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+        />
+        {/* Slow counter-spinning outer accent ring */}
+        <motion.div
+          className="absolute rounded-full"
+          style={{ width: 920, height: 920, border: `1px dashed ${ringColor}18` }}
+          animate={{ rotate: [0, -360] }}
+          transition={{ duration: 60, repeat: Infinity, ease: 'linear' }}
         />
       </div>
 
@@ -137,10 +153,28 @@ export function IdleScreen() {
         English · ગુજરાતી · हिंदी
       </motion.p>
 
+      {/* Scrolling ticker — available services */}
+      <div className="absolute bottom-0 left-0 right-0 z-10 overflow-hidden" style={{ borderTop: `1px solid ${ringColor}20`, background: 'rgba(0,0,0,0.28)', backdropFilter: 'blur(8px)' }}>
+        <motion.div
+          className="flex items-center gap-8 py-2.5 px-4 whitespace-nowrap"
+          animate={{ x: ['0%', '-50%'] }}
+          transition={{ duration: 28, repeat: Infinity, ease: 'linear' }}
+          style={{ width: 'max-content' }}
+        >
+          {['🪔 Puja Booking', '🎁 Soft Donations', '📖 Sponsorship', '✨ Temple Services', '🏗️ Project Donation', '🛍️ Shop', '🙏 Quick Donate', '🎉 Festivals', '📚 Yoga & Classes',
+            '🪔 Puja Booking', '🎁 Soft Donations', '📖 Sponsorship', '✨ Temple Services', '🏗️ Project Donation', '🛍️ Shop', '🙏 Quick Donate', '🎉 Festivals', '📚 Yoga & Classes'].map((item, i) => (
+            <span key={i} className="text-xs font-semibold select-none" style={{ color: `${ringColor}90` }}>
+              {item}
+              {i < 17 && <span className="ml-8 opacity-30">·</span>}
+            </span>
+          ))}
+        </motion.div>
+      </div>
+
       {/* Footer */}
-      <div className="absolute bottom-8 left-0 right-0 flex flex-col items-center gap-1 z-10">
-        <p className="text-sm select-none" style={{ color: `${th.headerSub}50` }}>UK Registered Charity</p>
-        <p className="text-xs select-none" style={{ color: `${th.headerSub}35` }}>Jay Shri Krishna 🙏</p>
+      <div className="absolute bottom-12 left-0 right-0 flex flex-col items-center gap-1 z-10">
+        <p className="text-sm select-none font-semibold" style={{ color: `${th.headerSub}60` }}>UK Registered Charity</p>
+        <p className="text-xs select-none" style={{ color: `${th.headerSub}40` }}>Jay Shri Krishna 🙏</p>
       </div>
     </div>
   )
