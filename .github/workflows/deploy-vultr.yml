@@ -3,8 +3,6 @@ name: Deploy to Vultr
 on:
   push:
     branches: [claude/shital-erp-platform-iR2UF, main]
-    # NOTE: 'develop' branch deploys to DEV only (deploy-dev.yml)
-    # Merge develop → main to release to production
   workflow_dispatch:
 
 concurrency:
@@ -17,14 +15,16 @@ jobs:
     steps:
       - name: Trigger webhook deployer (preferred — bypasses fail2ban)
         run: |
-          # Use secret from GitHub if set, otherwise fall back to deployer default
           SECRET="${{ secrets.DEPLOY_SECRET }}"
           SECRET="${SECRET:-ShitalDeploy2026!}"
           curl -X POST https://shital.org.uk/deploy \
             -H "X-Deploy-Secret: ${SECRET}" \
             --max-time 15 --retry 3 --retry-delay 5 || true
 
-      - name: SSH fallback (used only if webhook deployer is not yet running)
+      # SSH fallback: used if webhook deployer is not responding.
+      # IMPORTANT: This script does NOT build images — builds happen in CI.
+      #            It only pulls pre-built images from GHCR and restarts.
+      - name: SSH fallback
         uses: appleboy/ssh-action@v1.0.3
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -40,8 +40,8 @@ jobs:
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
-          timeout: 1800s
-          command_timeout: 90m
+          timeout: 600s
+          command_timeout: 10m
           envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
           script: |
             set -e
@@ -72,12 +72,9 @@ jobs:
             POSTGRES_PASSWORD=ShitalEco2024Prod!
             JWT_SECRET=shital-temple-erp-jwt-secret-2024-london-prod
             APP_ENV=production
-            CORS_ORIGINS=https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,http://192.248.147.205
-            MS_REDIRECT_URI=https://admin.shital.org.uk/auth-callback
             ENVEOF
             fi
 
-            # Inject secrets from GitHub into .env
             inject() {
               local key=$1 val=$2
               [ -z "$val" ] && return
@@ -94,42 +91,31 @@ jobs:
             inject MS_CLIENT_ID           "$MS_CLIENT_ID"
             inject MS_TENANT_ID           "$MS_TENANT_ID"
             inject MS_CLIENT_SECRET       "$MS_CLIENT_SECRET"
-            inject CORS_ORIGINS           "https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,https://dev.shital.org.uk,http://192.248.147.205"
+            inject GITHUB_TOKEN           "$GH_PAT"
+            inject CORS_ORIGINS           "https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,https://dev.shital.org.uk"
             inject MS_REDIRECT_URI        "https://admin.shital.org.uk/auth-callback"
 
+            # ── Weekly cron to prune dangling images (idempotent) ────────────
+            cat > /etc/cron.d/docker-prune << 'CRONEOF'
+            0 3 * * 0 root docker image prune -f && docker container prune -f >> /var/log/docker-prune.log 2>&1
+            CRONEOF
+            chmod 644 /etc/cron.d/docker-prune
+
             # ── Firewall ──────────────────────────────────────────────────────
-            ufw allow 22/tcp   2>/dev/null || true
-            ufw allow 80/tcp   2>/dev/null || true
-            ufw allow 443/tcp  2>/dev/null || true
-            ufw allow 8000/tcp 2>/dev/null || true
-            ufw allow 8001/tcp 2>/dev/null || true  # dev backend direct
-            ufw allow 8080/tcp 2>/dev/null || true  # dev nginx (HTTP)
+            ufw allow 22/tcp  2>/dev/null || true
+            ufw allow 80/tcp  2>/dev/null || true
+            ufw allow 443/tcp 2>/dev/null || true
             ufw --force enable 2>/dev/null || true
 
-            # ── Stop fail2ban banning GitHub Actions IPs ──────────────────────
-            # fail2ban keeps banning rotating GitHub runner IPs, blocking future
-            # deploys. Unban all and raise the threshold so normal deploy retries
-            # never trigger a ban.
+            # ── fail2ban: stop banning GitHub Actions IPs ────────────────────
             if command -v fail2ban-client &>/dev/null; then
-              fail2ban-client unban --all               2>/dev/null || true
-              fail2ban-client set sshd maxretry 100     2>/dev/null || true
-              fail2ban-client set sshd findtime 3600    2>/dev/null || true
-              fail2ban-client set sshd bantime  60      2>/dev/null || true
+              fail2ban-client unban --all           2>/dev/null || true
+              fail2ban-client set sshd maxretry 100 2>/dev/null || true
+              fail2ban-client set sshd bantime  60  2>/dev/null || true
             fi
 
-            # ── Ensure stack is running (first-boot or recovery) ─────────────
-            # On very first boot there are no containers at all — bring up DB
-            # and nginx so the site stays live throughout the build phase.
-            STACK_RUNNING=$(docker compose -f docker-compose.prod.yml ps -q 2>/dev/null | wc -l)
-            if [ "$STACK_RUNNING" -eq 0 ]; then
-              echo "=== First boot — starting full stack ==="
-              docker compose -f docker-compose.prod.yml up -d --remove-orphans || true
-            fi
-
-            # Always make sure DB and nginx are up before we build anything
+            # ── Ensure DB and nginx are up ────────────────────────────────────
             docker compose -f docker-compose.prod.yml up -d db nginx 2>/dev/null || true
-
-            # Wait for DB to be healthy
             echo "Waiting for DB..."
             for i in $(seq 1 30); do
               sleep 2
@@ -138,60 +124,23 @@ jobs:
               echo "  db attempt $i/30..."
             done
 
-            # ── CHECKPOINT — tag current images as :previous before rebuilding ─
-            echo "=== Saving checkpoint (current images → :previous) ==="
+            # ── Login to GHCR ─────────────────────────────────────────────────
+            echo "$GH_PAT" | docker login ghcr.io -u kammelaraj-arch --password-stdin
+            echo "Logged in to GHCR"
+
+            # ── Checkpoint: tag :latest as :previous ─────────────────────────
             for svc in backend admin quick-donation kiosk screen; do
               img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
-              docker tag "${img}:latest" "${img}:previous" 2>/dev/null && \
-                echo "  checkpoint: ${svc}" || \
-                echo "  (no previous image for ${svc} — skipping)"
+              docker tag "${img}:latest" "${img}:previous" 2>/dev/null || true
             done
 
-            # ── Enable BuildKit for all docker builds ────────────────────────
-            export DOCKER_BUILDKIT=1
-
-            # ── Weekly cron to prune dangling images (permanent) ─────────────
-            cat > /etc/cron.d/docker-prune << 'CRONEOF'
-0 3 * * 0 root docker image prune -f && docker container prune -f >> /var/log/docker-prune.log 2>&1
-CRONEOF
-            chmod 644 /etc/cron.d/docker-prune
-
-            # ── BUILD new images while old containers stay live ───────────────
-            # Admin is built FIRST because it takes the longest (Next.js SSG).
-            GIT_SHA=$(git rev-parse HEAD)
-            echo "=== Building admin (${GIT_SHA}) ==="
-            docker build -t ghcr.io/kammelaraj-arch/shitaleco-admin:latest \
-              -f apps/admin/Dockerfile \
-              --build-arg NEXT_PUBLIC_API_URL=/api/v1 \
-              --build-arg GIT_SHA="${GIT_SHA}" .
-
-            echo "=== Building backend ==="
-            docker build -t ghcr.io/kammelaraj-arch/shitaleco-backend:latest \
-              --build-arg GIT_SHA="${GIT_SHA}" ./backend
-
-            echo "=== Building quick-donation ==="
-            docker build -t ghcr.io/kammelaraj-arch/shitaleco-quick-donation:latest \
-              -f apps/quick-donation/Dockerfile \
-              --build-arg VITE_API_URL=/api/v1 \
-              --build-arg GIT_SHA="${GIT_SHA}" .
-
-            echo "=== Building kiosk ==="
-            docker build -t ghcr.io/kammelaraj-arch/shitaleco-kiosk:latest \
-              --build-arg VITE_API_URL=/api/v1 --build-arg VITE_BASE=/kiosk/ \
-              --build-arg GIT_SHA="${GIT_SHA}" ./apps/kiosk
-
-            echo "=== Building screen ==="
-            docker build -t ghcr.io/kammelaraj-arch/shitaleco-screen:latest \
-              --build-arg GIT_SHA="${GIT_SHA}" ./apps/screen
-
-            # ── Prune dangling images + stopped containers after builds ─────────
-            echo "=== Pruning dangling images ==="
+            # ── Pull images built by CI — zero build load on this server ─────
+            echo "=== Pulling pre-built images from GHCR ==="
+            docker compose -f docker-compose.prod.yml pull backend admin quick-donation kiosk screen
             docker image prune -f
             docker container prune -f
 
-            # ── ROLLING RESTART — one service at a time ───────────────────────
-            # DB and nginx stay up throughout. Each app is replaced individually.
-
+            # ── Rolling restart: backend first ────────────────────────────────
             echo "=== Rolling restart: backend ==="
             docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
 
@@ -200,53 +149,59 @@ CRONEOF
             for i in $(seq 1 30); do
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null; then
-                echo "Backend healthy!"
-                BACKEND_OK=1
-                break
+                echo "Backend healthy!"; BACKEND_OK=1; break
               fi
               echo "  attempt $i/30..."
             done
 
-            # Auto-rollback backend if health check fails
             if [ "$BACKEND_OK" -eq 0 ]; then
-              echo "!!! Backend health check failed — rolling back to :previous !!!"
+              echo "!!! Backend unhealthy — rolling back to :previous !!!"
               docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
                          ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
               docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
-              echo "Backend rolled back. Frontend apps will NOT be updated."
               docker compose -f docker-compose.prod.yml ps
               exit 1
             fi
 
-            echo "=== Seeding catalog if empty ==="
             curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
 
-            echo "=== Rolling restart: frontend apps ==="
-            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin
-            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate quick-donation
-            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate kiosk
-            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate screen
+            # ── Rolling restart: frontends ────────────────────────────────────
+            echo "=== Rolling restart: frontends ==="
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
 
-            # Wait for admin to become healthy before reloading nginx
-            echo "Waiting for admin health..."
+            echo "Waiting for admin..."
             for i in $(seq 1 20); do
               sleep 5
-              if curl -sf http://localhost:3001/admin > /dev/null 2>&1; then
-                echo "Admin healthy!"; break
-              fi
+              curl -sf http://localhost:3001/admin > /dev/null 2>&1 && break
               echo "  attempt $i/20..."
             done
 
-            # Reload nginx config (graceful, zero downtime)
-            echo "=== Reloading nginx ==="
             docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
               docker compose -f docker-compose.prod.yml up -d --no-deps nginx
 
-            # ── Expand SSL cert to include dev.shital.org.uk (idempotent) ────────
-            echo "=== Expanding SSL cert for dev.shital.org.uk ==="
+            # ── Smoke tests ───────────────────────────────────────────────────
+            echo "=== Smoke tests ==="
+            SMOKE_FAIL=0
+            smoke() {
+              if curl -sf --max-time 10 "$2" > /dev/null 2>&1; then echo "  ✓ $1"
+              else echo "  ✗ $1 FAILED"; SMOKE_FAIL=1; fi
+            }
+            smoke "backend /health"  "http://localhost:8000/health"
+            smoke "admin portal"     "http://localhost:3001/admin"
+            smoke "nginx main"       "http://localhost:80/"
+            smoke "kiosk"            "http://localhost:80/kiosk/"
+            smoke "donation"         "http://localhost:80/donate/"
+
+            if [ "$SMOKE_FAIL" -ne 0 ]; then
+              echo "!!! Smoke tests failed — check logs above !!!"
+              docker compose -f docker-compose.prod.yml logs --tail=30 backend
+              exit 1
+            fi
+
+            # ── SSL cert renewal (idempotent) ─────────────────────────────────
             docker run --rm \
-              -v certbot-www:/var/www/certbot \
-              -v certbot-certs:/etc/letsencrypt \
+              -v /var/www/certbot:/var/www/certbot \
+              -v /etc/letsencrypt:/etc/letsencrypt \
               certbot/certbot certonly --webroot \
               --webroot-path /var/www/certbot \
               -d shital.org.uk -d www.shital.org.uk \
@@ -255,64 +210,24 @@ CRONEOF
               -d dev.shital.org.uk \
               --expand --non-interactive --agree-tos \
               -m admin@shirdisai.org.uk \
-              2>&1 | tail -20 || echo "(certbot expand failed — DNS may not be set up yet, continuing)"
+              2>&1 | tail -5 || true
 
-            # ── Tag :latest images as :dev so dev stack has fresh code ───────
-            echo "=== Tagging :latest images as :dev ==="
+            # ── Tag :latest as :dev for dev stack ─────────────────────────────
             for svc in backend admin quick-donation kiosk screen; do
-              img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
-              docker tag "${img}:latest" "${img}:dev" 2>/dev/null && \
-                echo "  tagged ${svc}:dev" || echo "  skipped ${svc}"
+              docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
+                         ghcr.io/kammelaraj-arch/shitaleco-${svc}:dev 2>/dev/null || true
             done
 
-            # ── Ensure dev stack is running with new images ───────────────────
-            echo "=== Restarting dev stack ==="
             DEV_DIR=/opt/shitaleco-dev
             if [ -d "$DEV_DIR/.git" ]; then
               cd "$DEV_DIR"
               git fetch origin
               git reset --hard origin/claude/shital-erp-platform-iR2UF
               docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
-              echo "Dev stack status:"
-              docker compose -f docker-compose.dev.yml ps
-            else
-              echo "(dev repo not cloned yet — skipping dev stack restart)"
-            fi
-            cd /opt/shitaleco
-
-            # Reload nginx to pick up any updated SSL cert or new server block
-            docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
-              docker compose -f docker-compose.prod.yml up -d --no-deps nginx
-
-            # ── Post-deploy smoke tests ───────────────────────────────────────
-            echo "=== Running smoke tests ==="
-            SMOKE_FAIL=0
-
-            smoke() {
-              local label=$1 url=$2
-              if curl -sf --max-time 10 "$url" > /dev/null 2>&1; then
-                echo "  ✓ $label"
-              else
-                echo "  ✗ $label FAILED ($url)"
-                SMOKE_FAIL=1
-              fi
-            }
-
-            smoke "backend /health"           "http://localhost:8000/health"
-            smoke "backend /api/v1/ping"      "http://localhost:8000/api/v1/ping"
-            smoke "admin portal"              "http://localhost:3001/admin"
-            smoke "nginx main site"           "http://localhost:80/"
-            smoke "kiosk via nginx"           "http://localhost:80/kiosk/"
-            smoke "donation via nginx"        "http://localhost:80/donate/"
-
-            if [ "$SMOKE_FAIL" -ne 0 ]; then
-              echo "!!! One or more smoke tests failed — check logs above !!!"
-              echo "--- backend logs (last 30 lines) ---"
-              docker compose -f docker-compose.prod.yml logs --tail=30 backend
-              exit 1
             fi
 
-            # ── Status ────────────────────────────────────────────────────────
+            docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || true
+
             echo ""
             echo "=== Deploy complete — all sites live ==="
             docker compose -f docker-compose.prod.yml ps

@@ -1,4 +1,9 @@
 #!/bin/bash
+# ── ShitalEco Production Deploy ────────────────────────────────────────────────
+# Images are built by GitHub Actions and pushed to GHCR.
+# This script ONLY pulls pre-built images and does a rolling restart.
+# The production server NEVER builds — that's what killed it before.
+# ──────────────────────────────────────────────────────────────────────────────
 set -eo pipefail
 LOG=/tmp/deploy-$(date +%s).log
 exec >> "$LOG" 2>&1
@@ -6,49 +11,28 @@ exec >> "$LOG" 2>&1
 echo "=== Deploy started $(date) ==="
 cd /workspace
 
-# BuildKit: faster builds, better layer caching, lower peak memory
-export DOCKER_BUILDKIT=1
-
 git fetch origin
 git reset --hard origin/claude/shital-erp-platform-iR2UF
 GIT_SHA=$(git rev-parse HEAD)
 echo "=== Deploying commit ${GIT_SHA} ==="
 
-# ── Checkpoint: tag current :latest as :previous ────────────────────────────
+# ── Login to GHCR so we can pull private images ──────────────────────────────
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  echo "$GITHUB_TOKEN" | docker login ghcr.io -u kammelaraj-arch --password-stdin 2>/dev/null \
+    && echo "Logged in to GHCR" || echo "GHCR login failed — images may already be cached"
+fi
+
+# ── Checkpoint: tag :latest as :previous before pulling ─────────────────────
 for svc in backend admin quick-donation kiosk screen; do
   docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
              ghcr.io/kammelaraj-arch/shitaleco-${svc}:previous 2>/dev/null || true
 done
 
-# ── Build all images while old containers keep serving ───────────────────────
-# Admin first — slowest (Next.js SSR); starts while others still serve traffic
-echo "=== Building admin ==="
-docker build -t ghcr.io/kammelaraj-arch/shitaleco-admin:latest \
-  -f apps/admin/Dockerfile \
-  --build-arg NEXT_PUBLIC_API_URL=/api/v1 \
-  --build-arg GIT_SHA="${GIT_SHA}" .
+# ── Pull new images from GHCR (built by CI, not here) ───────────────────────
+echo "=== Pulling images from GHCR ==="
+docker compose -f docker-compose.prod.yml pull backend admin quick-donation kiosk screen
 
-echo "=== Building backend ==="
-docker build -t ghcr.io/kammelaraj-arch/shitaleco-backend:latest \
-  --build-arg GIT_SHA="${GIT_SHA}" ./backend
-
-echo "=== Building quick-donation ==="
-docker build -t ghcr.io/kammelaraj-arch/shitaleco-quick-donation:latest \
-  -f apps/quick-donation/Dockerfile \
-  --build-arg VITE_API_URL=/api/v1 \
-  --build-arg GIT_SHA="${GIT_SHA}" .
-
-echo "=== Building kiosk ==="
-docker build -t ghcr.io/kammelaraj-arch/shitaleco-kiosk:latest \
-  --build-arg VITE_API_URL=/api/v1 --build-arg VITE_BASE=/kiosk/ \
-  --build-arg GIT_SHA="${GIT_SHA}" ./apps/kiosk
-
-echo "=== Building screen ==="
-docker build -t ghcr.io/kammelaraj-arch/shitaleco-screen:latest \
-  --build-arg GIT_SHA="${GIT_SHA}" ./apps/screen
-
-# ── Prune immediately after builds — reclaim disk before rolling restart ─────
-echo "=== Pruning dangling images and stopped containers ==="
+# ── Prune old dangling images immediately ───────────────────────────────────
 docker image prune -f
 docker container prune -f
 
@@ -73,18 +57,16 @@ if [ "$BACKEND_OK" -eq 0 ]; then
   docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
              ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
   docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
-  echo "Rolled back. Frontend NOT updated."
+  echo "Rolled back. Frontends NOT updated."
   exit 1
 fi
 
-# ── Seed catalog if empty ────────────────────────────────────────────────────
 curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
 
 # ── Frontend rollout ─────────────────────────────────────────────────────────
 echo "=== Rolling restart: frontends ==="
 docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
 
-# Wait for admin before reloading nginx
 echo "Waiting for admin..."
 for i in $(seq 1 20); do
   sleep 4
@@ -115,7 +97,7 @@ smoke "donate via nginx"  "http://localhost:80/donate/"
 smoke "screen via nginx"  "http://localhost:80/screen/"
 
 if [ "$SMOKE_FAIL" -ne 0 ]; then
-  echo "!!! Smoke tests failed — check logs:"
+  echo "!!! Smoke tests failed ==="
   docker compose -f docker-compose.prod.yml logs --tail=20 backend
   exit 1
 fi

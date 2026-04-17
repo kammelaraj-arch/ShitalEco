@@ -181,6 +181,7 @@ services:
     environment:
       DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
       DOCKER_BUILDKIT: "1"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
       - /opt/shitaleco:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
