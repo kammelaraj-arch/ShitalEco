@@ -1,8 +1,10 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore, t } from '../store'
+import { useStore, t, type GiftAidDeclaration } from '../store'
+
+const DECLINED: GiftAidDeclaration = { agreed: false, fullName: '', postcode: '', address: '', contactEmail: '', contactPhone: '' }
 
 export function BasketPage() {
-  const { language, items, removeItem, updateQty, total, setScreen, clearBasket } = useStore()
+  const { language, items, removeItem, updateQty, total, giftAidTotal, setScreen, clearBasket, setGiftAidDeclaration } = useStore()
 
   if (items.length === 0) {
     return (
@@ -105,10 +107,22 @@ export function BasketPage() {
           <span style={{ color: 'rgba(255,248,220,0.5)' }}>Subtotal</span>
           <span className="font-semibold text-ivory-200 price-display">£{total.toFixed(2)}</span>
         </div>
+        {giftAidTotal > 0 && (
+          <div className="flex justify-between text-sm" style={{ color: '#4ade80' }}>
+            <span>🇬🇧 Gift Aid boost (HMRC +25%)</span>
+            <span className="font-bold price-display">+£{(giftAidTotal * 0.25).toFixed(2)}</span>
+          </div>
+        )}
         <div className="pt-3 flex justify-between" style={{ borderTop: '1px dashed rgba(212,175,55,0.2)' }}>
-          <span className="font-bold text-ivory-200">Total</span>
+          <span className="font-bold text-ivory-200">Total you pay</span>
           <span className="font-black text-xl text-gold-400 price-display">£{total.toFixed(2)}</span>
         </div>
+        {giftAidTotal > 0 && (
+          <div className="rounded-xl px-3 py-2 text-xs"
+            style={{ background: 'rgba(22,163,74,0.1)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }}>
+            🎁 HMRC adds <strong>£{(giftAidTotal * 0.25).toFixed(2)}</strong> to your donation at no extra cost.
+          </div>
+        )}
       </div>
 
       {/* PayPal note */}
@@ -122,14 +136,32 @@ export function BasketPage() {
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Actions — Gift Aid two-button pattern */}
       <div className="space-y-3">
-        <button
-          onClick={() => setScreen('contact')}
-          className="btn-gold"
-        >
-          Continue to Checkout →
-        </button>
+        {giftAidTotal > 0 ? (
+          <>
+            <button
+              onClick={() => { setGiftAidDeclaration(null); setScreen('contact') }}
+              className="w-full py-4 rounded-2xl font-black text-base active:scale-[0.99] transition-transform"
+              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff', boxShadow: '0 4px 20px rgba(22,163,74,0.35)' }}
+            >
+              <div className="flex flex-col items-center leading-tight gap-0.5">
+                <span className="text-sm font-bold opacity-90">🇬🇧 Boost with Gift Aid — +£{(giftAidTotal * 0.25).toFixed(2)} FREE</span>
+                <span className="text-lg font-black">Temple receives £{(total + giftAidTotal * 0.25).toFixed(2)}</span>
+              </div>
+            </button>
+            <button
+              onClick={() => { setGiftAidDeclaration(DECLINED); setScreen('contact') }}
+              className="btn-ghost"
+            >
+              Without Gift Aid · Pay £{total.toFixed(2)}
+            </button>
+          </>
+        ) : (
+          <button onClick={() => setScreen('contact')} className="btn-gold">
+            Continue to Checkout →
+          </button>
+        )}
         <button
           onClick={() => setScreen('browse')}
           className="w-full py-3 text-sm font-medium transition-colors"

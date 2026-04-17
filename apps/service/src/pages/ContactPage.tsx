@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { useStore, t } from '../store'
 
 export function ContactPage() {
-  const { language, setScreen, setContactInfo, items } = useStore()
+  const { language, setScreen, setContactInfo, giftAidTotal, giftAidDeclaration, items } = useStore()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
@@ -12,6 +12,7 @@ export function ContactPage() {
   const [terms, setTerms] = useState(false)
   const [error, setError] = useState('')
 
+  const hasGiftAidItems = giftAidTotal > 0
   const requiresContact = items.some((i) =>
     ['SOFT_DONATION', 'PROJECT_DONATION', 'SPONSORSHIP', 'SHOP'].includes(i.category || '')
   )
@@ -44,7 +45,12 @@ export function ContactPage() {
       termsConsent: anonymous ? false : terms,
       anonymous,
     })
-    setScreen('payment')
+    // Route to gift-aid if eligible and user chose "Boost" (giftAidDeclaration===null means undecided/boost)
+    if (hasGiftAidItems && !anonymous && giftAidDeclaration === null) {
+      setScreen('gift-aid')
+    } else {
+      setScreen('payment')
+    }
   }
 
   return (
