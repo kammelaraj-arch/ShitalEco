@@ -169,11 +169,11 @@ jobs:
             echo "=== Rolling restart: frontends ==="
             docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
 
-            echo "Waiting for admin..."
-            for i in $(seq 1 20); do
-              sleep 5
-              curl -sf http://localhost:3001/admin > /dev/null 2>&1 && break
-              echo "  attempt $i/20..."
+            echo "Waiting for admin (nginx:alpine on :80)..."
+            for i in $(seq 1 10); do
+              sleep 3
+              curl -sf http://localhost:80/admin/ > /dev/null 2>&1 && break
+              echo "  attempt $i/10..."
             done
 
             docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
@@ -187,7 +187,7 @@ jobs:
               else echo "  ✗ $1 FAILED"; SMOKE_FAIL=1; fi
             }
             smoke "backend /health"  "http://localhost:8000/health"
-            smoke "admin portal"     "http://localhost:3001/admin"
+            smoke "admin portal"     "http://localhost:80/admin/"
             smoke "nginx main"       "http://localhost:80/"
             smoke "kiosk"            "http://localhost:80/kiosk/"
             smoke "donation"         "http://localhost:80/donate/"
