@@ -103,6 +103,7 @@ interface ServiceStore {
   branchId: string
   branchName: string          // human-readable name from DB, e.g. "Wembley Temple"
   branchLocked: boolean       // true when branch comes from subdomain (not user-selected)
+  deviceToken: string | null  // set once on first login; persisted so device never re-prompts
   items: BasketItem[]
   basketId: string | null
   giftAidDeclaration: GiftAidDeclaration | null
@@ -114,6 +115,7 @@ interface ServiceStore {
   setTheme: (id: ThemeId) => void
   setBranchId: (id: string) => void
   setBranch: (id: string, name: string, locked?: boolean) => void
+  setDeviceToken: (token: string | null) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
   removeItem: (id: string) => void
@@ -138,6 +140,7 @@ export const useStore = create<ServiceStore>()(
       branchId: 'main',
       branchName: '',
       branchLocked: false,
+      deviceToken: null,
       items: [],
       basketId: null,
       giftAidDeclaration: null,
@@ -149,6 +152,7 @@ export const useStore = create<ServiceStore>()(
       setTheme: (themeId) => { applyTheme(getTheme(themeId)); set({ themeId }) },
       setBranchId: (branchId) => set({ branchId }),
       setBranch: (branchId, branchName, locked = false) => set({ branchId, branchName, branchLocked: locked }),
+      setDeviceToken: (deviceToken) => set({ deviceToken }),
       setBasketId: (basketId) => set({ basketId }),
 
       addItem: (item) => set((state) => {
@@ -201,7 +205,9 @@ export const useStore = create<ServiceStore>()(
       partialize: (s) => ({
         language: s.language,
         themeId: s.themeId,
-        // never persist branchId — always re-detect from URL / user picks fresh
+        deviceToken: s.deviceToken,
+        // persist branch when device is locked (token login or subdomain)
+        ...(s.deviceToken ? { branchId: s.branchId, branchName: s.branchName, branchLocked: s.branchLocked } : {}),
       }),
     }
   )

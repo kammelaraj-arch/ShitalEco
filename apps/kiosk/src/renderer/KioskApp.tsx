@@ -20,7 +20,7 @@ import { AdminScreen } from './pages/AdminScreen'
 const IDLE_TIMEOUT_MS = 120_000
 
 export function KioskApp() {
-  const { screen, resetKiosk, setTheme, setBranchId, setOrgName, setOrgLogoUrl } = useKioskStore()
+  const { screen, resetKiosk, setTheme, setBranchId, setOrgName, setOrgLogoUrl, setCardDevice } = useKioskStore()
   let idleTimeout: ReturnType<typeof setTimeout>
 
   // On startup, read ?token= from URL and fetch device config
@@ -36,6 +36,7 @@ export function KioskApp() {
         if (cfg.kiosk_theme) setTheme(cfg.kiosk_theme as KioskTheme)
         if (cfg.org_name)   setOrgName(cfg.org_name)
         if (cfg.org_logo_url) setOrgLogoUrl(cfg.org_logo_url)
+        if (cfg.stripe_reader_id) setCardDevice('stripe_terminal', cfg.stripe_reader_id, cfg.reader_label || cfg.stripe_reader_id)
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

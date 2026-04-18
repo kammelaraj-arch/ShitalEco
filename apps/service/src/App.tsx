@@ -23,7 +23,7 @@ function ProgressBar({ screen }: { screen: string }) {
   }
 
   return (
-    <div style={{ background: 'rgba(140,0,0,0.97)', borderBottom: '1px solid rgba(212,175,55,0.15)' }}>
+    <div style={{ background: 'var(--bg-header)', borderBottom: '1px solid rgba(212,175,55,0.15)' }}>
       <div className="max-w-5xl mx-auto px-4 py-2.5">
         <div className="flex items-center gap-1">
           {CHECKOUT_STEPS.map((step, i) => (
@@ -50,11 +50,15 @@ function ProgressBar({ screen }: { screen: string }) {
   )
 }
 
+const API = (import.meta.env.VITE_API_URL as string) || '/api/v1'
+
 export default function App() {
   const screen = useStore((s) => s.screen)
   const branchName = useStore((s) => s.branchName)
   const branchLocked = useStore((s) => s.branchLocked)
+  const deviceToken = useStore((s) => s.deviceToken)
   const setBranch = useStore((s) => s.setBranch)
+  const setDeviceToken = useStore((s) => s.setDeviceToken)
   const themeId = useStore((s) => s.themeId)
 
   useEffect(() => {
@@ -62,9 +66,25 @@ export default function App() {
   }, [themeId])
 
   useEffect(() => {
+    // 1. Hostname subdomain takes highest priority
     const sub = detectBranchFromHostname()
-    if (sub) setBranch(sub, sub, true)
-  }, [])
+    if (sub) { setBranch(sub, sub, true); return }
+
+    // 2. URL token param — store it for this device permanently
+    const params = new URLSearchParams(window.location.search)
+    const urlToken = params.get('token')
+    const token = urlToken || deviceToken
+    if (!token) return
+
+    fetch(`${API}/kiosk-devices/by-token/${encodeURIComponent(token)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => {
+        if (!cfg) return
+        if (urlToken) setDeviceToken(urlToken)
+        setBranch(cfg.branch_id || 'main', cfg.org_name || cfg.branch_id || 'Temple', true)
+      })
+      .catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const pageVariants = {
     initial: { opacity: 0, x: 20 },
@@ -84,12 +104,12 @@ export default function App() {
     }
   }
 
-  if (!branchName && !branchLocked) {
+  if (!branchName && !branchLocked && !deviceToken) {
     return <BranchPicker />
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: '#B80000' }}>
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
       <Header />
       <ProgressBar screen={screen} />
 
