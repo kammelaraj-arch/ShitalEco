@@ -63,6 +63,20 @@ services:
     networks:
       - internal
 
+  # ─── Service Portal (Vite SPA — service.shital.org.uk) ───────────────────────
+  service:
+    build:
+      context: .                          # workspace root (pnpm monorepo)
+      dockerfile: apps/service/Dockerfile
+      args:
+        VITE_API_URL: /api/v1
+        VITE_BASE: /
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - internal
+
   # ─── Quick Donation (Vite SPA served by nginx) ─────────────────────────────
   quick-donation:
     build:
@@ -118,6 +132,7 @@ services:
     depends_on:
       - backend
       - admin
+      - service
       - quick-donation
       - kiosk
       - screen
