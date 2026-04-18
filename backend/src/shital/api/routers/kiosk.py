@@ -1359,11 +1359,11 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 WHERE kd.branch_id = :branch_id
                   AND kd.device_type = 'QUICK_DONATION'
                   AND kd.deleted_at IS NULL
-                  AND kd.status = 'active'
+                  AND UPPER(kd.status) = 'ACTIVE'
                 ORDER BY kd.updated_at DESC
                 LIMIT 1
             """),
-            {"branch_id": user["branch_id"]},
+            {"branch_id": branch_code},
         )
         dev_row = dev_res.mappings().first()
         if dev_row and dev_row["stripe_reader_id"]:
