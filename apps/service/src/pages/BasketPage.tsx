@@ -157,7 +157,7 @@ export function BasketPage() {
           <>
             {/* PRIMARY — Gift Aid boost (prominent) */}
             <button
-              onClick={() => { setGiftAidDeclaration(null); setScreen('contact') }}
+              onClick={() => { setGiftAidDeclaration(null); setScreen('gift-aid') }}
               className="w-full rounded-2xl font-black active:scale-[0.99] transition-transform"
               style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff',
                 boxShadow: '0 6px 24px rgba(22,163,74,0.45), 0 2px 8px rgba(0,0,0,0.3)', padding: '1.1rem 1.5rem' }}
@@ -170,7 +170,7 @@ export function BasketPage() {
             </button>
             {/* SECONDARY — Without Gift Aid */}
             <button
-              onClick={() => { setGiftAidDeclaration(DECLINED); setScreen('contact') }}
+              onClick={() => { setGiftAidDeclaration(DECLINED); setScreen('gift-aid') }}
               className="w-full py-3.5 rounded-2xl text-sm font-bold transition-all"
               style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)',
                 color: 'rgba(255,248,220,0.45)' }}
