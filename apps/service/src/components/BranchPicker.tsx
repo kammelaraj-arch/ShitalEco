@@ -24,7 +24,7 @@ export function BranchPicker() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12"
-      style={{ background: '#B80000' }}>
+      style={{ background: 'var(--bg)' }}>
 
       {/* Ambient glow */}
       <div className="fixed inset-0 pointer-events-none"
