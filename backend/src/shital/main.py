@@ -834,6 +834,7 @@ async def _seed_api_key_metadata() -> None:
         ("META_WHATSAPP_VERIFY_TOKEN","Meta WhatsApp webhook verify token",             "WhatsApp",  True),
         ("PAYPAL_CLIENT_ID",          "PayPal REST API client ID",                      "PayPal",    False),
         ("PAYPAL_CLIENT_SECRET",      "PayPal REST API client secret",                  "PayPal",    True),
+        ("PAYPAL_ENV",                "PayPal environment: 'live' or 'sandbox'",        "PayPal",    False),
         ("HMRC_GIFT_AID_USER_ID",     "HMRC Government Gateway user ID",                "HMRC",      True),
         ("HMRC_GIFT_AID_PASSWORD",    "HMRC Government Gateway password",               "HMRC",      True),
         ("HMRC_GIFT_AID_VENDOR_ID",   "HMRC software vendor ID",                        "HMRC",      False),
