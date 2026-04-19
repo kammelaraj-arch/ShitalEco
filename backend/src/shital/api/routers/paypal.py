@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+import structlog
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -41,7 +42,6 @@ async def _token() -> str:
 @router.get("/config")
 async def paypal_config():
     """Return PayPal client_id for frontend SDK initialisation."""
-    import structlog
     from shital.core.fabrics.secrets import SecretsManager
     client_id = await SecretsManager.get("PAYPAL_CLIENT_ID") or ""
     env       = await SecretsManager.get("PAYPAL_ENV") or "live"
