@@ -41,10 +41,31 @@ async def _token() -> str:
 @router.get("/config")
 async def paypal_config():
     """Return PayPal client_id for frontend SDK initialisation."""
+    import structlog
     from shital.core.fabrics.secrets import SecretsManager
     client_id = await SecretsManager.get("PAYPAL_CLIENT_ID") or ""
     env       = await SecretsManager.get("PAYPAL_ENV") or "live"
+    if not client_id:
+        structlog.get_logger().warning(
+            "paypal_client_id_empty",
+            hint="Key shows 'Set' in Admin but decrypted to empty — re-save PAYPAL_CLIENT_ID in Admin > API Keys",
+        )
     return {"client_id": client_id, "env": env, "currency": "GBP"}
+
+
+@router.get("/ping")
+async def paypal_ping():
+    """Diagnostic: check if PayPal credentials are readable (no values exposed)."""
+    from shital.core.fabrics.secrets import SecretsManager
+    client_id = await SecretsManager.get("PAYPAL_CLIENT_ID") or ""
+    secret    = await SecretsManager.get("PAYPAL_CLIENT_SECRET") or ""
+    env       = await SecretsManager.get("PAYPAL_ENV") or "live"
+    return {
+        "client_id_readable": bool(client_id),
+        "secret_readable": bool(secret),
+        "env": env,
+        "ready": bool(client_id and secret),
+    }
 
 
 class CreateOrderBody(BaseModel):
