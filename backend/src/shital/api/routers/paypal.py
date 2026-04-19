@@ -72,6 +72,9 @@ class CreateOrderBody(BaseModel):
     amount: float
     description: str = "Shital Temple Donation"
     branch_id: str = "main"
+    contact_name: str = ""
+    contact_email: str = ""
+    contact_postcode: str = ""
 
 
 @router.post("/order")
@@ -79,22 +82,36 @@ async def create_paypal_order(body: CreateOrderBody) -> dict[str, str]:
     """Create a PayPal order server-side and return its ID to the frontend."""
     token = await _token()
     base  = await _base()
+
+    payer: dict = {}
+    if body.contact_name:
+        parts = body.contact_name.strip().split(" ", 1)
+        payer["name"] = {"given_name": parts[0], "surname": parts[1] if len(parts) > 1 else ""}
+    if body.contact_email:
+        payer["email_address"] = body.contact_email
+    if body.contact_postcode:
+        payer["address"] = {"postal_code": body.contact_postcode, "country_code": "GB"}
+
+    payload: dict = {
+        "intent": "CAPTURE",
+        "purchase_units": [{
+            "amount": {"currency_code": "GBP", "value": f"{body.amount:.2f}"},
+            "description": body.description[:127],
+        }],
+        "application_context": {
+            "brand_name": "Shital Temple",
+            "user_action": "PAY_NOW",
+            "shipping_preference": "NO_SHIPPING",
+        },
+    }
+    if payer:
+        payload["payer"] = payer
+
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.post(
             f"{base}/v2/checkout/orders",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={
-                "intent": "CAPTURE",
-                "purchase_units": [{
-                    "amount": {"currency_code": "GBP", "value": f"{body.amount:.2f}"},
-                    "description": body.description[:127],
-                }],
-                "application_context": {
-                    "brand_name": "Shital Temple",
-                    "user_action": "PAY_NOW",
-                    "shipping_preference": "NO_SHIPPING",
-                },
-            },
+            json=payload,
         )
         if not r.is_success:
             structlog.get_logger().error(

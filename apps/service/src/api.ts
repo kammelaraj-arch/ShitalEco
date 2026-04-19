@@ -100,11 +100,14 @@ export const api = {
     return r.json()
   },
 
-  async paypalCreateOrder(amount: number, description: string, branchId: string): Promise<string> {
+  async paypalCreateOrder(
+    amount: number, description: string, branchId: string,
+    prefill?: { contact_name?: string; contact_email?: string; contact_postcode?: string },
+  ): Promise<string> {
     const r = await fetch(`${API}/service/paypal/order`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, description, branch_id: branchId }),
+      body: JSON.stringify({ amount, description, branch_id: branchId, ...prefill }),
     })
     if (!r.ok) throw new Error(`PayPal order failed: ${r.status}`)
     const d = await r.json()
