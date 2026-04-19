@@ -96,7 +96,14 @@ async def create_paypal_order(body: CreateOrderBody) -> dict[str, str]:
                 },
             },
         )
-        r.raise_for_status()
+        if not r.is_success:
+            structlog.get_logger().error(
+                "paypal_order_create_failed",
+                status=r.status_code,
+                body=r.text[:500],
+                amount=body.amount,
+            )
+            r.raise_for_status()
         data = r.json()
     return {"id": data["id"]}
 
