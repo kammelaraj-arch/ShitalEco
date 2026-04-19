@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { useStore } from '../store'
+import { useStore, useTotal, useGiftAidTotal } from '../store'
 
 export function ConfirmationPage() {
-  const { orderResult, contactInfo, giftAidDeclaration, total, giftAidTotal, items, reset } = useStore()
+  const { orderResult, contactInfo, giftAidDeclaration, items, reset } = useStore()
+  const total = useTotal()
+  const giftAidTotal = useGiftAidTotal()
   const [countdown, setCountdown] = useState(60)
 
   const boost = giftAidTotal * 0.25

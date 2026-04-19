@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore, t } from '../store'
+import { useStore, useTotal, useItemCount, t } from '../store'
 import { ItemCard } from '../components/ItemCard'
 import { api } from '../api'
 
@@ -24,7 +24,9 @@ interface CatalogItem {
 interface Project { id: string; name: string }
 
 export function BrowsePage() {
-  const { language, branchId, itemCount, total, setScreen } = useStore()
+  const { language, branchId, setScreen } = useStore()
+  const total = useTotal()
+  const itemCount = useItemCount()
   const [activeTab, setActiveTab] = useState<Tab>('donate')
   const [items, setItems] = useState<CatalogItem[]>([])
   const [projects, setProjects] = useState<Project[]>([])

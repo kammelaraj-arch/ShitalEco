@@ -126,9 +126,6 @@ interface ServiceStore {
   setOrderResult: (r: OrderResult) => void
   reset: () => void
 
-  get total(): number
-  get itemCount(): number
-  get giftAidTotal(): number
 }
 
 export const useStore = create<ServiceStore>()(
@@ -195,9 +192,6 @@ export const useStore = create<ServiceStore>()(
         orderResult: null,
       }),
 
-      get total() { return get().items.reduce((s, i) => s + i.totalPrice, 0) },
-      get itemCount() { return get().items.reduce((s, i) => s + i.quantity, 0) },
-      get giftAidTotal() { return get().items.filter(i => i.giftAidEligible).reduce((s, i) => s + i.totalPrice, 0) },
     }),
     {
       name: 'shital-service-config',
@@ -212,6 +206,10 @@ export const useStore = create<ServiceStore>()(
     }
   )
 )
+
+export const useTotal = () => useStore(s => s.items.reduce((acc, i) => acc + i.totalPrice, 0))
+export const useGiftAidTotal = () => useStore(s => s.items.filter(i => i.giftAidEligible).reduce((acc, i) => acc + i.totalPrice, 0))
+export const useItemCount = () => useStore(s => s.items.reduce((acc, i) => acc + i.quantity, 0))
 
 // ── Translations ───────────────────────────────────────────────────────────────
 

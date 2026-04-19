@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { useStore, t } from '../store'
+import { useStore, useGiftAidTotal, t } from '../store'
 
 export function ContactPage() {
-  const { language, setScreen, setContactInfo, giftAidTotal, giftAidDeclaration, items } = useStore()
+  const { language, setScreen, setContactInfo, giftAidDeclaration, items } = useStore()
+  const giftAidTotal = useGiftAidTotal()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')

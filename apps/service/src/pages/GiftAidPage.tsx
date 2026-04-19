@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore, t, type GiftAidDeclaration } from '../store'
+import { useStore, useTotal, useGiftAidTotal, t, type GiftAidDeclaration } from '../store'
 import { api } from '../api'
 
 const DECLINED: GiftAidDeclaration = { agreed: false, fullName: '', postcode: '', address: '', contactEmail: '', contactPhone: '' }
@@ -8,7 +8,9 @@ const DECLINED: GiftAidDeclaration = { agreed: false, fullName: '', postcode: ''
 type Step = 'choice' | 'form' | 'no-form'
 
 export function GiftAidPage() {
-  const { language, setScreen, setGiftAidDeclaration, setContactInfo, contactInfo, giftAidTotal, total, giftAidDeclaration } = useStore()
+  const { language, setScreen, setGiftAidDeclaration, setContactInfo, contactInfo, giftAidDeclaration } = useStore()
+  const total = useTotal()
+  const giftAidTotal = useGiftAidTotal()
 
   const boost = giftAidTotal * 0.25
   const totalWithBoost = total + boost

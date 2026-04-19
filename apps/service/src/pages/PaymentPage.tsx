@@ -6,7 +6,7 @@ import {
   type PayPalButtonsComponentProps,
   type ReactPayPalScriptOptions,
 } from '@paypal/react-paypal-js'
-import { useStore, t } from '../store'
+import { useStore, useTotal, useGiftAidTotal, t } from '../store'
 import { api } from '../api'
 
 const PayPalScriptProvider = _PayPalScriptProvider as ComponentType<{
@@ -16,9 +16,11 @@ const PayPalButtons = _PayPalButtons as ComponentType<PayPalButtonsComponentProp
 
 export function PaymentPage() {
   const {
-    language, items, total, giftAidTotal, branchId, basketId, setBasketId,
+    language, items, branchId, basketId, setBasketId,
     contactInfo, giftAidDeclaration, setScreen, setOrderResult,
   } = useStore()
+  const total = useTotal()
+  const giftAidTotal = useGiftAidTotal()
 
   const [paypalClientId, setPaypalClientId] = useState('')
   const [configLoading, setConfigLoading] = useState(true)
