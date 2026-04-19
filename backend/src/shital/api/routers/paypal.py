@@ -75,6 +75,7 @@ class CreateOrderBody(BaseModel):
     contact_name: str = ""
     contact_email: str = ""
     contact_postcode: str = ""
+    contact_address: str = ""
 
 
 @router.post("/order")
@@ -89,8 +90,14 @@ async def create_paypal_order(body: CreateOrderBody) -> dict[str, str]:
         payer["name"] = {"given_name": parts[0], "surname": parts[1] if len(parts) > 1 else ""}
     if body.contact_email:
         payer["email_address"] = body.contact_email
-    if body.contact_postcode:
-        payer["address"] = {"postal_code": body.contact_postcode, "country_code": "GB"}
+    if body.contact_postcode or body.contact_address:
+        addr: dict = {"country_code": "GB"}
+        if body.contact_postcode:
+            addr["postal_code"] = body.contact_postcode
+        if body.contact_address:
+            # Use first comma-separated segment as address_line_1 (house + street)
+            addr["address_line_1"] = body.contact_address.split(",")[0].strip()
+        payer["address"] = addr
 
     payload: dict = {
         "intent": "CAPTURE",

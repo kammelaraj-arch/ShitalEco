@@ -102,7 +102,7 @@ export const api = {
 
   async paypalCreateOrder(
     amount: number, description: string, branchId: string,
-    prefill?: { contact_name?: string; contact_email?: string; contact_postcode?: string },
+    prefill?: { contact_name?: string; contact_email?: string; contact_postcode?: string; contact_address?: string },
   ): Promise<string> {
     const r = await fetch(`${API}/service/paypal/order`, {
       method: 'POST',

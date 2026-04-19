@@ -33,7 +33,7 @@ export function GiftAidPage() {
   const [addressError,    setAddressError]    = useState('')
   const [email,           setEmail]           = useState(contactInfo?.email || '')
   const [phone,           setPhone]           = useState(contactInfo?.phone || '')
-  const [agreed,          setAgreed]          = useState(false)
+  const [agreed,          setAgreed]          = useState(initialStep === 'form')
   const [gaTerms,         setGaTerms]         = useState(false)
 
   // No-form (without Gift Aid)

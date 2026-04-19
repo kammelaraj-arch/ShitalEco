@@ -52,9 +52,10 @@ export function PaymentPage() {
   const handleCreateOrder = useCallback(async (): Promise<string> => {
     const desc = items.slice(0, 3).map(i => i.name).join(', ') || 'Shital Temple Donation'
     return api.paypalCreateOrder(total, desc, branchId, {
-      contact_name: contactInfo?.name || giftAidDeclaration?.fullName || '',
-      contact_email: contactInfo?.email || giftAidDeclaration?.contactEmail || '',
+      contact_name: giftAidDeclaration?.fullName || contactInfo?.name || '',
+      contact_email: giftAidDeclaration?.contactEmail || contactInfo?.email || '',
       contact_postcode: giftAidDeclaration?.postcode || '',
+      contact_address: giftAidDeclaration?.address || '',
     })
   }, [total, branchId, items, contactInfo, giftAidDeclaration])
 
