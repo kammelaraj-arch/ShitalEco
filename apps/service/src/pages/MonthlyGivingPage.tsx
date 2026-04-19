@@ -177,7 +177,7 @@ export function MonthlyGivingPage() {
           <PayPalScriptProvider options={{ clientId, vault: true, intent: 'subscription', currency: 'GBP' }}>
             <PayPalButtons
               style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }}
-              createSubscription={(_data: unknown, actions: { subscription: { create: (o: object) => Promise<string> } }) =>
+              createSubscription={(_data, actions) =>
                 actions.subscription.create({ plan_id: planId })
               }
               onApprove={(data) => handleApprove({ subscriptionID: (data as { subscriptionID?: string }).subscriptionID })}

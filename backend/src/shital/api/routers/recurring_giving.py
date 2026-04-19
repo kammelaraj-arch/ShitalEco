@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace
@@ -71,6 +71,7 @@ async def _ensure_product(token: str, base: str) -> str:
 async def _ensure_plan(tier_id: str, amount: float, label: str, frequency: str) -> str:
     """Get or create a PayPal billing plan for a tier. Returns plan_id."""
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
@@ -130,6 +131,7 @@ async def _ensure_plan(tier_id: str, amount: float, label: str, frequency: str) 
 async def list_giving_tiers() -> dict[str, Any]:
     """Return active giving tiers for the donation portal."""
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         rows = await db.execute(text("""
@@ -153,6 +155,7 @@ class SubscribeBody(BaseModel):
 async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
     """Return the PayPal plan_id for a tier so the frontend can create a subscription."""
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         row = await db.execute(
@@ -182,6 +185,7 @@ class ApproveBody(BaseModel):
 async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
     """Record a donor-approved PayPal subscription in the database."""
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     async with SessionLocal() as db:
@@ -210,6 +214,7 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
 @router.get("/admin/giving/tiers")
 async def admin_list_tiers(space: CurrentSpace) -> dict[str, Any]:
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         rows = await db.execute(text("""
@@ -239,6 +244,7 @@ class TierBody(BaseModel):
 @router.post("/admin/giving/tiers")
 async def admin_create_tier(body: TierBody, space: CurrentSpace) -> dict[str, Any]:
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     tier_id = str(uuid.uuid4())
     async with SessionLocal() as db:
@@ -260,6 +266,7 @@ async def admin_create_tier(body: TierBody, space: CurrentSpace) -> dict[str, An
 @router.put("/admin/giving/tiers/{tier_id}")
 async def admin_update_tier(tier_id: str, body: TierBody, space: CurrentSpace) -> dict[str, str]:
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         if body.is_default:
@@ -282,6 +289,7 @@ async def admin_update_tier(tier_id: str, body: TierBody, space: CurrentSpace) -
 @router.delete("/admin/giving/tiers/{tier_id}")
 async def admin_delete_tier(tier_id: str, space: CurrentSpace) -> dict[str, str]:
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         await db.execute(
@@ -295,6 +303,7 @@ async def admin_delete_tier(tier_id: str, space: CurrentSpace) -> dict[str, str]
 @router.get("/admin/giving/subscriptions")
 async def admin_list_subscriptions(space: CurrentSpace) -> dict[str, Any]:
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         rows = await db.execute(text("""
