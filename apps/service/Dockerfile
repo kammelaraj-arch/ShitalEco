@@ -4,12 +4,12 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
 
-COPY package.json ./
+COPY apps/service/package.json ./
 
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN pnpm install --no-frozen-lockfile --ignore-scripts
 
-COPY . .
+COPY apps/service/ ./
 
 ARG VITE_API_URL=/api/v1
 ARG VITE_BASE=/service/

@@ -1,15 +1,16 @@
 'use client'
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore, LANGUAGE_META, type Language, t } from '../store'
+import { useStore, useTotal, useItemCount, LANGUAGE_META, type Language, t } from '../store'
 import { THEMES } from '../themes'
 
 export function Header() {
-  const { language, setLanguage, itemCount, setScreen, screen } = useStore()
+  const { language, setLanguage, setScreen, screen } = useStore()
   const branchName   = useStore((s) => s.branchName)
   const branchLocked = useStore((s) => s.branchLocked)
   const setBranch    = useStore((s) => s.setBranch)
-  const total        = useStore((s) => s.total)
+  const total        = useTotal()
+  const itemCount    = useItemCount()
   const themeId      = useStore((s) => s.themeId)
   const setTheme     = useStore((s) => s.setTheme)
   const [showLang, setShowLang] = useState(false)
