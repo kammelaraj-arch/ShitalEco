@@ -103,6 +103,32 @@ export function BrowsePage() {
         </div>
       </div>
 
+      {/* ── Monthly Giving Banner ───────────────────────────────────── */}
+      <div className="max-w-5xl mx-auto px-4 mt-5">
+        <button
+          onClick={() => setScreen('monthly-giving')}
+          className="w-full rounded-2xl p-4 flex items-center gap-4 transition-all active:scale-[0.99]"
+          style={{
+            background: 'linear-gradient(135deg,rgba(22,163,74,0.18),rgba(21,128,61,0.12))',
+            border: '1.5px solid rgba(34,197,94,0.35)',
+            boxShadow: '0 4px 20px rgba(22,163,74,0.15)',
+          }}
+        >
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
+            style={{ background: 'rgba(22,163,74,0.2)', border: '1px solid rgba(34,197,94,0.3)' }}>
+            🔁
+          </div>
+          <div className="flex-1 text-left">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(74,222,128,0.8)' }}>Monthly Giving</p>
+            <p className="font-black text-base text-ivory-200">Support the temple every month</p>
+            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>From £5/month · Cancel anytime · PayPal</p>
+          </div>
+          <svg className="w-5 h-5 flex-shrink-0" style={{ color: 'rgba(74,222,128,0.6)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+
       {/* Category Tabs */}
       <div className="sticky top-16 z-30"
         style={{ background: 'var(--bg-sticky)', borderBottom: '1px solid rgba(212,175,55,0.18)' }}>

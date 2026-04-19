@@ -10,6 +10,7 @@ import { ContactPage } from './pages/ContactPage'
 import { GiftAidPage } from './pages/GiftAidPage'
 import { PaymentPage } from './pages/PaymentPage'
 import { ConfirmationPage } from './pages/ConfirmationPage'
+import { MonthlyGivingPage } from './pages/MonthlyGivingPage'
 
 const CHECKOUT_STEPS = ['basket', 'contact', 'gift-aid', 'payment', 'confirmation']
 
@@ -99,8 +100,9 @@ export default function App() {
       case 'contact':      return <ContactPage />
       case 'gift-aid':     return <GiftAidPage />
       case 'payment':      return <PaymentPage />
-      case 'confirmation': return <ConfirmationPage />
-      default:             return <BrowsePage />
+      case 'confirmation':   return <ConfirmationPage />
+      case 'monthly-giving': return <MonthlyGivingPage />
+      default:               return <BrowsePage />
     }
   }
 

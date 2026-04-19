@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { type ThemeId, DEFAULT_THEME, applyTheme, getTheme } from './themes'
 
 export type Screen =
-  | 'browse' | 'basket' | 'contact' | 'gift-aid' | 'payment' | 'confirmation'
+  | 'browse' | 'basket' | 'contact' | 'gift-aid' | 'payment' | 'confirmation' | 'monthly-giving'
 
 export type Language = 'en' | 'gu' | 'hi' | 'te' | 'ta' | 'pa' | 'mr' | 'bn' | 'kn'
 

@@ -136,4 +136,44 @@ export const api = {
     if (!r.ok) throw new Error(`PayPal capture failed: ${r.status}`)
     return r.json()
   },
+
+  async givingTiers(): Promise<{ tiers: GivingTier[] }> {
+    const r = await fetch(`${API}/service/giving/tiers`)
+    if (!r.ok) return { tiers: [] }
+    return r.json()
+  },
+
+  async givingSubscribe(tierId: string, branchId: string, donorName: string, donorEmail: string): Promise<{ plan_id: string; amount: string; frequency: string }> {
+    const r = await fetch(`${API}/service/giving/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tier_id: tierId, branch_id: branchId, donor_name: donorName, donor_email: donorEmail }),
+    })
+    if (!r.ok) throw new Error(`Subscribe failed: ${r.status}`)
+    return r.json()
+  },
+
+  async givingApprove(params: {
+    subscription_id: string; plan_id: string; tier_id: string
+    amount: number; frequency: string; branch_id: string
+    donor_name: string; donor_email: string
+  }): Promise<{ success: boolean }> {
+    const r = await fetch(`${API}/service/giving/subscription/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    if (!r.ok) throw new Error(`Approve failed: ${r.status}`)
+    return r.json()
+  },
+}
+
+export interface GivingTier {
+  id: string
+  amount: number
+  label: string
+  description: string
+  frequency: string
+  is_default: boolean
+  display_order: number
 }
