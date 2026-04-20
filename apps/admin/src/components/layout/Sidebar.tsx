@@ -91,6 +91,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/settings/users',            icon: '🔐', label: 'Users & Roles' },
       { href: '/settings/azure-ad',         icon: '🔷', label: 'Azure AD / SSO' },
       { href: '/settings/address-lookup',   icon: '📮', label: 'Address Lookup' },
+      { href: '/settings/app-permissions',    icon: '🗂️', label: 'App Permissions' },
       { href: '/settings/api-keys',         icon: '🔑', label: 'API Keys' },
       { href: '/settings/azure-backup',     icon: '☁️', label: 'Azure Backups' },
       { href: '/settings/system',           icon: '🛡️', label: 'System & Backups' },

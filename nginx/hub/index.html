@@ -116,6 +116,14 @@
   }
   .card:hover::after { color: rgba(255,255,255,0.45); transform: translate(1px,-1px); }
 
+  /* Coming-soon card — no hover effect, no arrow */
+  .card.soon {
+    opacity: 0.5;
+    cursor: default;
+    pointer-events: none;
+  }
+  .card.soon::after { display: none; }
+
   .card-accent-line {
     position: absolute; top: 0; left: 0; right: 0; height: 2px;
     background: var(--c); opacity: 0; transition: opacity 0.18s;
@@ -131,12 +139,39 @@
   }
   .card-name { font-size: 0.92rem; font-weight: 800; }
   .card-desc { font-size: 0.75rem; color: rgba(255,255,255,0.38); line-height: 1.5; flex: 1; }
+
+  /* Tag row — role badge + optional access badge */
+  .card-tags { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
   .card-tag  {
     font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em;
     text-transform: uppercase; padding: 0.18rem 0.55rem;
     border-radius: 99px; width: fit-content;
     background: color-mix(in srgb, var(--c) 15%, transparent);
     color: var(--c);
+  }
+  .card-tag-access {
+    font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; padding: 0.18rem 0.55rem;
+    border-radius: 99px;
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.35);
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+    display: inline-flex; align-items: center;
+  }
+  a.card-tag-access:hover {
+    background: rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.65);
+  }
+  .card-tag-soon {
+    font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; padding: 0.18rem 0.5rem;
+    border-radius: 99px;
+    background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.25);
+    border: 1px solid rgba(255,255,255,0.07);
   }
 
   /* ── Info panel ──────────────────────────────────────────────────── */
@@ -247,17 +282,23 @@
     <a href="/admin/" class="card" style="--c:#3B82F6">
       <div class="card-accent-line"></div>
       <div class="card-icon">⚙️</div>
-      <div class="card-name">Admin Portal</div>
+      <div class="card-name">Business App</div>
       <div class="card-desc">Full ERP — finance, HR, payroll, Gift Aid, catalog, compliance, AI tools.</div>
-      <span class="card-tag">Staff</span>
+      <div class="card-tags">
+        <span class="card-tag">Staff</span>
+        <a href="/admin/settings/app-permissions" class="card-tag-access">Org internal</a>
+      </div>
     </a>
 
     <a href="/kiosk/" class="card" style="--c:#FF9933">
       <div class="card-accent-line"></div>
       <div class="card-icon">🖥️</div>
-      <div class="card-name">Temple Kiosk</div>
+      <div class="card-name">Kiosk</div>
       <div class="card-desc">Touch-screen kiosk — donations, services, shop &amp; bookings in 3 languages.</div>
-      <span class="card-tag">Kiosk</span>
+      <div class="card-tags">
+        <span class="card-tag">Kiosk</span>
+        <a href="/admin/settings/app-permissions" class="card-tag-access">Org internal</a>
+      </div>
     </a>
 
     <a href="/donate/" class="card" style="--c:#F59E0B">
@@ -265,7 +306,9 @@
       <div class="card-icon">🙏</div>
       <div class="card-name">Quick Donation</div>
       <div class="card-desc">Fast walk-up donation terminal. Card payments with Gift Aid capture.</div>
-      <span class="card-tag">Public</span>
+      <div class="card-tags">
+        <a href="/admin/settings/app-permissions" class="card-tag-access">Org internal</a>
+      </div>
     </a>
 
     <a href="/screen/" class="card" style="--c:#8B5CF6">
@@ -273,7 +316,9 @@
       <div class="card-icon">📺</div>
       <div class="card-name">Smart Screen</div>
       <div class="card-desc">Digital display board — announcements, events and live donation totals.</div>
-      <span class="card-tag">Display</span>
+      <div class="card-tags">
+        <a href="/admin/settings/app-permissions" class="card-tag-access">Org internal</a>
+      </div>
     </a>
 
     <a href="https://service.shital.org.uk" class="card" style="--c:#FF9933">
@@ -281,7 +326,9 @@
       <div class="card-icon">🙏</div>
       <div class="card-name">Service Portal</div>
       <div class="card-desc">Online donations, shop &amp; temple services with PayPal. Mobile-friendly.</div>
-      <span class="card-tag">Public</span>
+      <div class="card-tags">
+        <span class="card-tag">Public</span>
+      </div>
     </a>
 
     <a href="/api/v1/docs" class="card" style="--c:#10B981">
@@ -289,7 +336,10 @@
       <div class="card-icon">📡</div>
       <div class="card-name">API Docs</div>
       <div class="card-desc">Interactive REST API documentation. Browse and test all backend endpoints.</div>
-      <span class="card-tag">Developer</span>
+      <div class="card-tags">
+        <span class="card-tag">Developer</span>
+        <a href="/admin/settings/app-permissions" class="card-tag-access">Org internal</a>
+      </div>
     </a>
 
     <a href="/admin/settings/api-keys" class="card" style="--c:#EF4444">
@@ -297,8 +347,54 @@
       <div class="card-icon">🔑</div>
       <div class="card-name">API Keys</div>
       <div class="card-desc">Manage encrypted secrets — Stripe, SendGrid, Azure AD, AI and more.</div>
-      <span class="card-tag">Admin PIN</span>
+      <div class="card-tags">
+        <span class="card-tag">Admin</span>
+        <a href="/admin/settings/app-permissions" class="card-tag-access">Org internal</a>
+      </div>
     </a>
+
+    <!-- Coming soon -->
+    <div class="card soon" style="--c:#10B981">
+      <div class="card-icon">🙋</div>
+      <div class="card-name">Volunteers App</div>
+      <div class="card-desc">Volunteer scheduling, hours tracking, and communications.</div>
+      <div class="card-tags"><span class="card-tag-soon">Coming soon</span></div>
+    </div>
+
+    <div class="card soon" style="--c:#6366F1">
+      <div class="card-icon">📡</div>
+      <div class="card-name">TV App</div>
+      <div class="card-desc">Dedicated TV display app for lobby and hall screens.</div>
+      <div class="card-tags"><span class="card-tag-soon">Coming soon</span></div>
+    </div>
+
+    <div class="card soon" style="--c:#059669">
+      <div class="card-icon">🌿</div>
+      <div class="card-name">Smart Branch</div>
+      <div class="card-desc">Branch-level dashboard for managers — KPIs, events, operations.</div>
+      <div class="card-tags"><span class="card-tag-soon">Coming soon</span></div>
+    </div>
+
+    <div class="card soon" style="--c:#F59E0B">
+      <div class="card-icon">📣</div>
+      <div class="card-name">Marketing Companion</div>
+      <div class="card-desc">AI-powered marketing tools — newsletters, social, campaigns.</div>
+      <div class="card-tags"><span class="card-tag-soon">Coming soon</span></div>
+    </div>
+
+    <div class="card soon" style="--c:#3B82F6">
+      <div class="card-icon">👤</div>
+      <div class="card-name">Staff App</div>
+      <div class="card-desc">Mobile-first staff portal — tasks, shifts, communications.</div>
+      <div class="card-tags"><span class="card-tag-soon">Coming soon</span></div>
+    </div>
+
+    <div class="card soon" style="--c:#EF4444">
+      <div class="card-icon">💰</div>
+      <div class="card-name">Finance Companion</div>
+      <div class="card-desc">AI finance assistant — forecasting, analysis, reporting.</div>
+      <div class="card-tags"><span class="card-tag-soon">Coming soon</span></div>
+    </div>
 
   </div>
 
@@ -313,9 +409,9 @@
     <a href="http://192.248.147.205:8080/admin/" class="card" style="--c:#3B82F6">
       <div class="card-accent-line"></div>
       <div class="card-icon">⚙️</div>
-      <div class="card-name">Admin — Dev</div>
+      <div class="card-name">Business App — Dev</div>
       <div class="card-desc">Admin portal running the latest develop branch code. Test before promoting to prod.</div>
-      <span class="card-tag">Dev</span>
+      <div class="card-tags"><span class="card-tag">Dev</span></div>
     </a>
 
     <a href="http://192.248.147.205:8080/kiosk/" class="card" style="--c:#FF9933">
@@ -323,7 +419,7 @@
       <div class="card-icon">🖥️</div>
       <div class="card-name">Kiosk — Dev</div>
       <div class="card-desc">Kiosk app on dev environment with separate database. Safe to test freely.</div>
-      <span class="card-tag">Dev</span>
+      <div class="card-tags"><span class="card-tag">Dev</span></div>
     </a>
 
     <a href="http://192.248.147.205:8080/donate/" class="card" style="--c:#F59E0B">
@@ -331,7 +427,7 @@
       <div class="card-icon">🙏</div>
       <div class="card-name">Donation — Dev</div>
       <div class="card-desc">Quick donation app on dev. Separate DB — test data only, never real donations.</div>
-      <span class="card-tag">Dev</span>
+      <div class="card-tags"><span class="card-tag">Dev</span></div>
     </a>
 
     <a href="http://192.248.147.205:8080/screen/" class="card" style="--c:#8B5CF6">
@@ -339,7 +435,7 @@
       <div class="card-icon">📺</div>
       <div class="card-name">Screen — Dev</div>
       <div class="card-desc">Smart screen display running dev build. Safe for layout and content testing.</div>
-      <span class="card-tag">Dev</span>
+      <div class="card-tags"><span class="card-tag">Dev</span></div>
     </a>
 
     <a href="http://192.248.147.205:8001/docs" class="card" style="--c:#10B981">
@@ -347,7 +443,7 @@
       <div class="card-icon">📡</div>
       <div class="card-name">API Docs — Dev</div>
       <div class="card-desc">Dev backend API explorer. Direct port 8001 access, no nginx proxy.</div>
-      <span class="card-tag">Dev</span>
+      <div class="card-tags"><span class="card-tag">Dev</span></div>
     </a>
 
   </div>

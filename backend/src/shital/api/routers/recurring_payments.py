@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import calendar
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from dateutil.relativedelta import relativedelta  # type: ignore[import-untyped]
@@ -152,8 +152,6 @@ def _row_safe(mapping: Any) -> dict:
 @router.get("/dashboard")
 async def dashboard(ctx: OptionalSpace) -> dict[str, Any]:
     """Alert dashboard: overdue, due soon, renewals."""
-    from datetime import datetime
-
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
