@@ -85,6 +85,8 @@ function FieldInput({ isMobile, value, onChange, onTap, placeholder, type = 'tex
     return (
       <input
         type={inputType}
+        inputMode={type === 'email' ? 'email' : type === 'tel' ? 'tel' : type === 'postcode' ? 'text' : 'text'}
+        autoCapitalize={type === 'text' ? 'words' : 'off'}
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
@@ -133,7 +135,6 @@ export function GiftAidScreen() {
   const [addressList, setAddressList] = useState<string[]>([])
   const [address, setAddress] = useState('')
   const [lookingUp, setLookingUp] = useState(false)
-  const [contactMode, setContactMode] = useState<'email' | 'phone'>('email')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [declaration, setDeclaration] = useState(false)
@@ -193,8 +194,8 @@ export function GiftAidScreen() {
       fullName: `${firstName.trim()} ${surname.trim()}`.trim(),
       postcode,
       address,
-      contactEmail: contactMode === 'email' ? email : '',
-      contactPhone: contactMode === 'phone' ? phone : '',
+      contactEmail: email,
+      contactPhone: phone,
     })
     setPendingPayment(true)
     setScreen('checkout')
@@ -216,7 +217,7 @@ export function GiftAidScreen() {
     setScreen('checkout')
   }
 
-  const formValid = firstName.trim().length > 0 && surname.trim().length > 0 && address.trim().length > 3 && declaration && gaTerms && (email.trim() || phone.trim())
+  const formValid = firstName.trim().length > 0 && surname.trim().length > 0 && address.trim().length > 3 && declaration && gaTerms && email.includes('@')
 
   return (
     <div className="w-full h-full flex flex-col" style={{ fontFamily: 'Inter, system-ui, sans-serif', background: th.mainBg }}>
@@ -346,29 +347,16 @@ export function GiftAidScreen() {
                 <FieldInput isMobile={isMobile} value={address} onChange={v => { setAddress(v); setKbValue(v) }} onTap={() => openKb('address', address)} placeholder="Select from above or tap to enter" isActive={activeField === 'address'} isValid={address.length > 3} accent={th.langActive} multiline />
               </div>
 
-              {/* Contact — email or phone toggle */}
+              {/* Email — required */}
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Contact *</label>
-                <div className="flex gap-2 mb-2">
-                  {(['email', 'phone'] as const).map(mode => (
-                    <button
-                      key={mode}
-                      onClick={() => setContactMode(mode)}
-                      className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95"
-                      style={{
-                        background: contactMode === mode ? th.langActive : '#F3F4F6',
-                        color: contactMode === mode ? '#fff' : '#6B7280',
-                      }}
-                    >
-                      {mode === 'email' ? '📧 Email' : '📱 Phone'}
-                    </button>
-                  ))}
-                </div>
-                {contactMode === 'email' ? (
-                  <FieldInput isMobile={isMobile} value={email} onChange={v => { setEmail(v); setKbValue(v) }} onTap={() => openKb('email', email)} placeholder="Tap to enter email" type="email" isActive={activeField === 'email'} isValid={email.includes('@')} accent={th.langActive} />
-                ) : (
-                  <FieldInput isMobile={isMobile} value={phone} onChange={v => { setPhone(v); setKbValue(v) }} onTap={() => openKb('phone', phone)} placeholder="Tap to enter phone" type="tel" isActive={activeField === 'phone'} isValid={phone.length > 7} accent={th.langActive} />
-                )}
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Email Address <span className="text-red-500">*</span></label>
+                <FieldInput isMobile={isMobile} value={email} onChange={v => { setEmail(v); setKbValue(v) }} onTap={() => openKb('email', email)} placeholder="your@email.com" type="email" isActive={activeField === 'email'} isValid={email.includes('@')} accent={th.langActive} />
+              </div>
+
+              {/* Phone — optional */}
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Phone <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
+                <FieldInput isMobile={isMobile} value={phone} onChange={v => { setPhone(v); setKbValue(v) }} onTap={() => openKb('phone', phone)} placeholder="07700 000000" type="tel" isActive={activeField === 'phone'} isValid={phone.length > 7} accent={th.langActive} />
               </div>
 
               {/* Declaration — mandatory, starts un-ticked */}

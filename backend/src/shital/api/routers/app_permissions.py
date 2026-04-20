@@ -56,10 +56,10 @@ async def _load_permissions(db: Any) -> dict[str, list[str]]:
     row = await db.execute(
         text("SELECT value FROM app_settings WHERE key = 'app_permissions' LIMIT 1")
     )
-    r = row.first()
-    if r:
+    value: str | None = row.scalar()
+    if value is not None:
         try:
-            return json.loads(r[0])
+            return json.loads(value)
         except Exception:
             pass
     return dict(DEFAULT_PERMISSIONS)
