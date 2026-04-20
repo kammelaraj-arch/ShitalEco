@@ -22,16 +22,17 @@ function generateUUID(): string {
 export function ProcessingScreen() {
   const {
     amount, branchId, stripeReaderId, stripeReaderLabel,
-    setScreen, setOrderResult,
+    setScreen, setOrderResult, setReader,
   } = useDonationStore()
 
   const [error, setError] = useState('')
   const [stage, setStage] = useState('Creating donation...')
+  const isReaderError = !stripeReaderId || !stripeReaderId.trim()
 
   async function processPayment() {
     setError('')
     if (!stripeReaderId || !stripeReaderId.trim()) {
-      setError('No card reader configured. Please go to Admin and assign a Stripe Terminal reader to this device.')
+      setError('No card reader configured for this device.')
       return
     }
     try {
@@ -150,13 +151,23 @@ export function ProcessingScreen() {
             >
               ← Back
             </button>
-            <button
-              onClick={processPayment}
-              className="py-3.5 px-6 rounded-2xl bg-saffron-gradient text-white font-black text-sm shadow-lg"
-              style={{ flex: 2 }}
-            >
-              Try Again
-            </button>
+            {isReaderError ? (
+              <button
+                onClick={() => { setReader('', ''); setScreen('admin') }}
+                className="py-3.5 px-6 rounded-2xl bg-saffron-gradient text-white font-black text-sm shadow-lg"
+                style={{ flex: 2 }}
+              >
+                ⚙ Admin Setup
+              </button>
+            ) : (
+              <button
+                onClick={processPayment}
+                className="py-3.5 px-6 rounded-2xl bg-saffron-gradient text-white font-black text-sm shadow-lg"
+                style={{ flex: 2 }}
+              >
+                Try Again
+              </button>
+            )}
           </div>
         </motion.div>
       ) : (
