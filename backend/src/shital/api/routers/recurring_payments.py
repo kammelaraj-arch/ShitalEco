@@ -136,7 +136,7 @@ def _parse_date(s: str) -> date | None:
 def _row_safe(mapping: Any) -> dict:
     """Convert a DB row mapping to a JSON-safe dict."""
     from decimal import Decimal
-    result = {}
+    result: dict[str, Any] = {}
     for k, v in dict(mapping).items():
         if isinstance(v, date) and not isinstance(v, datetime):
             result[k] = v.isoformat()

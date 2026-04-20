@@ -51,8 +51,8 @@ services:
   # ─── Admin (Next.js) ───────────────────────────────────────────────────────
   admin:
     build:
-      context: ./apps/admin
-      dockerfile: Dockerfile
+      context: .                          # workspace root (pnpm monorepo)
+      dockerfile: apps/admin/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: /api/v1
     restart: unless-stopped
