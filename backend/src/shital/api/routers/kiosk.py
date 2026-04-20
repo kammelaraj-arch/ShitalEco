@@ -1478,6 +1478,34 @@ async def quick_kiosk_login_azure(body: AzureKioskLoginInput):
         )
         await db.commit()
 
+    # Look up the card reader assigned to the QUICK_DONATION device for this branch
+    # in the admin Devices page (kiosk_devices → terminal_devices).
+    device_reader_id = None
+    device_reader_label = None
+    async with SessionLocal() as db:
+        dev_res = await db.execute(
+            text("""
+                SELECT td.stripe_reader_id, td.label AS reader_label
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                WHERE kd.branch_id = :branch_id
+                  AND kd.device_type = 'QUICK_DONATION'
+                  AND kd.deleted_at IS NULL
+                  AND UPPER(kd.status) = 'ACTIVE'
+                ORDER BY kd.updated_at DESC
+                LIMIT 1
+            """),
+            {"branch_id": branch_code},
+        )
+        dev_row = dev_res.mappings().first()
+        if dev_row and dev_row["stripe_reader_id"]:
+            device_reader_id = dev_row["stripe_reader_id"]
+            device_reader_label = dev_row["reader_label"]
+
+    # Prefer admin device assignment over the profile's manually-set reader
+    effective_reader_id = device_reader_id or (profile.get("stripe_reader_id") if profile else None)
+    effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
+
     return {
         "authenticated": True,
         "auth_provider": "azure_ad",
@@ -1492,4 +1520,6 @@ async def quick_kiosk_login_azure(body: AzureKioskLoginInput):
             "name": user["branch_name"] or "Unknown",
         },
         "profile": profile,
+        "stripe_reader_id": effective_reader_id,
+        "reader_label": effective_reader_label,
     }
