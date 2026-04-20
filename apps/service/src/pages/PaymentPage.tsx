@@ -51,13 +51,16 @@ export function PaymentPage() {
 
   const handleCreateOrder = useCallback(async (): Promise<string> => {
     const desc = items.slice(0, 3).map(i => i.name).join(', ') || 'Shital Temple Donation'
+    const firstName = giftAidDeclaration?.firstName || ''
+    const surname   = giftAidDeclaration?.surname   || ''
     return api.paypalCreateOrder(total, desc, branchId, {
-      contact_name: (giftAidDeclaration?.firstName && giftAidDeclaration?.surname)
-        ? `${giftAidDeclaration.firstName} ${giftAidDeclaration.surname}`.trim()
-        : contactInfo?.name || '',
-      contact_email: giftAidDeclaration?.contactEmail || contactInfo?.email || '',
-      contact_postcode: giftAidDeclaration?.postcode || '',
-      contact_address: giftAidDeclaration?.address || '',
+      contact_first_name: firstName || contactInfo?.name?.split(' ')[0] || '',
+      contact_surname:    surname   || contactInfo?.name?.split(' ').slice(1).join(' ') || '',
+      contact_name:       firstName && surname ? `${firstName} ${surname}` : contactInfo?.name || '',
+      contact_email:      giftAidDeclaration?.contactEmail || contactInfo?.email || '',
+      contact_phone:      giftAidDeclaration?.contactPhone || contactInfo?.phone || '',
+      contact_postcode:   giftAidDeclaration?.postcode || '',
+      contact_address:    giftAidDeclaration?.address  || '',
     })
   }, [total, branchId, items, contactInfo, giftAidDeclaration])
 
@@ -65,16 +68,21 @@ export function PaymentPage() {
     setCapturing(true)
     setError('')
     try {
+      const gaFirst = giftAidDeclaration?.firstName || ''
+      const gaSurname = giftAidDeclaration?.surname || ''
+      const fullName = gaFirst && gaSurname ? `${gaFirst} ${gaSurname}` : contactInfo?.name || ''
       const result = await api.paypalCapture({
         paypal_order_id: data.orderID,
         amount: total,
         branch_id: branchId,
-        contact_name: contactInfo?.name || '',
-        contact_email: contactInfo?.email || '',
-        contact_phone: contactInfo?.phone || '',
-        gift_aid: giftAidDeclaration?.agreed ?? false,
-        gift_aid_postcode: giftAidDeclaration?.postcode || '',
-        gift_aid_address: giftAidDeclaration?.address || '',
+        contact_name:       fullName,
+        contact_first_name: gaFirst  || contactInfo?.name?.split(' ')[0] || '',
+        contact_surname:    gaSurname || contactInfo?.name?.split(' ').slice(1).join(' ') || '',
+        contact_email:      giftAidDeclaration?.contactEmail || contactInfo?.email || '',
+        contact_phone:      giftAidDeclaration?.contactPhone || contactInfo?.phone || '',
+        gift_aid:           giftAidDeclaration?.agreed ?? false,
+        gift_aid_postcode:  giftAidDeclaration?.postcode || '',
+        gift_aid_address:   giftAidDeclaration?.address  || '',
       })
       if (result.success) {
         setOrderResult({
@@ -148,6 +156,27 @@ export function PaymentPage() {
           <span className="font-black text-xl text-gold-400 price-display">£{total.toFixed(2)}</span>
         </div>
       </div>
+
+      {/* Gift Aid Declaration Summary */}
+      {giftAidDeclaration?.agreed && (
+        <div className="rounded-2xl p-4 mb-5"
+          style={{ background: 'linear-gradient(135deg,rgba(22,163,74,0.15),rgba(15,107,50,0.08))', border: '1px solid rgba(74,222,128,0.35)' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">✅</span>
+            <p className="font-black text-sm" style={{ color: '#4ade80' }}>Gift Aid Declared</p>
+            <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'rgba(74,222,128,0.15)', color: '#4ade80' }}>+£{boost.toFixed(2)} HMRC</span>
+          </div>
+          <div className="space-y-1.5 text-xs" style={{ color: 'rgba(255,248,220,0.7)' }}>
+            <div className="flex gap-2"><span className="opacity-60 w-16 flex-shrink-0">Name:</span><span className="font-semibold">{giftAidDeclaration.firstName} {giftAidDeclaration.surname}</span></div>
+            <div className="flex gap-2"><span className="opacity-60 w-16 flex-shrink-0">Email:</span><span className="font-semibold">{giftAidDeclaration.contactEmail}</span></div>
+            {giftAidDeclaration.postcode && <div className="flex gap-2"><span className="opacity-60 w-16 flex-shrink-0">Postcode:</span><span className="font-semibold">{giftAidDeclaration.postcode}</span></div>}
+            {giftAidDeclaration.address && <div className="flex gap-2"><span className="opacity-60 w-16 flex-shrink-0">Address:</span><span className="font-semibold">{giftAidDeclaration.address}</span></div>}
+          </div>
+          <p className="text-[10px] mt-3 leading-relaxed" style={{ color: 'rgba(74,222,128,0.55)' }}>
+            I am a UK taxpayer and confirm this Gift Aid declaration is accurate. HMRC will reclaim 25p for every £1 donated.
+          </p>
+        </div>
+      )}
 
       {/* PayPal Button */}
       {configLoading ? (

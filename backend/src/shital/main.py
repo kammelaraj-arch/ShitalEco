@@ -634,6 +634,8 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_gift_aid_decl_order_ref  ON gift_aid_declarations(order_ref)",
         "CREATE INDEX IF NOT EXISTS idx_gift_aid_decl_submitted  ON gift_aid_declarations(hmrc_submitted)",
+        "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS first_name VARCHAR(200) DEFAULT ''",
+        "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS surname    VARCHAR(200) DEFAULT ''",
         # ── Function Registry + Invocations ───────────────────────────────────
         """CREATE TABLE IF NOT EXISTS function_registry (
             id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),

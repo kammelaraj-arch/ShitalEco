@@ -73,9 +73,29 @@ class CreateOrderBody(BaseModel):
     description: str = "Shital Temple Donation"
     branch_id: str = "main"
     contact_name: str = ""
+    contact_first_name: str = ""
+    contact_surname: str = ""
     contact_email: str = ""
+    contact_phone: str = ""
     contact_postcode: str = ""
     contact_address: str = ""
+
+
+def _parse_uk_address(raw: str, postcode: str) -> dict:
+    """Parse a UK address string into PayPal address fields."""
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    addr: dict = {"country_code": "GB"}
+    if postcode:
+        addr["postal_code"] = postcode.upper()
+    if parts:
+        addr["address_line_1"] = parts[0]
+    if len(parts) >= 2:
+        addr["address_line_2"] = parts[1]
+    # Last non-postcode part is usually the city/town
+    city_candidates = [p for p in parts[1:] if p.upper() != postcode.upper()]
+    if city_candidates:
+        addr["admin_area_2"] = city_candidates[-1]
+    return addr
 
 
 @router.post("/order")
@@ -84,20 +104,21 @@ async def create_paypal_order(body: CreateOrderBody) -> dict[str, str]:
     token = await _token()
     base  = await _base()
 
+    # Build payer — prefer explicit first/surname, fall back to splitting full name
+    given  = body.contact_first_name.strip() or body.contact_name.strip().split(" ", 1)[0]
+    family = body.contact_surname.strip() or (body.contact_name.strip().split(" ", 1)[1] if " " in body.contact_name.strip() else "")
+
     payer: dict = {}
-    if body.contact_name:
-        parts = body.contact_name.strip().split(" ", 1)
-        payer["name"] = {"given_name": parts[0], "surname": parts[1] if len(parts) > 1 else ""}
+    if given or family:
+        payer["name"] = {"given_name": given, "surname": family}
     if body.contact_email:
         payer["email_address"] = body.contact_email
+    if body.contact_phone:
+        digits = "".join(c for c in body.contact_phone if c.isdigit())
+        if digits:
+            payer["phone"] = {"phone_type": "MOBILE", "phone_number": {"national_number": digits[-10:]}}
     if body.contact_postcode or body.contact_address:
-        addr: dict = {"country_code": "GB"}
-        if body.contact_postcode:
-            addr["postal_code"] = body.contact_postcode
-        if body.contact_address:
-            # Use first comma-separated segment as address_line_1 (house + street)
-            addr["address_line_1"] = body.contact_address.split(",")[0].strip()
-        payer["address"] = addr
+        payer["address"] = _parse_uk_address(body.contact_address, body.contact_postcode)
 
     payload: dict = {
         "intent": "CAPTURE",
@@ -137,6 +158,8 @@ class CaptureBody(BaseModel):
     amount: float
     branch_id: str = "main"
     contact_name: str = ""
+    contact_first_name: str = ""
+    contact_surname: str = ""
     contact_email: str = ""
     contact_phone: str = ""
     gift_aid: bool = False
@@ -172,17 +195,21 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
     try:
         async with SessionLocal() as db:
             decl_id: str | None = None
-            if body.gift_aid and body.contact_name:
+            full_name = body.contact_name or f"{body.contact_first_name} {body.contact_surname}".strip()
+            if body.gift_aid and full_name:
                 decl_id = str(uuid.uuid4())
                 await db.execute(text("""
                     INSERT INTO gift_aid_declarations
-                        (id, order_ref, full_name, postcode, address,
+                        (id, order_ref, full_name, first_name, surname, postcode, address,
                          contact_email, contact_phone, donation_amount, donation_date,
                          gift_aid_agreed, created_at, updated_at)
-                    VALUES (:id,:ref,:name,:pc,:addr,:email,:phone,:amt,:today,true,:now,:now)
+                    VALUES (:id,:ref,:name,:first,:surname,:pc,:addr,:email,:phone,:amt,:today,true,:now,:now)
                 """), {
                     "id": decl_id, "ref": order_ref,
-                    "name": body.contact_name, "pc": body.gift_aid_postcode,
+                    "name": full_name,
+                    "first": body.contact_first_name or full_name.split(" ", 1)[0],
+                    "surname": body.contact_surname or (full_name.split(" ", 1)[1] if " " in full_name else ""),
+                    "pc": body.gift_aid_postcode,
                     "addr": body.gift_aid_address, "email": body.contact_email,
                     "phone": body.contact_phone, "amt": body.amount,
                     "today": now.date(), "now": now,
