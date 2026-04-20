@@ -147,8 +147,11 @@ async def list_giving_tiers() -> dict[str, Any]:
 class SubscribeBody(BaseModel):
     tier_id: str
     branch_id: str = "main"
-    donor_name: str = ""
+    donor_first_name: str = ""
+    donor_surname: str = ""
     donor_email: str = ""
+    donor_postcode: str = ""
+    donor_address: str = ""
 
 
 @router.post("/service/giving/subscribe")
@@ -177,8 +180,11 @@ class ApproveBody(BaseModel):
     amount: float
     frequency: str = "MONTH"
     branch_id: str = "main"
-    donor_name: str = ""
+    donor_first_name: str = ""
+    donor_surname: str = ""
     donor_email: str = ""
+    donor_postcode: str = ""
+    donor_address: str = ""
 
 
 @router.post("/service/giving/subscription/approve")
@@ -188,21 +194,31 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
 
     from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
+    full_name = f"{body.donor_first_name} {body.donor_surname}".strip()
     async with SessionLocal() as db:
         await db.execute(text("""
             INSERT INTO recurring_giving_subscriptions
                 (id, paypal_subscription_id, paypal_plan_id, tier_id, amount, frequency,
-                 status, branch_id, donor_name, donor_email, approved_at, created_at, updated_at)
+                 status, branch_id, donor_name, donor_email,
+                 donor_first_name, donor_surname, donor_postcode, donor_address,
+                 approved_at, created_at, updated_at)
             VALUES
                 (:id, :sub_id, :plan_id, :tier_id, :amount, :freq,
-                 'ACTIVE', :branch, :name, :email, :now, :now, :now)
+                 'ACTIVE', :branch, :name, :email,
+                 :first_name, :surname, :postcode, :address,
+                 :now, :now, :now)
             ON CONFLICT (paypal_subscription_id) DO UPDATE
-                SET status = 'ACTIVE', approved_at = :now, updated_at = :now
+                SET status = 'ACTIVE', approved_at = :now, updated_at = :now,
+                    donor_name = :name, donor_email = :email,
+                    donor_first_name = :first_name, donor_surname = :surname,
+                    donor_postcode = :postcode, donor_address = :address
         """), {
             "id": str(uuid.uuid4()), "sub_id": body.subscription_id,
             "plan_id": body.plan_id, "tier_id": body.tier_id,
             "amount": body.amount, "freq": body.frequency,
-            "branch": body.branch_id, "name": body.donor_name, "email": body.donor_email,
+            "branch": body.branch_id, "name": full_name, "email": body.donor_email,
+            "first_name": body.donor_first_name, "surname": body.donor_surname,
+            "postcode": body.donor_postcode, "address": body.donor_address,
             "now": now,
         })
         await db.commit()

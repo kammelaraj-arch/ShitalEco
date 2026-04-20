@@ -143,11 +143,19 @@ export const api = {
     return r.json()
   },
 
-  async givingSubscribe(tierId: string, branchId: string, donorName: string, donorEmail: string): Promise<{ plan_id: string; amount: string; frequency: string }> {
+  async givingSubscribe(
+    tierId: string, branchId: string,
+    donorFirstName: string, donorSurname: string, donorEmail: string,
+    donorPostcode: string, donorAddress: string,
+  ): Promise<{ plan_id: string; amount: string; frequency: string }> {
     const r = await fetch(`${API}/service/giving/subscribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tier_id: tierId, branch_id: branchId, donor_name: donorName, donor_email: donorEmail }),
+      body: JSON.stringify({
+        tier_id: tierId, branch_id: branchId,
+        donor_first_name: donorFirstName, donor_surname: donorSurname,
+        donor_email: donorEmail, donor_postcode: donorPostcode, donor_address: donorAddress,
+      }),
     })
     if (!r.ok) throw new Error(`Subscribe failed: ${r.status}`)
     return r.json()
@@ -156,7 +164,8 @@ export const api = {
   async givingApprove(params: {
     subscription_id: string; plan_id: string; tier_id: string
     amount: number; frequency: string; branch_id: string
-    donor_name: string; donor_email: string
+    donor_first_name: string; donor_surname: string; donor_email: string
+    donor_postcode: string; donor_address: string
   }): Promise<{ success: boolean }> {
     const r = await fetch(`${API}/service/giving/subscription/approve`, {
       method: 'POST',

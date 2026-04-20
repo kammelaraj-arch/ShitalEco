@@ -130,7 +130,7 @@ export type KioskScreen =
   | 'setup' | 'idle' | 'language' | 'home' | 'services' | 'service-detail'
   | 'donate' | 'basket' | 'checkout' | 'payment' | 'confirmation'
   | 'admin' | 'admin-pin' | 'soft-donation' | 'project-donation' | 'shop'
-  | 'gift-aid' | 'receipt'
+  | 'gift-aid' | 'receipt' | 'monthly-giving'
 
 export interface EndScreenTemplate {
   icon: string          // e.g. "🕉"

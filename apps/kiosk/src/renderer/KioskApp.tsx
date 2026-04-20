@@ -15,6 +15,7 @@ import { PaymentScreen } from './pages/PaymentScreen'
 import { ConfirmationScreen } from './pages/ConfirmationScreen'
 import { ShopScreen } from './pages/ShopScreen'
 import { AdminScreen } from './pages/AdminScreen'
+import { MonthlyGivingScreen } from './pages/MonthlyGivingScreen'
 
 const IDLE_TIMEOUT_MS = 120_000
 
@@ -67,6 +68,7 @@ export function KioskApp() {
       case 'payment':          return <PaymentScreen key="payment" />
       case 'confirmation':     return <ConfirmationScreen key="confirmation" />
       case 'admin':            return <AdminScreen key="admin" />
+      case 'monthly-giving':   return <MonthlyGivingScreen key="monthly-giving" />
       default:                 return <HomeScreen key="home" />
     }
   }

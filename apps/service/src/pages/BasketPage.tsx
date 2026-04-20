@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, useTotal, useGiftAidTotal, t, type GiftAidDeclaration } from '../store'
 
-const DECLINED: GiftAidDeclaration = { agreed: false, fullName: '', postcode: '', address: '', contactEmail: '', contactPhone: '' }
+const DECLINED: GiftAidDeclaration = { agreed: false, firstName: '', surname: '', postcode: '', address: '', contactEmail: '', contactPhone: '' }
 
 export function BasketPage() {
   const { language, items, removeItem, updateQty, setScreen, clearBasket, setGiftAidDeclaration } = useStore()
@@ -111,7 +111,7 @@ export function BasketPage() {
         </div>
         {giftAidTotal > 0 && (
           <div className="flex justify-between text-sm font-semibold" style={{ color: '#4ade80' }}>
-            <span>🇬🇧 Gift Aid (on £{giftAidTotal.toFixed(2)})</span>
+            <span>Gift Aid (on £{giftAidTotal.toFixed(2)})</span>
             <span className="price-display">+£{(giftAidTotal * 0.25).toFixed(2)}</span>
           </div>
         )}
@@ -126,7 +126,6 @@ export function BasketPage() {
         <div className="rounded-2xl p-4 mb-4"
           style={{ background: 'linear-gradient(135deg,rgba(22,163,74,0.18),rgba(15,107,50,0.12))', border: '1px solid rgba(74,222,128,0.3)' }}>
           <div className="flex items-start gap-3">
-            <span className="text-2xl flex-shrink-0">🇬🇧</span>
             <div>
               <p className="font-black text-sm" style={{ color: '#4ade80' }}>
                 Are you a UK taxpayer? Claim Gift Aid!
@@ -165,7 +164,7 @@ export function BasketPage() {
                 boxShadow: '0 6px 24px rgba(22,163,74,0.45), 0 2px 8px rgba(0,0,0,0.3)', padding: '1.1rem 1.5rem' }}
             >
               <div className="flex flex-col items-center leading-tight gap-1">
-                <span className="text-xs font-bold uppercase tracking-widest opacity-80">🇬🇧 Recommended · UK Taxpayers</span>
+                <span className="text-xs font-bold uppercase tracking-widest opacity-80">Recommended · UK Taxpayers</span>
                 <span className="text-lg font-black">Boost with Gift Aid (+£{(giftAidTotal * 0.25).toFixed(2)} for free)</span>
                 <span className="text-sm font-bold opacity-90">Temple gets £{(total + giftAidTotal * 0.25).toFixed(2)}</span>
               </div>

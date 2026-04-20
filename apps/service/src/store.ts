@@ -41,7 +41,8 @@ export interface BasketItem {
 
 export interface GiftAidDeclaration {
   agreed: boolean
-  fullName: string
+  firstName: string
+  surname: string
   postcode: string
   address: string
   contactEmail: string

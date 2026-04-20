@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, useTotal, useGiftAidTotal, t, type GiftAidDeclaration } from '../store'
 import { api } from '../api'
 
-const DECLINED: GiftAidDeclaration = { agreed: false, fullName: '', postcode: '', address: '', contactEmail: '', contactPhone: '' }
+const DECLINED: GiftAidDeclaration = { agreed: false, firstName: '', surname: '', postcode: '', address: '', contactEmail: '', contactPhone: '' }
 
 type Step = 'choice' | 'form' | 'no-form'
 
@@ -25,7 +25,8 @@ export function GiftAidPage() {
   const [step, setStep] = useState<Step>(initialStep)
 
   // Gift Aid form
-  const [name,            setName]            = useState(contactInfo?.name  || '')
+  const [firstName,       setFirstName]       = useState('')
+  const [surname,         setSurname]         = useState('')
   const [postcode,        setPostcode]        = useState('')
   const [addresses,       setAddresses]       = useState<string[]>([])
   const [selectedAddress, setSelectedAddress] = useState('')
@@ -47,7 +48,7 @@ export function GiftAidPage() {
   const [error, setError] = useState('')
 
   const noHasData    = !!(noName.trim() || noEmail.trim() || noPhone.trim())
-  const formValid    = name.trim().length > 1 && selectedAddress.length > 3 && agreed && gaTerms && (email.trim() || phone.trim())
+  const formValid    = firstName.trim().length > 0 && surname.trim().length > 0 && selectedAddress.length > 3 && agreed && gaTerms && (email.trim() || phone.trim())
   const noFormValid  = anonymous || !noHasData || (noGdpr && noTerms)
 
   async function lookupPostcode() {
@@ -62,14 +63,16 @@ export function GiftAidPage() {
 
   function confirmGiftAid() {
     setError('')
-    if (!name.trim())          { setError('Please enter your full name'); return }
+    if (!firstName.trim())     { setError('Please enter your first name'); return }
+    if (!surname.trim())       { setError('Please enter your surname'); return }
     if (!selectedAddress)      { setError('Please select your address');  return }
     if (!email.trim() && !phone.trim()) { setError('Please provide email or phone'); return }
     if (!agreed)               { setError('Please confirm the Gift Aid declaration'); return }
     if (!gaTerms)              { setError('Please accept the terms'); return }
 
-    setGiftAidDeclaration({ agreed: true, fullName: name, postcode, address: selectedAddress, contactEmail: email, contactPhone: phone })
-    setContactInfo({ name, email, phone, gdprConsent: true, termsConsent: true, anonymous: false })
+    const fullName = `${firstName.trim()} ${surname.trim()}`
+    setGiftAidDeclaration({ agreed: true, firstName: firstName.trim(), surname: surname.trim(), postcode, address: selectedAddress, contactEmail: email, contactPhone: phone })
+    setContactInfo({ name: fullName, email, phone, gdprConsent: true, termsConsent: true, anonymous: false })
     setScreen('payment')
   }
 
@@ -139,7 +142,7 @@ export function GiftAidPage() {
               }}
             >
               <div className="flex flex-col items-center leading-tight gap-1">
-                <span className="text-xs font-bold uppercase tracking-widest opacity-80">🇬🇧 Recommended · UK Taxpayers</span>
+                <span className="text-xs font-bold uppercase tracking-widest opacity-80">Recommended · UK Taxpayers</span>
                 <span className="text-lg font-black">Yes — Boost with Gift Aid</span>
                 <span className="text-sm font-bold opacity-90">Temple gets £{totalWithBoost.toFixed(2)}</span>
               </div>
@@ -161,11 +164,18 @@ export function GiftAidPage() {
             <h1 className="font-display font-bold text-xl text-gold-400 mb-0.5">Gift Aid Declaration</h1>
             <p className="text-xs mb-2" style={{ color: 'rgba(255,248,220,0.45)' }}>HMRC requires your details to claim the 25% top-up</p>
 
-            {/* Full Name */}
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Full Name *</label>
-              <input type="text" value={name} onChange={e => setName(e.target.value)}
-                placeholder="As it appears on your tax record" className="w-full px-4 py-3 rounded-xl text-sm" />
+            {/* Name fields */}
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>First Name *</label>
+                <input type="text" value={firstName} onChange={e => setFirstName(e.target.value)}
+                  placeholder="First name" className="w-full px-4 py-3 rounded-xl text-sm" />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Surname *</label>
+                <input type="text" value={surname} onChange={e => setSurname(e.target.value)}
+                  placeholder="Surname" className="w-full px-4 py-3 rounded-xl text-sm" />
+              </div>
             </div>
 
             {/* Postcode */}

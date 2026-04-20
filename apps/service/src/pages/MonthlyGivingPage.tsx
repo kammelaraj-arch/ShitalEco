@@ -19,10 +19,21 @@ export function MonthlyGivingPage() {
   const [clientId, setClientId]     = useState('')
   const [loading, setLoading]       = useState(true)
   const [planId, setPlanId]         = useState('')
-  const [donorName, setDonorName]   = useState('')
+
+  // Donor details
+  const [firstName, setFirstName]   = useState('')
+  const [surname, setSurname]       = useState('')
   const [donorEmail, setDonorEmail] = useState('')
+  const [postcode, setPostcode]     = useState('')
+  const [addresses, setAddresses]   = useState<string[]>([])
+  const [selectedAddress, setSelectedAddress] = useState('')
+  const [lookingUp, setLookingUp]   = useState(false)
+  const [addressError, setAddressError] = useState('')
+
   const [step, setStep]             = useState<'pick' | 'details' | 'pay' | 'done'>('pick')
   const [error, setError]           = useState('')
+
+  const detailsValid = firstName.trim().length > 0 && surname.trim().length > 0 && donorEmail.trim().includes('@') && selectedAddress.length > 3
 
   useEffect(() => {
     Promise.all([
@@ -35,11 +46,25 @@ export function MonthlyGivingPage() {
     ]).finally(() => setLoading(false))
   }, [])
 
+  async function lookupPostcode() {
+    setAddressError('')
+    if (!postcode.trim()) return
+    setLookingUp(true)
+    const found = await api.lookupPostcode(postcode)
+    setLookingUp(false)
+    if (!found.length) setAddressError('No addresses found — check your postcode.')
+    else setAddresses(found)
+  }
+
   async function goToPay() {
     if (!selected) return
     setError('')
     try {
-      const res = await api.givingSubscribe(selected.id, branchId, donorName, donorEmail)
+      const res = await api.givingSubscribe(
+        selected.id, branchId,
+        firstName.trim(), surname.trim(), donorEmail.trim(),
+        postcode.trim(), selectedAddress,
+      )
       setPlanId(res.plan_id)
       setStep('pay')
     } catch {
@@ -56,11 +81,14 @@ export function MonthlyGivingPage() {
       amount: selected.amount,
       frequency: selected.frequency,
       branch_id: branchId,
-      donor_name: donorName,
-      donor_email: donorEmail,
+      donor_first_name: firstName.trim(),
+      donor_surname: surname.trim(),
+      donor_email: donorEmail.trim(),
+      donor_postcode: postcode.trim(),
+      donor_address: selectedAddress,
     }).catch(() => {})
     setStep('done')
-  }, [selected, planId, branchId, donorName, donorEmail])
+  }, [selected, planId, branchId, firstName, surname, donorEmail, postcode, selectedAddress])
 
   if (loading) {
     return (
@@ -137,16 +165,64 @@ export function MonthlyGivingPage() {
             <button onClick={() => setStep('pick')} className="text-xs font-bold" style={{ color: 'rgba(212,175,55,0.6)' }}>Change</button>
           </div>
 
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Your Name (optional)</label>
-            <input type="text" value={donorName} onChange={e => setDonorName(e.target.value)}
-              placeholder="Your name" className="w-full px-4 py-3 rounded-xl text-sm" />
+          {/* Name — split fields */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>First Name *</label>
+              <input type="text" value={firstName} onChange={e => setFirstName(e.target.value)}
+                placeholder="First name" className="w-full px-4 py-3 rounded-xl text-sm" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Surname *</label>
+              <input type="text" value={surname} onChange={e => setSurname(e.target.value)}
+                placeholder="Surname" className="w-full px-4 py-3 rounded-xl text-sm" />
+            </div>
           </div>
+
+          {/* Email */}
           <div>
-            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Email for receipts (optional)</label>
+            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Email *</label>
             <input type="email" value={donorEmail} onChange={e => setDonorEmail(e.target.value)}
               placeholder="your@email.com" className="w-full px-4 py-3 rounded-xl text-sm" />
+            {donorEmail && <p className="text-xs mt-1 ml-1" style={{ color: '#60a5fa' }}>📧 Subscription confirmation sent here</p>}
           </div>
+
+          {/* Postcode lookup */}
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>UK Postcode *</label>
+            <div className="flex gap-2">
+              <input
+                type="text" value={postcode}
+                onChange={e => setPostcode(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === 'Enter' && lookupPostcode()}
+                placeholder="e.g. HA9 0BB"
+                className="flex-1 px-4 py-3 rounded-xl text-sm uppercase"
+              />
+              <button onClick={lookupPostcode} disabled={lookingUp}
+                className="px-4 py-3 rounded-xl font-bold text-sm disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#6B0000' }}>
+                {lookingUp ? '…' : 'Find'}
+              </button>
+            </div>
+            {addressError && <p className="text-xs mt-1" style={{ color: '#f87171' }}>{addressError}</p>}
+          </div>
+
+          {/* Address dropdown */}
+          {addresses.length > 0 && (
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Select Address *</label>
+              <select value={selectedAddress} onChange={e => setSelectedAddress(e.target.value)} className="w-full px-4 py-3 rounded-xl text-sm">
+                <option value="">— Select your address —</option>
+                {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
+              </select>
+            </div>
+          )}
+
+          {selectedAddress && (
+            <div className="px-4 py-3 rounded-xl text-xs font-medium" style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', color: '#4ade80' }}>
+              ✓ {selectedAddress}
+            </div>
+          )}
 
           {error && (
             <p className="text-sm font-medium rounded-xl px-4 py-3"
@@ -155,8 +231,8 @@ export function MonthlyGivingPage() {
             </p>
           )}
 
-          <button onClick={goToPay}
-            className="w-full py-4 rounded-2xl font-black text-base transition-all active:scale-[0.99]"
+          <button onClick={goToPay} disabled={!detailsValid}
+            className="w-full py-4 rounded-2xl font-black text-base transition-all active:scale-[0.99] disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
             Proceed to Payment →
           </button>
@@ -166,12 +242,11 @@ export function MonthlyGivingPage() {
       {/* Step: PayPal subscription */}
       {step === 'pay' && planId && clientId && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="temple-card p-4 mb-5 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.6)' }}>Monthly donation</p>
-              <p className="font-black text-2xl text-gold-400">£{selected ? Number(selected.amount).toFixed(0) : '—'}/month</p>
-            </div>
-            <button onClick={() => setStep('details')} className="text-xs font-bold" style={{ color: 'rgba(212,175,55,0.6)' }}>Change</button>
+          <div className="temple-card p-4 mb-4">
+            <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(212,175,55,0.6)' }}>Monthly donation</p>
+            <p className="font-black text-2xl text-gold-400">£{selected ? Number(selected.amount).toFixed(0) : '—'}/month</p>
+            <p className="text-xs text-ivory-200 mt-0.5">{firstName} {surname} · {donorEmail}</p>
+            <button onClick={() => setStep('details')} className="text-xs font-bold mt-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Change details</button>
           </div>
 
           <PayPalScriptProvider options={{ clientId, vault: true, intent: 'subscription', currency: 'GBP' }}>

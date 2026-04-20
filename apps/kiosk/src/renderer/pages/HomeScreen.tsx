@@ -561,6 +561,25 @@ export function HomeScreen() {
             </div>
           )}
 
+          {/* Monthly Giving banner — shown on donations tab */}
+          {activeNav === 'donations' && (
+            <div className="flex-shrink-0 px-3 pt-3 pb-1">
+              <button
+                onClick={() => setScreen('monthly-giving')}
+                className="w-full rounded-xl p-3 flex items-center gap-3 transition-all active:scale-[0.99]"
+                style={{ background: 'linear-gradient(135deg,rgba(22,163,74,0.12),rgba(21,128,61,0.08))', border: '1.5px solid rgba(34,197,94,0.3)' }}
+              >
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-xl"
+                  style={{ background: 'rgba(22,163,74,0.15)' }}>🔁</div>
+                <div className="flex-1 text-left">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-green-700">Monthly Giving</p>
+                  <p className="font-black text-sm text-gray-800">Make a big impact — from £5/month</p>
+                </div>
+                <span className="text-green-500 font-bold text-lg">›</span>
+              </button>
+            </div>
+          )}
+
           {/* Items grid — scrollable */}
           <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent', touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
             {loading ? (

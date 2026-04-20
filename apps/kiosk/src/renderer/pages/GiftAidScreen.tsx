@@ -127,7 +127,8 @@ export function GiftAidScreen() {
   const [step, setStep] = useState<'choice' | 'form' | 'no-form'>('choice')
 
   // Form state
-  const [fullName, setFullName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [surname, setSurname] = useState('')
   const [postcode, setPostcode] = useState('')
   const [addressList, setAddressList] = useState<string[]>([])
   const [address, setAddress] = useState('')
@@ -157,7 +158,8 @@ export function GiftAidScreen() {
   const closeKb = () => setActiveField(null)
   const handleKbChange = (v: string) => {
     setKbValue(v)
-    if (activeField === 'name')    setFullName(v)
+    if (activeField === 'firstname') setFirstName(v)
+    else if (activeField === 'surname')  setSurname(v)
     else if (activeField === 'postcode') setPostcode(v)
     else if (activeField === 'address')  setAddress(v)
     else if (activeField === 'email')    setEmail(v)
@@ -188,7 +190,7 @@ export function GiftAidScreen() {
   const handleConfirm = () => {
     setGiftAidDeclaration({
       agreed: true,
-      fullName,
+      fullName: `${firstName.trim()} ${surname.trim()}`.trim(),
       postcode,
       address,
       contactEmail: contactMode === 'email' ? email : '',
@@ -214,7 +216,7 @@ export function GiftAidScreen() {
     setScreen('checkout')
   }
 
-  const formValid = fullName.trim().length > 1 && address.trim().length > 3 && declaration && gaTerms && (email.trim() || phone.trim())
+  const formValid = firstName.trim().length > 0 && surname.trim().length > 0 && address.trim().length > 3 && declaration && gaTerms && (email.trim() || phone.trim())
 
   return (
     <div className="w-full h-full flex flex-col" style={{ fontFamily: 'Inter, system-ui, sans-serif', background: th.mainBg }}>
@@ -292,10 +294,16 @@ export function GiftAidScreen() {
           {step === 'form' && (
             <motion.div key="form" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
 
-              {/* Full Name */}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Full Name *</label>
-                <FieldInput isMobile={isMobile} value={fullName} onChange={v => { setFullName(v); setKbValue(v) }} onTap={() => openKb('name', fullName)} placeholder="Tap to enter full name" isActive={activeField === 'name'} isValid={fullName.length > 1} accent={th.langActive} />
+              {/* Name — split fields */}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">First Name *</label>
+                  <FieldInput isMobile={isMobile} value={firstName} onChange={v => { setFirstName(v); setKbValue(v) }} onTap={() => openKb('firstname', firstName)} placeholder="First name" isActive={activeField === 'firstname'} isValid={firstName.length > 0} accent={th.langActive} />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Surname *</label>
+                  <FieldInput isMobile={isMobile} value={surname} onChange={v => { setSurname(v); setKbValue(v) }} onTap={() => openKb('surname', surname)} placeholder="Surname" isActive={activeField === 'surname'} isValid={surname.length > 0} accent={th.langActive} />
+                </div>
               </div>
 
               {/* Postcode lookup */}

@@ -823,6 +823,11 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_rgs_status ON recurring_giving_subscriptions(status)",
         "CREATE INDEX IF NOT EXISTS idx_rgs_email  ON recurring_giving_subscriptions(donor_email)",
+        # Add address/name columns to existing subscriptions table (idempotent)
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_first_name VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_surname VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_postcode VARCHAR(50) DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_address VARCHAR(500) DEFAULT ''",
         # Seed default tiers if none exist
         """INSERT INTO recurring_giving_tiers (amount, label, description, is_active, is_default, display_order)
         SELECT * FROM (VALUES

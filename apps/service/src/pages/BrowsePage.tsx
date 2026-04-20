@@ -120,8 +120,8 @@ export function BrowsePage() {
           </div>
           <div className="flex-1 text-left">
             <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(74,222,128,0.8)' }}>Monthly Giving</p>
-            <p className="font-black text-base text-ivory-200">Support the temple every month</p>
-            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>From £5/month · Cancel anytime · PayPal</p>
+            <p className="font-black text-base text-ivory-200">Make a big impact from just £5/month</p>
+            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>Regular giving · Cancel anytime · Secure PayPal</p>
           </div>
           <svg className="w-5 h-5 flex-shrink-0" style={{ color: 'rgba(74,222,128,0.6)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
