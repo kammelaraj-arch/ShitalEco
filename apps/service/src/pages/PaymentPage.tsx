@@ -52,7 +52,9 @@ export function PaymentPage() {
   const handleCreateOrder = useCallback(async (): Promise<string> => {
     const desc = items.slice(0, 3).map(i => i.name).join(', ') || 'Shital Temple Donation'
     return api.paypalCreateOrder(total, desc, branchId, {
-      contact_name: giftAidDeclaration?.fullName || contactInfo?.name || '',
+      contact_name: (giftAidDeclaration?.firstName && giftAidDeclaration?.surname)
+        ? `${giftAidDeclaration.firstName} ${giftAidDeclaration.surname}`.trim()
+        : contactInfo?.name || '',
       contact_email: giftAidDeclaration?.contactEmail || contactInfo?.email || '',
       contact_postcode: giftAidDeclaration?.postcode || '',
       contact_address: giftAidDeclaration?.address || '',
@@ -137,7 +139,7 @@ export function PaymentPage() {
         {giftAidDeclaration?.agreed && boost > 0 && (
           <div className="flex justify-between text-sm pt-1"
             style={{ borderTop: '1px dashed rgba(212,175,55,0.15)', color: '#4ade80' }}>
-            <span>🇬🇧 Gift Aid boost (HMRC)</span>
+            <span>Gift Aid boost (HMRC)</span>
             <span className="font-bold price-display">+£{boost.toFixed(2)}</span>
           </div>
         )}
