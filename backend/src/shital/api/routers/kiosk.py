@@ -1280,7 +1280,7 @@ async def list_kiosk_profiles(branch_id: str = ""):
 
 
 class QuickKioskLoginInput(BaseModel):
-    email: str
+    email: str   # accepts full email or short username (e.g. "wembley-1")
     password: str
 
 
@@ -1296,6 +1296,11 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
 
     from shital.core.fabrics.database import SessionLocal
 
+    login_input = body.email.lower().strip()
+    # Accept short username like "wembley-1" — expand to full kiosk email
+    if "@" not in login_input:
+        login_input = f"quickkiosk-{login_input}@shirdisai.org.uk"
+
     async with SessionLocal() as db:
         # Authenticate user
         result = await db.execute(
@@ -1305,12 +1310,12 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 "FROM users u LEFT JOIN branches b ON u.branch_id = b.id "
                 "WHERE u.email = :email AND u.deleted_at IS NULL"
             ),
-            {"email": body.email.lower().strip()},
+            {"email": login_input},
         )
         user = result.mappings().first()
 
     if not user or not user["password_hash"]:
-        return {"authenticated": False, "error": "Invalid email or password"}
+        return {"authenticated": False, "error": "Invalid username or password"}
     if not bcrypt.checkpw(body.password.encode(), user["password_hash"].encode()):
         return {"authenticated": False, "error": "Invalid email or password"}
     if not user["is_active"]:

@@ -232,17 +232,17 @@ export function AdminScreen() {
             </div>
           )}
 
-          {/* Email/Password Login */}
+          {/* Username/Password Login */}
           <div className="space-y-4 mb-6">
             <div>
               <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">
-                Email
+                Username
               </label>
               <input
-                type="email"
+                type="text"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="quickkiosk-wembley-1@shirdisai.org.uk"
+                placeholder="wembley-1"
                 className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-orange-400"
                 onKeyDown={e => e.key === 'Enter' && handleLogin()}
               />

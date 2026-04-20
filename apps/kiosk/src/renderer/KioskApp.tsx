@@ -1,8 +1,6 @@
 import React, { useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useKioskStore, KioskTheme } from './store/kiosk.store'
-
-const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
+import { useKioskStore } from './store/kiosk.store'
 import { SetupScreen } from './pages/SetupScreen'
 import { IdleScreen } from './pages/IdleScreen'
 import { HomeScreen } from './pages/HomeScreen'
@@ -21,41 +19,12 @@ import { AdminScreen } from './pages/AdminScreen'
 const IDLE_TIMEOUT_MS = 120_000
 
 export function KioskApp() {
-  const {
-    screen, resetKiosk, setTheme, setBranchId, setOrgName, setOrgLogoUrl,
-    setCardDevice, setDeviceToken, setDeviceConfigured, deviceToken, deviceConfigured, setScreen,
-  } = useKioskStore()
+  const { screen, resetKiosk, deviceConfigured, setScreen } = useKioskStore()
   let idleTimeout: ReturnType<typeof setTimeout>
 
-  // On startup, apply device config from URL token or stored token
+  // On startup: if not logged in yet, show login/setup screen
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const urlToken = params.get('token')
-    const token = urlToken || deviceToken
-
-    if (!token) {
-      // No token at all — show setup screen for first-time pairing
-      if (!deviceConfigured) setScreen('setup')
-      return
-    }
-
-    fetch(`${API_BASE}/kiosk-devices/by-token/${encodeURIComponent(token)}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(cfg => {
-        if (!cfg) {
-          // Invalid token — show setup
-          setScreen('setup')
-          return
-        }
-        if (urlToken) setDeviceToken(urlToken)
-        if (cfg.branch_id)    setBranchId(cfg.branch_id)
-        if (cfg.kiosk_theme)  setTheme(cfg.kiosk_theme as KioskTheme)
-        if (cfg.org_name)     setOrgName(cfg.org_name)
-        if (cfg.org_logo_url) setOrgLogoUrl(cfg.org_logo_url)
-        if (cfg.stripe_reader_id) setCardDevice('stripe_terminal', cfg.stripe_reader_id, cfg.reader_label || cfg.stripe_reader_id)
-        setDeviceConfigured(true)
-      })
-      .catch(() => {})
+    if (!deviceConfigured) setScreen('setup')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const resetIdle = useCallback(() => {

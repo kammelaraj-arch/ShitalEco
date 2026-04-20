@@ -211,8 +211,8 @@ interface KioskState {
   paymentIntent: Record<string, unknown> | null
   idleTimer: number
   branchId: string
-  deviceToken: string | null
   deviceConfigured: boolean
+  loggedInUser: { name: string; email: string; branch: string } | null
   theme: KioskTheme
   orgName: string
   orgLogoUrl: string
@@ -246,8 +246,8 @@ interface KioskState {
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
   setBranchId: (id: string) => void
-  setDeviceToken: (token: string | null) => void
   setDeviceConfigured: (v: boolean) => void
+  setLoggedInUser: (u: { name: string; email: string; branch: string } | null) => void
   setOrgName: (name: string) => void
   setOrgLogoUrl: (url: string) => void
   setCardDevice: (provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash', deviceId: string, deviceLabel: string) => void
@@ -275,8 +275,8 @@ export const useKioskStore = create<KioskState>()(
   paymentIntent: null,
   idleTimer: 120,
   branchId: 'main',
-  deviceToken: null,
   deviceConfigured: false,
+  loggedInUser: null,
   theme: 'lotus',
   orgName: 'Shital',
   orgLogoUrl: '',
@@ -304,8 +304,8 @@ export const useKioskStore = create<KioskState>()(
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
   setBranchId: (branchId) => set({ branchId }),
-  setDeviceToken: (deviceToken) => set({ deviceToken }),
   setDeviceConfigured: (deviceConfigured) => set({ deviceConfigured }),
+  setLoggedInUser: (loggedInUser) => set({ loggedInUser }),
   setOrgName: (orgName) => set({ orgName }),
   setOrgLogoUrl: (orgLogoUrl) => set({ orgLogoUrl }),
   setCardDevice: (provider, deviceId, deviceLabel) => set(
@@ -355,8 +355,8 @@ export const useKioskStore = create<KioskState>()(
         sumupReaderId: state.sumupReaderId,
         sumupReaderLabel: state.sumupReaderLabel,
         branchId: state.branchId,
-        deviceToken: state.deviceToken,
         deviceConfigured: state.deviceConfigured,
+        loggedInUser: state.loggedInUser,
         endScreenTemplate: state.endScreenTemplate,
         formTextConfig: state.formTextConfig,
       }),
