@@ -31,7 +31,8 @@ export function ProcessingScreen() {
   async function processPayment() {
     setError('')
     if (!stripeReaderId || !stripeReaderId.trim()) {
-      setError('No card reader configured. Please go to Admin and assign a Stripe Terminal reader to this device.')
+      // No reader — push the user to the admin login instead of a dead-end error.
+      setScreen('admin')
       return
     }
     try {

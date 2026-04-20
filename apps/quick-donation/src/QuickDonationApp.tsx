@@ -15,10 +15,12 @@ export function QuickDonationApp() {
   const { screen, setScreen, stripeReaderId } = useDonationStore()
   const idleTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // First launch: if no reader configured, go straight to admin login
+  // Whenever no reader is configured, force the admin login screen.
+  // Reactive (not mount-only) so async rehydration or a cleared reader
+  // can't leave the user on the donate screen with an unusable reader.
   useEffect(() => {
-    if (!stripeReaderId) setScreen('admin')
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!stripeReaderId && screen !== 'admin') setScreen('admin')
+  }, [stripeReaderId, screen, setScreen])
 
   const resetIdle = useCallback(() => {
     if (idleTimeout.current) clearTimeout(idleTimeout.current)
