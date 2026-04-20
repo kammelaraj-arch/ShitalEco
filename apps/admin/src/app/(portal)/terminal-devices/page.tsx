@@ -75,7 +75,7 @@ function providerBadge(provider: string) {
     stripe_terminal: { icon: '⚡', label: 'Stripe Terminal', cls: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/20' },
     square:          { icon: '◼', label: 'Square',          cls: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
     clover:          { icon: '🍀', label: 'Clover Flex',     cls: 'bg-orange-500/15 text-orange-400 border-orange-500/20' },
-    sumup:           { icon: '💳', label: 'SumUp',           cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20' },
+    sumup:           { icon: '💳', label: 'SumUp Reader',     cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20' },
     cash:            { icon: '💵', label: 'Cash',            cls: 'bg-green-500/15 text-green-400 border-green-500/20' },
   }
   return map[provider] ?? { icon: '?', label: provider, cls: 'bg-white/10 text-white/50 border-white/10' }
@@ -144,7 +144,7 @@ function DeviceModal({
     { id: 'stripe_terminal', label: 'Stripe Terminal (WisePOS E)', icon: '⚡' },
     { id: 'square',          label: 'Square Terminal',             icon: '◼' },
     { id: 'clover',          label: 'Clover Flex',                 icon: '🍀' },
-    { id: 'sumup',           label: 'SumUp Solo',                  icon: '💳' },
+    { id: 'sumup',           label: 'SumUp (Solo / Air Plus / Kiosk)', icon: '💳' },
     { id: 'cash',            label: 'Cash / Manual',               icon: '💵' },
   ]
 
@@ -226,7 +226,7 @@ function DeviceModal({
             <Field label="Clover Device ID" value={form.clover_device_id} onChange={v => set('clover_device_id', v)} placeholder="CLOVER_DEVICE_XXXXXXXXX" mono />
           )}
           {form.provider === 'sumup' && (
-            <Field label="SumUp Reader Serial" value={form.sumup_reader_serial} onChange={v => set('sumup_reader_serial', v)} placeholder="e.g. SNR-XXXXXXX" mono />
+            <Field label="SumUp Reader Serial" value={form.sumup_reader_serial} onChange={v => set('sumup_reader_serial', v)} placeholder="e.g. SNR-XXXXXXX (Solo / Air Plus / Kiosk)" mono />
           )}
 
           {/* Hardware */}
