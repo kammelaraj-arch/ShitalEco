@@ -133,19 +133,36 @@ def _parse_date(s: str) -> date | None:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+def _row_safe(mapping: Any) -> dict:
+    """Convert a DB row mapping to a JSON-safe dict."""
+    from decimal import Decimal
+    result = {}
+    for k, v in dict(mapping).items():
+        if isinstance(v, date) and not isinstance(v, datetime):
+            result[k] = v.isoformat()
+        elif isinstance(v, datetime):
+            result[k] = v.isoformat()
+        elif isinstance(v, Decimal):
+            result[k] = float(v)
+        else:
+            result[k] = v
+    return result
+
+
 @router.get("/dashboard")
 async def dashboard(ctx: OptionalSpace) -> dict[str, Any]:
     """Alert dashboard: overdue, due soon, renewals."""
+    from datetime import datetime
+
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    today = date.today().isoformat()
-    in7   = (date.today() + timedelta(days=7)).isoformat()
-    in30  = (date.today() + timedelta(days=30)).isoformat()
-    in60  = (date.today() + timedelta(days=60)).isoformat()
+    today = date.today()
+    in7   = today + timedelta(days=7)
+    in30  = today + timedelta(days=30)
+    in60  = today + timedelta(days=60)
 
     async with SessionLocal() as db:
-        # Overdue: PENDING schedule items past due
         r = await db.execute(text("""
             SELECT ps.id, ps.due_date, ps.amount, ps.currency,
                    rp.name, rp.category, rp.is_critical, rp.payee, rp.id AS rp_id
@@ -155,9 +172,8 @@ async def dashboard(ctx: OptionalSpace) -> dict[str, Any]:
               AND rp.is_active = true AND rp.deleted_at IS NULL
             ORDER BY ps.due_date ASC LIMIT 50
         """), {"today": today})
-        overdue = [dict(x) for x in r.mappings()]
+        overdue = [_row_safe(x) for x in r.mappings()]
 
-        # Due in 7 days
         r = await db.execute(text("""
             SELECT ps.id, ps.due_date, ps.amount, ps.currency,
                    rp.name, rp.category, rp.is_critical, rp.payee, rp.id AS rp_id
@@ -168,9 +184,8 @@ async def dashboard(ctx: OptionalSpace) -> dict[str, Any]:
               AND rp.is_active = true AND rp.deleted_at IS NULL
             ORDER BY ps.due_date ASC LIMIT 50
         """), {"today": today, "in7": in7})
-        due_7 = [dict(x) for x in r.mappings()]
+        due_7 = [_row_safe(x) for x in r.mappings()]
 
-        # Due in 30 days
         r = await db.execute(text("""
             SELECT ps.id, ps.due_date, ps.amount, ps.currency,
                    rp.name, rp.category, rp.is_critical, rp.payee, rp.id AS rp_id
@@ -181,9 +196,8 @@ async def dashboard(ctx: OptionalSpace) -> dict[str, Any]:
               AND rp.is_active = true AND rp.deleted_at IS NULL
             ORDER BY ps.due_date ASC LIMIT 50
         """), {"in7": in7, "in30": in30})
-        due_30 = [dict(x) for x in r.mappings()]
+        due_30 = [_row_safe(x) for x in r.mappings()]
 
-        # Renewals due within 60 days
         r = await db.execute(text("""
             SELECT id, name, category, is_critical, renewal_date, notice_days, payee
             FROM recurring_payments
@@ -192,7 +206,7 @@ async def dashboard(ctx: OptionalSpace) -> dict[str, Any]:
               AND is_active = true AND deleted_at IS NULL
             ORDER BY renewal_date ASC LIMIT 20
         """), {"today": today, "in60": in60})
-        renewals = [dict(x) for x in r.mappings()]
+        renewals = [_row_safe(x) for x in r.mappings()]
 
     return {
         "overdue": overdue,
@@ -212,11 +226,12 @@ async def list_recurring(
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    today = date.today().isoformat()
+    today = date.today()
+    in7   = today + timedelta(days=7)
 
     async with SessionLocal() as db:
         conds = ["rp.deleted_at IS NULL"]
-        params: dict[str, Any] = {"today": today}
+        params: dict[str, Any] = {"today": today, "in7": in7}
         if not include_inactive:
             conds.append("rp.is_active = true")
         if branch_id:
@@ -228,13 +243,16 @@ async def list_recurring(
         where = "WHERE " + " AND ".join(conds)
 
         result = await db.execute(text(f"""
-            SELECT rp.*,
+            SELECT rp.id, rp.branch_id, rp.name, rp.category, rp.is_critical,
+                   rp.amount, rp.currency, rp.frequency, rp.start_date, rp.end_date,
+                   rp.day_of_month, rp.renewal_date, rp.notice_days,
+                   rp.payee, rp.reference, rp.notes, rp.is_active,
+                   rp.created_at, rp.updated_at,
                    MIN(ps.due_date) FILTER (WHERE ps.status = 'PENDING') AS next_due_date,
                    CASE
                      WHEN MIN(ps.due_date) FILTER (WHERE ps.status = 'PENDING') < :today
                        THEN 'OVERDUE'
-                     WHEN MIN(ps.due_date) FILTER (WHERE ps.status = 'PENDING')
-                          <= (:today::date + INTERVAL '7 days')
+                     WHEN MIN(ps.due_date) FILTER (WHERE ps.status = 'PENDING') <= :in7
                        THEN 'DUE_SOON'
                      WHEN MIN(ps.due_date) FILTER (WHERE ps.status = 'PENDING') IS NOT NULL
                        THEN 'OK'
@@ -245,10 +263,14 @@ async def list_recurring(
             FROM recurring_payments rp
             LEFT JOIN payment_schedule ps ON ps.recurring_payment_id = rp.id
             {where}
-            GROUP BY rp.id
+            GROUP BY rp.id, rp.branch_id, rp.name, rp.category, rp.is_critical,
+                     rp.amount, rp.currency, rp.frequency, rp.start_date, rp.end_date,
+                     rp.day_of_month, rp.renewal_date, rp.notice_days,
+                     rp.payee, rp.reference, rp.notes, rp.is_active,
+                     rp.created_at, rp.updated_at
             ORDER BY rp.is_critical DESC, rp.name ASC
         """), params)
-        rows = [dict(r) for r in result.mappings()]
+        rows = [_row_safe(r) for r in result.mappings()]
 
     return {"recurring_payments": rows}
 
