@@ -4,10 +4,12 @@ Permissions are stored as a JSON config in app_settings (key: app_permissions).
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from shital.api.deps import RequiredSpace
 
@@ -51,13 +53,11 @@ DEFAULT_PERMISSIONS: dict[str, list[str]] = {
 
 
 async def _load_permissions(db: Any) -> dict[str, list[str]]:
-    from sqlalchemy import text
     row = await db.execute(
         text("SELECT value FROM app_settings WHERE key = 'app_permissions' LIMIT 1")
     )
     r = row.first()
     if r:
-        import json
         try:
             return json.loads(r[0])
         except Exception:
@@ -66,8 +66,6 @@ async def _load_permissions(db: Any) -> dict[str, list[str]]:
 
 
 async def _save_permissions(db: Any, perms: dict[str, list[str]]) -> None:
-    import json
-    from sqlalchemy import text
     value = json.dumps(perms)
     await db.execute(text("""
         INSERT INTO app_settings (key, value, updated_at)
