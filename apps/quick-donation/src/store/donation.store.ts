@@ -9,6 +9,7 @@ export interface DonationState {
   branchId: string
   stripeReaderId: string
   stripeReaderLabel: string
+  deviceToken: string | null
   orderId: string | null
   orderRef: string | null
   paymentIntentId: string | null
@@ -18,6 +19,7 @@ export interface DonationState {
   setAmount: (amount: number) => void
   setBranchId: (id: string) => void
   setReader: (readerId: string, label: string) => void
+  setDeviceToken: (token: string | null) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   reset: () => void
 }
@@ -30,6 +32,7 @@ export const useDonationStore = create<DonationState>()(
       branchId: 'main',
       stripeReaderId: '',
       stripeReaderLabel: 'Temple WisePOS E',
+      deviceToken: null,
       orderId: null,
       orderRef: null,
       paymentIntentId: null,
@@ -39,6 +42,7 @@ export const useDonationStore = create<DonationState>()(
       setAmount: (amount) => set({ amount }),
       setBranchId: (branchId) => set({ branchId }),
       setReader: (stripeReaderId, stripeReaderLabel) => set({ stripeReaderId, stripeReaderLabel }),
+      setDeviceToken: (deviceToken) => set({ deviceToken }),
       setOrderResult: (orderId, orderRef, paymentIntentId, clientSecret) =>
         set({ orderId, orderRef, paymentIntentId, clientSecret }),
       reset: () =>
@@ -58,6 +62,7 @@ export const useDonationStore = create<DonationState>()(
         branchId: state.branchId,
         stripeReaderId: state.stripeReaderId,
         stripeReaderLabel: state.stripeReaderLabel,
+        deviceToken: state.deviceToken,
       }),
     }
   )

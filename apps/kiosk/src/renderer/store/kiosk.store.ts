@@ -127,7 +127,7 @@ export const IDLE_RING_COLORS: Record<KioskTheme, string> = {
 }
 
 export type KioskScreen =
-  | 'idle' | 'language' | 'home' | 'services' | 'service-detail'
+  | 'setup' | 'idle' | 'language' | 'home' | 'services' | 'service-detail'
   | 'donate' | 'basket' | 'checkout' | 'payment' | 'confirmation'
   | 'admin' | 'admin-pin' | 'soft-donation' | 'project-donation' | 'shop'
   | 'gift-aid' | 'receipt'
@@ -211,6 +211,8 @@ interface KioskState {
   paymentIntent: Record<string, unknown> | null
   idleTimer: number
   branchId: string
+  deviceToken: string | null
+  deviceConfigured: boolean
   theme: KioskTheme
   orgName: string
   orgLogoUrl: string
@@ -244,6 +246,8 @@ interface KioskState {
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
   setBranchId: (id: string) => void
+  setDeviceToken: (token: string | null) => void
+  setDeviceConfigured: (v: boolean) => void
   setOrgName: (name: string) => void
   setOrgLogoUrl: (url: string) => void
   setCardDevice: (provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash', deviceId: string, deviceLabel: string) => void
@@ -271,6 +275,8 @@ export const useKioskStore = create<KioskState>()(
   paymentIntent: null,
   idleTimer: 120,
   branchId: 'main',
+  deviceToken: null,
+  deviceConfigured: false,
   theme: 'lotus',
   orgName: 'Shital',
   orgLogoUrl: '',
@@ -298,6 +304,8 @@ export const useKioskStore = create<KioskState>()(
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
   setBranchId: (branchId) => set({ branchId }),
+  setDeviceToken: (deviceToken) => set({ deviceToken }),
+  setDeviceConfigured: (deviceConfigured) => set({ deviceConfigured }),
   setOrgName: (orgName) => set({ orgName }),
   setOrgLogoUrl: (orgLogoUrl) => set({ orgLogoUrl }),
   setCardDevice: (provider, deviceId, deviceLabel) => set(
@@ -347,6 +355,8 @@ export const useKioskStore = create<KioskState>()(
         sumupReaderId: state.sumupReaderId,
         sumupReaderLabel: state.sumupReaderLabel,
         branchId: state.branchId,
+        deviceToken: state.deviceToken,
+        deviceConfigured: state.deviceConfigured,
         endScreenTemplate: state.endScreenTemplate,
         formTextConfig: state.formTextConfig,
       }),

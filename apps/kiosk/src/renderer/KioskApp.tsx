@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useKioskStore, KioskTheme } from './store/kiosk.store'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
+import { SetupScreen } from './pages/SetupScreen'
 import { IdleScreen } from './pages/IdleScreen'
 import { HomeScreen } from './pages/HomeScreen'
 import { ServicesScreen } from './pages/ServicesScreen'
@@ -20,23 +21,39 @@ import { AdminScreen } from './pages/AdminScreen'
 const IDLE_TIMEOUT_MS = 120_000
 
 export function KioskApp() {
-  const { screen, resetKiosk, setTheme, setBranchId, setOrgName, setOrgLogoUrl } = useKioskStore()
+  const {
+    screen, resetKiosk, setTheme, setBranchId, setOrgName, setOrgLogoUrl,
+    setCardDevice, setDeviceToken, setDeviceConfigured, deviceToken, deviceConfigured, setScreen,
+  } = useKioskStore()
   let idleTimeout: ReturnType<typeof setTimeout>
 
-  // On startup, read ?token= from URL and fetch device config
+  // On startup, apply device config from URL token or stored token
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const token = params.get('token')
-    if (!token) return
+    const urlToken = params.get('token')
+    const token = urlToken || deviceToken
+
+    if (!token) {
+      // No token at all — show setup screen for first-time pairing
+      if (!deviceConfigured) setScreen('setup')
+      return
+    }
+
     fetch(`${API_BASE}/kiosk-devices/by-token/${encodeURIComponent(token)}`)
       .then(r => r.ok ? r.json() : null)
       .then(cfg => {
-        if (!cfg) return
-        if (cfg.branch_id) setBranchId(cfg.branch_id)
-        if (cfg.kiosk_theme) setTheme(cfg.kiosk_theme as KioskTheme)
-        if (cfg.org_name)   setOrgName(cfg.org_name)
+        if (!cfg) {
+          // Invalid token — show setup
+          setScreen('setup')
+          return
+        }
+        if (urlToken) setDeviceToken(urlToken)
+        if (cfg.branch_id)    setBranchId(cfg.branch_id)
+        if (cfg.kiosk_theme)  setTheme(cfg.kiosk_theme as KioskTheme)
+        if (cfg.org_name)     setOrgName(cfg.org_name)
         if (cfg.org_logo_url) setOrgLogoUrl(cfg.org_logo_url)
-
+        if (cfg.stripe_reader_id) setCardDevice('stripe_terminal', cfg.stripe_reader_id, cfg.reader_label || cfg.stripe_reader_id)
+        setDeviceConfigured(true)
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -67,6 +84,7 @@ export function KioskApp() {
 
   const renderScreen = () => {
     switch (screen) {
+      case 'setup':            return <SetupScreen key="setup" />
       case 'idle':             return <IdleScreen key="idle" />
       case 'home':             return <HomeScreen key="home" />
       case 'services':         return <ServicesScreen key="services" />

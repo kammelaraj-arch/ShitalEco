@@ -1,6 +1,8 @@
 import React, { useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useDonationStore } from './store/donation.store'
+
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 import { IdleScreen } from './pages/IdleScreen'
 import { DonationScreen } from './pages/DonationScreen'
 import { ProcessingScreen } from './pages/ProcessingScreen'
@@ -12,8 +14,31 @@ import { AdminScreen } from './pages/AdminScreen'
 const SCREENSAVER_TIMEOUT_MS = 120_000
 
 export function QuickDonationApp() {
-  const { screen, setScreen } = useDonationStore()
+  const { screen, setScreen, stripeReaderId, deviceToken, setBranchId, setReader, setDeviceToken } = useDonationStore()
   const idleTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // On startup: try device token to auto-configure, then check reader
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlToken = params.get('token')
+    const token = urlToken || deviceToken
+
+    if (token) {
+      fetch(`${API_BASE}/kiosk-devices/by-token/${encodeURIComponent(token)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(cfg => {
+          if (!cfg) { if (!stripeReaderId) setScreen('admin'); return }
+          if (urlToken) setDeviceToken(urlToken)
+          setBranchId(cfg.branch_id || 'main')
+          if (cfg.stripe_reader_id) setReader(cfg.stripe_reader_id, cfg.reader_label || cfg.stripe_reader_id)
+          else if (!stripeReaderId) setScreen('admin')
+        })
+        .catch(() => { if (!stripeReaderId) setScreen('admin') })
+    } else if (!stripeReaderId) {
+      // First launch — no token, no reader — go straight to admin setup
+      setScreen('admin')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const resetIdle = useCallback(() => {
     if (idleTimeout.current) clearTimeout(idleTimeout.current)
