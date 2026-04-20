@@ -236,6 +236,43 @@ async def toggle_active(user_id: str, ctx: RequiredSpace):
     return {"user_id": user_id, "is_active": row["is_active"]}
 
 
+# ─── Change password ─────────────────────────────────────────────────────────
+
+class PasswordChange(BaseModel):
+    new_password: str
+
+
+@router.put("/{user_id}/password")
+async def change_password(user_id: str, body: PasswordChange, ctx: RequiredSpace):
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    import bcrypt
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    password_hash = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt(12)).decode()
+    now = datetime.utcnow()
+
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text("""
+                UPDATE users
+                SET password_hash = :hash, auth_provider = 'local', updated_at = :now
+                WHERE id = :id AND deleted_at IS NULL
+                RETURNING id
+            """),
+            {"hash": password_hash, "now": now, "id": user_id},
+        )
+        row = result.first()
+        await db.commit()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"user_id": user_id, "updated": True}
+
+
 # ─── Delete (soft) ────────────────────────────────────────────────────────────
 
 @router.delete("/{user_id}")
