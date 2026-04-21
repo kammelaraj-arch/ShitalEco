@@ -1356,9 +1356,10 @@ class QuickKioskLoginInput(BaseModel):
 @router.post("/quick-donation/login")
 async def quick_kiosk_login(body: QuickKioskLoginInput):
     """
-    Login for QuickDonation kiosk accounts.
-    Returns branch info, kiosk profile, and assigned device config.
-    Supports both password auth and Azure AD-linked accounts.
+    Login for QuickDonation kiosk devices.
+    First checks kiosk_devices.device_username (admin-configured credentials).
+    Falls back to users table (legacy quickkiosk-* accounts).
+    Returns branch info, card reader, and device feature flags.
     """
     import bcrypt
     from sqlalchemy import text
@@ -1366,12 +1367,48 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     from shital.core.fabrics.database import SessionLocal
 
     login_input = body.email.lower().strip()
-    # Accept short username like "wembley-1" — expand to full kiosk email
+
+    # ── Path 1: Device-level credentials (set in admin Edit Device form) ──────
+    async with SessionLocal() as db:
+        dev_res = await db.execute(
+            text("""
+                SELECT kd.id, kd.name, kd.branch_id, kd.device_password_hash,
+                       kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
+                       kd.card_reader_id,
+                       td.stripe_reader_id, td.label AS reader_label,
+                       b.name AS branch_name
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                LEFT JOIN branches b ON b.branch_id = kd.branch_id
+                WHERE kd.device_username = :uname
+                  AND kd.deleted_at IS NULL
+                  AND UPPER(kd.status) = 'ACTIVE'
+                LIMIT 1
+            """),
+            {"uname": login_input},
+        )
+        device = dev_res.mappings().first()
+
+    if device and device["device_password_hash"]:
+        if not bcrypt.checkpw(body.password.encode(), device["device_password_hash"].encode()):
+            return {"authenticated": False, "error": "Invalid username or password"}
+        return {
+            "authenticated": True,
+            "user": {"id": str(device["id"]), "email": login_input, "name": device["name"], "role": "KIOSK"},
+            "branch": {"id": device["branch_id"], "name": device["branch_name"] or device["branch_id"]},
+            "profile": None,
+            "stripe_reader_id": device["stripe_reader_id"],
+            "reader_label": device["reader_label"],
+            "show_monthly_giving": bool(device["show_monthly_giving"]),
+            "enable_gift_aid": bool(device["enable_gift_aid"]),
+            "tap_and_go": bool(device["tap_and_go"]),
+        }
+
+    # ── Path 2: Legacy user-table login (quickkiosk-* accounts) ──────────────
     if "@" not in login_input:
         login_input = f"quickkiosk-{login_input}@shirdisai.org.uk"
 
     async with SessionLocal() as db:
-        # Authenticate user
         result = await db.execute(
             text(
                 "SELECT u.id, u.email, u.name, u.password_hash, u.role, u.branch_id, u.is_active, "
@@ -1394,7 +1431,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
 
     branch_code = user["branch_code"] or "main"
 
-    # Fetch kiosk profile with device assignment
+    # Fetch kiosk profile
     profile = None
     try:
         async with SessionLocal() as db:
@@ -1413,24 +1450,23 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             prof_row = prof_result.mappings().first()
             if prof_row:
                 profile = dict(prof_row)
-
-            # Update last_active_at
             await db.execute(
                 text("UPDATE kiosk_profiles SET last_active_at = :now WHERE user_email = :email AND deleted_at IS NULL"),
                 {"now": datetime.utcnow(), "email": user["email"]},
             )
             await db.commit()
     except Exception:
-        pass  # profile stays None — login still succeeds without device assignment
+        pass
 
-    # Look up the card reader assigned to the QUICK_DONATION device for this branch
-    # in the admin Devices page (kiosk_devices → terminal_devices).
+    # Look up card reader from admin Devices page for this branch
     device_reader_id = None
     device_reader_label = None
+    dev_flags: dict = {"show_monthly_giving": False, "enable_gift_aid": False, "tap_and_go": True}
     async with SessionLocal() as db:
         dev_res = await db.execute(
             text("""
-                SELECT td.stripe_reader_id, td.label AS reader_label
+                SELECT kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
+                       td.stripe_reader_id, td.label AS reader_label
                 FROM kiosk_devices kd
                 LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
                 WHERE kd.branch_id = :branch_id
@@ -1443,29 +1479,27 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             {"branch_id": branch_code},
         )
         dev_row = dev_res.mappings().first()
-        if dev_row and dev_row["stripe_reader_id"]:
-            device_reader_id = dev_row["stripe_reader_id"]
-            device_reader_label = dev_row["reader_label"]
+        if dev_row:
+            if dev_row["stripe_reader_id"]:
+                device_reader_id = dev_row["stripe_reader_id"]
+                device_reader_label = dev_row["reader_label"]
+            dev_flags = {
+                "show_monthly_giving": bool(dev_row["show_monthly_giving"]),
+                "enable_gift_aid": bool(dev_row["enable_gift_aid"]),
+                "tap_and_go": bool(dev_row["tap_and_go"]),
+            }
 
-    # Prefer admin device assignment over the profile's manually-set reader
     effective_reader_id = device_reader_id or (profile.get("stripe_reader_id") if profile else None)
     effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
 
     return {
         "authenticated": True,
-        "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "name": user["name"],
-            "role": user["role"],
-        },
-        "branch": {
-            "id": branch_code,
-            "name": user["branch_name"] or "Unknown",
-        },
+        "user": {"id": str(user["id"]), "email": user["email"], "name": user["name"], "role": user["role"]},
+        "branch": {"id": branch_code, "name": user["branch_name"] or "Unknown"},
         "profile": profile,
         "stripe_reader_id": effective_reader_id,
         "reader_label": effective_reader_label,
+        **dev_flags,
     }
 
 

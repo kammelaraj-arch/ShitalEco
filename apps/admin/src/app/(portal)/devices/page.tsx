@@ -29,6 +29,10 @@ interface KioskDevice {
   kiosk_theme: KioskThemeId
   org_name: string
   org_logo_url: string
+  device_username: string | null
+  show_monthly_giving: boolean
+  enable_gift_aid: boolean
+  tap_and_go: boolean
   created_at: string
   updated_at: string
 }
@@ -67,6 +71,8 @@ const EMPTY_FORM = {
   serial_number: '', ip_address: '', notes: '',
   kiosk_theme: 'lotus' as KioskThemeId,
   org_name: '', org_logo_url: '',
+  device_username: '', device_password: '',
+  show_monthly_giving: false, enable_gift_aid: false, tap_and_go: true,
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -158,6 +164,10 @@ export default function DevicesPage() {
       serial_number: d.serial_number, ip_address: d.ip_address, notes: d.notes,
       kiosk_theme: (d.kiosk_theme || 'lotus') as KioskThemeId,
       org_name: d.org_name || '', org_logo_url: d.org_logo_url || '',
+      device_username: d.device_username || '', device_password: '',
+      show_monthly_giving: d.show_monthly_giving ?? false,
+      enable_gift_aid: d.enable_gift_aid ?? false,
+      tap_and_go: d.tap_and_go ?? true,
     })
     setError('')
     setDrawerOpen(true)
@@ -172,6 +182,8 @@ export default function DevicesPage() {
         ...form,
         screen_profile_id: form.screen_profile_id || null,
         off_peak_playlist_id: form.off_peak_playlist_id || null,
+        device_username: form.device_username.trim() || null,
+        device_password: form.device_password.trim() || null,
       }
       const bodyWithReader = { ...body, card_reader_id: form.card_reader_id || null }
       if (editing) {
@@ -575,10 +587,11 @@ export default function DevicesPage() {
                   </div>
                 )}
 
-                {/* ── Quick Donation: default amount ──────────────────── */}
+                {/* ── Quick Donation: settings + feature flags ────────── */}
                 {form.device_type === 'QUICK_DONATION' && (
-                  <div className="rounded-2xl p-4 space-y-3" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.18)' }}>
+                  <div className="rounded-2xl p-4 space-y-4" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.18)' }}>
                     <p className="text-amber-400 text-xs font-bold uppercase tracking-wide">💳 Quick Donation Settings</p>
+
                     <div>
                       <p className={lbl}>Default Pre-selected Amount (£)</p>
                       <input
@@ -589,6 +602,67 @@ export default function DevicesPage() {
                       />
                       <p className="text-white/30 text-[10px] mt-1">This tile is pre-selected when the device starts up</p>
                     </div>
+
+                    {/* Feature toggles */}
+                    <div className="space-y-2.5 pt-1">
+                      {([
+                        { key: 'show_monthly_giving' as const, label: 'Display Monthly Giving banner', desc: 'Show "Make a big impact from £5/month" promo above tiles' },
+                        { key: 'enable_gift_aid'      as const, label: 'Enable Gift Aid collection',   desc: 'Ask UK taxpayers to claim Gift Aid after tapping a tile' },
+                        { key: 'tap_and_go'           as const, label: 'Just Tap & Go (no extras)',    desc: 'Tap tile → tap card directly — no gift aid, no extras' },
+                      ] as const).map(({ key, label, desc }) => (
+                        <label key={key} className="flex items-start gap-3 cursor-pointer p-3 rounded-xl transition-colors hover:bg-white/5">
+                          <div className="relative flex-shrink-0 mt-0.5">
+                            <input
+                              type="checkbox"
+                              className="sr-only"
+                              checked={form[key]}
+                              onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))}
+                            />
+                            <div
+                              className="w-9 h-5 rounded-full transition-colors"
+                              style={{ background: form[key] ? '#F59E0B' : 'rgba(255,255,255,0.12)' }}
+                            >
+                              <div
+                                className="w-4 h-4 bg-white rounded-full shadow absolute top-0.5 transition-transform"
+                                style={{ transform: form[key] ? 'translateX(18px)' : 'translateX(2px)' }}
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-white/80 text-xs font-bold">{label}</p>
+                            <p className="text-white/35 text-[10px] mt-0.5">{desc}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Device Login Credentials (all types) ────────────── */}
+                {(form.device_type === 'KIOSK' || form.device_type === 'QUICK_DONATION' || form.device_type === 'SMART_DISPLAY') && (
+                  <div className="rounded-2xl p-4 space-y-3" style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                    <p className="text-indigo-400 text-xs font-bold uppercase tracking-wide">🔐 Device Login</p>
+                    <p className="text-white/35 text-[10px]">Set credentials staff use to log in to this device. Used by Kiosk, Quick Donation, and Smart Display apps.</p>
+                    <div className={row}>
+                      <div>
+                        <p className={lbl}>Username</p>
+                        <input className={inp} value={form.device_username}
+                          onChange={e => setForm(f => ({ ...f, device_username: e.target.value.trim() }))}
+                          placeholder="e.g. wembley-1" autoComplete="off" />
+                      </div>
+                      <div>
+                        <p className={lbl}>Password{editing && ' (leave blank to keep)'}</p>
+                        <input type="password" className={inp} value={form.device_password}
+                          onChange={e => setForm(f => ({ ...f, device_password: e.target.value }))}
+                          placeholder={editing ? '••••••••' : 'Set password'}
+                          autoComplete="new-password" />
+                      </div>
+                    </div>
+                    {form.device_username && (
+                      <p className="text-indigo-400/60 text-[10px]">
+                        Login: <span className="font-mono font-bold">{form.device_username}</span> / {form.device_password ? '(new password set)' : '(existing password)'}
+                      </p>
+                    )}
                   </div>
                 )}
 

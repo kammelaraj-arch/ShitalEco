@@ -14,10 +14,16 @@ export interface DonationState {
   paymentIntentId: string | null
   clientSecret: string | null
 
+  // Device feature flags (set on login, persisted)
+  showMonthlyGiving: boolean
+  enableGiftAid: boolean
+  tapAndGo: boolean
+
   setScreen: (screen: Screen) => void
   setAmount: (amount: number) => void
   setBranchId: (id: string) => void
   setReader: (readerId: string, label: string) => void
+  setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   reset: () => void
 }
@@ -35,10 +41,15 @@ export const useDonationStore = create<DonationState>()(
       paymentIntentId: null,
       clientSecret: null,
 
+      showMonthlyGiving: false,
+      enableGiftAid: false,
+      tapAndGo: true,
+
       setScreen: (screen) => set({ screen }),
       setAmount: (amount) => set({ amount }),
       setBranchId: (branchId) => set({ branchId }),
       setReader: (stripeReaderId, stripeReaderLabel) => set({ stripeReaderId, stripeReaderLabel }),
+      setDeviceFlags: (flags) => set(flags),
       setOrderResult: (orderId, orderRef, paymentIntentId, clientSecret) =>
         set({ orderId, orderRef, paymentIntentId, clientSecret }),
       reset: () =>
@@ -58,6 +69,9 @@ export const useDonationStore = create<DonationState>()(
         branchId: state.branchId,
         stripeReaderId: state.stripeReaderId,
         stripeReaderLabel: state.stripeReaderLabel,
+        showMonthlyGiving: state.showMonthlyGiving,
+        enableGiftAid: state.enableGiftAid,
+        tapAndGo: state.tapAndGo,
       }),
     }
   )

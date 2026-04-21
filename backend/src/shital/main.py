@@ -454,9 +454,16 @@ async def _patch_schema() -> None:
         # ── Add card_reader_id to existing kiosk_devices rows ─────────────────
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS card_reader_id UUID",
         # ── Kiosk branding / appearance columns ───────────────────────────────
-        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS kiosk_theme   VARCHAR(20)  NOT NULL DEFAULT 'lotus'",
-        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS org_name      VARCHAR(100) NOT NULL DEFAULT ''",
-        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS org_logo_url  TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS kiosk_theme          VARCHAR(20)  NOT NULL DEFAULT 'lotus'",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS org_name             VARCHAR(100) NOT NULL DEFAULT ''",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS org_logo_url         TEXT         NOT NULL DEFAULT ''",
+        # ── Device-level credentials + quick donation feature flags ──────────────
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS device_username      VARCHAR(100) DEFAULT NULL",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS device_password_hash VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS show_monthly_giving  BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS enable_gift_aid      BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS tap_and_go           BOOLEAN NOT NULL DEFAULT true",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_username ON kiosk_devices(device_username) WHERE device_username IS NOT NULL",
         # ── Quick-donation kiosk profiles ─────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS kiosk_profiles (
             id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
