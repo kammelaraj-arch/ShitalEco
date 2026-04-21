@@ -130,8 +130,13 @@ class CheckoutInput(BaseModel):
     payment_provider: str = "STRIPE"
     branch_id: str = "main"
     customer_name: str = ""
+    customer_first_name: str = ""
+    customer_surname: str = ""
     customer_email: str = ""
     customer_phone: str = ""
+    customer_postcode: str = ""
+    customer_address: str = ""
+    customer_uprn: str = ""
 
 
 @router.post("/checkout")
@@ -154,10 +159,71 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
     from shital.capabilities.payments.capabilities import CreatePaymentInput, create_payment
     safe_ctx = ctx or DigitalSpace(user_id="kiosk", user_email="kiosk@shital.org", role="KIOSK", branch_id=body.branch_id, permissions=[], session_id=str(uuid.uuid4()))
     payment = await create_payment(safe_ctx, CreatePaymentInput(provider=body.payment_provider, amount_pence=amount_pence, currency="GBP", order_id=order_id, description=f"Shital Temple Order {ref}", idempotency_key=order_id))
+
+    full_name = body.customer_name or f"{body.customer_first_name} {body.customer_surname}".strip()
+    email_key = body.customer_email.strip().lower() if body.customer_email.strip() else None
+
     async with SessionLocal() as db:
+        # ── CRM contact upsert ──────────────────────────────────────────────
+        contact_id: str | None = None
+        if email_key:
+            contact_uuid = str(uuid.uuid4())
+            c_result = await db.execute(text("""
+                INSERT INTO contacts
+                    (id, email, first_name, surname, full_name, phone,
+                     gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                     first_source, first_branch_id, created_at, updated_at)
+                VALUES
+                    (:id, :email, :first, :surname, :name, :phone,
+                     true, :now, true, :now,
+                     'kiosk', :branch, :now, :now)
+                ON CONFLICT (email) DO UPDATE SET
+                    first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                    surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                    full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                    phone             = COALESCE(NULLIF(EXCLUDED.phone,''),      contacts.phone),
+                    gdpr_consent      = true,
+                    gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                    tac_consent       = true,
+                    tac_consented_at  = COALESCE(contacts.tac_consented_at,  EXCLUDED.tac_consented_at),
+                    updated_at        = EXCLUDED.updated_at
+                RETURNING id
+            """), {
+                "id": contact_uuid, "email": email_key,
+                "first": body.customer_first_name or "", "surname": body.customer_surname or "",
+                "name": full_name, "phone": body.customer_phone or "",
+                "branch": body.branch_id, "now": now,
+            })
+            row = c_result.mappings().first()
+            contact_id = str(row["id"]) if row else contact_uuid
+
+            if body.customer_postcode or body.customer_address:
+                await db.execute(text("""
+                    INSERT INTO addresses
+                        (id, contact_id, formatted, postcode, uprn,
+                         is_primary, lookup_source, created_at)
+                    VALUES (:id, :cid, :fmt, :pc, :uprn, true, 'kiosk', :now)
+                """), {
+                    "id": str(uuid.uuid4()), "cid": contact_id,
+                    "fmt": body.customer_address or "", "pc": body.customer_postcode.upper().strip(),
+                    "uprn": body.customer_uprn or "", "now": now,
+                })
+
         await db.execute(
-            text("INSERT INTO orders (id, branch_id, basket_id, reference, status, total_amount, currency, payment_provider, payment_ref, idempotency_key, created_at, updated_at) VALUES (:id, :bid, :basket, :ref, 'PENDING', :total, 'GBP', :provider, :pref, :ikey, :now, :now)"),
-            {"id": order_id, "bid": body.branch_id, "basket": body.basket_id, "ref": ref, "total": str(total), "provider": body.payment_provider, "pref": payment.get("payment_id"), "ikey": order_id, "now": now},
+            text("""INSERT INTO orders
+                (id, branch_id, basket_id, reference, status, total_amount, currency,
+                 payment_provider, payment_ref, customer_name, customer_email, customer_phone,
+                 contact_id, idempotency_key, created_at, updated_at)
+                VALUES (:id, :bid, :basket, :ref, 'PENDING', :total, 'GBP',
+                        :provider, :pref, :cname, :cemail, :cphone,
+                        :cid, :ikey, :now, :now)"""),
+            {
+                "id": order_id, "bid": body.branch_id, "basket": body.basket_id,
+                "ref": ref, "total": str(total), "provider": body.payment_provider,
+                "pref": payment.get("payment_id"),
+                "cname": full_name, "cemail": body.customer_email, "cphone": body.customer_phone,
+                "cid": contact_id, "ikey": order_id, "now": now,
+            },
         )
         await db.execute(text("UPDATE baskets SET status = 'CHECKOUT', updated_at = :now WHERE id = :bid"), {"now": now, "bid": body.basket_id})
         await db.commit()

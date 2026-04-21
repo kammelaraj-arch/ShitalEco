@@ -230,7 +230,8 @@ interface KioskState {
     address: string; contactEmail: string; contactPhone: string
   } | null
   contactInfo: {
-    name: string; email: string; phone: string
+    name: string; firstName?: string; surname?: string
+    email: string; phone: string
     gdprConsent: boolean; termsConsent: boolean; anonymous: boolean
   } | null
   pendingPayment: boolean

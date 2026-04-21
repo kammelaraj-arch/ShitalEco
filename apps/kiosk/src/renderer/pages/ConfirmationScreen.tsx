@@ -150,7 +150,7 @@ export function ConfirmationScreen() {
         {/* Thank you + tagline */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
           <h1 className="font-black text-gray-900 leading-tight" style={{ fontSize: '1.75rem' }}>
-            Thank you{contactInfo?.name && !contactInfo.anonymous ? `, ${contactInfo.name.split(' ')[0]}` : ''}!
+            Thank you{contactInfo?.name && !contactInfo.anonymous ? `, ${contactInfo.firstName || contactInfo.name.split(' ')[0]}` : ''}!
           </h1>
           <p className="font-black mt-0.5" style={{ color: '#FF9933', fontSize: '1.2rem' }}>{thankYouLine}</p>
           {subMessage && <p className="text-gray-500 text-sm mt-1">{subMessage}</p>}
