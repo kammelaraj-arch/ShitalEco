@@ -95,9 +95,15 @@ export const api = {
   },
 
   async paypalConfig(): Promise<{ client_id: string; env: string; currency: string }> {
-    const r = await fetch(`${API}/service/paypal/config`)
-    if (!r.ok) return { client_id: '', env: 'sandbox', currency: 'GBP' }
-    return r.json()
+    const fallback = (import.meta.env.VITE_PAYPAL_CLIENT_ID as string) || ''
+    try {
+      const r = await fetch(`${API}/service/paypal/config`)
+      if (!r.ok) return { client_id: fallback, env: 'live', currency: 'GBP' }
+      const d = await r.json()
+      return { ...d, client_id: d.client_id || fallback }
+    } catch {
+      return { client_id: fallback, env: 'live', currency: 'GBP' }
+    }
   },
 
   async paypalCreateOrder(
