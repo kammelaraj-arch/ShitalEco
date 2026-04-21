@@ -55,14 +55,19 @@ export function SetupScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: username.trim(), password }),
       })
+      if (!res.ok && res.status >= 500) {
+        setError(`Server error (${res.status}) — backend may still be starting. Try again in a moment.`)
+        return
+      }
       const data: LoginResponse = await res.json()
       if (data.authenticated) {
         applyProfile(data)
       } else {
         setError(data.error || 'Login failed. Check your credentials.')
       }
-    } catch {
-      setError('Cannot reach server. Check network connection.')
+    } catch (err) {
+      const msg = err instanceof TypeError ? 'Cannot reach server — check network connection.' : 'Login failed. Please try again.'
+      setError(msg)
     } finally { setLoading(false) }
   }
 

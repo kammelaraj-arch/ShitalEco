@@ -1396,29 +1396,32 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
 
     # Fetch kiosk profile with device assignment
     profile = None
-    async with SessionLocal() as db:
-        prof_result = await db.execute(
-            text(
-                "SELECT id, profile_name, kiosk_type, display_name, "
-                "  device_label, stripe_reader_id, device_provider, "
-                "  preset_amounts, default_purpose, gift_aid_prompt, "
-                "  idle_timeout_secs, theme "
-                "FROM kiosk_profiles "
-                "WHERE user_email = :email AND is_active = true AND deleted_at IS NULL "
-                "LIMIT 1"
-            ),
-            {"email": user["email"]},
-        )
-        prof_row = prof_result.mappings().first()
-        if prof_row:
-            profile = dict(prof_row)
+    try:
+        async with SessionLocal() as db:
+            prof_result = await db.execute(
+                text(
+                    "SELECT id, profile_name, kiosk_type, display_name, "
+                    "  device_label, stripe_reader_id, device_provider, "
+                    "  preset_amounts, default_purpose, gift_aid_prompt, "
+                    "  idle_timeout_secs, theme "
+                    "FROM kiosk_profiles "
+                    "WHERE user_email = :email AND is_active = true AND deleted_at IS NULL "
+                    "LIMIT 1"
+                ),
+                {"email": user["email"]},
+            )
+            prof_row = prof_result.mappings().first()
+            if prof_row:
+                profile = dict(prof_row)
 
-        # Update last_active_at
-        await db.execute(
-            text("UPDATE kiosk_profiles SET last_active_at = :now WHERE user_email = :email AND deleted_at IS NULL"),
-            {"now": datetime.utcnow(), "email": user["email"]},
-        )
-        await db.commit()
+            # Update last_active_at
+            await db.execute(
+                text("UPDATE kiosk_profiles SET last_active_at = :now WHERE user_email = :email AND deleted_at IS NULL"),
+                {"now": datetime.utcnow(), "email": user["email"]},
+            )
+            await db.commit()
+    except Exception:
+        pass  # profile stays None — login still succeeds without device assignment
 
     # Look up the card reader assigned to the QUICK_DONATION device for this branch
     # in the admin Devices page (kiosk_devices → terminal_devices).
