@@ -696,7 +696,7 @@ class QuickDonationRecordInput(BaseModel):
 async def _resolve_branch_uuid(db: Any, branch_code: str) -> str:
     """Resolve a branch short code (e.g. 'main') to its UUID. Returns the code unchanged if not found."""
     from sqlalchemy import text
-    row = (await db.execute(text("SELECT id FROM branches WHERE code = :code LIMIT 1"), {"code": branch_code})).mappings().first()
+    row = (await db.execute(text("SELECT id FROM branches WHERE branch_id = :code LIMIT 1"), {"code": branch_code})).mappings().first()
     return str(row["id"]) if row else branch_code
 
 
@@ -1168,9 +1168,9 @@ async def seed_quick_kiosk_accounts():
             addr_json = json.dumps({"city": b["city"], "postcode": b["postcode"]})
             await db.execute(
                 text(
-                    "INSERT INTO branches (id, name, code, address, phone, is_active, created_at, updated_at) "
-                    "VALUES (:id, :name, :code, CAST(:addr AS jsonb), '', true, :now, :now) "
-                    "ON CONFLICT (code) DO NOTHING"
+                    "INSERT INTO branches (id, branch_id, name, address, phone, is_active, created_at, updated_at) "
+                    "VALUES (:id, :code, :name, CAST(:addr AS jsonb), '', true, :now, :now) "
+                    "ON CONFLICT (branch_id) DO NOTHING"
                 ),
                 {
                     "id": branch_id, "name": b["name"], "code": b["id"],
@@ -1187,7 +1187,7 @@ async def seed_quick_kiosk_accounts():
 
             # Resolve branch
             branch_row = (await db.execute(
-                text("SELECT id, name FROM branches WHERE code = :code LIMIT 1"),
+                text("SELECT id, name FROM branches WHERE branch_id = :code LIMIT 1"),
                 {"code": acct["branch_code"]},
             )).mappings().first()
             branch_uuid = str(branch_row["id"]) if branch_row else None
@@ -1375,7 +1375,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         result = await db.execute(
             text(
                 "SELECT u.id, u.email, u.name, u.password_hash, u.role, u.branch_id, u.is_active, "
-                "b.code AS branch_code, b.name AS branch_name "
+                "b.branch_id AS branch_code, b.name AS branch_name "
                 "FROM users u LEFT JOIN branches b ON u.branch_id::text = b.id::text "
                 "WHERE u.email = :email AND u.deleted_at IS NULL"
             ),
@@ -1508,7 +1508,7 @@ async def quick_kiosk_login_azure(body: AzureKioskLoginInput):
         result = await db.execute(
             text(
                 "SELECT u.id, u.email, u.name, u.role, u.is_active, "
-                "b.code AS branch_code, b.name AS branch_name "
+                "b.branch_id AS branch_code, b.name AS branch_name "
                 "FROM users u LEFT JOIN branches b ON u.branch_id::text = b.id::text "
                 "WHERE u.email = :email AND u.deleted_at IS NULL"
             ),
