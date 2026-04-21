@@ -81,18 +81,25 @@ class CreateOrderBody(BaseModel):
     contact_address: str = ""
 
 
+def _fmt_uk_postcode(raw: str) -> str:
+    """Normalise a UK postcode to 'AB1 2CD' format (space before last 3 chars)."""
+    pc = raw.upper().replace(" ", "")
+    return f"{pc[:-3]} {pc[-3:]}" if len(pc) >= 5 else raw.upper()
+
+
 def _parse_uk_address(raw: str, postcode: str) -> dict:
     """Parse a UK address string into PayPal address fields."""
     parts = [p.strip() for p in raw.split(",") if p.strip()]
+    pc_compact = postcode.upper().replace(" ", "")
     addr: dict = {"country_code": "GB"}
     if postcode:
-        addr["postal_code"] = postcode.upper()
+        addr["postal_code"] = _fmt_uk_postcode(postcode)
     if parts:
         addr["address_line_1"] = parts[0]
     if len(parts) >= 2:
         addr["address_line_2"] = parts[1]
-    # Last non-postcode part is usually the city/town
-    city_candidates = [p for p in parts[1:] if p.upper() != postcode.upper()]
+    # Last non-postcode part is the city/county — compare without spaces
+    city_candidates = [p for p in parts[1:] if p.upper().replace(" ", "") != pc_compact]
     if city_candidates:
         addr["admin_area_2"] = city_candidates[-1]
     return addr
