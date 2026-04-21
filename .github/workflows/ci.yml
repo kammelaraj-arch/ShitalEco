@@ -220,8 +220,8 @@ jobs:
           cache-to: type=gha,scope=service,mode=max
 
 
-      - name: Trigger production deploy (main only)
-        if: github.ref == 'refs/heads/main'
+      - name: Trigger production deploy
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/shital-erp-platform-iR2UF'
         run: |
           SECRET="${{ secrets.DEPLOY_SECRET }}"
           SECRET="${SECRET:-ShitalDeploy2026!}"
