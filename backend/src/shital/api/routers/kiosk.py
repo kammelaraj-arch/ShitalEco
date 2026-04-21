@@ -1376,7 +1376,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             text(
                 "SELECT u.id, u.email, u.name, u.password_hash, u.role, u.branch_id, u.is_active, "
                 "b.code AS branch_code, b.name AS branch_name "
-                "FROM users u LEFT JOIN branches b ON u.branch_id = b.id "
+                "FROM users u LEFT JOIN branches b ON u.branch_id::text = b.id::text "
                 "WHERE u.email = :email AND u.deleted_at IS NULL"
             ),
             {"email": login_input},
@@ -1509,7 +1509,7 @@ async def quick_kiosk_login_azure(body: AzureKioskLoginInput):
             text(
                 "SELECT u.id, u.email, u.name, u.role, u.is_active, "
                 "b.code AS branch_code, b.name AS branch_name "
-                "FROM users u LEFT JOIN branches b ON u.branch_id = b.id "
+                "FROM users u LEFT JOIN branches b ON u.branch_id::text = b.id::text "
                 "WHERE u.email = :email AND u.deleted_at IS NULL"
             ),
             {"email": email},

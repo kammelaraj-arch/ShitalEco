@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, useTotal, useGiftAidTotal, t, type GiftAidDeclaration } from '../store'
 
-const DECLINED: GiftAidDeclaration = { agreed: false, firstName: '', surname: '', postcode: '', address: '', contactEmail: '', contactPhone: '' }
+const DECLINED: GiftAidDeclaration = { agreed: false, firstName: '', surname: '', postcode: '', address: '', uprn: '', contactEmail: '', contactPhone: '' }
 
 export function BasketPage() {
   const { language, items, removeItem, updateQty, setScreen, clearBasket, setGiftAidDeclaration } = useStore()

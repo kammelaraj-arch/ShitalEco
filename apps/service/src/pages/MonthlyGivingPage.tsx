@@ -32,7 +32,7 @@ export function MonthlyGivingPage() {
   const [surname, setSurname]       = useState('')
   const [donorEmail, setDonorEmail] = useState('')
   const [postcode, setPostcode]     = useState('')
-  const [addresses, setAddresses]   = useState<string[]>([])
+  const [addresses, setAddresses]   = useState<Array<{ formatted: string; uprn: string }>>([])
   const [selectedAddress, setSelectedAddress] = useState('')
   const [lookingUp, setLookingUp]   = useState(false)
   const [addressError, setAddressError] = useState('')
@@ -221,7 +221,7 @@ export function MonthlyGivingPage() {
               <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Select Address *</label>
               <select value={selectedAddress} onChange={e => setSelectedAddress(e.target.value)} className="w-full px-4 py-3 rounded-xl text-sm">
                 <option value="">— Select your address —</option>
-                {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
+                {addresses.map((a, i) => <option key={i} value={a.formatted}>{a.formatted}</option>)}
               </select>
             </div>
           )}
