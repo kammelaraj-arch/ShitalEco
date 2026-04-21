@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, useTotal, useGiftAidTotal, t, type GiftAidDeclaration } from '../store'
 import { api } from '../api'
 
-const DECLINED: GiftAidDeclaration = { agreed: false, firstName: '', surname: '', postcode: '', address: '', contactEmail: '', contactPhone: '' }
+const DECLINED: GiftAidDeclaration = { agreed: false, firstName: '', surname: '', postcode: '', address: '', uprn: '', contactEmail: '', contactPhone: '' }
 
 type Step = 'choice' | 'form' | 'no-form'
 
@@ -28,8 +28,9 @@ export function GiftAidPage() {
   const [firstName,       setFirstName]       = useState('')
   const [surname,         setSurname]         = useState('')
   const [postcode,        setPostcode]        = useState('')
-  const [addresses,       setAddresses]       = useState<string[]>([])
+  const [addresses,       setAddresses]       = useState<Array<{ formatted: string; uprn: string }>>([])
   const [selectedAddress, setSelectedAddress] = useState('')
+  const [selectedUprn,    setSelectedUprn]    = useState('')
   const [lookingUp,       setLookingUp]       = useState(false)
   const [addressError,    setAddressError]    = useState('')
   const [email,           setEmail]           = useState(contactInfo?.email || '')
@@ -44,8 +45,9 @@ export function GiftAidPage() {
   const [noEmail,          setNoEmail]          = useState(contactInfo?.email     || '')
   const [noPhone,          setNoPhone]          = useState(contactInfo?.phone     || '')
   const [noPostcode,       setNoPostcode]       = useState('')
-  const [noAddresses,      setNoAddresses]      = useState<string[]>([])
+  const [noAddresses,      setNoAddresses]      = useState<Array<{ formatted: string; uprn: string }>>([])
   const [noSelectedAddr,   setNoSelectedAddr]   = useState('')
+  const [noSelectedUprn,   setNoSelectedUprn]   = useState('')
   const [noLookingUp,      setNoLookingUp]      = useState(false)
   const [noAddrError,      setNoAddrError]      = useState('')
   const [noGdpr,           setNoGdpr]           = useState(false)
@@ -77,7 +79,7 @@ export function GiftAidPage() {
     if (!gaTerms)              { setError('Please accept the terms'); return }
 
     const fullName = `${firstName.trim()} ${surname.trim()}`
-    setGiftAidDeclaration({ agreed: true, firstName: firstName.trim(), surname: surname.trim(), postcode, address: selectedAddress, contactEmail: email, contactPhone: phone })
+    setGiftAidDeclaration({ agreed: true, firstName: firstName.trim(), surname: surname.trim(), postcode, address: selectedAddress, uprn: selectedUprn, contactEmail: email, contactPhone: phone })
     setContactInfo({ name: fullName, email, phone, gdprConsent: true, termsConsent: true, anonymous: false })
     setScreen('payment')
   }
@@ -100,10 +102,11 @@ export function GiftAidPage() {
     const p    = anonymous ? '' : noPhone.trim()
     const pc   = anonymous ? '' : noPostcode.trim()
     const addr = anonymous ? '' : noSelectedAddr
+    const uprn = anonymous ? '' : noSelectedUprn
     setGiftAidDeclaration(DECLINED)
     setContactInfo({
       name: n, firstName: fn, surname: sn,
-      email: e, phone: p, postcode: pc, address: addr,
+      email: e, phone: p, postcode: pc, address: addr, uprn,
       gdprConsent: !anonymous && noGdpr, termsConsent: !anonymous && noTerms, anonymous,
     })
     setScreen('payment')
@@ -226,9 +229,17 @@ export function GiftAidPage() {
             {addresses.length > 0 && (
               <div>
                 <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Select Address *</label>
-                <select value={selectedAddress} onChange={e => setSelectedAddress(e.target.value)} className="w-full px-4 py-3 rounded-xl text-sm">
+                <select
+                  value={selectedAddress}
+                  onChange={e => {
+                    const chosen = addresses.find(a => a.formatted === e.target.value)
+                    setSelectedAddress(e.target.value)
+                    setSelectedUprn(chosen?.uprn ?? '')
+                  }}
+                  className="w-full px-4 py-3 rounded-xl text-sm"
+                >
                   <option value="">— Select your address —</option>
-                  {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
+                  {addresses.map((a, i) => <option key={i} value={a.formatted}>{a.formatted}</option>)}
                 </select>
               </div>
             )}
@@ -362,10 +373,17 @@ export function GiftAidPage() {
                 {noAddresses.length > 0 && (
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Select Address</label>
-                    <select value={noSelectedAddr} onChange={e => setNoSelectedAddr(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl text-sm">
+                    <select
+                      value={noSelectedAddr}
+                      onChange={e => {
+                        const chosen = noAddresses.find(a => a.formatted === e.target.value)
+                        setNoSelectedAddr(e.target.value)
+                        setNoSelectedUprn(chosen?.uprn ?? '')
+                      }}
+                      className="w-full px-4 py-3 rounded-xl text-sm"
+                    >
                       <option value="">— Select your address —</option>
-                      {noAddresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
+                      {noAddresses.map((a, i) => <option key={i} value={a.formatted}>{a.formatted}</option>)}
                     </select>
                   </div>
                 )}

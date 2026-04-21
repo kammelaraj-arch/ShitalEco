@@ -72,12 +72,17 @@ export const api = {
     } catch { /* non-fatal */ }
   },
 
-  async lookupPostcode(postcode: string): Promise<string[]> {
+  async lookupPostcode(postcode: string): Promise<Array<{ formatted: string; uprn: string }>> {
     try {
       const r = await fetch(`${API}/kiosk/postcode/${encodeURIComponent(postcode)}`)
       if (!r.ok) return []
       const d = await r.json()
-      return d.addresses ?? []
+      const raw: unknown[] = d.addresses ?? []
+      return raw.map((a) =>
+        typeof a === 'string'
+          ? { formatted: a, uprn: '' }
+          : { formatted: (a as { formatted: string }).formatted ?? '', uprn: (a as { uprn?: string }).uprn ?? '' }
+      )
     } catch { return [] }
   },
 
@@ -111,7 +116,7 @@ export const api = {
     prefill?: {
       contact_name?: string; contact_first_name?: string; contact_surname?: string
       contact_email?: string; contact_phone?: string
-      contact_postcode?: string; contact_address?: string
+      contact_postcode?: string; contact_address?: string; contact_uprn?: string
     },
   ): Promise<string> {
     const r = await fetch(`${API}/service/paypal/order`, {
@@ -138,6 +143,7 @@ export const api = {
     contact_name: string; contact_first_name?: string; contact_surname?: string
     contact_email: string; contact_phone: string
     gift_aid: boolean; gift_aid_postcode: string; gift_aid_address: string
+    contact_uprn?: string
   }) {
     const r = await fetch(`${API}/service/paypal/capture`, {
       method: 'POST',

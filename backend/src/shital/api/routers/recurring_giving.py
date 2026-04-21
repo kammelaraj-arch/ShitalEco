@@ -195,23 +195,70 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
     from shital.core.fabrics.database import SessionLocal
     now = datetime.utcnow()
     full_name = f"{body.donor_first_name} {body.donor_surname}".strip()
+    email_key = body.donor_email.strip().lower() if body.donor_email.strip() else None
+
     async with SessionLocal() as db:
+        # ── Upsert CRM contact ──────────────────────────────────────────────
+        contact_id: str | None = None
+        if email_key:
+            contact_uuid = str(uuid.uuid4())
+            c_result = await db.execute(text("""
+                INSERT INTO contacts
+                    (id, email, first_name, surname, full_name, phone,
+                     gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                     first_source, first_branch_id, created_at, updated_at)
+                VALUES
+                    (:id, :email, :first, :surname, :name, '',
+                     true, :now, true, :now,
+                     'monthly-giving', :branch, :now, :now)
+                ON CONFLICT (email) DO UPDATE SET
+                    first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                    surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                    full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                    gdpr_consent      = true,
+                    gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                    tac_consent       = true,
+                    tac_consented_at  = COALESCE(contacts.tac_consented_at,  EXCLUDED.tac_consented_at),
+                    updated_at        = EXCLUDED.updated_at
+                RETURNING id
+            """), {
+                "id": contact_uuid, "email": email_key,
+                "first": body.donor_first_name or "", "surname": body.donor_surname or "",
+                "name": full_name, "branch": body.branch_id, "now": now,
+            })
+            row = c_result.mappings().first()
+            contact_id = str(row["id"]) if row else contact_uuid
+
+            # ── Upsert address if postcode provided ─────────────────────────
+            if body.donor_postcode:
+                await db.execute(text("""
+                    INSERT INTO addresses
+                        (id, contact_id, formatted, postcode, uprn,
+                         is_primary, lookup_source, created_at)
+                    VALUES (:id, :cid, :fmt, :pc, '', true, 'monthly-giving', :now)
+                """), {
+                    "id": str(uuid.uuid4()), "cid": contact_id,
+                    "fmt": body.donor_address or "", "pc": body.donor_postcode, "now": now,
+                })
+
+        # ── Record subscription ─────────────────────────────────────────────
         await db.execute(text("""
             INSERT INTO recurring_giving_subscriptions
                 (id, paypal_subscription_id, paypal_plan_id, tier_id, amount, frequency,
                  status, branch_id, donor_name, donor_email,
                  donor_first_name, donor_surname, donor_postcode, donor_address,
-                 approved_at, created_at, updated_at)
+                 contact_id, approved_at, created_at, updated_at)
             VALUES
                 (:id, :sub_id, :plan_id, :tier_id, :amount, :freq,
                  'ACTIVE', :branch, :name, :email,
                  :first_name, :surname, :postcode, :address,
-                 :now, :now, :now)
+                 :cid, :now, :now, :now)
             ON CONFLICT (paypal_subscription_id) DO UPDATE
                 SET status = 'ACTIVE', approved_at = :now, updated_at = :now,
                     donor_name = :name, donor_email = :email,
                     donor_first_name = :first_name, donor_surname = :surname,
-                    donor_postcode = :postcode, donor_address = :address
+                    donor_postcode = :postcode, donor_address = :address,
+                    contact_id = COALESCE(recurring_giving_subscriptions.contact_id, EXCLUDED.contact_id)
         """), {
             "id": str(uuid.uuid4()), "sub_id": body.subscription_id,
             "plan_id": body.plan_id, "tier_id": body.tier_id,
@@ -219,7 +266,7 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
             "branch": body.branch_id, "name": full_name, "email": body.donor_email,
             "first_name": body.donor_first_name, "surname": body.donor_surname,
             "postcode": body.donor_postcode, "address": body.donor_address,
-            "now": now,
+            "cid": contact_id, "now": now,
         })
         await db.commit()
     return {"success": True, "subscription_id": body.subscription_id}

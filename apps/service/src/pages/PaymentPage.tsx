@@ -61,6 +61,7 @@ export function PaymentPage() {
       contact_phone:      giftAidDeclaration?.contactPhone || contactInfo?.phone || '',
       contact_postcode:   giftAidDeclaration?.postcode || contactInfo?.postcode || '',
       contact_address:    giftAidDeclaration?.address  || contactInfo?.address  || '',
+      contact_uprn:       giftAidDeclaration?.uprn     || contactInfo?.uprn     || '',
     })
   }, [total, branchId, items, contactInfo, giftAidDeclaration])
 
@@ -83,6 +84,7 @@ export function PaymentPage() {
         gift_aid:           giftAidDeclaration?.agreed ?? false,
         gift_aid_postcode:  giftAidDeclaration?.postcode || contactInfo?.postcode || '',
         gift_aid_address:   giftAidDeclaration?.address  || contactInfo?.address  || '',
+        contact_uprn:       giftAidDeclaration?.uprn     || contactInfo?.uprn     || '',
       })
       if (result.success) {
         setOrderResult({

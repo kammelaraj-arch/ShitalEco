@@ -45,6 +45,7 @@ export interface GiftAidDeclaration {
   surname: string
   postcode: string
   address: string
+  uprn: string
   contactEmail: string
   contactPhone: string
 }
@@ -60,6 +61,7 @@ export interface ContactInfo {
   surname?: string
   postcode?: string
   address?: string
+  uprn?: string
 }
 
 export interface OrderResult {

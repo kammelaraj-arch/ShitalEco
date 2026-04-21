@@ -11,8 +11,9 @@ export function ContactPage() {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [postcode, setPostcode] = useState('')
-  const [addresses, setAddresses] = useState<string[]>([])
+  const [addresses, setAddresses] = useState<Array<{ formatted: string; uprn: string }>>([])
   const [selectedAddress, setSelectedAddress] = useState('')
+  const [selectedUprn, setSelectedUprn] = useState('')
   const [lookingUp, setLookingUp] = useState(false)
   const [addressError, setAddressError] = useState('')
   const [anonymous, setAnonymous] = useState(false)
@@ -65,6 +66,7 @@ export function ContactPage() {
       phone: anonymous ? '' : phone.trim(),
       postcode: anonymous ? '' : postcode.trim(),
       address: anonymous ? '' : selectedAddress,
+      uprn: anonymous ? '' : selectedUprn,
       gdprConsent: anonymous ? false : gdpr,
       termsConsent: anonymous ? false : terms,
       anonymous,
@@ -194,7 +196,7 @@ export function ContactPage() {
               <input
                 type="text"
                 value={postcode}
-                onChange={(e) => { setPostcode(e.target.value.toUpperCase()); setAddresses([]); setSelectedAddress('') }}
+                onChange={(e) => { setPostcode(e.target.value.toUpperCase()); setAddresses([]); setSelectedAddress(''); setSelectedUprn('') }}
                 onKeyDown={(e) => e.key === 'Enter' && lookupPostcode()}
                 placeholder="e.g. HA9 0BB"
                 className="flex-1 px-4 py-3 rounded-xl text-sm uppercase"
@@ -214,10 +216,17 @@ export function ContactPage() {
                 style={{ color: 'rgba(212,175,55,0.6)' }}>
                 Select Address
               </label>
-              <select value={selectedAddress} onChange={(e) => setSelectedAddress(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl text-sm">
+              <select
+                value={selectedAddress}
+                onChange={(e) => {
+                  const chosen = addresses.find(a => a.formatted === e.target.value)
+                  setSelectedAddress(e.target.value)
+                  setSelectedUprn(chosen?.uprn ?? '')
+                }}
+                className="w-full px-4 py-3 rounded-xl text-sm"
+              >
                 <option value="">— Select your address —</option>
-                {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
+                {addresses.map((a, i) => <option key={i} value={a.formatted}>{a.formatted}</option>)}
               </select>
             </div>
           )}

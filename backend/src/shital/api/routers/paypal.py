@@ -165,6 +165,7 @@ class CaptureBody(BaseModel):
     gift_aid: bool = False
     gift_aid_postcode: str = ""
     gift_aid_address: str = ""
+    contact_uprn: str = ""
     items: list[dict[str, Any]] = []
 
 
@@ -205,56 +206,111 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
 
     try:
         async with SessionLocal() as db:
-            decl_id: str | None = None
             full_name = body.contact_name or f"{body.contact_first_name} {body.contact_surname}".strip()
+            email_key = body.contact_email.strip().lower() if body.contact_email.strip() else None
+
+            # ── Upsert CRM contact ──────────────────────────────────────────
+            contact_id: str | None = None
+            if email_key:
+                contact_uuid = str(uuid.uuid4())
+                c_result = await db.execute(text("""
+                    INSERT INTO contacts
+                        (id, email, first_name, surname, full_name, phone,
+                         gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                         first_source, first_branch_id, created_at, updated_at)
+                    VALUES
+                        (:id, :email, :first, :surname, :name, :phone,
+                         true, :now, true, :now,
+                         'service-portal', :branch, :now, :now)
+                    ON CONFLICT (email) DO UPDATE SET
+                        first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                        surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                        full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                        phone             = COALESCE(NULLIF(EXCLUDED.phone,''),      contacts.phone),
+                        gdpr_consent      = true,
+                        gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                        tac_consent       = true,
+                        tac_consented_at  = COALESCE(contacts.tac_consented_at,  EXCLUDED.tac_consented_at),
+                        updated_at        = EXCLUDED.updated_at
+                    RETURNING id
+                """), {
+                    "id": contact_uuid, "email": email_key,
+                    "first": body.contact_first_name or "", "surname": body.contact_surname or "",
+                    "name": full_name, "phone": body.contact_phone or "",
+                    "branch": body.branch_id, "now": now,
+                })
+                row = c_result.mappings().first()
+                contact_id = str(row["id"]) if row else contact_uuid
+
+                # ── Upsert address linked to contact ────────────────────────
+                addr_text    = body.gift_aid_address or ""
+                addr_postcode = body.gift_aid_postcode or ""
+                addr_uprn    = body.contact_uprn or ""
+                if addr_postcode or addr_text:
+                    await db.execute(text("""
+                        INSERT INTO addresses
+                            (id, contact_id, formatted, postcode, uprn,
+                             is_primary, lookup_source, created_at)
+                        VALUES (:id, :cid, :fmt, :pc, :uprn, true, 'service-portal', :now)
+                    """), {
+                        "id": str(uuid.uuid4()), "cid": contact_id,
+                        "fmt": addr_text, "pc": addr_postcode, "uprn": addr_uprn, "now": now,
+                    })
+
+            # ── Gift Aid declaration ────────────────────────────────────────
+            decl_id: str | None = None
             if body.gift_aid and full_name:
                 decl_id = str(uuid.uuid4())
                 await db.execute(text("""
                     INSERT INTO gift_aid_declarations
-                        (id, order_ref, full_name, first_name, surname, postcode, address,
+                        (id, order_ref, full_name, first_name, surname, postcode, address, uprn,
                          contact_email, contact_phone, donation_amount, donation_date,
-                         gift_aid_agreed, created_at, updated_at)
-                    VALUES (:id,:ref,:name,:first,:surname,:pc,:addr,:email,:phone,:amt,:today,true,:now,:now)
+                         gift_aid_agreed, contact_id, created_at, updated_at)
+                    VALUES (:id,:ref,:name,:first,:surname,:pc,:addr,:uprn,
+                            :email,:phone,:amt,:today,true,:cid,:now,:now)
                 """), {
-                    "id": decl_id, "ref": order_ref,
-                    "name": full_name,
+                    "id": decl_id, "ref": order_ref, "name": full_name,
                     "first": body.contact_first_name or full_name.split(" ", 1)[0],
                     "surname": body.contact_surname or (full_name.split(" ", 1)[1] if " " in full_name else ""),
-                    "pc": body.gift_aid_postcode,
-                    "addr": body.gift_aid_address, "email": body.contact_email,
-                    "phone": body.contact_phone, "amt": captured_amount,
-                    "today": now.date(), "now": now,
+                    "pc": body.gift_aid_postcode, "addr": body.gift_aid_address,
+                    "uprn": body.contact_uprn,
+                    "email": body.contact_email, "phone": body.contact_phone,
+                    "amt": captured_amount, "today": now.date(), "cid": contact_id, "now": now,
                 })
 
+            # ── Donation ledger ─────────────────────────────────────────────
             await db.execute(text("""
                 INSERT INTO donations
                     (id, branch_id, amount, currency, gift_aid_eligible, gift_aid_declaration_id,
                      purpose, reference, payment_provider, payment_ref, paypal_capture_id,
-                     status, idempotency_key, created_at, updated_at)
+                     status, contact_id, idempotency_key, created_at, updated_at)
                 VALUES (:id,:branch,:amount,'GBP',:ga,:decl_id,
-                        'Service Portal',:ref,'paypal',:paypal_id,:capture_id,'COMPLETED',:idem,:now,:now)
+                        'Service Portal',:ref,'paypal',:paypal_id,:capture_id,
+                        'COMPLETED',:cid,:idem,:now,:now)
                 ON CONFLICT (idempotency_key) DO NOTHING
             """), {
                 "id": str(uuid.uuid4()), "branch": body.branch_id, "amount": captured_amount,
-                "ga": body.gift_aid, "decl_id": decl_id,
-                "ref": order_ref, "paypal_id": body.paypal_order_id, "capture_id": capture_id,
-                "idem": f"paypal-{body.paypal_order_id}", "now": now,
+                "ga": body.gift_aid, "decl_id": decl_id, "ref": order_ref,
+                "paypal_id": body.paypal_order_id, "capture_id": capture_id,
+                "cid": contact_id, "idem": f"paypal-{body.paypal_order_id}", "now": now,
             })
 
+            # ── Order record ────────────────────────────────────────────────
             await db.execute(text("""
                 INSERT INTO orders
                     (id, branch_id, reference, status, total_amount, currency,
                      payment_provider, payment_ref, paypal_capture_id,
                      customer_name, customer_email, customer_phone,
-                     idempotency_key, created_at, updated_at)
+                     contact_id, idempotency_key, created_at, updated_at)
                 VALUES (:id,:branch,:ref,'COMPLETED',:amount,'GBP',
-                        'paypal',:paypal_id,:capture_id,:name,:email,:phone,:idem,:now,:now)
+                        'paypal',:paypal_id,:capture_id,:name,:email,:phone,
+                        :cid,:idem,:now,:now)
                 ON CONFLICT (idempotency_key) DO NOTHING
             """), {
                 "id": order_id, "branch": body.branch_id, "ref": order_ref, "amount": captured_amount,
                 "paypal_id": body.paypal_order_id, "capture_id": capture_id,
                 "name": body.contact_name, "email": body.contact_email, "phone": body.contact_phone,
-                "idem": f"paypal-order-{body.paypal_order_id}", "now": now,
+                "cid": contact_id, "idem": f"paypal-order-{body.paypal_order_id}", "now": now,
             })
             await db.commit()
     except Exception as exc:

@@ -843,6 +843,47 @@ async def _patch_schema() -> None:
         # PayPal capture transaction ID (different from the PayPal order ID)
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
         "ALTER TABLE orders    ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
+        # ── CRM: Contacts table ───────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS contacts (
+            id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            email             VARCHAR(254) UNIQUE,
+            first_name        VARCHAR(200) NOT NULL DEFAULT '',
+            surname           VARCHAR(200) NOT NULL DEFAULT '',
+            full_name         VARCHAR(400) NOT NULL DEFAULT '',
+            phone             VARCHAR(50)  NOT NULL DEFAULT '',
+            gdpr_consent      BOOLEAN      NOT NULL DEFAULT false,
+            gdpr_consented_at TIMESTAMPTZ,
+            tac_consent       BOOLEAN      NOT NULL DEFAULT false,
+            tac_consented_at  TIMESTAMPTZ,
+            first_source      VARCHAR(50)  NOT NULL DEFAULT '',
+            first_branch_id   VARCHAR(100) NOT NULL DEFAULT '',
+            created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_contacts_email   ON contacts(email)",
+        "CREATE INDEX IF NOT EXISTS idx_contacts_surname ON contacts(surname)",
+        "CREATE INDEX IF NOT EXISTS idx_contacts_created ON contacts(created_at DESC)",
+        # ── CRM: Addresses table (linked to contacts, stores UPRN) ────────────
+        """CREATE TABLE IF NOT EXISTS addresses (
+            id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            contact_id   UUID        REFERENCES contacts(id) ON DELETE CASCADE,
+            formatted    TEXT        NOT NULL DEFAULT '',
+            postcode     VARCHAR(20) NOT NULL DEFAULT '',
+            uprn         VARCHAR(20) NOT NULL DEFAULT '',
+            is_primary   BOOLEAN     NOT NULL DEFAULT true,
+            lookup_source VARCHAR(30) NOT NULL DEFAULT '',
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_addresses_contact  ON addresses(contact_id)",
+        "CREATE INDEX IF NOT EXISTS idx_addresses_postcode ON addresses(postcode)",
+        "CREATE INDEX IF NOT EXISTS idx_addresses_uprn     ON addresses(uprn) WHERE uprn != ''",
+        # ── CRM: Link contact_id into transaction tables ───────────────────────
+        "ALTER TABLE orders                       ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
+        "ALTER TABLE donations                    ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
+        "ALTER TABLE gift_aid_declarations        ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
+        # Store UPRN on gift_aid_declarations for HMRC record-keeping
+        "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS uprn VARCHAR(20) NOT NULL DEFAULT ''",
         # Seed default tiers if none exist
         """INSERT INTO recurring_giving_tiers (amount, label, description, is_active, is_default, display_order)
         SELECT * FROM (VALUES
@@ -1268,6 +1309,7 @@ _mount("shital.api.routers.recurring_payments",   "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
+_mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
 
 

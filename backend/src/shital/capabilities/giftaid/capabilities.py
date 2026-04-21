@@ -223,6 +223,10 @@ async def submit_gift_aid_claim(
         )
 
 
+def _addr(formatted: str, uprn: str = "") -> dict[str, str]:
+    return {"formatted": formatted, "uprn": uprn}
+
+
 async def _postcodes_io_fallback(postcode: str, reason: str = "") -> dict[str, Any]:
     """Fallback to postcodes.io (free, no API key) when getAddress.io is unavailable.
     Returns street-level addresses based on the postcode's locality data."""
@@ -235,25 +239,19 @@ async def _postcodes_io_fallback(postcode: str, reason: str = "") -> dict[str, A
             town = data.get("admin_ward", "") or data.get("parish", "") or data.get("admin_district", "") or ""
             county = data.get("admin_county", "") or data.get("admin_district", "") or ""
             pc = data.get("postcode", postcode.upper().strip())
-            # Build a set of plausible address stubs — user can still type house number
-            addresses = [
-                f"{town}, {county}, {pc}".replace(", ,", ",").strip(", "),
-            ]
-            # Also return a prompt-style entry so the user knows to type their number
             return {
                 "postcode": pc,
-                "addresses": addresses,
+                "addresses": [_addr(f"{town}, {county}, {pc}".replace(", ,", ",").strip(", "))],
                 "source": "postcodes_io",
                 "note": reason,
             }
     except Exception:
         pass
-    # Last resort — return empty so frontend shows manual text input
     return {"postcode": postcode, "addresses": [], "error": reason}
 
 
 async def _ideal_postcodes_lookup(postcode: str, api_key: str) -> dict[str, Any]:
-    """Look up UK addresses via Ideal Postcodes API."""
+    """Look up UK addresses via Ideal Postcodes API (returns UPRN per address)."""
     clean = postcode.strip().upper().replace(" ", "")
     url = f"https://api.ideal-postcodes.co.uk/v1/postcodes/{clean}?api_key={api_key}"
     try:
@@ -277,7 +275,7 @@ async def _ideal_postcodes_lookup(postcode: str, api_key: str) -> dict[str, Any]
             ]
             formatted = ", ".join(p for p in parts if p)
             if formatted:
-                addresses.append(formatted)
+                addresses.append(_addr(formatted, uprn=str(r.get("uprn", "") or "")))
         if not addresses:
             return await _postcodes_io_fallback(postcode, reason="ideal-postcodes returned empty")
         return {"postcode": clean, "addresses": addresses, "source": "ideal_postcodes"}
@@ -319,9 +317,9 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
             "source": "mock",
         }
 
-    # getAddress.io requires lowercase postcode with NO space (e.g. "hp79nq")
+    # getAddress.io — use expand=true to get structured results with UPRN
     clean = postcode.strip().lower().replace(" ", "")
-    url = f"https://api.getaddress.io/find/{clean}?api-key={api_key}"
+    url = f"https://api.getaddress.io/find/{clean}?api-key={api_key}&expand=true"
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -344,7 +342,7 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
             if isinstance(a, str):
                 parts = [p.strip() for p in a.split(",") if p.strip()]
                 parts.append(pc)
-                addresses.append(", ".join(parts))
+                addresses.append(_addr(", ".join(parts)))
             elif isinstance(a, dict):
                 parts = [
                     a.get("line_1", ""), a.get("line_2", ""), a.get("line_3", ""),
@@ -352,7 +350,8 @@ async def lookup_postcode(ctx: DigitalSpace, postcode: str) -> dict[str, Any]:
                 ]
                 formatted = ", ".join(p for p in parts if p)
                 if formatted:
-                    addresses.append(formatted)
+                    uprn = str(a.get("uprn", "") or "")
+                    addresses.append(_addr(formatted, uprn=uprn))
 
         if not addresses:
             return await _postcodes_io_fallback(postcode, reason="getAddress returned empty")
