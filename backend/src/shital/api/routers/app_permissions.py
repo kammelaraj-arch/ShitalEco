@@ -16,7 +16,7 @@ from shital.api.deps import RequiredSpace
 router = APIRouter(prefix="/settings/app-permissions", tags=["settings"])
 
 # All platform apps with their metadata
-PLATFORM_APPS = [
+PLATFORM_APPS: list[dict[str, Any]] = [
     {"slug": "admin",       "name": "Business App",       "description": "Full ERP — finance, HR, payroll, Gift Aid, catalog, compliance, AI tools.", "url": "/admin/", "icon": "⚙️", "color": "#3B82F6"},
     {"slug": "kiosk",       "name": "Kiosk",              "description": "Touch-screen kiosk — donations, services, shop & bookings in 3 languages.", "url": "/kiosk/", "icon": "🖥️", "color": "#FF9933"},
     {"slug": "donate",      "name": "Quick Donation",     "description": "Fast walk-up donation terminal. Card payments with Gift Aid capture.",       "url": "/donate/","icon": "🙏", "color": "#F59E0B"},
