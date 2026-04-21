@@ -140,7 +140,7 @@ jobs:
       - name: Set image tag
         id: tag
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/claude/shital-erp-platform-iR2UF" ]; then
             echo "tag=latest" >> $GITHUB_OUTPUT
           else
             echo "tag=dev" >> $GITHUB_OUTPUT
@@ -204,6 +204,20 @@ jobs:
           build-args: GIT_SHA=${{ github.sha }}
           cache-from: type=gha,scope=screen
           cache-to: type=gha,scope=screen,mode=max
+
+      - name: Build & push service
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/service/Dockerfile
+          push: true
+          tags: ghcr.io/kammelaraj-arch/shitaleco-service:${{ steps.tag.outputs.tag }}
+          build-args: |
+            VITE_API_URL=/api/v1
+            VITE_BASE=/
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=service
+          cache-to: type=gha,scope=service,mode=max
 
 
       - name: Trigger production deploy (main only)
