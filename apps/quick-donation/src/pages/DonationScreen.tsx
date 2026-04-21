@@ -192,7 +192,7 @@ function GiftAidForm({
 }
 
 export function DonationScreen() {
-  const { setScreen, setAmount, branchId, showMonthlyGiving, enableGiftAid, donateTitle } = useDonationStore()
+  const { setScreen, setAmount, branchId, showMonthlyGiving, enableGiftAid, donateTitle, monthlyGivingText, monthlyGivingAmount } = useDonationStore()
 
   const [tiles, setTiles]         = useState<AmountTile[]>([])
   const [loading, setLoading]     = useState(true)
@@ -301,7 +301,7 @@ export function DonationScreen() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: 'rgba(74,222,128,0.7)' }}>Monthly Giving</p>
-              <p className="text-sm font-black leading-snug" style={{ color: '#4ade80' }}>Make a big impact from just £5/month</p>
+              <p className="text-sm font-black leading-snug" style={{ color: '#4ade80' }}>{monthlyGivingText || `Make a big impact from just £${monthlyGivingAmount}/month`}</p>
               <p className="text-[10px]" style={{ color: 'rgba(74,222,128,0.55)' }}>Regular giving · Cancel anytime · Secure PayPal</p>
             </div>
             <span className="text-white/30 text-lg flex-shrink-0">›</span>

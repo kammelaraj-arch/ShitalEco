@@ -19,12 +19,14 @@ export interface DonationState {
   enableGiftAid: boolean
   tapAndGo: boolean
   donateTitle: string
+  monthlyGivingText: string
+  monthlyGivingAmount: number
 
   setScreen: (screen: Screen) => void
   setAmount: (amount: number) => void
   setBranchId: (id: string) => void
   setReader: (readerId: string, label: string) => void
-  setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string }) => void
+  setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   reset: () => void
 }
@@ -46,6 +48,8 @@ export const useDonationStore = create<DonationState>()(
       enableGiftAid: false,
       tapAndGo: true,
       donateTitle: 'Tap & Donate',
+      monthlyGivingText: 'Make a big impact from just £5/month',
+      monthlyGivingAmount: 5,
 
       setScreen: (screen) => set({ screen }),
       setAmount: (amount) => set({ amount }),
@@ -75,6 +79,8 @@ export const useDonationStore = create<DonationState>()(
         enableGiftAid: state.enableGiftAid,
         tapAndGo: state.tapAndGo,
         donateTitle: state.donateTitle,
+        monthlyGivingText: state.monthlyGivingText,
+        monthlyGivingAmount: state.monthlyGivingAmount,
       }),
     }
   )

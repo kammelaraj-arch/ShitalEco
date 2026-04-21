@@ -31,6 +31,8 @@ interface KioskDevice {
   org_logo_url: string
   device_username: string | null
   donate_title?: string
+  monthly_giving_text?: string
+  monthly_giving_amount?: number
   show_monthly_giving: boolean
   enable_gift_aid: boolean
   tap_and_go: boolean
@@ -75,6 +77,8 @@ const EMPTY_FORM = {
   device_username: '', device_password: '',
   show_monthly_giving: false, enable_gift_aid: false, tap_and_go: true,
   donate_title: 'Tap & Donate',
+  monthly_giving_text: 'Make a big impact from just £5/month',
+  monthly_giving_amount: 5,
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -171,6 +175,8 @@ export default function DevicesPage() {
       enable_gift_aid: d.enable_gift_aid ?? false,
       tap_and_go: d.tap_and_go ?? true,
       donate_title: d.donate_title || 'Tap & Donate',
+      monthly_giving_text: d.monthly_giving_text || 'Make a big impact from just £5/month',
+      monthly_giving_amount: d.monthly_giving_amount ?? 5,
     })
     setError('')
     setDrawerOpen(true)
@@ -618,10 +624,35 @@ export default function DevicesPage() {
                       <p className="text-white/30 text-[10px] mt-1">Shown as the main heading on the donation screen</p>
                     </div>
 
+                    {/* Monthly Giving text + amount — shown when toggle is on */}
+                    {form.show_monthly_giving && (
+                      <div className="space-y-3 pt-1 pl-1" style={{ borderLeft: '2px solid rgba(74,222,128,0.25)' }}>
+                        <div>
+                          <p className={lbl}>Banner Text</p>
+                          <input
+                            className={inp}
+                            value={form.monthly_giving_text}
+                            onChange={e => setForm(f => ({ ...f, monthly_giving_text: e.target.value }))}
+                            placeholder="Make a big impact from just £5/month"
+                          />
+                        </div>
+                        <div>
+                          <p className={lbl}>Monthly Amount (£)</p>
+                          <input
+                            type="number" min="1" step="0.5"
+                            className={inp}
+                            value={form.monthly_giving_amount}
+                            onChange={e => setForm(f => ({ ...f, monthly_giving_amount: parseFloat(e.target.value) || 5 }))}
+                          />
+                          <p className="text-white/30 text-[10px] mt-1">Shown as the starting price in the banner</p>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Feature toggles */}
                     <div className="space-y-2.5 pt-1">
                       {([
-                        { key: 'show_monthly_giving' as const, label: 'Display Monthly Giving banner', desc: 'Show "Make a big impact from £5/month" promo above tiles' },
+                        { key: 'show_monthly_giving' as const, label: 'Display Monthly Giving banner', desc: 'Show monthly giving promo above tiles' },
                         { key: 'enable_gift_aid'      as const, label: 'Enable Gift Aid collection',   desc: 'Ask UK taxpayers to claim Gift Aid after tapping a tile' },
                         { key: 'tap_and_go'           as const, label: 'Just Tap & Go (no extras)',    desc: 'Tap tile → tap card directly — no gift aid, no extras' },
                       ] as const).map(({ key, label, desc }) => (

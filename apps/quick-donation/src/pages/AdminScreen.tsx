@@ -18,6 +18,8 @@ interface LoginResponse {
   enable_gift_aid?: boolean
   tap_and_go?: boolean
   donate_title?: string
+  monthly_giving_text?: string
+  monthly_giving_amount?: number
 }
 
 interface AzureConfig { client_id: string; authority: string }
@@ -58,6 +60,8 @@ export function AdminScreen() {
       enableGiftAid: data.enable_gift_aid ?? false,
       tapAndGo: data.tap_and_go ?? true,
       donateTitle: data.donate_title ?? 'Tap & Donate',
+      monthlyGivingText: data.monthly_giving_text ?? 'Make a big impact from just £5/month',
+      monthlyGivingAmount: data.monthly_giving_amount ?? 5,
     })
     setLoggedInName(data.user?.name || username)
     setLoggedIn(true)
