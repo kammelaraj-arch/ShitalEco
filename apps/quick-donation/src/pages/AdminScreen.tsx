@@ -17,6 +17,7 @@ interface LoginResponse {
   show_monthly_giving?: boolean
   enable_gift_aid?: boolean
   tap_and_go?: boolean
+  donate_title?: string
 }
 
 interface AzureConfig { client_id: string; authority: string }
@@ -56,6 +57,7 @@ export function AdminScreen() {
       showMonthlyGiving: data.show_monthly_giving ?? false,
       enableGiftAid: data.enable_gift_aid ?? false,
       tapAndGo: data.tap_and_go ?? true,
+      donateTitle: data.donate_title ?? 'Tap & Donate',
     })
     setLoggedInName(data.user?.name || username)
     setLoggedIn(true)

@@ -30,6 +30,7 @@ interface KioskDevice {
   org_name: string
   org_logo_url: string
   device_username: string | null
+  donate_title?: string
   show_monthly_giving: boolean
   enable_gift_aid: boolean
   tap_and_go: boolean
@@ -73,6 +74,7 @@ const EMPTY_FORM = {
   org_name: '', org_logo_url: '',
   device_username: '', device_password: '',
   show_monthly_giving: false, enable_gift_aid: false, tap_and_go: true,
+  donate_title: 'Tap & Donate',
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -168,6 +170,7 @@ export default function DevicesPage() {
       show_monthly_giving: d.show_monthly_giving ?? false,
       enable_gift_aid: d.enable_gift_aid ?? false,
       tap_and_go: d.tap_and_go ?? true,
+      donate_title: d.donate_title || 'Tap & Donate',
     })
     setError('')
     setDrawerOpen(true)
@@ -601,6 +604,18 @@ export default function DevicesPage() {
                         onChange={e => setForm(f => ({ ...f, default_donate_amount: parseFloat(e.target.value) || 5 }))}
                       />
                       <p className="text-white/30 text-[10px] mt-1">This tile is pre-selected when the device starts up</p>
+                    </div>
+
+                    {/* Screen title */}
+                    <div>
+                      <p className={lbl}>Screen Title</p>
+                      <input
+                        className={inp}
+                        value={form.donate_title}
+                        onChange={e => setForm(f => ({ ...f, donate_title: e.target.value }))}
+                        placeholder="Tap & Donate"
+                      />
+                      <p className="text-white/30 text-[10px] mt-1">Shown as the main heading on the donation screen</p>
                     </div>
 
                     {/* Feature toggles */}

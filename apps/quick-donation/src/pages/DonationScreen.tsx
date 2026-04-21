@@ -192,7 +192,7 @@ function GiftAidForm({
 }
 
 export function DonationScreen() {
-  const { setScreen, setAmount, branchId, showMonthlyGiving, enableGiftAid } = useDonationStore()
+  const { setScreen, setAmount, branchId, showMonthlyGiving, enableGiftAid, donateTitle } = useDonationStore()
 
   const [tiles, setTiles]         = useState<AmountTile[]>([])
   const [loading, setLoading]     = useState(true)
@@ -278,7 +278,7 @@ export function DonationScreen() {
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="px-6 pt-6 pb-3 flex-shrink-0 flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-black text-gold-gradient">Tap &amp; Donate</h1>
+          <h1 className="text-4xl font-black text-gold-gradient">{donateTitle || 'Tap & Donate'}</h1>
           <p className="text-saffron-400/60 text-base mt-0.5">Tap an amount to donate</p>
         </div>
         {enableGiftAid && (

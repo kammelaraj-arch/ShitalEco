@@ -1373,7 +1373,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         dev_res = await db.execute(
             text("""
                 SELECT kd.id, kd.name, kd.branch_id, kd.device_password_hash,
-                       kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
+                       kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go, kd.donate_title,
                        kd.card_reader_id,
                        td.stripe_reader_id, td.label AS reader_label,
                        b.name AS branch_name
@@ -1402,6 +1402,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "show_monthly_giving": bool(device["show_monthly_giving"]),
             "enable_gift_aid": bool(device["enable_gift_aid"]),
             "tap_and_go": bool(device["tap_and_go"]),
+            "donate_title": device["donate_title"] or "Tap & Donate",
         }
 
     # ── Path 2: Legacy user-table login (quickkiosk-* accounts) ──────────────
@@ -1461,11 +1462,11 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     # Look up card reader from admin Devices page for this branch
     device_reader_id = None
     device_reader_label = None
-    dev_flags: dict = {"show_monthly_giving": False, "enable_gift_aid": False, "tap_and_go": True}
+    dev_flags: dict = {"show_monthly_giving": False, "enable_gift_aid": False, "tap_and_go": True, "donate_title": "Tap & Donate"}
     async with SessionLocal() as db:
         dev_res = await db.execute(
             text("""
-                SELECT kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
+                SELECT kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go, kd.donate_title,
                        td.stripe_reader_id, td.label AS reader_label
                 FROM kiosk_devices kd
                 LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
@@ -1487,6 +1488,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 "show_monthly_giving": bool(dev_row["show_monthly_giving"]),
                 "enable_gift_aid": bool(dev_row["enable_gift_aid"]),
                 "tap_and_go": bool(dev_row["tap_and_go"]),
+                "donate_title": dev_row["donate_title"] or "Tap & Donate",
             }
 
     effective_reader_id = device_reader_id or (profile.get("stripe_reader_id") if profile else None)
