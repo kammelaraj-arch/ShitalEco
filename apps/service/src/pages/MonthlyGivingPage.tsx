@@ -9,6 +9,13 @@ import {
 import { useStore } from '../store'
 import { api, type GivingTier } from '../api'
 
+const DEFAULT_TIERS: GivingTier[] = [
+  { id: 'default-5',  amount: 5,  label: 'Lamp Supporter',  description: 'Supports daily lamp lighting at the temple',   frequency: 'MONTH', is_default: false, display_order: 1 },
+  { id: 'default-11', amount: 11, label: 'Prasad Patron',   description: 'Provides weekly prasad offering to devotees',  frequency: 'MONTH', is_default: true,  display_order: 2 },
+  { id: 'default-21', amount: 21, label: 'Puja Sponsor',    description: 'Sponsors a monthly puja ceremony',             frequency: 'MONTH', is_default: false, display_order: 3 },
+  { id: 'default-51', amount: 51, label: 'Festival Friend', description: 'Helps cover special festival and event costs', frequency: 'MONTH', is_default: false, display_order: 4 },
+]
+
 const PayPalScriptProvider = _PPP as ComponentType<{ options: ReactPayPalScriptOptions; children: React.ReactNode }>
 const PayPalButtons = _PPB as ComponentType<PayPalButtonsComponentProps>
 
@@ -38,8 +45,9 @@ export function MonthlyGivingPage() {
   useEffect(() => {
     Promise.all([
       api.givingTiers().then(d => {
-        setTiers(d.tiers)
-        const def = d.tiers.find(t => t.is_default) ?? d.tiers[0]
+        const tiers = d.tiers.length > 0 ? d.tiers : DEFAULT_TIERS
+        setTiers(tiers)
+        const def = tiers.find(t => t.is_default) ?? tiers[0]
         if (def) setSelected(def)
       }),
       api.paypalConfig().then(cfg => setClientId(cfg.client_id)),

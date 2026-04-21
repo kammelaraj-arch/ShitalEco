@@ -35,6 +35,8 @@ jobs:
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          PAYPAL_CLIENT_ID: ${{ secrets.PAYPAL_CLIENT_ID }}
+          PAYPAL_CLIENT_SECRET: ${{ secrets.PAYPAL_CLIENT_SECRET }}
         with:
           host: 192.248.147.205
           username: root
@@ -42,7 +44,7 @@ jobs:
           port: 22
           timeout: 600s
           command_timeout: 10m
-          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,PAYPAL_CLIENT_ID,PAYPAL_CLIENT_SECRET
           script: |
             set -e
 
@@ -91,6 +93,8 @@ jobs:
             inject MS_CLIENT_ID           "$MS_CLIENT_ID"
             inject MS_TENANT_ID           "$MS_TENANT_ID"
             inject MS_CLIENT_SECRET       "$MS_CLIENT_SECRET"
+            inject PAYPAL_CLIENT_ID       "$PAYPAL_CLIENT_ID"
+            inject PAYPAL_CLIENT_SECRET   "$PAYPAL_CLIENT_SECRET"
             inject GITHUB_TOKEN           "$GH_PAT"
             inject CORS_ORIGINS           "https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,https://dev.shital.org.uk"
             inject MS_REDIRECT_URI        "https://admin.shital.org.uk/auth-callback"

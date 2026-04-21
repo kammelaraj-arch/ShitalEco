@@ -50,6 +50,9 @@ services:
       MS_TENANT_ID: ${MS_TENANT_ID:-}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
       MS_REDIRECT_URI: ${MS_REDIRECT_URI:-https://admin.shital.org.uk/auth-callback}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      PAYPAL_ENV: ${PAYPAL_ENV:-live}
     volumes:
       - /opt/shitaleco/backups:/opt/shitaleco/backups
     depends_on:
