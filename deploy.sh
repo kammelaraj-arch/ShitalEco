@@ -78,7 +78,9 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 step "[1/8] Checking system dependencies"
 
-if ! command -v docker &>/dev/null; then
+if [ "$MODE" = "update" ]; then
+  ok "Skipping Docker install (--update mode)"
+elif ! command -v docker &>/dev/null; then
   info "Installing Docker..."
   apt-get update -q
   apt-get install -y -q ca-certificates curl gnupg git ufw
@@ -92,11 +94,11 @@ if ! command -v docker &>/dev/null; then
   apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
   systemctl enable --now docker
   ok "Docker installed"
-else
+elif [ "$MODE" != "update" ]; then
   ok "Docker $(docker --version | grep -oP '[\d.]+ '| head -1) already installed"
 fi
 
-if ! command -v git &>/dev/null; then
+if [ "$MODE" != "update" ] && ! command -v git &>/dev/null; then
   apt-get install -y -q git
 fi
 
