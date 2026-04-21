@@ -235,6 +235,16 @@ async def _patch_schema() -> None:
             updated_by  VARCHAR(200) NOT NULL DEFAULT ''
         )""",
         "CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys_store(group_name)",
+        # App settings (key/value config store — also created by migration 003)
+        """CREATE TABLE IF NOT EXISTS app_settings (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            key         VARCHAR(100) NOT NULL UNIQUE,
+            value       TEXT NOT NULL DEFAULT '',
+            description TEXT,
+            is_secret   BOOLEAN NOT NULL DEFAULT false,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
         # ── Smart Screen ─────────────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS screen_content_items (
             id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

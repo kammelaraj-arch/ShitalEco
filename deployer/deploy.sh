@@ -23,7 +23,7 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 fi
 
 # ── Checkpoint: tag :latest as :previous before pulling ─────────────────────
-for svc in backend admin quick-donation kiosk screen; do
+for svc in backend admin quick-donation kiosk screen service; do
   docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
              ghcr.io/kammelaraj-arch/shitaleco-${svc}:previous 2>/dev/null || true
 done
@@ -31,6 +31,8 @@ done
 # ── Pull new images from GHCR (built by CI, not here) ───────────────────────
 echo "=== Pulling images from GHCR ==="
 docker compose -f docker-compose.prod.yml pull backend admin quick-donation kiosk screen
+docker compose -f docker-compose.prod.yml pull service 2>/dev/null || \
+  echo "service image not yet in GHCR — skipping pull"
 
 # ── Prune old dangling images immediately ───────────────────────────────────
 docker image prune -f
@@ -66,6 +68,8 @@ curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
 # ── Frontend rollout ─────────────────────────────────────────────────────────
 echo "=== Rolling restart: frontends ==="
 docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
+docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate service 2>/dev/null || \
+  echo "service container not yet available — skipping"
 
 echo "Waiting for admin..."
 for i in $(seq 1 20); do
@@ -103,7 +107,7 @@ if [ "$SMOKE_FAIL" -ne 0 ]; then
 fi
 
 # ── Tag :latest as :dev and refresh dev stack ────────────────────────────────
-for svc in backend admin quick-donation kiosk screen; do
+for svc in backend admin quick-donation kiosk screen service; do
   docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
              ghcr.io/kammelaraj-arch/shitaleco-${svc}:dev 2>/dev/null || true
 done
