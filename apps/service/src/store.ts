@@ -56,6 +56,10 @@ export interface ContactInfo {
   gdprConsent: boolean
   termsConsent: boolean
   anonymous: boolean
+  firstName?: string
+  surname?: string
+  postcode?: string
+  address?: string
 }
 
 export interface OrderResult {

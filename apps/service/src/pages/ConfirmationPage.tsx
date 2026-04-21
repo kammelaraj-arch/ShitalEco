@@ -122,15 +122,28 @@ export function ConfirmationPage() {
         </p>
       </motion.div>
 
-      <motion.p
+      <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 1.1 }}
-        className="font-display text-xs mt-10"
-        style={{ color: 'rgba(212,175,55,0.3)' }}
+        className="mt-8 space-y-1"
       >
-        🕉 Shri Shirdi Saibaba Temple · SHITAL · UK Registered Charity
-      </motion.p>
+        <p className="font-display text-xs" style={{ color: 'rgba(212,175,55,0.3)' }}>
+          🕉 Shri Shirdi Saibaba Temple · SHITAL · UK Registered Charity
+        </p>
+        <p className="text-xs" style={{ color: 'rgba(255,248,220,0.2)' }}>
+          By donating you agreed to our{' '}
+          <a href="https://shital.org.uk/terms" target="_blank" rel="noopener noreferrer"
+            style={{ color: 'rgba(212,175,55,0.4)', textDecoration: 'underline' }}>
+            Terms &amp; Conditions
+          </a>
+          {' '}and{' '}
+          <a href="https://shital.org.uk/privacy" target="_blank" rel="noopener noreferrer"
+            style={{ color: 'rgba(212,175,55,0.4)', textDecoration: 'underline' }}>
+            Privacy Policy
+          </a>
+        </p>
+      </motion.div>
     </div>
   )
 }

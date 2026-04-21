@@ -51,16 +51,16 @@ export function PaymentPage() {
 
   const handleCreateOrder = useCallback(async (): Promise<string> => {
     const desc = items.slice(0, 3).map(i => i.name).join(', ') || 'Shital Temple Donation'
-    const firstName = giftAidDeclaration?.firstName || ''
-    const surname   = giftAidDeclaration?.surname   || ''
+    const firstName = giftAidDeclaration?.firstName || contactInfo?.firstName || contactInfo?.name?.split(' ')[0] || ''
+    const surname   = giftAidDeclaration?.surname   || contactInfo?.surname   || contactInfo?.name?.split(' ').slice(1).join(' ') || ''
     return api.paypalCreateOrder(total, desc, branchId, {
-      contact_first_name: firstName || contactInfo?.name?.split(' ')[0] || '',
-      contact_surname:    surname   || contactInfo?.name?.split(' ').slice(1).join(' ') || '',
+      contact_first_name: firstName,
+      contact_surname:    surname,
       contact_name:       firstName && surname ? `${firstName} ${surname}` : contactInfo?.name || '',
       contact_email:      giftAidDeclaration?.contactEmail || contactInfo?.email || '',
       contact_phone:      giftAidDeclaration?.contactPhone || contactInfo?.phone || '',
-      contact_postcode:   giftAidDeclaration?.postcode || '',
-      contact_address:    giftAidDeclaration?.address  || '',
+      contact_postcode:   giftAidDeclaration?.postcode || contactInfo?.postcode || '',
+      contact_address:    giftAidDeclaration?.address  || contactInfo?.address  || '',
     })
   }, [total, branchId, items, contactInfo, giftAidDeclaration])
 
@@ -68,21 +68,21 @@ export function PaymentPage() {
     setCapturing(true)
     setError('')
     try {
-      const gaFirst = giftAidDeclaration?.firstName || ''
-      const gaSurname = giftAidDeclaration?.surname || ''
-      const fullName = gaFirst && gaSurname ? `${gaFirst} ${gaSurname}` : contactInfo?.name || ''
+      const gaFirst   = giftAidDeclaration?.firstName || contactInfo?.firstName || ''
+      const gaSurname = giftAidDeclaration?.surname   || contactInfo?.surname   || ''
+      const fullName  = gaFirst && gaSurname ? `${gaFirst} ${gaSurname}` : contactInfo?.name || ''
       const result = await api.paypalCapture({
         paypal_order_id: data.orderID,
         amount: total,
         branch_id: branchId,
         contact_name:       fullName,
-        contact_first_name: gaFirst  || contactInfo?.name?.split(' ')[0] || '',
+        contact_first_name: gaFirst   || contactInfo?.name?.split(' ')[0] || '',
         contact_surname:    gaSurname || contactInfo?.name?.split(' ').slice(1).join(' ') || '',
         contact_email:      giftAidDeclaration?.contactEmail || contactInfo?.email || '',
         contact_phone:      giftAidDeclaration?.contactPhone || contactInfo?.phone || '',
         gift_aid:           giftAidDeclaration?.agreed ?? false,
-        gift_aid_postcode:  giftAidDeclaration?.postcode || '',
-        gift_aid_address:   giftAidDeclaration?.address  || '',
+        gift_aid_postcode:  giftAidDeclaration?.postcode || contactInfo?.postcode || '',
+        gift_aid_address:   giftAidDeclaration?.address  || contactInfo?.address  || '',
       })
       if (result.success) {
         setOrderResult({

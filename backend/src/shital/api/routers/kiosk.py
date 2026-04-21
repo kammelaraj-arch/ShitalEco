@@ -843,7 +843,10 @@ async def send_receipt(body: ReceiptInput):
     <p style="color:#FF9933;font-size:18px;font-weight:900;text-align:center;">🙏 Jay Shri Krishna</p>
   </td></tr>
   <tr><td style="background:#f9f9f9;padding:16px;text-align:center;font-size:12px;color:#999;">
-    {body.branch_name} · Registered UK Charity
+    {body.branch_name} · Registered UK Charity<br>
+    <a href="https://shital.org.uk/terms" style="color:#FF9933;text-decoration:none;">Terms &amp; Conditions</a>
+    &nbsp;·&nbsp;
+    <a href="https://shital.org.uk/privacy" style="color:#FF9933;text-decoration:none;">Privacy Policy</a>
   </td></tr>
 </table></td></tr></table></body></html>"""
         text = (
@@ -851,7 +854,7 @@ async def send_receipt(body: ReceiptInput):
             + (f"Dear {body.customer_name},\n\n" if body.customer_name else "")
             + f"Thank you for your generous donation!\n\nOrder: {body.order_ref}\nDate: {variables['date']}\n\n"
             + "\n".join(f"- {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}" for i in body.items)
-            + f"\n\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}"
+            + f"\n\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}\n\nTerms & Conditions: https://shital.org.uk/terms\nPrivacy Policy: https://shital.org.uk/privacy"
         )
         return subj, html, text
 

@@ -38,16 +38,22 @@ export function GiftAidPage() {
   const [gaTerms,         setGaTerms]         = useState(false)
 
   // No-form (without Gift Aid)
-  const [anonymous, setAnonymous] = useState(false)
-  const [noName,    setNoName]    = useState(contactInfo?.name  || '')
-  const [noEmail,   setNoEmail]   = useState(contactInfo?.email || '')
-  const [noPhone,   setNoPhone]   = useState(contactInfo?.phone || '')
-  const [noGdpr,    setNoGdpr]    = useState(false)
-  const [noTerms,   setNoTerms]   = useState(false)
+  const [anonymous,        setAnonymous]        = useState(false)
+  const [noFirstName,      setNoFirstName]      = useState(contactInfo?.firstName || '')
+  const [noSurname,        setNoSurname]        = useState(contactInfo?.surname   || '')
+  const [noEmail,          setNoEmail]          = useState(contactInfo?.email     || '')
+  const [noPhone,          setNoPhone]          = useState(contactInfo?.phone     || '')
+  const [noPostcode,       setNoPostcode]       = useState('')
+  const [noAddresses,      setNoAddresses]      = useState<string[]>([])
+  const [noSelectedAddr,   setNoSelectedAddr]   = useState('')
+  const [noLookingUp,      setNoLookingUp]      = useState(false)
+  const [noAddrError,      setNoAddrError]      = useState('')
+  const [noGdpr,           setNoGdpr]           = useState(false)
+  const [noTerms,          setNoTerms]          = useState(false)
 
   const [error, setError] = useState('')
 
-  const noHasData    = !!(noName.trim() || noEmail.trim() || noPhone.trim())
+  const noHasData    = !!(noFirstName.trim() || noSurname.trim() || noEmail.trim() || noPhone.trim())
   const formValid    = firstName.trim().length > 0 && surname.trim().length > 0 && selectedAddress.length > 3 && agreed && gaTerms && (email.trim() || phone.trim())
   const noFormValid  = anonymous || !noHasData || (noGdpr && noTerms)
 
@@ -76,12 +82,30 @@ export function GiftAidPage() {
     setScreen('payment')
   }
 
+  async function lookupNoPostcode() {
+    setNoAddrError('')
+    if (!noPostcode.trim()) return
+    setNoLookingUp(true)
+    const found = await api.lookupPostcode(noPostcode)
+    setNoLookingUp(false)
+    if (!found.length) setNoAddrError('No addresses found — check your postcode.')
+    else setNoAddresses(found)
+  }
+
   function proceedWithout() {
-    const n = anonymous ? '' : noName.trim()
-    const e = anonymous ? '' : noEmail.trim()
-    const p = anonymous ? '' : noPhone.trim()
+    const fn   = anonymous ? '' : noFirstName.trim()
+    const sn   = anonymous ? '' : noSurname.trim()
+    const n    = [fn, sn].filter(Boolean).join(' ')
+    const e    = anonymous ? '' : noEmail.trim()
+    const p    = anonymous ? '' : noPhone.trim()
+    const pc   = anonymous ? '' : noPostcode.trim()
+    const addr = anonymous ? '' : noSelectedAddr
     setGiftAidDeclaration(DECLINED)
-    setContactInfo({ name: n, email: e, phone: p, gdprConsent: !anonymous && noGdpr, termsConsent: !anonymous && noTerms, anonymous })
+    setContactInfo({
+      name: n, firstName: fn, surname: sn,
+      email: e, phone: p, postcode: pc, address: addr,
+      gdprConsent: !anonymous && noGdpr, termsConsent: !anonymous && noTerms, anonymous,
+    })
     setScreen('payment')
   }
 
@@ -294,10 +318,17 @@ export function GiftAidPage() {
 
             {!anonymous && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Full Name</label>
-                  <input type="text" value={noName} onChange={e => setNoName(e.target.value)}
-                    placeholder="Your name (optional)" className="w-full px-4 py-3 rounded-xl text-sm" />
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>First Name</label>
+                    <input type="text" value={noFirstName} onChange={e => setNoFirstName(e.target.value)}
+                      placeholder="First name" className="w-full px-4 py-3 rounded-xl text-sm" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Surname</label>
+                    <input type="text" value={noSurname} onChange={e => setNoSurname(e.target.value)}
+                      placeholder="Surname" className="w-full px-4 py-3 rounded-xl text-sm" />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Email</label>
@@ -310,6 +341,34 @@ export function GiftAidPage() {
                   <input type="tel" value={noPhone} onChange={e => setNoPhone(e.target.value)}
                     placeholder="+44 7700 000 000" className="w-full px-4 py-3 rounded-xl text-sm" />
                 </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>
+                    UK Postcode{' '}
+                    <span style={{ color: 'rgba(212,175,55,0.4)', fontWeight: 400, textTransform: 'none', letterSpacing: 0, fontSize: '10px' }}>(optional)</span>
+                  </label>
+                  <div className="flex gap-2">
+                    <input type="text" value={noPostcode}
+                      onChange={e => { setNoPostcode(e.target.value.toUpperCase()); setNoAddresses([]); setNoSelectedAddr('') }}
+                      onKeyDown={e => e.key === 'Enter' && lookupNoPostcode()}
+                      placeholder="e.g. HA9 0BB" className="flex-1 px-4 py-3 rounded-xl text-sm uppercase" />
+                    <button onClick={lookupNoPostcode} disabled={noLookingUp || !noPostcode.trim()}
+                      className="px-4 py-3 rounded-xl font-bold text-sm disabled:opacity-40"
+                      style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#6B0000' }}>
+                      {noLookingUp ? '…' : 'Find'}
+                    </button>
+                  </div>
+                  {noAddrError && <p className="text-xs mt-1" style={{ color: '#f87171' }}>{noAddrError}</p>}
+                </div>
+                {noAddresses.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Select Address</label>
+                    <select value={noSelectedAddr} onChange={e => setNoSelectedAddr(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl text-sm">
+                      <option value="">— Select your address —</option>
+                      {noAddresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 {noHasData && (
                   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3 pt-1">

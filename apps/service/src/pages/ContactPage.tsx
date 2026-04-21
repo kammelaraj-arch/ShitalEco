@@ -1,13 +1,20 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useStore, useGiftAidTotal, t } from '../store'
+import { api } from '../api'
 
 export function ContactPage() {
   const { language, setScreen, setContactInfo, giftAidDeclaration, items } = useStore()
   const giftAidTotal = useGiftAidTotal()
-  const [name, setName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [surname, setSurname] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
+  const [postcode, setPostcode] = useState('')
+  const [addresses, setAddresses] = useState<string[]>([])
+  const [selectedAddress, setSelectedAddress] = useState('')
+  const [lookingUp, setLookingUp] = useState(false)
+  const [addressError, setAddressError] = useState('')
   const [anonymous, setAnonymous] = useState(false)
   const [gdpr, setGdpr] = useState(false)
   const [terms, setTerms] = useState(false)
@@ -17,18 +24,30 @@ export function ContactPage() {
   const requiresContact = items.some((i) =>
     ['SOFT_DONATION', 'PROJECT_DONATION', 'SPONSORSHIP', 'SHOP'].includes(i.category || '')
   )
+  const hasData = !!(firstName.trim() || surname.trim() || email.trim() || phone.trim())
+  const name = [firstName.trim(), surname.trim()].filter(Boolean).join(' ')
+
+  async function lookupPostcode() {
+    setAddressError('')
+    if (!postcode.trim()) return
+    setLookingUp(true)
+    const found = await api.lookupPostcode(postcode)
+    setLookingUp(false)
+    if (!found.length) setAddressError('No addresses found — check your postcode.')
+    else setAddresses(found)
+  }
 
   function validate() {
     if (anonymous) return true
-    if (requiresContact && !name.trim()) {
-      setError('Please enter your name')
+    if (requiresContact && !firstName.trim()) {
+      setError('Please enter your first name')
       return false
     }
-    if (!anonymous && (name || email || phone) && !gdpr) {
+    if (!anonymous && hasData && !gdpr) {
       setError('Please accept the data protection notice')
       return false
     }
-    if (!anonymous && (name || email || phone) && !terms) {
+    if (!anonymous && hasData && !terms) {
       setError('Please accept the terms & conditions')
       return false
     }
@@ -39,14 +58,17 @@ export function ContactPage() {
     setError('')
     if (!validate()) return
     setContactInfo({
-      name: anonymous ? '' : name.trim(),
+      name: anonymous ? '' : name,
+      firstName: anonymous ? '' : firstName.trim(),
+      surname: anonymous ? '' : surname.trim(),
       email: anonymous ? '' : email.trim(),
       phone: anonymous ? '' : phone.trim(),
+      postcode: anonymous ? '' : postcode.trim(),
+      address: anonymous ? '' : selectedAddress,
       gdprConsent: anonymous ? false : gdpr,
       termsConsent: anonymous ? false : terms,
       anonymous,
     })
-    // Route to gift-aid if eligible and user chose "Boost" (giftAidDeclaration===null means undecided/boost)
     if (hasGiftAidItems && !anonymous && giftAidDeclaration === null) {
       setScreen('gift-aid')
     } else {
@@ -79,7 +101,7 @@ export function ContactPage() {
             <p className="font-bold text-ivory-200 text-sm">Donate Anonymously</p>
             <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.4)' }}>Your details will not be recorded</p>
           </div>
-          <div className={`w-12 h-6 rounded-full transition-colors relative flex-shrink-0 ${anonymous ? '' : ''}`}
+          <div className="w-12 h-6 rounded-full transition-colors relative flex-shrink-0"
             style={{ background: anonymous ? '#FF9933' : 'rgba(255,255,255,0.1)' }}>
             <motion.div
               animate={{ x: anonymous ? 24 : 2 }}
@@ -96,19 +118,34 @@ export function ContactPage() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-3 mb-4"
         >
-          {/* Name */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
-              style={{ color: 'rgba(212,175,55,0.6)' }}>
-              Full Name {requiresContact && <span style={{ color: '#C62828' }}>*</span>}
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Your full name"
-              className="w-full px-4 py-3 rounded-xl text-sm"
-            />
+          {/* Name — split for PayPal pre-populate */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                style={{ color: 'rgba(212,175,55,0.6)' }}>
+                First Name {requiresContact && <span style={{ color: '#C62828' }}>*</span>}
+              </label>
+              <input
+                type="text"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="First name"
+                className="w-full px-4 py-3 rounded-xl text-sm"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                style={{ color: 'rgba(212,175,55,0.6)' }}>
+                Surname
+              </label>
+              <input
+                type="text"
+                value={surname}
+                onChange={(e) => setSurname(e.target.value)}
+                placeholder="Surname"
+                className="w-full px-4 py-3 rounded-xl text-sm"
+              />
+            </div>
           </div>
 
           {/* Email */}
@@ -144,7 +181,48 @@ export function ContactPage() {
             />
           </div>
 
-          {(name || email || phone) && (
+          {/* Postcode lookup — optional, pre-fills PayPal */}
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+              style={{ color: 'rgba(212,175,55,0.6)' }}>
+              UK Postcode{' '}
+              <span style={{ color: 'rgba(212,175,55,0.4)', fontWeight: 400, textTransform: 'none', letterSpacing: 0, fontSize: '10px' }}>
+                (optional)
+              </span>
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={postcode}
+                onChange={(e) => { setPostcode(e.target.value.toUpperCase()); setAddresses([]); setSelectedAddress('') }}
+                onKeyDown={(e) => e.key === 'Enter' && lookupPostcode()}
+                placeholder="e.g. HA9 0BB"
+                className="flex-1 px-4 py-3 rounded-xl text-sm uppercase"
+              />
+              <button onClick={lookupPostcode} disabled={lookingUp || !postcode.trim()}
+                className="px-4 py-3 rounded-xl font-bold text-sm disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#6B0000' }}>
+                {lookingUp ? '…' : 'Find'}
+              </button>
+            </div>
+            {addressError && <p className="text-xs mt-1" style={{ color: '#f87171' }}>{addressError}</p>}
+          </div>
+
+          {addresses.length > 0 && (
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                style={{ color: 'rgba(212,175,55,0.6)' }}>
+                Select Address
+              </label>
+              <select value={selectedAddress} onChange={(e) => setSelectedAddress(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl text-sm">
+                <option value="">— Select your address —</option>
+                {addresses.map((a, i) => <option key={i} value={a}>{a}</option>)}
+              </select>
+            </div>
+          )}
+
+          {hasData && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -177,7 +255,9 @@ export function ContactPage() {
                 <div>
                   <p className="text-xs font-semibold text-ivory-200">Terms &amp; Conditions</p>
                   <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.4)' }}>
-                    By proceeding you confirm your donation is made voluntarily and you agree to our donation terms.
+                    By proceeding you confirm your donation is made voluntarily and you agree to our{' '}
+                    <a href="https://shital.org.uk/terms" target="_blank" rel="noopener noreferrer"
+                      style={{ color: '#D4AF37', textDecoration: 'underline' }}>donation terms</a>.
                   </p>
                 </div>
               </label>
