@@ -56,6 +56,12 @@ export function ConfirmationPage() {
             <span className="font-black text-gold-400">{orderResult.order_ref}</span>
           </div>
         )}
+        {orderResult?.paypal_capture_id && (
+          <div className="flex justify-between text-sm">
+            <span style={{ color: 'rgba(255,248,220,0.45)' }}>PayPal Transaction</span>
+            <span className="font-mono text-xs text-ivory-200 break-all text-right">{orderResult.paypal_capture_id}</span>
+          </div>
+        )}
 
         {items.map((item) => (
           <div key={item.id} className="flex justify-between text-sm">

@@ -66,6 +66,7 @@ export interface OrderResult {
   order_id: string
   order_ref: string
   paypal_order_id: string
+  paypal_capture_id?: string
   amount: number
 }
 

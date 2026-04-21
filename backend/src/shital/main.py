@@ -840,6 +840,9 @@ async def _patch_schema() -> None:
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_surname VARCHAR(255) DEFAULT ''",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_postcode VARCHAR(50) DEFAULT ''",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_address VARCHAR(500) DEFAULT ''",
+        # PayPal capture transaction ID (different from the PayPal order ID)
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE orders    ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
         # Seed default tiers if none exist
         """INSERT INTO recurring_giving_tiers (amount, label, description, is_active, is_default, display_order)
         SELECT * FROM (VALUES

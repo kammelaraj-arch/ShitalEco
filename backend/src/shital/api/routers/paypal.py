@@ -184,6 +184,17 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
     if data.get("status") != "COMPLETED":
         raise HTTPException(400, detail=f"PayPal payment not completed: {data.get('status')}")
 
+    # Extract the capture transaction ID and confirmed amount from PayPal's response.
+    # The capture ID is PayPal's permanent transaction reference (used for refunds/reconciliation).
+    capture_data: dict = {}
+    try:
+        capture_data = data["purchase_units"][0]["payments"]["captures"][0]
+    except (KeyError, IndexError):
+        pass
+    capture_id     = capture_data.get("id", "")
+    captured_value = capture_data.get("amount", {}).get("value")
+    captured_amount = float(captured_value) if captured_value else body.amount
+
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
@@ -211,36 +222,37 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
                     "surname": body.contact_surname or (full_name.split(" ", 1)[1] if " " in full_name else ""),
                     "pc": body.gift_aid_postcode,
                     "addr": body.gift_aid_address, "email": body.contact_email,
-                    "phone": body.contact_phone, "amt": body.amount,
+                    "phone": body.contact_phone, "amt": captured_amount,
                     "today": now.date(), "now": now,
                 })
 
             await db.execute(text("""
                 INSERT INTO donations
                     (id, branch_id, amount, currency, gift_aid_eligible, gift_aid_declaration_id,
-                     purpose, reference, payment_provider, payment_ref, status, idempotency_key,
-                     created_at, updated_at)
+                     purpose, reference, payment_provider, payment_ref, paypal_capture_id,
+                     status, idempotency_key, created_at, updated_at)
                 VALUES (:id,:branch,:amount,'GBP',:ga,:decl_id,
-                        'Service Portal',:ref,'paypal',:paypal_id,'COMPLETED',:idem,:now,:now)
+                        'Service Portal',:ref,'paypal',:paypal_id,:capture_id,'COMPLETED',:idem,:now,:now)
                 ON CONFLICT (idempotency_key) DO NOTHING
             """), {
-                "id": str(uuid.uuid4()), "branch": body.branch_id, "amount": body.amount,
+                "id": str(uuid.uuid4()), "branch": body.branch_id, "amount": captured_amount,
                 "ga": body.gift_aid, "decl_id": decl_id,
-                "ref": order_ref, "paypal_id": body.paypal_order_id,
+                "ref": order_ref, "paypal_id": body.paypal_order_id, "capture_id": capture_id,
                 "idem": f"paypal-{body.paypal_order_id}", "now": now,
             })
 
             await db.execute(text("""
                 INSERT INTO orders
                     (id, branch_id, reference, status, total_amount, currency,
-                     payment_provider, payment_ref, customer_name, customer_email, customer_phone,
+                     payment_provider, payment_ref, paypal_capture_id,
+                     customer_name, customer_email, customer_phone,
                      idempotency_key, created_at, updated_at)
                 VALUES (:id,:branch,:ref,'COMPLETED',:amount,'GBP',
-                        'paypal',:paypal_id,:name,:email,:phone,:idem,:now,:now)
+                        'paypal',:paypal_id,:capture_id,:name,:email,:phone,:idem,:now,:now)
                 ON CONFLICT (idempotency_key) DO NOTHING
             """), {
-                "id": order_id, "branch": body.branch_id, "ref": order_ref, "amount": body.amount,
-                "paypal_id": body.paypal_order_id,
+                "id": order_id, "branch": body.branch_id, "ref": order_ref, "amount": captured_amount,
+                "paypal_id": body.paypal_order_id, "capture_id": capture_id,
                 "name": body.contact_name, "email": body.contact_email, "phone": body.contact_phone,
                 "idem": f"paypal-order-{body.paypal_order_id}", "now": now,
             })
@@ -254,5 +266,6 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
         "order_id": order_id,
         "order_ref": order_ref,
         "paypal_order_id": body.paypal_order_id,
-        "amount": body.amount,
+        "paypal_capture_id": capture_id,
+        "amount": captured_amount,
     }

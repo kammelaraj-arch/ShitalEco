@@ -89,7 +89,8 @@ export function PaymentPage() {
           order_id: result.order_id,
           order_ref: result.order_ref,
           paypal_order_id: data.orderID,
-          amount: total,
+          paypal_capture_id: result.paypal_capture_id || '',
+          amount: result.amount ?? total,
         })
         if (contactInfo?.email && result.order_ref) {
           await api.sendReceipt({
