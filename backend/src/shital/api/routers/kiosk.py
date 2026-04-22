@@ -246,6 +246,150 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
     return {"order_id": order_id, "reference": ref, "total": total, "currency": "GBP", "payment": payment}
 
 
+class OrderConfirmInput(BaseModel):
+    basket_id: str
+    order_ref: str
+    payment_provider: str
+    payment_ref: str = ""
+    branch_id: str = "main"
+    total_amount: float = 0.0
+    contact_name: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    gift_aid_eligible: bool = False
+    items: list[dict[str, Any]] = []
+
+
+@router.post("/order/confirm")
+async def confirm_order(body: OrderConfirmInput):
+    """
+    Called by PaymentScreen on every successful payment.
+    Records order, contact and donation. Sends receipt email if email provided.
+    Idempotent — safe to call multiple times for the same order_ref.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    now = datetime.utcnow()
+    order_id = str(uuid.uuid4())
+    email_sent = False
+
+    email_key = body.contact_email.strip().lower() if body.contact_email.strip() else None
+    name_parts = body.contact_name.strip().split(" ", 1) if body.contact_name.strip() else []
+    first_name = name_parts[0] if name_parts else ""
+    surname    = name_parts[1] if len(name_parts) > 1 else ""
+
+    async with SessionLocal() as db:
+        # Read basket items so we have accurate total + item list for receipt
+        items_result = await db.execute(
+            text("SELECT name, quantity, unit_price, total_price FROM basket_items WHERE basket_id = :bid"),
+            {"bid": body.basket_id},
+        )
+        db_items = [dict(r) for r in items_result.mappings().all()]
+
+        total = (
+            sum(float(str(r["total_price"])) for r in db_items)
+            if db_items else body.total_amount
+        )
+
+        contact_id: str | None = None
+        if email_key:
+            contact_uuid = str(uuid.uuid4())
+            c_row = await db.execute(text("""
+                INSERT INTO contacts
+                    (id, email, first_name, surname, full_name, phone,
+                     gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                     first_source, first_branch_id, created_at, updated_at)
+                VALUES
+                    (:id, :email, :first, :surname, :name, :phone,
+                     true, :now, true, :now, 'kiosk', :branch, :now, :now)
+                ON CONFLICT (email) DO UPDATE SET
+                    first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''),  contacts.first_name),
+                    surname           = COALESCE(NULLIF(EXCLUDED.surname,''),     contacts.surname),
+                    full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),   contacts.full_name),
+                    phone             = COALESCE(NULLIF(EXCLUDED.phone,''),       contacts.phone),
+                    gdpr_consent      = true,
+                    gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                    tac_consent       = true,
+                    tac_consented_at  = COALESCE(contacts.tac_consented_at,  EXCLUDED.tac_consented_at),
+                    updated_at        = EXCLUDED.updated_at
+                RETURNING id
+            """), {
+                "id": contact_uuid, "email": email_key,
+                "first": first_name, "surname": surname,
+                "name": body.contact_name, "phone": body.contact_phone or "",
+                "branch": body.branch_id, "now": now,
+            })
+            row = c_row.mappings().first()
+            contact_id = str(row["id"]) if row else contact_uuid
+
+        await db.execute(text("""
+            INSERT INTO orders
+                (id, branch_id, basket_id, reference, status, total_amount, currency,
+                 payment_provider, payment_ref, customer_name, customer_email, customer_phone,
+                 contact_id, idempotency_key, created_at, updated_at)
+            VALUES
+                (:id, :bid, :basket, :ref, 'COMPLETED', :total, 'GBP',
+                 :provider, :pref, :cname, :cemail, :cphone,
+                 :cid, :ikey, :now, :now)
+            ON CONFLICT (idempotency_key) DO NOTHING
+        """), {
+            "id": order_id, "bid": body.branch_id, "basket": body.basket_id,
+            "ref": body.order_ref, "total": str(total),
+            "provider": body.payment_provider, "pref": body.payment_ref or "",
+            "cname": body.contact_name, "cemail": body.contact_email, "cphone": body.contact_phone,
+            "cid": contact_id, "ikey": body.order_ref, "now": now,
+        })
+
+        await db.execute(text(
+            "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
+            "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
+            "status, source, contact_id, idempotency_key, created_at, updated_at) "
+            "VALUES (:id, :uid, :bid, :amount, 'GBP', :ga, 'General Fund', :ref, "
+            ":provider, :pref, 'COMPLETED', 'kiosk', :cid, :ikey, :now, :now) "
+            "ON CONFLICT (idempotency_key) DO NOTHING"
+        ), {
+            "id": str(uuid.uuid4()), "uid": contact_id or "", "bid": body.branch_id,
+            "amount": str(total), "ref": body.order_ref,
+            "provider": body.payment_provider, "pref": body.payment_ref or "",
+            "ga": body.gift_aid_eligible,
+            "cid": contact_id, "ikey": f"confirm-{body.order_ref}", "now": now,
+        })
+
+        await db.execute(
+            text("UPDATE baskets SET status = 'COMPLETED', updated_at = :now WHERE id = :bid"),
+            {"now": now, "bid": body.basket_id},
+        )
+        await db.commit()
+
+    # Send receipt email from backend so it is tracked even if frontend navigates away
+    if email_key:
+        try:
+            receipt_items = body.items or [
+                {"name": r["name"], "quantity": r["quantity"], "unitPrice": float(str(r["unit_price"]))}
+                for r in db_items
+            ]
+            branch_label = (
+                "Wembley" if body.branch_id in ("main", "wembley") else
+                body.branch_id.replace("-", " ").title()
+            )
+            result = await send_receipt(ReceiptInput(
+                order_ref=body.order_ref,
+                type="email",
+                destination=email_key,
+                total=total,
+                items=receipt_items,
+                branch_name=f"Shital {branch_label}",
+                customer_name=body.contact_name,
+            ))
+            email_sent = bool(result.get("sent"))
+        except Exception:
+            email_sent = False
+
+    return {"confirmed": True, "order_id": order_id, "reference": body.order_ref, "email_sent": email_sent}
+
+
 @router.post("/terminal/connection-token")
 async def stripe_connection_token():
     import stripe

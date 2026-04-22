@@ -235,6 +235,7 @@ interface KioskState {
     gdprConsent: boolean; termsConsent: boolean; anonymous: boolean
   } | null
   pendingPayment: boolean
+  receiptSentByConfirm: boolean
   endScreenTemplate: EndScreenTemplate
   setEndScreenTemplate: (t: EndScreenTemplate) => void
   formTextConfig: FormTextConfig
@@ -242,6 +243,7 @@ interface KioskState {
   setGiftAidDeclaration: (decl: KioskState['giftAidDeclaration']) => void
   setContactInfo: (info: KioskState['contactInfo']) => void
   setPendingPayment: (v: boolean) => void
+  setReceiptSentByConfirm: (v: boolean) => void
   setScreen: (screen: KioskScreen) => void
   setHomeActiveNav: (nav: string) => void
   setLanguage: (lang: Language) => void
@@ -284,6 +286,7 @@ export const useKioskStore = create<KioskState>()(
   giftAidDeclaration: null,
   contactInfo: null,
   pendingPayment: false,
+  receiptSentByConfirm: false,
   endScreenTemplate: { icon: '🕉', thankYouLine: 'Jay Shri Krishna 🙏', subMessage: '' },
   setEndScreenTemplate: (endScreenTemplate) => set({ endScreenTemplate }),
   formTextConfig: DEFAULT_FORM_TEXT,
@@ -300,6 +303,7 @@ export const useKioskStore = create<KioskState>()(
   setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
   setContactInfo: (contactInfo) => set({ contactInfo }),
   setPendingPayment: (pendingPayment) => set({ pendingPayment }),
+  setReceiptSentByConfirm: (receiptSentByConfirm) => set({ receiptSentByConfirm }),
   setScreen: (screen) => set({ screen }),
   setHomeActiveNav: (homeActiveNav) => set({ homeActiveNav }),
   setLanguage: (language) => set({ language }),
@@ -334,7 +338,7 @@ export const useKioskStore = create<KioskState>()(
   })),
   clearBasket: () => set({ items: [], basketId: null }),
   setOrderResult: (orderId, orderRef, paymentIntent) => set({ orderId, orderRef, paymentIntent }),
-  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, contactInfo: null, pendingPayment: false }),
+  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, contactInfo: null, pendingPayment: false, receiptSentByConfirm: false }),
   get total() { return get().items.reduce((sum, i) => sum + i.totalPrice, 0) },
   get itemCount() { return get().items.reduce((sum, i) => sum + i.quantity, 0) },
     }),

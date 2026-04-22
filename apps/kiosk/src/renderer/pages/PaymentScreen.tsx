@@ -7,8 +7,45 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
 type ReaderStatus = 'waiting' | 'processing' | 'succeeded' | 'failed' | 'cancelled'
 
+async function recordOrder(params: {
+  basketId: string | null
+  orderRef: string | null
+  provider: string
+  paymentRef: string
+  branchId: string
+  total: number
+  items: { name: string; quantity: number; unitPrice: number }[]
+  contactName: string
+  contactEmail: string
+  contactPhone: string
+  giftAidEligible: boolean
+  setReceiptSentByConfirm: (v: boolean) => void
+}) {
+  try {
+    const res = await fetch(`${API_BASE}/kiosk/order/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        basket_id:          params.basketId || '',
+        order_ref:          params.orderRef || '',
+        payment_provider:   params.provider,
+        payment_ref:        params.paymentRef,
+        branch_id:          params.branchId,
+        total_amount:       params.total,
+        contact_name:       params.contactName,
+        contact_email:      params.contactEmail,
+        contact_phone:      params.contactPhone,
+        gift_aid_eligible:  params.giftAidEligible,
+        items:              params.items,
+      }),
+    })
+    const data = await res.json()
+    if (data.email_sent) params.setReceiptSentByConfirm(true)
+  } catch { /* non-fatal */ }
+}
+
 export function PaymentScreen() {
-  const { setScreen, paymentIntent, orderRef, items, theme } = useKioskStore()
+  const { setScreen, paymentIntent, orderRef, basketId, branchId, items, contactInfo, giftAidDeclaration, theme, setReceiptSentByConfirm } = useKioskStore()
   const th = THEMES[theme]
 
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
@@ -50,6 +87,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
+          recordOrder({ basketId, orderRef, provider: 'STRIPE_TERMINAL', paymentRef: paymentIntentId || '', branchId, total, items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })), contactName: contactInfo?.name || '', contactEmail: contactInfo?.email || '', contactPhone: contactInfo?.phone || '', giftAidEligible: !!giftAidDeclaration?.agreed, setReceiptSentByConfirm })
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (d.status === 'canceled') {
           clearInterval(poll)
@@ -78,6 +116,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
+          recordOrder({ basketId, orderRef, provider: 'SQUARE', paymentRef: checkoutId || '', branchId, total, items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })), contactName: contactInfo?.name || '', contactEmail: contactInfo?.email || '', contactPhone: contactInfo?.phone || '', giftAidEligible: !!giftAidDeclaration?.agreed, setReceiptSentByConfirm })
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (['CANCELED', 'CANCEL_REQUESTED'].includes(d.status)) {
           clearInterval(poll)
@@ -102,6 +141,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
+          recordOrder({ basketId, orderRef, provider: 'SUMUP', paymentRef: sumupCheckoutId || '', branchId, total, items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })), contactName: contactInfo?.name || '', contactEmail: contactInfo?.email || '', contactPhone: contactInfo?.phone || '', giftAidEligible: !!giftAidDeclaration?.agreed, setReceiptSentByConfirm })
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (d.status === 'FAILED') {
           clearInterval(poll)
@@ -130,6 +170,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
+          recordOrder({ basketId, orderRef, provider: 'CLOVER', paymentRef: cloverOrderId || '', branchId, total, items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })), contactName: contactInfo?.name || '', contactEmail: contactInfo?.email || '', contactPhone: contactInfo?.phone || '', giftAidEligible: !!giftAidDeclaration?.agreed, setReceiptSentByConfirm })
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (d.status === 'FAILED') {
           clearInterval(poll)
@@ -249,7 +290,10 @@ export function PaymentScreen() {
             ← Cancel
           </button>
           {!isTerminal && (
-            <button onClick={() => setScreen('confirmation')} className="py-4 px-6 rounded-2xl text-white font-black text-sm transition-all active:scale-95 shadow-lg" style={{ background: `linear-gradient(135deg,${th.basketBtn},${th.basketBtnHover})`, flex: 2 }}>
+            <button onClick={() => {
+              recordOrder({ basketId, orderRef, provider: provider || 'CASH', paymentRef: '', branchId, total, items: items.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice })), contactName: contactInfo?.name || '', contactEmail: contactInfo?.email || '', contactPhone: contactInfo?.phone || '', giftAidEligible: !!giftAidDeclaration?.agreed, setReceiptSentByConfirm })
+              setScreen('confirmation')
+            }} className="py-4 px-6 rounded-2xl text-white font-black text-sm transition-all active:scale-95 shadow-lg" style={{ background: `linear-gradient(135deg,${th.basketBtn},${th.basketBtnHover})`, flex: 2 }}>
               ✓ Confirm Payment
             </button>
           )}
