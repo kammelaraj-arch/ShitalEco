@@ -117,23 +117,36 @@ async def send_test_email(body: TemplateSendTest):
         dict(row), {**_default_vars(), **body.variables}
     )
 
-    if not settings.SENDGRID_API_KEY:
-        return {"sent": False, "reason": "SendGrid not configured", "subject": subject}
+    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
+    password   = settings.OFFICE365_PASSWORD
 
-    import httpx
-    resp = await httpx.AsyncClient().post(
-        "https://api.sendgrid.com/v3/mail/send",
-        headers={"Authorization": f"Bearer {settings.SENDGRID_API_KEY}"},
-        json={
-            "personalizations": [{"to": [{"email": body.to}]}],
-            "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": "Shital Temple"},
-            "subject": subject,
-            "content": [{"type": "text/html", "value": html_body}]
-            + ([{"type": "text/plain", "value": text_body}] if text_body else []),
-        },
-        timeout=15,
-    )
-    return {"sent": resp.status_code in (200, 202), "to": body.to, "subject": subject}
+    if not password:
+        return {"sent": False, "reason": "Email not configured — add OFFICE365_EMAIL and OFFICE365_PASSWORD in Admin → API Keys", "subject": subject}
+
+    import asyncio
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    def _send() -> None:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = from_email
+        msg["To"]      = body.to
+        if text_body:
+            msg.attach(MIMEText(text_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+        with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
+            srv.ehlo()
+            srv.starttls()
+            srv.login(from_email, password)
+            srv.sendmail(from_email, body.to, msg.as_string())
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, _send)
+        return {"sent": True, "to": body.to, "subject": subject}
+    except Exception as exc:
+        return {"sent": False, "error": str(exc), "subject": subject}
 
 
 def render_template(template: dict[str, Any], variables: dict[str, Any]) -> tuple[str, str, str]:

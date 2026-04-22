@@ -1,5 +1,5 @@
 """
-Notifications Capabilities — email (SendGrid), WhatsApp (Meta Cloud API), in-app.
+Notifications Capabilities — email (Office 365 SMTP), WhatsApp (Meta Cloud API), in-app.
 """
 from __future__ import annotations
 
@@ -38,42 +38,48 @@ class InAppNotificationInput(BaseModel):
 
 @capability(
     name="send_email",
-    description="Send an email via SendGrid. Used for OTP codes, receipts, payslips, and confirmations.",
+    description="Send an email via Office 365 SMTP. Used for OTP codes, receipts, payslips, and confirmations.",
     fabric=Fabric.NOTIFICATIONS,
     requires=[],
     idempotent=False,
     tags=["email", "notifications"],
 )
 async def send_email(ctx: DigitalSpace, data: EmailInput) -> dict[str, Any]:
-    if not settings.SENDGRID_API_KEY:
-        logger.warning("sendgrid_not_configured")
-        return {"sent": False, "reason": "SendGrid not configured"}
+    import asyncio
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
 
-    content: list[dict[str, str]] = [{"type": "text/html", "value": data.html_body}]
-    if data.text_body:
-        content.append({"type": "text/plain", "value": data.text_body})
-    payload = {
-        "personalizations": [{"to": [{"email": data.to}]}],
-        "from": {"email": settings.SENDGRID_FROM_EMAIL, "name": "Shital Temple"},
-        "subject": data.subject,
-        "content": content,
-    }
+    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
+    password   = settings.OFFICE365_PASSWORD
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://api.sendgrid.com/v3/mail/send",
-            json=payload,
-            headers={"Authorization": f"Bearer {settings.SENDGRID_API_KEY}"},
-            timeout=15,
-        )
+    if not password:
+        logger.warning("office365_not_configured")
+        return {"sent": False, "reason": "Email not configured — add OFFICE365_EMAIL and OFFICE365_PASSWORD in Admin → API Keys"}
 
-    if resp.status_code in (200, 202):
-        logger.info("email_sent", to=data.to, subject=data.subject)
+    def _smtp_send() -> None:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = data.subject
+        msg["From"]    = from_email
+        msg["To"]      = data.to
+        if data.text_body:
+            msg.attach(MIMEText(data.text_body, "plain"))
+        msg.attach(MIMEText(data.html_body, "html"))
+        with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
+            srv.ehlo()
+            srv.starttls()
+            srv.login(from_email, password)
+            srv.sendmail(from_email, data.to, msg.as_string())
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _smtp_send)
+        logger.info("email_sent", to=data.to, subject=data.subject, method="office365")
         return {"sent": True, "to": data.to}
-    else:
-        logger.error("email_failed", status=resp.status_code, body=resp.text)
+    except Exception as exc:
+        logger.error("office365_smtp_error", error=str(exc))
         from shital.core.fabrics.errors import ExternalServiceError
-        raise ExternalServiceError("SendGrid", f"HTTP {resp.status_code}: {resp.text[:200]}")
+        raise ExternalServiceError("Office365 SMTP", str(exc))
 
 
 @capability(
