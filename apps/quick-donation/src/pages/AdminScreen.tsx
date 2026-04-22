@@ -5,6 +5,7 @@ import { useDonationStore } from '../store/donation.store'
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
 interface Reader { id: string; label: string; device_type: string; status: string }
+interface SumUpReader { serial: string; name: string; status: string }
 
 interface LoginResponse {
   authenticated: boolean
@@ -28,13 +29,20 @@ interface AzureConfig { client_id: string; authority: string }
 
 export function AdminScreen() {
   const {
-    branchId, stripeReaderId, stripeReaderLabel,
+    branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId,
     isDeviceLoggedIn, loggedInName,
     setBranchId, setReader, setDeviceFlags, setDeviceLoggedIn, setScreen,
   } = useDonationStore()
 
   const [readers, setReaders] = useState<Reader[]>([])
   const [loading, setLoading] = useState(false)
+
+  // SumUp state
+  const [sumupReaders, setSumupReaders]     = useState<SumUpReader[]>([])
+  const [sumupSerial, setSumupSerial]       = useState(sumupReaderId || '')
+  const [sumupLoading, setSumupLoading]     = useState(false)
+  const [sumupTestResult, setSumupTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const [sumupError, setSumupError]         = useState('')
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -136,6 +144,37 @@ export function AdminScreen() {
       setReaders(data.readers || [])
     } catch { setReaders([]) }
     setLoading(false)
+  }
+
+  async function loadSumUpReaders() {
+    setSumupLoading(true); setSumupError(''); setSumupTestResult('idle')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/sumup/readers`)
+      const data = await res.json()
+      if (data.error) { setSumupError(data.error); setSumupReaders([]); return }
+      setSumupReaders(data.readers || [])
+    } catch { setSumupError('Could not reach server.') }
+    finally { setSumupLoading(false) }
+  }
+
+  async function testSumUpReader() {
+    const serial = sumupSerial.trim()
+    if (!serial) return
+    setSumupLoading(true); setSumupTestResult('idle'); setSumupError('')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/sumup/readers`)
+      const data = await res.json()
+      const found = (data.readers || []).some((r: SumUpReader) => r.serial === serial)
+      setSumupTestResult(found ? 'ok' : 'fail')
+      if (!found) setSumupError(`Serial ${serial} not found in your SumUp account.`)
+    } catch { setSumupTestResult('fail'); setSumupError('Test failed — check network.') }
+    finally { setSumupLoading(false) }
+  }
+
+  function assignSumUp() {
+    const serial = sumupSerial.trim()
+    if (!serial) return
+    setReader('', `SumUp Solo ${serial}`, 'sumup', serial)
   }
 
   function handleLogout() {
@@ -253,60 +292,144 @@ export function AdminScreen() {
           </div>
         </div>
 
-        {/* Active reader */}
-        {stripeReaderId && (
+        {/* Active reader badge */}
+        {(stripeReaderId || sumupReaderId) && (
           <div className="mb-5 px-4 py-3 rounded-xl"
             style={{ background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.25)' }}>
-            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.6)' }}>Active Card Reader</p>
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.6)' }}>
+              Active Card Reader · {readerProvider === 'sumup' ? 'SumUp' : 'Stripe Terminal'}
+            </p>
             <p className="font-black text-sm mt-0.5" style={{ color: '#D4AF37' }}>{stripeReaderLabel}</p>
-            <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(212,175,55,0.4)' }}>{stripeReaderId}</p>
+            <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(212,175,55,0.4)' }}>
+              {readerProvider === 'sumup' ? sumupReaderId : stripeReaderId}
+            </p>
           </div>
         )}
 
-        {/* Reader list */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.35)' }}>Assign Card Reader</p>
-            <button onClick={loadReaders} disabled={loading}
-              className="text-[10px] font-bold px-2 py-1 rounded-lg"
-              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }}>
-              {loading ? '…' : 'Refresh'}
-            </button>
-          </div>
-          <div className="space-y-2">
-            {readers.map(r => (
-              <button key={r.id} onClick={() => setReader(r.id, r.label)}
-                className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
-                style={{
-                  background: stripeReaderId === r.id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
-                  border: `1px solid ${stripeReaderId === r.id ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                }}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-sm" style={{ color: stripeReaderId === r.id ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{r.label}</p>
-                    <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{r.id}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {stripeReaderId === r.id && (
-                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full"
-                        style={{ background: 'rgba(212,175,55,0.2)', color: '#D4AF37' }}>ACTIVE</span>
-                    )}
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                      style={{ background: r.status === 'online' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
-                        color: r.status === 'online' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
-                      {r.status}
-                    </span>
-                  </div>
-                </div>
+        {/* ── SumUp Solo section ──────────────────────────────────────────── */}
+        {readerProvider === 'sumup' || (!readerProvider && !stripeReaderId) ? (
+          <div className="mb-6">
+            <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(255,248,220,0.35)' }}>
+              💳 SumUp Solo Reader
+            </p>
+
+            {/* Serial input row */}
+            <div className="flex gap-2 mb-2">
+              <input
+                value={sumupSerial}
+                onChange={e => { setSumupSerial(e.target.value); setSumupTestResult('idle') }}
+                placeholder="Serial number e.g. 200101578509"
+                className="flex-1 px-3 py-2.5 rounded-xl text-xs font-mono outline-none"
+                style={{ background: 'rgba(255,255,255,0.07)', color: '#fff', border: '1px solid rgba(212,175,55,0.25)' }}
+              />
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2 mb-2">
+              <button onClick={testSumUpReader} disabled={sumupLoading || !sumupSerial.trim()}
+                className="flex-1 py-2.5 rounded-xl text-xs font-black disabled:opacity-40 transition-all active:scale-[0.97]"
+                style={{ background: 'rgba(96,165,250,0.15)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.25)' }}>
+                {sumupLoading ? '…' : '⚡ Test'}
               </button>
-            ))}
-            {!loading && readers.length === 0 && (
-              <p className="text-center text-xs py-4" style={{ color: 'rgba(255,248,220,0.25)' }}>
-                No readers found. Ensure Stripe Terminal is configured.
+              <button onClick={loadSumUpReaders} disabled={sumupLoading}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold disabled:opacity-40 transition-all active:scale-[0.97]"
+                style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {sumupLoading ? '…' : 'Fetch List'}
+              </button>
+              <button onClick={assignSumUp} disabled={!sumupSerial.trim()}
+                className="flex-1 py-2.5 rounded-xl text-xs font-black disabled:opacity-40 transition-all active:scale-[0.97]"
+                style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
+                Assign
+              </button>
+            </div>
+
+            {/* Test result */}
+            {sumupTestResult === 'ok' && (
+              <p className="text-xs px-3 py-2 rounded-lg font-bold" style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.25)' }}>
+                ✓ Reader found in your SumUp account
               </p>
             )}
+            {sumupTestResult === 'fail' && (
+              <p className="text-xs px-3 py-2 rounded-lg font-bold" style={{ background: 'rgba(198,40,40,0.12)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }}>
+                ✗ {sumupError || 'Reader not found'}
+              </p>
+            )}
+            {sumupError && sumupTestResult === 'idle' && (
+              <p className="text-xs mt-1" style={{ color: '#f87171' }}>{sumupError}</p>
+            )}
+
+            {/* Reader list from API */}
+            {sumupReaders.length > 0 && (
+              <div className="space-y-1.5 mt-3">
+                {sumupReaders.map(r => (
+                  <button key={r.serial} onClick={() => { setSumupSerial(r.serial); setSumupTestResult('idle') }}
+                    className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
+                    style={{
+                      background: sumupSerial === r.serial ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${sumupSerial === r.serial ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                    }}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-sm" style={{ color: sumupSerial === r.serial ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{r.name || r.serial}</p>
+                        <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{r.serial}</p>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ background: r.status === 'available' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
+                          color: r.status === 'available' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
+                        {r.status}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
+        ) : (
+          /* ── Stripe Terminal section ──────────────────────────────────── */
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.35)' }}>⚡ Assign Card Reader</p>
+              <button onClick={loadReaders} disabled={loading}
+                className="text-[10px] font-bold px-2 py-1 rounded-lg"
+                style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }}>
+                {loading ? '…' : 'Refresh'}
+              </button>
+            </div>
+            <div className="space-y-2">
+              {readers.map(r => (
+                <button key={r.id} onClick={() => setReader(r.id, r.label)}
+                  className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
+                  style={{
+                    background: stripeReaderId === r.id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${stripeReaderId === r.id ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                  }}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: stripeReaderId === r.id ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{r.label}</p>
+                      <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{r.id}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {stripeReaderId === r.id && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full"
+                          style={{ background: 'rgba(212,175,55,0.2)', color: '#D4AF37' }}>ACTIVE</span>
+                      )}
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ background: r.status === 'online' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
+                          color: r.status === 'online' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
+                        {r.status}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+              {!loading && readers.length === 0 && (
+                <p className="text-center text-xs py-4" style={{ color: 'rgba(255,248,220,0.25)' }}>
+                  No readers found. Ensure Stripe Terminal is configured.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Branch info */}
         <div className="px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
