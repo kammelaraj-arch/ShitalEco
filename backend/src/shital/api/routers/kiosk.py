@@ -226,6 +226,22 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
             },
         )
         await db.execute(text("UPDATE baskets SET status = 'CHECKOUT', updated_at = :now WHERE id = :bid"), {"now": now, "bid": body.basket_id})
+
+        # Record in donations table so the unified finance view picks it up
+        await db.execute(text(
+            "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
+            "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
+            "status, source, contact_id, idempotency_key, created_at, updated_at) "
+            "VALUES (:id, :uid, :bid, :amount, 'GBP', false, 'General Fund', :ref, "
+            ":provider, :pref, 'PENDING', 'kiosk', :cid, :ikey, :now, :now) "
+            "ON CONFLICT (idempotency_key) DO NOTHING"
+        ), {
+            "id": str(uuid.uuid4()), "uid": contact_id or "", "bid": body.branch_id,
+            "amount": str(total), "ref": ref,
+            "provider": body.payment_provider, "pref": payment.get("payment_id") or "",
+            "cid": contact_id, "ikey": f"kiosk-{order_id}", "now": now,
+        })
+
         await db.commit()
     return {"order_id": order_id, "reference": ref, "total": total, "currency": "GBP", "payment": payment}
 
@@ -770,9 +786,9 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                 text(
                     "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
                     "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
-                    "status, idempotency_key, created_at, updated_at) "
+                    "status, source, idempotency_key, created_at, updated_at) "
                     "VALUES (:id, :uid, :bid, :amount, 'GBP', :ga_elig, 'General Fund', :ref, "
-                    "'KIOSK', :pref, 'PENDING', :ikey, :now, :now) "
+                    "'KIOSK', :pref, 'PENDING', 'quick-donation', :ikey, :now, :now) "
                     "ON CONFLICT (idempotency_key) DO NOTHING"
                 ),
                 {

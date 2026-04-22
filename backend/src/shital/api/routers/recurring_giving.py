@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace
@@ -372,6 +372,7 @@ async def admin_list_subscriptions(space: CurrentSpace) -> dict[str, Any]:
         rows = await db.execute(text("""
             SELECT s.id, s.paypal_subscription_id, s.amount, s.frequency, s.status,
                    s.donor_name, s.donor_email, s.branch_id, s.approved_at, s.created_at,
+                   s.last_payment_at, s.total_payments, s.next_billing_date,
                    t.label AS tier_label
             FROM   recurring_giving_subscriptions s
             LEFT JOIN recurring_giving_tiers t ON t.id = s.tier_id
@@ -380,3 +381,200 @@ async def admin_list_subscriptions(space: CurrentSpace) -> dict[str, Any]:
         """))
         subs = [dict(r._mapping) for r in rows]
     return {"subscriptions": subs}
+
+
+# ── PayPal Webhook ────────────────────────────────────────────────────────────
+
+async def _verify_paypal_webhook(
+    transmission_id: str, transmission_time: str, auth_algo: str,
+    cert_url: str, transmission_sig: str, webhook_id: str, event: dict,
+) -> bool:
+    """Call PayPal's verify-webhook-signature endpoint. Returns True if valid."""
+    try:
+        token = await _token()
+        base  = await _base()
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.post(
+                f"{base}/v1/notifications/verify-webhook-signature",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={
+                    "auth_algo": auth_algo,
+                    "cert_url": cert_url,
+                    "transmission_id": transmission_id,
+                    "transmission_sig": transmission_sig,
+                    "transmission_time": transmission_time,
+                    "webhook_id": webhook_id,
+                    "webhook_event": event,
+                },
+            )
+            return r.json().get("verification_status") == "SUCCESS"
+    except Exception:
+        return False
+
+
+async def _ensure_subscription_columns() -> None:
+    """Add tracking columns to recurring_giving_subscriptions if not present."""
+    from sqlalchemy import text
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        for stmt in [
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_at    TIMESTAMPTZ",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_amount NUMERIC(10,2)",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS next_billing_date   DATE",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS total_payments      INTEGER NOT NULL DEFAULT 0",
+        ]:
+            await db.execute(text(stmt))
+        await db.commit()
+
+
+async def _handle_payment_completed(resource: dict, event_type: str) -> None:
+    """
+    Handle PAYMENT.SALE.COMPLETED (v1 billing) and
+    BILLING.SUBSCRIPTION.PAYMENT.COMPLETED (v2 billing).
+    Creates a donations row and updates subscription tracking columns.
+    """
+    from decimal import Decimal
+    from sqlalchemy import text
+    from shital.core.fabrics.database import SessionLocal
+
+    # Extract subscription_id and amount depending on event shape
+    if event_type == "PAYMENT.SALE.COMPLETED":
+        sub_id = resource.get("billing_agreement_id", "")
+        amount_str = resource.get("amount", {}).get("total", "0")
+        currency   = resource.get("amount", {}).get("currency", "GBP")
+        payment_ref = resource.get("id", "")          # sale ID
+        paid_at_str = resource.get("create_time", "")
+    else:  # BILLING.SUBSCRIPTION.PAYMENT.COMPLETED
+        sub_id = resource.get("id", "")
+        amount_obj = resource.get("amount_with_breakdown", {}).get("gross_amount", {})
+        amount_str = amount_obj.get("value", "0")
+        currency   = amount_obj.get("currency_code", "GBP")
+        payment_ref = resource.get("id", "")
+        paid_at_str = resource.get("time", "")
+
+    if not sub_id:
+        return
+
+    try:
+        paid_at = datetime.fromisoformat(paid_at_str.replace("Z", "+00:00"))
+    except Exception:
+        paid_at = datetime.utcnow()
+
+    amount = float(Decimal(amount_str or "0"))
+    idem_key = f"paypal-sub-payment-{payment_ref or uuid.uuid4()}"
+
+    async with SessionLocal() as db:
+        # Look up subscription
+        row = (await db.execute(
+            text("SELECT id, branch_id, contact_id, tier_id, donor_name FROM recurring_giving_subscriptions WHERE paypal_subscription_id = :sid LIMIT 1"),
+            {"sid": sub_id},
+        )).mappings().first()
+
+        if not row:
+            return  # unknown subscription — ignore
+
+        # Insert donation record
+        await db.execute(text("""
+            INSERT INTO donations
+                (id, branch_id, amount, currency, gift_aid_eligible, purpose,
+                 reference, payment_provider, payment_ref,
+                 status, source, contact_id, idempotency_key, created_at, updated_at)
+            VALUES
+                (:id, :branch, :amount, :currency, false, 'Monthly Giving',
+                 :sub_id, 'paypal', :payment_ref,
+                 'COMPLETED', 'monthly-giving', :cid, :idem, :now, :now)
+            ON CONFLICT (idempotency_key) DO NOTHING
+        """), {
+            "id": str(uuid.uuid4()), "branch": row["branch_id"],
+            "amount": str(amount), "currency": currency,
+            "sub_id": sub_id, "payment_ref": payment_ref,
+            "cid": row["contact_id"], "idem": idem_key, "now": paid_at,
+        })
+
+        # Update subscription tracking
+        await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET last_payment_at     = :paid_at,
+                last_payment_amount = :amount,
+                total_payments      = COALESCE(total_payments, 0) + 1,
+                status              = 'ACTIVE',
+                updated_at          = NOW()
+            WHERE paypal_subscription_id = :sid
+        """), {"paid_at": paid_at, "amount": str(amount), "sid": sub_id})
+
+        await db.commit()
+
+
+async def _handle_subscription_status(sub_id: str, new_status: str, cancelled: bool = False) -> None:
+    from sqlalchemy import text
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        if cancelled:
+            await db.execute(text("""
+                UPDATE recurring_giving_subscriptions
+                SET status = :status, cancelled_at = NOW(), updated_at = NOW()
+                WHERE paypal_subscription_id = :sid
+            """), {"status": new_status, "sid": sub_id})
+        else:
+            await db.execute(text("""
+                UPDATE recurring_giving_subscriptions
+                SET status = :status, updated_at = NOW()
+                WHERE paypal_subscription_id = :sid
+            """), {"status": new_status, "sid": sub_id})
+        await db.commit()
+
+
+@router.post("/service/giving/webhook/paypal")
+async def paypal_giving_webhook(request: Request) -> dict[str, Any]:
+    """
+    PayPal webhook endpoint for recurring giving subscriptions.
+    Register this URL in PayPal Developer Dashboard → Webhooks.
+    Events: BILLING.SUBSCRIPTION.*, PAYMENT.SALE.COMPLETED
+    """
+    import json
+    from shital.core.fabrics.secrets import SecretsManager
+
+    body_bytes = await request.body()
+    try:
+        event = json.loads(body_bytes)
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON payload")
+
+    # Verify signature if webhook ID is configured
+    webhook_id = await SecretsManager.get("PAYPAL_WEBHOOK_ID") or ""
+    if webhook_id:
+        valid = await _verify_paypal_webhook(
+            transmission_id  = request.headers.get("paypal-transmission-id", ""),
+            transmission_time= request.headers.get("paypal-transmission-time", ""),
+            auth_algo        = request.headers.get("paypal-auth-algo", ""),
+            cert_url         = request.headers.get("paypal-cert-url", ""),
+            transmission_sig = request.headers.get("paypal-transmission-sig", ""),
+            webhook_id       = webhook_id,
+            event            = event,
+        )
+        if not valid:
+            raise HTTPException(401, detail="Webhook signature verification failed")
+
+    # Ensure tracking columns exist (idempotent)
+    await _ensure_subscription_columns()
+
+    event_type = event.get("event_type", "")
+    resource   = event.get("resource", {})
+    sub_id     = resource.get("id", "") or resource.get("billing_agreement_id", "")
+
+    if event_type in ("PAYMENT.SALE.COMPLETED", "BILLING.SUBSCRIPTION.PAYMENT.COMPLETED"):
+        await _handle_payment_completed(resource, event_type)
+
+    elif event_type in ("BILLING.SUBSCRIPTION.ACTIVATED", "BILLING.SUBSCRIPTION.RE-ACTIVATED"):
+        await _handle_subscription_status(sub_id, "ACTIVE")
+
+    elif event_type == "BILLING.SUBSCRIPTION.CANCELLED":
+        await _handle_subscription_status(sub_id, "CANCELLED", cancelled=True)
+
+    elif event_type == "BILLING.SUBSCRIPTION.SUSPENDED":
+        await _handle_subscription_status(sub_id, "SUSPENDED")
+
+    elif event_type == "BILLING.SUBSCRIPTION.EXPIRED":
+        await _handle_subscription_status(sub_id, "EXPIRED", cancelled=True)
+
+    return {"received": True, "event_type": event_type}

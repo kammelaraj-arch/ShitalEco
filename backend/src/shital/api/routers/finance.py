@@ -70,7 +70,11 @@ async def list_donations(
     ctx: CurrentSpace,
     from_date: str = "2020-01-01",
     to_date: str = "2099-12-31",
-    limit: int = 200,
+    limit: int = 500,
+    source: str = "",
+    branch_id: str = "",
+    purpose: str = "",
+    status: str = "",
 ) -> dict[str, Any]:
     from datetime import date as _date
     from datetime import datetime as _dt
@@ -84,22 +88,100 @@ async def list_donations(
     except ValueError:
         fd = _date(2020, 1, 1)
         td = _date(2099, 12, 31)
+
+    from_dt = _dt.combine(fd, _dt.min.time())
+    to_dt   = _dt.combine(td, _dt.max.time()).replace(microsecond=0)
+
+    # Build optional WHERE fragments
+    src_filter    = "AND COALESCE(d.source, CASE d.payment_provider WHEN 'KIOSK' THEN 'quick-donation' WHEN 'paypal' THEN 'service-portal' ELSE 'manual' END) = :source" if source else ""
+    branch_filter = "AND d.branch_id = :branch_id" if branch_id else ""
+    purpose_filter= "AND d.purpose ILIKE :purpose" if purpose else ""
+    status_filter = "AND d.status = :status" if status else ""
+    # Skip recurring UNION leg entirely when filtering for a non-recurring source
+    skip_recurring = source and source != "monthly-giving"
+    rgs_src_filter = "" if not source else ("AND true" if source == "monthly-giving" else "AND false")
+
+    params: dict[str, Any] = {"from_dt": from_dt, "to_dt": to_dt, "lim": limit}
+    if source:    params["source"]    = source
+    if branch_id: params["branch_id"] = branch_id
+    if purpose:   params["purpose"]   = f"%{purpose}%"
+    if status:    params["status"]    = status
+
     async with SessionLocal() as db:
-        result = await db.execute(text("""
-            SELECT id::text, branch_id, amount, currency, purpose, payment_provider,
-                   payment_ref, gift_aid_eligible, gift_aid_amount, status,
-                   reference, created_at, updated_at
-            FROM donations
-            WHERE deleted_at IS NULL
-              AND created_at >= :from_dt
-              AND created_at < :to_dt
+        # Idempotently add source column if not yet present
+        await db.execute(text(
+            "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source VARCHAR(64) DEFAULT 'manual'"
+        ))
+
+        result = await db.execute(text(f"""
+            SELECT
+                d.id::text,
+                d.branch_id,
+                d.amount,
+                d.currency,
+                COALESCE(d.source,
+                    CASE d.payment_provider
+                        WHEN 'KIOSK'  THEN 'quick-donation'
+                        WHEN 'paypal' THEN 'service-portal'
+                        ELSE 'manual'
+                    END
+                ) AS source,
+                d.purpose,
+                d.payment_provider,
+                d.payment_ref,
+                d.gift_aid_eligible,
+                d.gift_aid_amount,
+                d.status,
+                d.reference,
+                d.contact_id::text,
+                c.full_name  AS contact_name,
+                c.email      AS contact_email,
+                'one-time'   AS donation_type,
+                d.created_at,
+                d.updated_at
+            FROM donations d
+            LEFT JOIN contacts c ON c.id = d.contact_id
+            WHERE d.deleted_at IS NULL
+              AND d.created_at >= :from_dt
+              AND d.created_at < :to_dt
+              {src_filter}
+              {branch_filter}
+              {purpose_filter}
+              {status_filter}
+
+            UNION ALL
+
+            SELECT
+                rgs.id::text,
+                rgs.branch_id,
+                rgs.amount,
+                'GBP'                                     AS currency,
+                'monthly-giving'                          AS source,
+                COALESCE(t.label, 'Monthly Giving')       AS purpose,
+                'paypal'                                  AS payment_provider,
+                rgs.paypal_subscription_id                AS payment_ref,
+                false                                     AS gift_aid_eligible,
+                0                                         AS gift_aid_amount,
+                rgs.status,
+                rgs.paypal_subscription_id                AS reference,
+                rgs.contact_id::text,
+                COALESCE(c2.full_name, rgs.donor_name)   AS contact_name,
+                COALESCE(c2.email,     rgs.donor_email)  AS contact_email,
+                'recurring'                               AS donation_type,
+                rgs.created_at,
+                rgs.updated_at
+            FROM recurring_giving_subscriptions rgs
+            LEFT JOIN recurring_giving_tiers t   ON t.id   = rgs.tier_id
+            LEFT JOIN contacts              c2   ON c2.id  = rgs.contact_id
+            WHERE rgs.created_at >= :from_dt
+              AND rgs.created_at < :to_dt
+              {rgs_src_filter}
+              {'AND rgs.branch_id = :branch_id' if branch_id else ''}
+              {'AND rgs.status = :status'        if status    else ''}
+
             ORDER BY created_at DESC
             LIMIT :lim
-        """), {
-            "from_dt": _dt.combine(fd, _dt.min.time()),
-            "to_dt": _dt.combine(td, _dt.max.time()).replace(microsecond=0),
-            "lim": limit,
-        })
+        """), params)
         rows = result.mappings().all()
     return {"donations": [_row(r) for r in rows]}
 
@@ -229,12 +311,12 @@ async def import_donations_csv(
                         id, branch_id, amount, currency, purpose,
                         payment_provider, payment_ref, status, reference,
                         gift_aid_eligible, gift_aid_amount,
-                        idempotency_key, created_at, updated_at
+                        source, idempotency_key, created_at, updated_at
                     ) VALUES (
                         gen_random_uuid(), :bid, :amt, 'GBP', :purpose,
                         :pp, :pref, :status, :ref,
                         :ga, :ga_amt,
-                        :ikey, :ddate, NOW()
+                        'manual', :ikey, :ddate, NOW()
                     )
                 """), {
                     "bid": branch_id, "amt": amount, "purpose": purpose,

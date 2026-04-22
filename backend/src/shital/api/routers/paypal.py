@@ -290,10 +290,10 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
                 INSERT INTO donations
                     (id, branch_id, amount, currency, gift_aid_eligible, gift_aid_declaration_id,
                      purpose, reference, payment_provider, payment_ref, paypal_capture_id,
-                     status, contact_id, idempotency_key, created_at, updated_at)
+                     status, source, contact_id, idempotency_key, created_at, updated_at)
                 VALUES (:id,:branch,:amount,'GBP',:ga,:decl_id,
                         'Service Portal',:ref,'paypal',:paypal_id,:capture_id,
-                        'COMPLETED',:cid,:idem,:now,:now)
+                        'COMPLETED','service-portal',:cid,:idem,:now,:now)
                 ON CONFLICT (idempotency_key) DO NOTHING
             """), {
                 "id": str(uuid.uuid4()), "branch": body.branch_id, "amount": captured_amount,
