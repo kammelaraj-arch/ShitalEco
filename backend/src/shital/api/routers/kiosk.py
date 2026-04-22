@@ -1424,11 +1424,11 @@ async def _create_kiosk_subscription(
             sub_id    = sub_data.get("id")
             for link in sub_data.get("links", []):
                 if link.get("rel") == "approve":
-                    return link["href"], sub_id
+                    return link["href"], sub_id, plan_id
     except Exception as exc:
         import structlog
         structlog.get_logger().warning("kiosk_monthly_paypal_error", error=str(exc))
-    return None, None
+    return None, None, None
 
 
 @router.post("/quick-donation/monthly-signup")
@@ -1443,7 +1443,7 @@ async def quick_donation_monthly_signup(body: MonthlySignupInput):
     full_name = f"{body.first_name} {body.surname}".strip()
     email_key = body.email.strip().lower()
 
-    approval_url, paypal_sub_id = await _create_kiosk_subscription(
+    approval_url, paypal_sub_id, plan_id = await _create_kiosk_subscription(
         body.first_name, body.surname, email_key,
         body.amount, body.house_number, body.postcode,
     )
@@ -1454,14 +1454,14 @@ async def quick_donation_monthly_signup(body: MonthlySignupInput):
     async with SessionLocal() as db:
         await db.execute(text("""
             INSERT INTO recurring_giving_subscriptions
-                (id, paypal_subscription_id, amount, frequency, status, branch_id,
+                (id, paypal_subscription_id, paypal_plan_id, amount, frequency, status, branch_id,
                  donor_name, donor_email, donor_first_name, donor_surname,
                  donor_postcode, donor_address, created_at, updated_at)
             VALUES
-                (:id, :sub_id, :amt, 'MONTH', :status, :bid,
+                (:id, :sub_id, :plan_id, :amt, 'MONTH', :status, :bid,
                  :name, :email, :fn, :sn, :pc, :addr, :now, :now)
         """), {
-            "id": signup_id, "sub_id": paypal_sub_id,
+            "id": signup_id, "sub_id": paypal_sub_id, "plan_id": plan_id or "",
             "amt": body.amount, "status": status, "bid": body.branch_id,
             "name": full_name, "email": email_key,
             "fn": body.first_name, "sn": body.surname,
@@ -1469,10 +1469,20 @@ async def quick_donation_monthly_signup(body: MonthlySignupInput):
         })
         await db.commit()
 
+    # Fetch PayPal client_id for the frontend SDK
+    paypal_client_id = ""
+    try:
+        from shital.core.fabrics.secrets import SecretsManager
+        paypal_client_id = await SecretsManager.get("PAYPAL_CLIENT_ID") or ""
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "signup_id": signup_id,
         "approval_url": approval_url,
+        "plan_id": plan_id,
+        "paypal_client_id": paypal_client_id,
         "amount": body.amount,
         "name": full_name,
     }

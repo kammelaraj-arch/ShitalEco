@@ -12,6 +12,7 @@
     "start:prod": "npm run build && node server.js"
   },
   "dependencies": {
+    "@paypal/react-paypal-js": "^8.9.2",
     "express": "^4.22.1",
     "framer-motion": "^11.3.0",
     "react": "^18.3.0",

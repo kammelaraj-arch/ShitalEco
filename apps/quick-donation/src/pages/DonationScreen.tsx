@@ -1,6 +1,16 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import {
+  PayPalScriptProvider as _PPSProvider,
+  PayPalButtons as _PPButtons,
+  type PayPalButtonsComponentProps,
+  type ReactPayPalScriptOptions,
+} from '@paypal/react-paypal-js'
 import { useDonationStore } from '../store/donation.store'
+
+// Cast to any-prop components to avoid strict type issues
+const PayPalScriptProvider = _PPSProvider as React.ComponentType<{ options: ReactPayPalScriptOptions; children: React.ReactNode }>
+const PayPalButtons = _PPButtons as React.ComponentType<PayPalButtonsComponentProps>
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -14,7 +24,159 @@ const MONTHLY_TIERS = [
 
 type MonthlyStep = 0 | 1 | 2 | 3 | 'done'
 
-interface MonthlyResult { approval_url?: string | null; name: string; amount: number }
+interface MonthlyResult {
+  approval_url?: string | null
+  plan_id?: string | null
+  paypal_client_id?: string
+  name: string
+  amount: number
+}
+
+// ── Confirmation: two options — QR scan or on-screen PayPal ──────────────────
+function DoneOptions({
+  result, firstName, surname, email, houseNum, postcode, branchId, onClose,
+}: {
+  result: MonthlyResult
+  firstName: string; surname: string; email: string
+  houseNum: string; postcode: string; branchId: string
+  onClose: () => void
+}) {
+  const [tab, setTab] = useState<'qr' | 'card'>('qr')
+  const [subscribed, setSubscribed] = useState(false)
+
+  const tabStyle = (active: boolean) => ({
+    flex: 1, padding: '10px', borderRadius: '12px', fontWeight: 900, fontSize: 13,
+    background: active ? 'rgba(212,175,55,0.2)' : 'transparent',
+    color: active ? '#D4AF37' : 'rgba(255,248,220,0.4)',
+    border: active ? '1.5px solid rgba(212,175,55,0.4)' : '1.5px solid transparent',
+    cursor: 'pointer',
+  })
+
+  return (
+    <motion.div key="done" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      className="pb-4 pt-2">
+      <div className="text-center mb-4">
+        <div className="text-4xl mb-2">🙏</div>
+        <h2 className="text-lg font-black" style={{ color: '#D4AF37' }}>
+          Thank you, {result.name.split(' ')[0]}!
+        </h2>
+        <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.5)' }}>
+          Monthly support of <strong style={{ color: '#D4AF37' }}>£{result.amount}/month</strong> — choose how to complete:
+        </p>
+      </div>
+
+      {/* Tab switcher */}
+      <div className="flex gap-2 mb-4 p-1 rounded-xl" style={{ background: 'rgba(255,255,255,0.05)' }}>
+        <button style={tabStyle(tab === 'qr')} onClick={() => setTab('qr')}>📱 Scan QR</button>
+        <button style={tabStyle(tab === 'card')} onClick={() => setTab('card')}>💳 Pay Here</button>
+      </div>
+
+      {/* QR tab */}
+      {tab === 'qr' && (
+        <div className="flex flex-col items-center">
+          {result.approval_url ? (
+            <>
+              <div className="p-3 rounded-2xl mb-3" style={{ background: '#fff' }}>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=190x190&data=${encodeURIComponent(result.approval_url)}`}
+                  alt="PayPal QR"
+                  className="w-48 h-48"
+                />
+              </div>
+              <p className="text-xs font-bold mb-1 text-center" style={{ color: 'rgba(212,175,55,0.8)' }}>
+                Scan with your phone camera
+              </p>
+              <p className="text-[10px] text-center" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                Approve your PayPal subscription · Cancel anytime
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-center px-4" style={{ color: 'rgba(255,248,220,0.45)' }}>
+              We'll send setup details to <span style={{ color: '#D4AF37' }}>{email}</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Pay on screen tab — PayPal buttons */}
+      {tab === 'card' && !subscribed && result.plan_id && result.paypal_client_id && (
+        <div>
+          <p className="text-xs text-center mb-3" style={{ color: 'rgba(255,248,220,0.4)' }}>
+            Complete your monthly donation securely on this screen
+          </p>
+          <PayPalScriptProvider options={{
+            clientId: result.paypal_client_id,
+            currency: 'GBP',
+            vault: true,
+            intent: 'subscription',
+          } as ReactPayPalScriptOptions}>
+            <PayPalButtons
+              style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }}
+              createSubscription={(_data: Record<string, unknown>, actions: Record<string, unknown>) => {
+                const subActions = actions as { subscription: { create: (o: unknown) => Promise<string> } }
+                return subActions.subscription.create({
+                  plan_id: result.plan_id,
+                  subscriber: {
+                    name: { given_name: firstName, surname },
+                    email_address: email,
+                    shipping_address: postcode ? {
+                      name: { full_name: `${firstName} ${surname}` },
+                      address: { address_line_1: houseNum, postal_code: postcode.toUpperCase().replace(' ', ''), country_code: 'GB' },
+                    } : undefined,
+                  },
+                })
+              }}
+              onApprove={async (data: Record<string, unknown>) => {
+                await fetch(`${API_BASE}/service/giving/subscription/approve`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    subscription_id: data.subscriptionID,
+                    plan_id: result.plan_id,
+                    amount: result.amount,
+                    frequency: 'MONTH',
+                    branch_id: branchId,
+                    donor_first_name: firstName,
+                    donor_surname: surname,
+                    donor_email: email,
+                    donor_postcode: postcode,
+                    donor_address: houseNum,
+                  }),
+                }).catch(() => {})
+                setSubscribed(true)
+              }}
+              onError={() => setTab('qr')}
+            />
+          </PayPalScriptProvider>
+        </div>
+      )}
+
+      {tab === 'card' && !subscribed && (!result.plan_id || !result.paypal_client_id) && (
+        <p className="text-xs text-center px-4" style={{ color: 'rgba(255,248,220,0.4)' }}>
+          PayPal not configured — please use the QR code option.
+        </p>
+      )}
+
+      {subscribed && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          className="flex flex-col items-center py-4">
+          <div className="text-4xl mb-2">✅</div>
+          <p className="font-black" style={{ color: '#4ade80' }}>Subscription confirmed!</p>
+          <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.4)' }}>
+            Thank you for your ongoing support.
+          </p>
+        </motion.div>
+      )}
+
+      <button onClick={onClose}
+        className="w-full mt-5 py-3 rounded-2xl font-black text-sm"
+        style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,248,220,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
+        ← Back to Donate
+      </button>
+    </motion.div>
+  )
+}
+
 
 function MonthlyGivingFlow({
   defaultAmount,
@@ -49,7 +211,7 @@ function MonthlyGivingFlow({
         }),
       })
       const data = await res.json()
-      setResult({ approval_url: data.approval_url, name: data.name, amount })
+      setResult({ approval_url: data.approval_url, plan_id: data.plan_id, paypal_client_id: data.paypal_client_id, name: data.name, amount })
       setStep('done')
     } catch {
       setResult({ name: `${firstName} ${surname}`, amount })
@@ -195,42 +357,15 @@ function MonthlyGivingFlow({
             </motion.div>
           )}
 
-          {/* Done — confirmation */}
+          {/* Done — two options: QR or pay on screen */}
           {step === 'done' && result && (
-            <motion.div key="done" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-              className="flex flex-col items-center text-center pt-4 pb-6">
-              <div className="text-5xl mb-4">🙏</div>
-              <h2 className="text-xl font-black mb-1" style={{ color: '#D4AF37' }}>Thank You, {result.name.split(' ')[0]}!</h2>
-              <p className="text-sm mb-4" style={{ color: 'rgba(255,248,220,0.6)' }}>
-                Your monthly support of <span style={{ color: '#D4AF37', fontWeight: 900 }}>£{result.amount}/month</span> means the world to us.
-              </p>
-              {result.approval_url ? (
-                <>
-                  <div className="p-3 rounded-2xl mb-3" style={{ background: '#fff' }}>
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(result.approval_url)}`}
-                      alt="PayPal approval QR"
-                      className="w-44 h-44"
-                    />
-                  </div>
-                  <p className="text-xs font-bold mb-1" style={{ color: 'rgba(212,175,55,0.8)' }}>
-                    Scan with your phone to complete setup
-                  </p>
-                  <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                    Secure recurring payment via PayPal · Cancel anytime
-                  </p>
-                </>
-              ) : (
-                <p className="text-xs px-4" style={{ color: 'rgba(255,248,220,0.45)' }}>
-                  We'll send setup details to <span style={{ color: '#D4AF37' }}>{email}</span>
-                </p>
-              )}
-              <button onClick={onClose}
-                className="mt-6 px-8 py-3 rounded-2xl font-black text-base"
-                style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
-                ← Back to Donate
-              </button>
-            </motion.div>
+            <DoneOptions
+              result={result}
+              firstName={firstName} surname={surname}
+              email={email} houseNum={houseNum} postcode={postcode}
+              branchId={branchId}
+              onClose={onClose}
+            />
           )}
 
         </AnimatePresence>

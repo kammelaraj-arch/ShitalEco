@@ -176,7 +176,7 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
 class ApproveBody(BaseModel):
     subscription_id: str
     plan_id: str
-    tier_id: str
+    tier_id: str | None = None  # optional — kiosk signups have no tier
     amount: float
     frequency: str = "MONTH"
     branch_id: str = "main"
@@ -261,7 +261,7 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                     contact_id = COALESCE(recurring_giving_subscriptions.contact_id, EXCLUDED.contact_id)
         """), {
             "id": str(uuid.uuid4()), "sub_id": body.subscription_id,
-            "plan_id": body.plan_id, "tier_id": body.tier_id,
+            "plan_id": body.plan_id, "tier_id": body.tier_id or None,
             "amount": body.amount, "freq": body.frequency,
             "branch": body.branch_id, "name": full_name, "email": body.donor_email,
             "first_name": body.donor_first_name, "surname": body.donor_surname,
