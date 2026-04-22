@@ -438,155 +438,206 @@ function NumKey({ k, onPress }: { k: string; onPress: (k: string) => void }) {
   )
 }
 
-// Simple Gift Aid overlay — shown after tile tap when enableGiftAid is true
-function GiftAidOverlay({
+// Full-screen multi-step Gift Aid flow
+type GiftAidFlowStep = 0 | 1 | 2 | 3
+
+function GiftAidFlow({
   amount,
-  onYes,
-  onNo,
+  onConfirm,
+  onSkip,
 }: {
   amount: number
-  onYes: () => void
-  onNo: () => void
+  onConfirm: (firstName: string, surname: string, houseNum: string, postcode: string, email: string) => void
+  onSkip: () => void
 }) {
+  const [step, setStep]         = useState<GiftAidFlowStep>(0)
+  const [firstName, setFirstName] = useState('')
+  const [surname, setSurname]   = useState('')
+  const [houseNum, setHouseNum] = useState('')
+  const [postcode, setPostcode] = useState('')
+  const [email, setEmail]       = useState('')
+  const [declared, setDeclared] = useState(false)
+
+  const gaAmount    = (amount * 0.25).toFixed(2)
+  const totalAmount = (amount * 1.25).toFixed(2)
+
+  const inputCls   = "w-full px-4 py-4 rounded-2xl text-base font-semibold outline-none"
+  const inputStyle = { background: 'rgba(255,255,255,0.07)', color: '#fff', border: '1.5px solid rgba(74,222,128,0.3)', caretColor: '#4ade80' }
+  const labelCls   = "block text-xs font-black uppercase tracking-widest mb-2"
+  const labelStyle = { color: 'rgba(74,222,128,0.65)' }
+
+  const canNext1 = firstName.trim().length > 0 && surname.trim().length > 0
+  const canNext3 = email.trim().length > 0 && declared
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 flex flex-col items-center justify-end z-20"
-      style={{ background: 'rgba(0,0,0,0.72)' }}
+      className="absolute inset-0 z-20 flex flex-col"
+      style={{ background: 'linear-gradient(160deg,#071a07 0%,#0d2a0d 60%,#071a07 100%)' }}
     >
-      <motion.div
-        initial={{ y: '100%' }}
-        animate={{ y: 0 }}
-        exit={{ y: '100%' }}
-        transition={{ type: 'spring', damping: 30, stiffness: 320 }}
-        className="w-full rounded-t-3xl p-6 space-y-4"
-        style={{ background: 'linear-gradient(160deg,#0d2a0a,#122a10)', border: '1px solid rgba(74,222,128,0.25)' }}
-      >
-        <div className="text-center">
-          <p className="text-2xl mb-1">🇬🇧</p>
-          <h2 className="font-black text-xl" style={{ color: '#4ade80' }}>Are you a UK taxpayer?</h2>
-          <p className="text-sm mt-1" style={{ color: 'rgba(74,222,128,0.75)' }}>
-            HMRC will add <strong style={{ color: '#4ade80' }}>£{(amount * 0.25).toFixed(2)}</strong> to your £{amount.toFixed(2)} donation — <strong>completely free</strong>.
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.4)' }}>
-            ✓ No extra payment &nbsp;·&nbsp; ✓ Takes 30 seconds &nbsp;·&nbsp; ✓ HMRC approved
-          </p>
-        </div>
+      {/* Header */}
+      <div className="text-center pt-6 pb-2 flex-shrink-0">
+        <div className="text-3xl mb-1">🇬🇧</div>
+        <h1 className="text-xl font-black tracking-wide" style={{ color: '#4ade80' }}>Gift Aid</h1>
+        <p className="text-xs mt-0.5" style={{ color: 'rgba(74,222,128,0.5)' }}>
+          HMRC adds 25% to your donation — completely free
+        </p>
+      </div>
 
-        <div className="flex gap-3">
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={onYes}
-            className="flex-1 py-4 rounded-2xl font-black text-base"
-            style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff',
-              boxShadow: '0 6px 20px rgba(22,163,74,0.4)' }}
-          >
-            Yes — Claim Gift Aid
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={onNo}
-            className="flex-[0.55] py-4 rounded-2xl font-bold text-sm"
-            style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.45)',
-              border: '1px solid rgba(255,255,255,0.1)' }}
-          >
-            No thanks
-          </motion.button>
+      {/* Step dots (screens 1-3 only) */}
+      {step > 0 && (
+        <div className="flex justify-center gap-2 py-3 flex-shrink-0">
+          {([1,2,3] as const).map(s => (
+            <div key={s} className="w-2 h-2 rounded-full transition-all"
+              style={{ background: step === s ? '#4ade80' : 'rgba(74,222,128,0.2)', transform: step === s ? 'scale(1.3)' : 'scale(1)' }} />
+          ))}
         </div>
-      </motion.div>
-    </motion.div>
-  )
-}
+      )}
 
-// Inline Gift Aid form — collect name + postcode
-function GiftAidForm({
-  amount,
-  onSubmit,
-  onSkip,
-}: {
-  amount: number
-  onSubmit: (firstName: string, surname: string, postcode: string) => void
-  onSkip: () => void
-}) {
-  const [firstName, setFirstName] = useState('')
-  const [surname, setSurname]     = useState('')
-  const [postcode, setPostcode]   = useState('')
-  const valid = firstName.trim().length > 0 && surname.trim().length > 0 && postcode.trim().length >= 5
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-5 pb-4">
+        <AnimatePresence mode="wait">
 
-  return (
-    <motion.div
-      initial={{ y: '100%' }}
-      animate={{ y: 0 }}
-      exit={{ y: '100%' }}
-      transition={{ type: 'spring', damping: 30, stiffness: 320 }}
-      className="absolute inset-0 flex flex-col justify-end z-30"
-      style={{ background: 'rgba(0,0,0,0.8)' }}
-    >
-      <div className="w-full rounded-t-3xl p-6 space-y-4"
-        style={{ background: 'linear-gradient(160deg,#0d2a0a,#122a10)', border: '1px solid rgba(74,222,128,0.25)' }}>
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest mb-0.5" style={{ color: 'rgba(74,222,128,0.6)' }}>Gift Aid Declaration</p>
-          <p className="text-sm font-bold" style={{ color: '#4ade80' }}>
-            Temple will receive £{(amount * 1.25).toFixed(2)} (+£{(amount * 0.25).toFixed(2)} free)
-          </p>
-        </div>
+          {/* Screen 0 — Gift Aid prompt */}
+          {step === 0 && (
+            <motion.div key="ga0" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+              className="flex flex-col gap-4 pt-4">
+              {/* Amount breakdown */}
+              <div className="rounded-2xl p-4 text-center" style={{ background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)' }}>
+                <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(74,222,128,0.6)' }}>
+                  Your donation: £{amount.toFixed(2)}
+                </p>
+                <p className="text-3xl font-black" style={{ color: '#4ade80' }}>
+                  Temple gets £{totalAmount}
+                </p>
+                <p className="text-sm mt-1" style={{ color: 'rgba(74,222,128,0.65)' }}>
+                  +£{gaAmount} from HMRC at no cost to you
+                </p>
+              </div>
 
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <label className="block text-xs font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,248,220,0.45)' }}>First Name</label>
-            <input
-              value={firstName} onChange={e => setFirstName(e.target.value)}
-              placeholder="First name"
-              className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
-              style={{ background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)' }}
-            />
-          </div>
-          <div className="flex-1">
-            <label className="block text-xs font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,248,220,0.45)' }}>Surname</label>
-            <input
-              value={surname} onChange={e => setSurname(e.target.value)}
-              placeholder="Surname"
-              className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
-              style={{ background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)' }}
-            />
-          </div>
-        </div>
+              {/* Boost with Gift Aid — recommended */}
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => setStep(1)}
+                className="w-full rounded-2xl p-5 text-center"
+                style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', boxShadow: '0 8px 24px rgba(22,163,74,0.45)' }}
+              >
+                <p className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                  RECOMMENDED · UK TAXPAYERS
+                </p>
+                <p className="text-lg font-black text-white">
+                  Boost with Gift Aid (+£{gaAmount})
+                </p>
+                <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.8)' }}>
+                  Temple gets £{totalAmount}
+                </p>
+              </motion.button>
 
-        <div>
-          <label className="block text-xs font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,248,220,0.45)' }}>UK Postcode</label>
-          <input
-            value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())}
-            placeholder="e.g. HA9 0BB"
-            className="w-full px-3 py-2.5 rounded-xl text-sm outline-none uppercase"
-            style={{ background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)' }}
-          />
-          <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.3)' }}>
-            I confirm I am a UK taxpayer and understand that Gift Aid will be reclaimed on this donation.
-          </p>
-        </div>
+              {/* Without Gift Aid */}
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={onSkip}
+                className="w-full rounded-2xl py-4 font-bold text-sm"
+                style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.45)', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                Without Gift Aid · Pay £{amount.toFixed(2)}
+              </motion.button>
 
-        <div className="flex gap-3">
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={() => onSubmit(firstName.trim(), surname.trim(), postcode.trim())}
-            disabled={!valid}
-            className="flex-1 py-4 rounded-2xl font-black text-base disabled:opacity-40"
-            style={{ background: valid ? 'linear-gradient(135deg,#16a34a,#15803d)' : 'rgba(255,255,255,0.06)', color: '#fff' }}
-          >
-            Confirm Gift Aid
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={onSkip}
-            className="flex-[0.55] py-4 rounded-2xl font-bold text-sm"
-            style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)',
-              border: '1px solid rgba(255,255,255,0.1)' }}
-          >
-            Skip
-          </motion.button>
-        </div>
+              <p className="text-[10px] text-center" style={{ color: 'rgba(255,248,220,0.25)' }}>
+                ✓ No extra payment &nbsp;·&nbsp; ✓ Takes 30 seconds &nbsp;·&nbsp; ✓ HMRC approved
+              </p>
+            </motion.div>
+          )}
+
+          {/* Screen 1 — Name */}
+          {step === 1 && (
+            <motion.div key="ga1" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
+              <div>
+                <label className={labelCls} style={labelStyle}>Surname *</label>
+                <input className={inputCls} style={inputStyle} placeholder="Surname"
+                  value={surname} onChange={e => setSurname(e.target.value)} autoFocus />
+              </div>
+              <div>
+                <label className={labelCls} style={labelStyle}>First Name *</label>
+                <input className={inputCls} style={inputStyle} placeholder="First name"
+                  value={firstName} onChange={e => setFirstName(e.target.value)} />
+              </div>
+            </motion.div>
+          )}
+
+          {/* Screen 2 — Address */}
+          {step === 2 && (
+            <motion.div key="ga2" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
+              <div>
+                <label className={labelCls} style={labelStyle}>House Number</label>
+                <input className={inputCls} style={inputStyle} placeholder="House number or name"
+                  value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus />
+              </div>
+              <div>
+                <label className={labelCls} style={labelStyle}>Postcode</label>
+                <input className={inputCls} style={inputStyle} placeholder="e.g. HA9 0BB"
+                  value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())} />
+              </div>
+            </motion.div>
+          )}
+
+          {/* Screen 3 — Email + Declaration */}
+          {step === 3 && (
+            <motion.div key="ga3" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
+              <div>
+                <label className={labelCls} style={labelStyle}>Email *</label>
+                <input className={inputCls} style={inputStyle} placeholder="your@email.com"
+                  type="email" value={email} onChange={e => setEmail(e.target.value)} autoFocus />
+              </div>
+              <button onClick={() => setDeclared(v => !v)}
+                className="w-full flex items-start gap-3 p-4 rounded-2xl text-left transition-all"
+                style={{
+                  background: declared ? 'rgba(74,222,128,0.1)' : 'rgba(255,255,255,0.04)',
+                  border: `1.5px solid ${declared ? 'rgba(74,222,128,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                }}>
+                <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
+                  style={{ background: declared ? '#22c55e' : 'rgba(255,255,255,0.1)', border: declared ? 'none' : '2px solid rgba(255,255,255,0.25)' }}>
+                  {declared && <span className="text-white text-xs font-black">✓</span>}
+                </div>
+                <div>
+                  <p className="text-sm font-bold" style={{ color: declared ? '#4ade80' : 'rgba(255,255,255,0.7)' }}>
+                    GiftAid declaration
+                  </p>
+                  <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    I am a UK taxpayer. HMRC will add 25p to every £1 I donate at no cost to me.
+                  </p>
+                </div>
+              </button>
+            </motion.div>
+          )}
+
+        </AnimatePresence>
+      </div>
+
+      {/* Nav buttons */}
+      <div className="flex gap-3 px-5 pb-6 pt-3 flex-shrink-0"
+        style={{ borderTop: '1px solid rgba(74,222,128,0.1)' }}>
+        <button
+          onClick={() => step === 0 ? onSkip() : setStep((step - 1) as GiftAidFlowStep)}
+          className="flex-1 py-3.5 rounded-2xl font-black text-sm"
+          style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          {step === 0 ? '← Back' : 'Back'}
+        </button>
+        {step > 0 && (
+          <button
+            onClick={() => {
+              if (step === 1) { if (canNext1) setStep(2) }
+              else if (step === 2) setStep(3)
+              else if (step === 3) { if (canNext3) onConfirm(firstName.trim(), surname.trim(), houseNum.trim(), postcode.trim(), email.trim()) }
+            }}
+            disabled={(step === 1 && !canNext1) || (step === 3 && !canNext3)}
+            className="flex-[2] py-3.5 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.98]"
+            style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff' }}>
+            {step === 3 ? 'Next →' : 'Next →'}
+          </button>
+        )}
       </div>
     </motion.div>
   )
@@ -617,10 +668,8 @@ export function DonationScreen() {
   // Monthly giving flow
   const [monthlyOpen, setMonthlyOpen] = useState(false)
 
-  // Gift Aid overlay state
-  const [pendingAmount, setPendingAmount]     = useState<number | null>(null)
-  const [giftAidStep, setGiftAidStep]         = useState<'none' | 'ask' | 'form'>('none')
-  const [giftAidInfo, setGiftAidInfo]         = useState<{ firstName: string; surname: string; postcode: string } | null>(null)
+  // Gift Aid flow state
+  const [pendingAmount, setPendingAmount] = useState<number | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -654,20 +703,15 @@ export function DonationScreen() {
     setOtherVal(next)
   }
 
-  const proceedToPayment = (amount: number, gaInfo?: { firstName: string; surname: string; postcode: string } | null) => {
+  const proceedToPayment = (amount: number) => {
     setAmount(amount)
-    // TODO: pass gaInfo to checkout if needed
-    void gaInfo
-    setGiftAidStep('none')
     setPendingAmount(null)
-    setGiftAidInfo(null)
     setScreen('processing')
   }
 
   const handleTileTap = (price: number) => {
     if (enableGiftAid) {
       setPendingAmount(price)
-      setGiftAidStep('ask')
     } else {
       setAmount(price)
       setScreen('processing')
@@ -679,7 +723,6 @@ export function DonationScreen() {
     if (!amt || amt <= 0) return
     if (enableGiftAid) {
       setPendingAmount(amt)
-      setGiftAidStep('ask')
       setOtherOpen(false)
       setOtherVal('')
     } else {
@@ -845,29 +888,16 @@ export function DonationScreen() {
         )}
       </AnimatePresence>
 
-      {/* ── Gift Aid overlays ────────────────────────────────────────────────── */}
+      {/* ── Gift Aid flow ────────────────────────────────────────────────────── */}
       <AnimatePresence>
-        {giftAidStep === 'ask' && pendingAmount !== null && (
-          <GiftAidOverlay
+        {pendingAmount !== null && (
+          <GiftAidFlow
             amount={pendingAmount}
-            onYes={() => setGiftAidStep('form')}
-            onNo={() => proceedToPayment(pendingAmount, null)}
-          />
-        )}
-        {giftAidStep === 'form' && pendingAmount !== null && (
-          <GiftAidForm
-            amount={pendingAmount}
-            onSubmit={(fn, sn, pc) => {
-              setGiftAidInfo({ firstName: fn, surname: sn, postcode: pc })
-              proceedToPayment(pendingAmount, { firstName: fn, surname: sn, postcode: pc })
-            }}
-            onSkip={() => proceedToPayment(pendingAmount, null)}
+            onConfirm={(_fn, _sn, _hn, _pc, _em) => proceedToPayment(pendingAmount)}
+            onSkip={() => proceedToPayment(pendingAmount)}
           />
         )}
       </AnimatePresence>
-
-      {/* suppress unused warning */}
-      {giftAidInfo && null}
 
       {/* ── Monthly Giving flow ──────────────────────────────────────────────── */}
       <AnimatePresence>
