@@ -292,7 +292,8 @@ async def list_addresses(q: str = "", contact_id: str = "", page: int = 1, per_p
             text(f"SELECT COUNT(*) AS cnt FROM addresses a LEFT JOIN contacts c ON c.id = a.contact_id {where}"),
             {k: v for k, v in params.items() if k not in ("limit", "offset")},
         )
-        total = (count_r.mappings().first() or {}).get("cnt", 0)
+        count_row = count_r.mappings().first()
+        total = int(count_row["cnt"]) if count_row else 0
 
     return {"addresses": [dict(r) for r in rows], "total": total, "page": page, "per_page": per_page}
 
@@ -347,6 +348,7 @@ async def list_order_items(order_ref: str = "", branch_id: str = "", page: int =
             """),
             {k: v for k, v in params.items() if k not in ("limit", "offset")},
         )
-        total = (count_r.mappings().first() or {}).get("cnt", 0)
+        count_row = count_r.mappings().first()
+        total = int(count_row["cnt"]) if count_row else 0
 
     return {"items": [dict(r) for r in rows], "total": total, "page": page, "per_page": per_page}
