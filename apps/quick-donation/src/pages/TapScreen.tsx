@@ -9,12 +9,15 @@ type ReaderStatus = 'waiting' | 'processing' | 'succeeded' | 'failed' | 'cancell
 export function TapScreen() {
   const {
     amount, orderRef, paymentIntentId, stripeReaderId, stripeReaderLabel,
+    readerProvider,
     setScreen, reset,
   } = useDonationStore()
 
   const [timeLeft, setTimeLeft] = useState(120)
   const [readerStatus, setReaderStatus] = useState<ReaderStatus>('waiting')
   const [statusMessage, setStatusMessage] = useState('Present your card to the reader')
+
+  const isSumUp = readerProvider === 'sumup'
 
   // Countdown timer
   useEffect(() => {
@@ -27,7 +30,7 @@ export function TapScreen() {
     return () => clearInterval(timer)
   }, [reset])
 
-  // Poll Stripe Terminal status
+  // Poll payment status — branches on provider
   useEffect(() => {
     if (!paymentIntentId) return
     setReaderStatus('processing')
@@ -35,32 +38,52 @@ export function TapScreen() {
 
     const poll = setInterval(async () => {
       try {
-        const res = await fetch(
-          `${API_BASE}/kiosk/terminal/payment-intent-status?id=${paymentIntentId}`
-        )
-        const d = await res.json()
-        if (d.status === 'succeeded') {
-          clearInterval(poll)
-          setReaderStatus('succeeded')
-          setStatusMessage('Payment successful!')
-          setTimeout(() => setScreen('confirmation'), 1500)
-        } else if (d.status === 'canceled') {
-          clearInterval(poll)
-          setReaderStatus('cancelled')
-          setStatusMessage('Payment was cancelled.')
-        } else if (d.status === 'requires_payment_method') {
-          setStatusMessage('Tap, insert or swipe your card...')
-        } else if (d.status === 'processing') {
-          setStatusMessage('Processing payment...')
+        if (isSumUp) {
+          // SumUp checkout status
+          const res = await fetch(`${API_BASE}/kiosk/sumup/checkout/${paymentIntentId}`)
+          const d = await res.json()
+          const s = (d.status || '').toUpperCase()
+          if (s === 'COMPLETED') {
+            clearInterval(poll)
+            setReaderStatus('succeeded')
+            setStatusMessage('Payment successful!')
+            setTimeout(() => setScreen('confirmation'), 1500)
+          } else if (s === 'FAILED' || s === 'EXPIRED') {
+            clearInterval(poll)
+            setReaderStatus('failed')
+            setStatusMessage('Payment failed — please try again.')
+          } else if (s === 'PROCESSING') {
+            setStatusMessage('Processing payment...')
+          }
+        } else {
+          // Stripe Terminal payment intent status
+          const res = await fetch(
+            `${API_BASE}/kiosk/terminal/payment-intent-status?id=${paymentIntentId}`
+          )
+          const d = await res.json()
+          if (d.status === 'succeeded') {
+            clearInterval(poll)
+            setReaderStatus('succeeded')
+            setStatusMessage('Payment successful!')
+            setTimeout(() => setScreen('confirmation'), 1500)
+          } else if (d.status === 'canceled') {
+            clearInterval(poll)
+            setReaderStatus('cancelled')
+            setStatusMessage('Payment was cancelled.')
+          } else if (d.status === 'requires_payment_method') {
+            setStatusMessage('Tap, insert or swipe your card...')
+          } else if (d.status === 'processing') {
+            setStatusMessage('Processing payment...')
+          }
         }
       } catch { /* retry on next poll */ }
     }, 2000)
 
     return () => clearInterval(poll)
-  }, [paymentIntentId, setScreen])
+  }, [paymentIntentId, isSumUp, setScreen])
 
   const handleCancel = async () => {
-    if (stripeReaderId && paymentIntentId) {
+    if (!isSumUp && stripeReaderId && paymentIntentId) {
       await fetch(`${API_BASE}/kiosk/terminal/cancel-action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
