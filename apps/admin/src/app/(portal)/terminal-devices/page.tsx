@@ -562,7 +562,9 @@ export default function TerminalDevicesPage() {
           >
             <option value="">All Providers</option>
             <option value="stripe_terminal">Stripe Terminal</option>
+            <option value="sumup">SumUp</option>
             <option value="square">Square</option>
+            <option value="clover">Clover</option>
             <option value="cash">Cash</option>
           </select>
         </div>
@@ -627,7 +629,7 @@ export default function TerminalDevicesPage() {
                       <td className="px-5 py-4 pl-6">
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-lg flex-shrink-0">
-                            {d.provider === 'stripe_terminal' ? '⚡' : d.provider === 'square' ? '◼' : '💵'}
+                            {{ stripe_terminal: '⚡', square: '◼', clover: '🍀', sumup: '💳', cash: '💵' }[d.provider] ?? '💳'}
                           </div>
                           <div>
                             <p className="text-white font-semibold text-sm">{d.label}</p>
@@ -652,13 +654,12 @@ export default function TerminalDevicesPage() {
 
                       {/* Reader ID */}
                       <td className="px-5 py-4">
-                        {d.stripe_reader_id ? (
-                          <span className="text-white/50 text-xs font-mono bg-white/5 px-2 py-1 rounded-lg">{d.stripe_reader_id}</span>
-                        ) : d.square_device_id ? (
-                          <span className="text-white/50 text-xs font-mono bg-white/5 px-2 py-1 rounded-lg">{d.square_device_id}</span>
-                        ) : (
-                          <span className="text-white/20 text-xs">—</span>
-                        )}
+                        {(() => {
+                          const rid = d.stripe_reader_id || d.square_device_id || d.clover_device_id || d.sumup_reader_serial
+                          return rid
+                            ? <span className="text-white/50 text-xs font-mono bg-white/5 px-2 py-1 rounded-lg">{rid}</span>
+                            : <span className="text-white/20 text-xs">—</span>
+                        })()}
                       </td>
 
                       {/* Assigned to */}

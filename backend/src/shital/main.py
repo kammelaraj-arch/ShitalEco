@@ -665,6 +665,9 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_terminal_devices_branch ON terminal_devices(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_terminal_devices_active ON terminal_devices(is_active) WHERE deleted_at IS NULL",
+        # Idempotent columns for providers added after initial schema
+        "ALTER TABLE terminal_devices ADD COLUMN IF NOT EXISTS clover_device_id   VARCHAR(255) NOT NULL DEFAULT ''",
+        "ALTER TABLE terminal_devices ADD COLUMN IF NOT EXISTS sumup_reader_serial VARCHAR(255) NOT NULL DEFAULT ''",
         # ── Gift Aid Declarations ─────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS gift_aid_declarations (
             id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
