@@ -98,6 +98,7 @@ export function CheckoutScreen() {
             branch_id:         branchId,
             device_id:         deviceId,
             device_label:      deviceLabel,
+            source:            'kiosk',
             total_amount:      total,
             contact_name:      contactInfo?.anonymous ? '' : (contactInfo?.name || ''),
             contact_email:     contactInfo?.anonymous ? '' : (contactInfo?.email || ''),

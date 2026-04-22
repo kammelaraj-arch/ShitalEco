@@ -926,9 +926,10 @@ async def _patch_schema() -> None:
         "ALTER TABLE donations                    ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
         "ALTER TABLE gift_aid_declarations        ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
-        # ── Kiosk device tracking on orders ──────────────────────────────────
+        # ── Kiosk device tracking + origin on orders ─────────────────────────
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS device_id    VARCHAR(200) NOT NULL DEFAULT ''",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS device_label VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS source       VARCHAR(64)  NOT NULL DEFAULT 'kiosk'",
         # Store UPRN on gift_aid_declarations for HMRC record-keeping
         "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS uprn VARCHAR(20) NOT NULL DEFAULT ''",
         # Seed default tiers if none exist

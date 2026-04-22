@@ -277,6 +277,7 @@ class OrderPendingInput(BaseModel):
     branch_id: str = "main"
     device_id: str = ""
     device_label: str = ""
+    source: str = "kiosk"
     total_amount: float = 0.0
     contact_name: str = ""
     contact_email: str = ""
@@ -327,12 +328,12 @@ async def create_pending_order(body: OrderPendingInput):
         await db.execute(text("""
             INSERT INTO orders
                 (id, branch_id, basket_id, reference, status, total_amount, currency,
-                 payment_provider, payment_ref, device_id, device_label,
+                 payment_provider, payment_ref, device_id, device_label, source,
                  customer_name, customer_email, customer_phone,
                  contact_id, idempotency_key, created_at, updated_at)
             VALUES
                 (:id, :bid, :basket, :ref, 'PENDING', :total, 'GBP',
-                 :provider, :pref, :did, :dlabel,
+                 :provider, :pref, :did, :dlabel, :source,
                  :cname, :cemail, :cphone,
                  :cid, :ikey, :now, :now)
             ON CONFLICT (idempotency_key) DO NOTHING
@@ -341,6 +342,7 @@ async def create_pending_order(body: OrderPendingInput):
             "ref": body.order_ref, "total": str(total),
             "provider": body.payment_provider, "pref": body.payment_intent_id or "",
             "did": body.device_id or "", "dlabel": body.device_label or "",
+            "source": body.source or "kiosk",
             "cname": body.contact_name, "cemail": body.contact_email, "cphone": body.contact_phone,
             "cid": contact_id, "ikey": body.order_ref, "now": now,
         })
