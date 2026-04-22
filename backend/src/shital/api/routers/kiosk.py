@@ -1969,6 +1969,63 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     }
 
 
+@router.get("/quick-donation/refresh-config")
+async def quick_kiosk_refresh_config(username: str):
+    """
+    Returns the latest device config (reader, flags, branch) for an already
+    logged-in device without requiring the password again.
+    Non-sensitive: only feature flags, reader IDs, and branch info are returned.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    login_input = username.strip().lower()
+    if not login_input:
+        return {"ok": False, "error": "username required"}
+
+    async with SessionLocal() as db:
+        dev_res = await db.execute(
+            text("""
+                SELECT kd.id, kd.name, kd.branch_id,
+                       kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
+                       kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
+                       kd.card_reader_id,
+                       td.stripe_reader_id, td.label AS reader_label,
+                       COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
+                       COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
+                       b.name AS branch_name
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                LEFT JOIN branches b ON b.branch_id = kd.branch_id
+                WHERE LOWER(kd.device_username) = :uname
+                  AND kd.deleted_at IS NULL
+                  AND UPPER(kd.status) = 'ACTIVE'
+                LIMIT 1
+            """),
+            {"uname": login_input},
+        )
+        device = dev_res.mappings().first()
+
+    if not device:
+        return {"ok": False, "error": "Device not found"}
+
+    return {
+        "ok": True,
+        "branch": {"id": device["branch_id"], "name": device["branch_name"] or device["branch_id"]},
+        "stripe_reader_id": device["stripe_reader_id"],
+        "reader_label": device["reader_label"],
+        "reader_provider": device["reader_provider"],
+        "sumup_reader_serial": device["sumup_reader_serial"],
+        "show_monthly_giving": bool(device["show_monthly_giving"]),
+        "enable_gift_aid": bool(device["enable_gift_aid"]),
+        "tap_and_go": bool(device["tap_and_go"]),
+        "donate_title": device["donate_title"] or "Tap & Donate",
+        "monthly_giving_text": device["monthly_giving_text"] or "Make a big impact from just £5/month",
+        "monthly_giving_amount": float(device["monthly_giving_amount"] or 5),
+    }
+
+
 class AzureKioskLoginInput(BaseModel):
     id_token: str
 

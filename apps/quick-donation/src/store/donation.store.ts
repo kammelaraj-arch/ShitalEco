@@ -42,6 +42,7 @@ export interface DonationState {
   // Persistent login — survives reboots; cleared only by explicit logout
   isDeviceLoggedIn: boolean
   loggedInName: string
+  loggedInUsername: string  // raw username used to login, for refresh-config calls
 
   _hasHydrated: boolean
   setHasHydrated: (v: boolean) => void
@@ -52,7 +53,7 @@ export interface DonationState {
   setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string) => void
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
-  setDeviceLoggedIn: (loggedIn: boolean, name: string) => void
+  setDeviceLoggedIn: (loggedIn: boolean, name: string, username?: string) => void
   setPendingGiftAid: (data: GiftAidData | null) => void
   reset: () => void
 }
@@ -82,6 +83,7 @@ export const useDonationStore = create<DonationState>()(
 
       isDeviceLoggedIn: false,
       loggedInName: '',
+      loggedInUsername: '',
 
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
@@ -92,7 +94,10 @@ export const useDonationStore = create<DonationState>()(
       setReader: (stripeReaderId, stripeReaderLabel, readerProvider = '', sumupReaderId = '') =>
         set({ stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId }),
       setDeviceFlags: (flags) => set(flags),
-      setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName) => set({ isDeviceLoggedIn, loggedInName }),
+      setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName, username) => set({
+        isDeviceLoggedIn, loggedInName,
+        ...(username !== undefined ? { loggedInUsername: username } : {}),
+      }),
       setOrderResult: (orderId, orderRef, paymentIntentId, clientSecret) =>
         set({ orderId, orderRef, paymentIntentId, clientSecret }),
       setPendingGiftAid: (pendingGiftAid) => set({ pendingGiftAid }),
@@ -124,6 +129,7 @@ export const useDonationStore = create<DonationState>()(
         monthlyGivingAmount: state.monthlyGivingAmount,
         isDeviceLoggedIn: state.isDeviceLoggedIn,
         loggedInName: state.loggedInName,
+        loggedInUsername: state.loggedInUsername,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true)

@@ -30,9 +30,12 @@ interface AzureConfig { client_id: string; authority: string }
 export function AdminScreen() {
   const {
     branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId,
-    isDeviceLoggedIn, loggedInName,
+    isDeviceLoggedIn, loggedInName, loggedInUsername,
     setBranchId, setReader, setDeviceFlags, setDeviceLoggedIn, setScreen,
   } = useDonationStore()
+
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<'idle' | 'ok' | 'fail'>('idle')
 
   const [readers, setReaders] = useState<Reader[]>([])
   const [loading, setLoading] = useState(false)
@@ -80,9 +83,35 @@ export function AdminScreen() {
       monthlyGivingAmount: data.monthly_giving_amount ?? 5,
     })
     // Persist login — survives reboots until explicit logout
-    setDeviceLoggedIn(true, data.user?.name || enteredUsername)
+    setDeviceLoggedIn(true, data.user?.name || enteredUsername, enteredUsername)
     loadReaders()
     setScreen('donate')
+  }
+
+  async function handleSync() {
+    if (!loggedInUsername) return
+    setSyncing(true); setSyncResult('idle')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/quick-donation/refresh-config?username=${encodeURIComponent(loggedInUsername)}`)
+      const data = await res.json()
+      if (!data.ok) { setSyncResult('fail'); return }
+      setBranchId(data.branch.id)
+      const provider = (data.reader_provider || 'stripe_terminal') as import('../store/donation.store').ReaderProvider
+      if (data.stripe_reader_id || data.sumup_reader_serial) {
+        setReader(data.stripe_reader_id || '', data.reader_label || '', provider, data.sumup_reader_serial || '')
+      }
+      setDeviceFlags({
+        showMonthlyGiving: data.show_monthly_giving ?? false,
+        enableGiftAid: data.enable_gift_aid ?? false,
+        tapAndGo: data.tap_and_go ?? true,
+        donateTitle: data.donate_title ?? 'Tap & Donate',
+        monthlyGivingText: data.monthly_giving_text ?? 'Make a big impact from just £5/month',
+        monthlyGivingAmount: data.monthly_giving_amount ?? 5,
+      })
+      setSyncResult('ok')
+      setTimeout(() => setSyncResult('idle'), 3000)
+    } catch { setSyncResult('fail') }
+    finally { setSyncing(false) }
   }
 
   async function handleLogin() {
@@ -279,6 +308,15 @@ export function AdminScreen() {
             </p>
           </div>
           <div className="flex gap-2">
+            <button onClick={handleSync} disabled={syncing || !loggedInUsername}
+              className="px-3 py-2 rounded-xl text-xs font-bold disabled:opacity-40 transition-all active:scale-[0.97]"
+              style={syncResult === 'ok'
+                ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.3)' }
+                : syncResult === 'fail'
+                ? { background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }
+                : { background: 'rgba(212,175,55,0.1)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.25)' }}>
+              {syncing ? '…' : syncResult === 'ok' ? '✓ Synced' : syncResult === 'fail' ? '✗ Failed' : '↻ Sync'}
+            </button>
             <button onClick={handleLogout}
               className="px-3 py-2 rounded-xl text-xs font-bold"
               style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }}>
