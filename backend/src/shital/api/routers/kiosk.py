@@ -689,6 +689,13 @@ class QuickDonationRecordInput(BaseModel):
     branch_id: str = "main"
     payment_intent_id: str = ""
     reader_id: str = ""
+    # Optional Gift Aid — collected before payment on the kiosk
+    ga_first_name: str = ""
+    ga_surname: str = ""
+    ga_house_number: str = ""
+    ga_postcode: str = ""
+    ga_email: str = ""
+    ga_declared: bool = False
 
 
 # Anonymous kiosk user/branch lookup — maps branch codes to UUIDs at runtime.
@@ -756,13 +763,15 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                 },
             )
 
+            ga = body.ga_declared and bool(body.ga_first_name or body.ga_surname)
+
             # 2. Record in donations table (for donation reporting, Gift Aid, finance)
             await db.execute(
                 text(
                     "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
                     "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
                     "status, idempotency_key, created_at, updated_at) "
-                    "VALUES (:id, :uid, :bid, :amount, 'GBP', false, 'General Fund', :ref, "
+                    "VALUES (:id, :uid, :bid, :amount, 'GBP', :ga_elig, 'General Fund', :ref, "
                     "'KIOSK', :pref, 'PENDING', :ikey, :now, :now) "
                     "ON CONFLICT (idempotency_key) DO NOTHING"
                 ),
@@ -770,17 +779,86 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                     "id": donation_id, "uid": anon_user_id, "bid": branch_id,
                     "amount": str(total), "ref": body.order_ref,
                     "pref": body.payment_intent_id, "ikey": f"qd-{order_id}",
-                    "now": now,
+                    "ga_elig": ga, "now": now,
                 },
             )
+
+            # 3. Store Gift Aid declaration + upsert contact (reuses gift_aid_declarations table)
+            declaration_id: str | None = None
+            if ga:
+                # Ensure source column exists (idempotent migration)
+                await db.execute(text(
+                    "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS source VARCHAR(64) DEFAULT 'kiosk'"
+                ))
+
+                full_name = f"{body.ga_first_name} {body.ga_surname}".strip()
+                email_key = body.ga_email.strip().lower() if body.ga_email.strip() else None
+                contact_id: str | None = None
+
+                if email_key:
+                    contact_uuid = str(uuid.uuid4())
+                    c_row = (await db.execute(text("""
+                        INSERT INTO contacts
+                            (id, email, first_name, surname, full_name, phone,
+                             gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                             first_source, first_branch_id, created_at, updated_at)
+                        VALUES
+                            (:id, :email, :first, :surname, :name, '',
+                             true, :now, true, :now, 'quick-donation', :branch, :now, :now)
+                        ON CONFLICT (email) DO UPDATE SET
+                            first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                            surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                            full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                            gdpr_consent      = true,
+                            gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                            updated_at        = EXCLUDED.updated_at
+                        RETURNING id
+                    """), {
+                        "id": contact_uuid, "email": email_key,
+                        "first": body.ga_first_name, "surname": body.ga_surname,
+                        "name": full_name, "branch": body.branch_id, "now": now,
+                    })).mappings().first()
+                    contact_id = str(c_row["id"]) if c_row else contact_uuid
+
+                    if body.ga_postcode:
+                        await db.execute(text("""
+                            INSERT INTO addresses
+                                (id, contact_id, formatted, postcode, uprn,
+                                 is_primary, lookup_source, created_at)
+                            VALUES (:id, :cid, :fmt, :pc, '', true, 'quick-donation', :now)
+                        """), {
+                            "id": str(uuid.uuid4()), "cid": contact_id,
+                            "fmt": body.ga_house_number or "", "pc": body.ga_postcode.upper().strip(), "now": now,
+                        })
+
+                declaration_id = str(uuid.uuid4())
+                await db.execute(text("""
+                    INSERT INTO gift_aid_declarations
+                        (id, order_ref, full_name, first_name, surname, postcode, address, uprn,
+                         contact_email, contact_phone, donation_amount, donation_date,
+                         gift_aid_agreed, contact_id, source, hmrc_submitted, created_at)
+                    VALUES
+                        (:id, :ref, :name, :first, :surname, :pc, :addr, '',
+                         :email, '', :amount, :ddate,
+                         true, :cid, 'quick-donation', false, :now)
+                """), {
+                    "id": declaration_id, "ref": body.order_ref,
+                    "name": full_name, "first": body.ga_first_name, "surname": body.ga_surname,
+                    "pc": body.ga_postcode.upper().strip() if body.ga_postcode else "",
+                    "addr": body.ga_house_number or "",
+                    "email": body.ga_email.strip().lower() if body.ga_email else "",
+                    "amount": str(total), "ddate": now.date(),
+                    "cid": contact_id, "now": now,
+                })
 
             await db.commit()
         return {
             "recorded": True,
             "order_id": order_id,
             "donation_id": donation_id,
+            "declaration_id": declaration_id,
             "reference": body.order_ref,
-            "anonymous": True,
+            "gift_aid": ga,
         }
     except Exception as e:
         return {"recorded": False, "error": str(e)}

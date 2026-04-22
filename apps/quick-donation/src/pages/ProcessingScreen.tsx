@@ -22,6 +22,7 @@ function generateUUID(): string {
 export function ProcessingScreen() {
   const {
     amount, branchId, stripeReaderId, stripeReaderLabel,
+    pendingGiftAid,
     setScreen, setOrderResult, setReader,
   } = useDonationStore()
 
@@ -108,7 +109,7 @@ export function ProcessingScreen() {
       // 5. Store order result and move to tap screen
       const orderRef = `DON-${basketId.slice(0, 8).toUpperCase()}`
 
-      // Record order in DB (best-effort)
+      // Record order in DB with optional Gift Aid declaration (best-effort)
       try {
         await fetch(`${API_BASE}/kiosk/quick-donation/record`, {
           method: 'POST',
@@ -120,6 +121,14 @@ export function ProcessingScreen() {
             branch_id: branchId,
             payment_intent_id: pi.payment_intent_id,
             reader_id: stripeReaderId,
+            ...(pendingGiftAid ? {
+              ga_first_name: pendingGiftAid.firstName,
+              ga_surname: pendingGiftAid.surname,
+              ga_house_number: pendingGiftAid.houseNum,
+              ga_postcode: pendingGiftAid.postcode,
+              ga_email: pendingGiftAid.email,
+              ga_declared: true,
+            } : {}),
           }),
         })
       } catch { /* non-fatal — will be reconciled via Stripe webhook */ }

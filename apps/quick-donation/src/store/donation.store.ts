@@ -3,6 +3,14 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 
 export type Screen = 'idle' | 'donate' | 'processing' | 'tap' | 'confirmation' | 'admin'
 
+export interface GiftAidData {
+  firstName: string
+  surname: string
+  houseNum: string
+  postcode: string
+  email: string
+}
+
 export interface DonationState {
   screen: Screen
   amount: number
@@ -13,6 +21,9 @@ export interface DonationState {
   orderRef: string | null
   paymentIntentId: string | null
   clientSecret: string | null
+
+  // Gift Aid — collected on kiosk before card tap, cleared after record call
+  pendingGiftAid: GiftAidData | null
 
   // Device feature flags (set on login, persisted)
   showMonthlyGiving: boolean
@@ -33,6 +44,7 @@ export interface DonationState {
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string) => void
+  setPendingGiftAid: (data: GiftAidData | null) => void
   reset: () => void
 }
 
@@ -48,6 +60,7 @@ export const useDonationStore = create<DonationState>()(
       orderRef: null,
       paymentIntentId: null,
       clientSecret: null,
+      pendingGiftAid: null,
 
       showMonthlyGiving: false,
       enableGiftAid: false,
@@ -67,6 +80,7 @@ export const useDonationStore = create<DonationState>()(
       setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName) => set({ isDeviceLoggedIn, loggedInName }),
       setOrderResult: (orderId, orderRef, paymentIntentId, clientSecret) =>
         set({ orderId, orderRef, paymentIntentId, clientSecret }),
+      setPendingGiftAid: (pendingGiftAid) => set({ pendingGiftAid }),
       reset: () =>
         set({
           screen: 'donate',
@@ -75,6 +89,7 @@ export const useDonationStore = create<DonationState>()(
           orderRef: null,
           paymentIntentId: null,
           clientSecret: null,
+          pendingGiftAid: null,
         }),
     }),
     {

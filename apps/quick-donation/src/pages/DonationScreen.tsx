@@ -644,7 +644,7 @@ function GiftAidFlow({
 }
 
 export function DonationScreen() {
-  const { setScreen, setAmount, branchId, showMonthlyGiving, enableGiftAid, donateTitle, monthlyGivingText, monthlyGivingAmount } = useDonationStore()
+  const { setScreen, setAmount, branchId, showMonthlyGiving, enableGiftAid, donateTitle, monthlyGivingText, monthlyGivingAmount, setPendingGiftAid } = useDonationStore()
 
   const [tiles, setTiles]         = useState<AmountTile[]>([])
   const [loading, setLoading]     = useState(true)
@@ -703,8 +703,9 @@ export function DonationScreen() {
     setOtherVal(next)
   }
 
-  const proceedToPayment = (amount: number) => {
+  const proceedToPayment = (amount: number, gaData?: { firstName: string; surname: string; houseNum: string; postcode: string; email: string } | null) => {
     setAmount(amount)
+    setPendingGiftAid(gaData ?? null)
     setPendingAmount(null)
     setScreen('processing')
   }
@@ -893,8 +894,8 @@ export function DonationScreen() {
         {pendingAmount !== null && (
           <GiftAidFlow
             amount={pendingAmount}
-            onConfirm={(_fn, _sn, _hn, _pc, _em) => proceedToPayment(pendingAmount)}
-            onSkip={() => proceedToPayment(pendingAmount)}
+            onConfirm={(fn, sn, hn, pc, em) => proceedToPayment(pendingAmount, { firstName: fn, surname: sn, houseNum: hn, postcode: pc, email: em })}
+            onSkip={() => proceedToPayment(pendingAmount, null)}
           />
         )}
       </AnimatePresence>
