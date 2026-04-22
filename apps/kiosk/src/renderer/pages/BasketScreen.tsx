@@ -49,7 +49,8 @@ function GiftAidScreen({
   const [agreed,    setAgreed]   = useState(true)
   const [gdpr,      setGdpr]     = useState(true)
   const [terms,     setTerms]    = useState(false)
-  const [fullName,  setFullName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [surname,   setSurname]   = useState('')
   const [postcode,  setPostcode] = useState('')
   const [addresses, setAddresses]= useState<string[]>([])
   const [resolvedPc,setResolvedPc]=useState('')
@@ -70,7 +71,8 @@ function GiftAidScreen({
   const closeKb = () => setActiveField(null)
   const handleKbChange = (v: string) => {
     setKbValue(v)
-    if (activeField === 'fullname') setFullName(v)
+    if (activeField === 'firstname') setFirstName(v)
+    else if (activeField === 'surname')  setSurname(v)
     else if (activeField === 'postcode') setPostcode(v.toUpperCase())
     else if (activeField === 'phone') setPhone(v)
     else if (activeField === 'email') setEmail(v)
@@ -101,11 +103,12 @@ function GiftAidScreen({
   function handleContinue() {
     if (!agreed) { setError('Please confirm the Gift Aid declaration'); return }
     if (!terms)  { setError('Please accept the Terms & Conditions to proceed'); return }
-    if (!fullName.trim()) { setError('Please enter your full name'); return }
+    if (!firstName.trim()) { setError('Please enter your first name'); return }
+    if (!surname.trim())   { setError('Please enter your surname'); return }
     if (!address) { setError('Please look up your postcode and select your address'); return }
     if (!phone.trim() && !email.trim()) { setError('Please enter a phone number or email'); return }
     setError('')
-    onConfirm({ fullName, postcode: resolvedPc || postcode.toUpperCase(), address, email, phone, agreed })
+    onConfirm({ fullName: `${firstName.trim()} ${surname.trim()}`, postcode: resolvedPc || postcode.toUpperCase(), address, email, phone, agreed })
   }
 
   return (
@@ -202,15 +205,27 @@ function GiftAidScreen({
           </p>
         </button>
 
-        {/* Full Name */}
-        <div>
-          <label className="block text-sm font-black text-gray-800 mb-1.5">Full Name <span className="text-red-500">*</span></label>
-          <div
-            onClick={() => openKb('fullname', fullName)}
-            className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
-            style={{ borderColor: activeField === 'fullname' ? '#16a34a' : fullName.length > 1 ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'fullname' ? '0 0 0 3px #16a34a25' : 'none' }}
-          >
-            {fullName ? <span className="text-gray-900">{fullName}</span> : <span className="text-gray-400">Tap to enter full name</span>}
+        {/* First Name + Surname */}
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <label className="block text-sm font-black text-gray-800 mb-1.5">First Name <span className="text-red-500">*</span></label>
+            <div
+              onClick={() => openKb('firstname', firstName)}
+              className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+              style={{ borderColor: activeField === 'firstname' ? '#16a34a' : firstName.length > 0 ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'firstname' ? '0 0 0 3px #16a34a25' : 'none' }}
+            >
+              {firstName ? <span className="text-gray-900">{firstName}</span> : <span className="text-gray-400">First name</span>}
+            </div>
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm font-black text-gray-800 mb-1.5">Surname <span className="text-red-500">*</span></label>
+            <div
+              onClick={() => openKb('surname', surname)}
+              className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+              style={{ borderColor: activeField === 'surname' ? '#16a34a' : surname.length > 0 ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'surname' ? '0 0 0 3px #16a34a25' : 'none' }}
+            >
+              {surname ? <span className="text-gray-900">{surname}</span> : <span className="text-gray-400">Surname</span>}
+            </div>
           </div>
         </div>
 
@@ -651,12 +666,16 @@ export function BasketScreen() {
   }
 
   function handleGiftAidConfirm(decl: { fullName: string; postcode: string; address: string; email: string; phone: string; agreed: boolean }) {
+    const parts = decl.fullName.trim().split(' ')
+    const fn = parts[0] || ''
+    const sn = parts.slice(1).join(' ') || ''
     setGiftAidDeclaration({
       agreed: decl.agreed, fullName: decl.fullName, postcode: decl.postcode,
       address: decl.address, contactEmail: decl.email, contactPhone: decl.phone,
     })
     setContactInfo({
-      name: decl.fullName, email: decl.email, phone: decl.phone,
+      name: decl.fullName, firstName: fn, surname: sn,
+      email: decl.email, phone: decl.phone,
       anonymous: false, gdprConsent: true, termsConsent: true,
     })
     setPendingPayment(true)
