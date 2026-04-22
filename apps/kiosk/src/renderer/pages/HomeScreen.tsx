@@ -205,6 +205,20 @@ export function HomeScreen() {
   const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl } = useKioskStore()
   const th = THEMES[theme]
   const [activeNav, setActiveNav] = useState(() => homeActiveNav || 'donations')
+
+  // Hidden staff access: tap top-right corner 3× within 3 s → admin screen
+  const cornerTaps = React.useRef(0)
+  const cornerTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleCornerTap = () => {
+    cornerTaps.current += 1
+    if (cornerTimer.current) clearTimeout(cornerTimer.current)
+    if (cornerTaps.current >= 3) {
+      cornerTaps.current = 0
+      setScreen('admin')
+      return
+    }
+    cornerTimer.current = setTimeout(() => { cornerTaps.current = 0 }, 3000)
+  }
   const [services, setServices] = useState<Service[]>([])
   const [softDonations, setSoftDonations] = useState<DbItem[]>([])
   const [brickTiers, setBrickTiers] = useState<DbItem[]>([])
@@ -414,6 +428,13 @@ export function HomeScreen() {
         >
           <span className="text-base">⚙️</span>
         </button>
+
+        {/* Hidden staff tap zone — 3 taps within 3 s → admin */}
+        <div
+          onPointerDown={handleCornerTap}
+          className="w-8 h-9 rounded-xl select-none flex-shrink-0"
+          style={{ WebkitTapHighlightColor: 'transparent' }}
+        />
       </header>
 
       {/* ══ MOBILE NAV (portrait phones) ══════════════════════════════════════ */}
