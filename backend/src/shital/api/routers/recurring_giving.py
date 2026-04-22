@@ -415,6 +415,7 @@ async def _verify_paypal_webhook(
 async def _ensure_subscription_columns() -> None:
     """Add tracking columns to recurring_giving_subscriptions if not present."""
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         for stmt in [
@@ -434,7 +435,9 @@ async def _handle_payment_completed(resource: dict, event_type: str) -> None:
     Creates a donations row and updates subscription tracking columns.
     """
     from decimal import Decimal
+
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
 
     # Extract subscription_id and amount depending on event shape
@@ -507,6 +510,7 @@ async def _handle_payment_completed(resource: dict, event_type: str) -> None:
 
 async def _handle_subscription_status(sub_id: str, new_status: str, cancelled: bool = False) -> None:
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         if cancelled:
@@ -532,6 +536,7 @@ async def paypal_giving_webhook(request: Request) -> dict[str, Any]:
     Events: BILLING.SUBSCRIPTION.*, PAYMENT.SALE.COMPLETED
     """
     import json
+
     from shital.core.fabrics.secrets import SecretsManager
 
     body_bytes = await request.body()

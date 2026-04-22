@@ -1530,7 +1530,9 @@ async def quick_donation_monthly_signup(body: MonthlySignupInput):
     """Record kiosk monthly-giving signup and create PayPal subscription."""
     import uuid
     from datetime import datetime
+
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
 
     now      = datetime.utcnow()

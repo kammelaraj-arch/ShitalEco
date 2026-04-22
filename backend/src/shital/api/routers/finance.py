@@ -99,10 +99,14 @@ async def list_donations(
     status_filter = "AND d.status = :status" if status else ""
 
     params: dict[str, Any] = {"from_dt": from_dt, "to_dt": to_dt, "lim": limit}
-    if source:    params["source"]    = source
-    if branch_id: params["branch_id"] = branch_id
-    if purpose:   params["purpose"]   = f"%{purpose}%"
-    if status:    params["status"]    = status
+    if source:
+        params["source"] = source
+    if branch_id:
+        params["branch_id"] = branch_id
+    if purpose:
+        params["purpose"] = f"%{purpose}%"
+    if status:
+        params["status"] = status
 
     # Idempotently add source column — must commit DDL before running the query
     async with SessionLocal() as db:
