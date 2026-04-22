@@ -349,25 +349,26 @@ function MonthlyGivingFlow({
           {step === 2 && (
             <motion.div key="s2" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-3 pt-2">
               <label className={labelCls} style={labelStyle}>Address Lookup</label>
-              {/* House no. + postcode + search on one row */}
-              <div className="flex gap-2">
-                <input
-                  className="px-3 py-3.5 rounded-2xl text-base font-semibold outline-none w-24 flex-shrink-0"
-                  style={inputStyle} placeholder="No."
-                  value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus
-                />
-                <input
-                  className="flex-1 px-3 py-3.5 rounded-2xl text-base font-semibold outline-none uppercase"
-                  style={inputStyle} placeholder="Postcode"
-                  value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())}
-                  onKeyDown={e => e.key === 'Enter' && lookupAddress()}
-                />
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <input
+                    className="px-3 py-3.5 rounded-2xl text-base font-semibold outline-none w-24 flex-shrink-0"
+                    style={inputStyle} placeholder="No."
+                    value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus
+                  />
+                  <input
+                    className="flex-1 px-3 py-3.5 rounded-2xl text-base font-semibold outline-none uppercase"
+                    style={inputStyle} placeholder="Postcode"
+                    value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())}
+                    onKeyDown={e => e.key === 'Enter' && lookupAddress()}
+                  />
+                </div>
                 <button
                   onClick={lookupAddress} disabled={lookingUp || !postcode.trim()}
-                  className="px-4 py-3.5 rounded-2xl font-black text-sm flex-shrink-0 disabled:opacity-40 active:scale-[0.96] transition-all"
+                  className="w-full py-3.5 rounded-2xl font-black text-sm disabled:opacity-40 active:scale-[0.98] transition-all"
                   style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}
                 >
-                  {lookingUp ? '…' : '🔍'}
+                  {lookingUp ? 'Looking up…' : '🔍 Find Address'}
                 </button>
               </div>
 
@@ -680,25 +681,26 @@ function GiftAidFlow({
           {step === 2 && (
             <motion.div key="ga2" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-3 pt-2">
               <label className={labelCls} style={labelStyle}>Address Lookup</label>
-              {/* House no. + postcode + search on one row */}
-              <div className="flex gap-2">
-                <input
-                  className="px-3 py-4 rounded-2xl text-base font-semibold outline-none w-24 flex-shrink-0"
-                  style={inputStyle} placeholder="No."
-                  value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus
-                />
-                <input
-                  className="flex-1 px-3 py-4 rounded-2xl text-base font-semibold outline-none uppercase"
-                  style={inputStyle} placeholder="Postcode"
-                  value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())}
-                  onKeyDown={e => e.key === 'Enter' && lookupAddress()}
-                />
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <input
+                    className="px-3 py-4 rounded-2xl text-base font-semibold outline-none w-24 flex-shrink-0"
+                    style={inputStyle} placeholder="No."
+                    value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus
+                  />
+                  <input
+                    className="flex-1 px-3 py-4 rounded-2xl text-base font-semibold outline-none uppercase"
+                    style={inputStyle} placeholder="Postcode"
+                    value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())}
+                    onKeyDown={e => e.key === 'Enter' && lookupAddress()}
+                  />
+                </div>
                 <button
                   onClick={lookupAddress} disabled={lookingUp || !postcode.trim()}
-                  className="px-4 py-4 rounded-2xl font-black text-sm flex-shrink-0 disabled:opacity-40 active:scale-[0.96] transition-all"
+                  className="w-full py-4 rounded-2xl font-black text-sm disabled:opacity-40 active:scale-[0.98] transition-all"
                   style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff' }}
                 >
-                  {lookingUp ? '…' : '🔍'}
+                  {lookingUp ? 'Looking up…' : '🔍 Find Address'}
                 </button>
               </div>
 
