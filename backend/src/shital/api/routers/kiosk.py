@@ -1381,7 +1381,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 FROM kiosk_devices kd
                 LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
                 LEFT JOIN branches b ON b.branch_id = kd.branch_id
-                WHERE kd.device_username = :uname
+                WHERE LOWER(kd.device_username) = :uname
                   AND kd.deleted_at IS NULL
                   AND UPPER(kd.status) = 'ACTIVE'
                 LIMIT 1
