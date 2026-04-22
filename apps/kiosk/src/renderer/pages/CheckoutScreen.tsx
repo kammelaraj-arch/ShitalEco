@@ -17,6 +17,7 @@ export function CheckoutScreen() {
     squareDeviceId, squareDeviceName,
     cloverDeviceId, cloverDeviceName,
     sumupReaderId, sumupReaderLabel,
+    kioskDeviceId, kioskDeviceName,
     pendingPayment, setPendingPayment, theme,
     contactInfo, giftAidDeclaration,
   } = useKioskStore()
@@ -86,7 +87,7 @@ export function CheckoutScreen() {
       const orderRef = `ORD-${basket_id.slice(0, 8).toUpperCase()}`
 
       // Helper — fire-and-forget: save PENDING order before card reader sees it
-      const savePending = (provider: string, paymentIntentId = '', deviceId = '', deviceLabel = '') => {
+      const savePending = (provider: string, paymentIntentId = '') => {
         fetch(`${API_BASE}/kiosk/order/pending`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -96,8 +97,8 @@ export function CheckoutScreen() {
             payment_provider:  provider,
             payment_intent_id: paymentIntentId,
             branch_id:         branchId,
-            device_id:         deviceId,
-            device_label:      deviceLabel,
+            device_id:         kioskDeviceId,
+            device_label:      kioskDeviceName,
             source:            'kiosk',
             total_amount:      total,
             contact_name:      contactInfo?.anonymous ? '' : (contactInfo?.name || ''),
@@ -135,7 +136,7 @@ export function CheckoutScreen() {
         const pr = await prRes.json()
         if (pr.error) throw new Error(pr.error)
 
-        savePending('STRIPE_TERMINAL', pi.payment_intent_id, stripeReaderId, stripeReaderLabel)
+        savePending('STRIPE_TERMINAL', pi.payment_intent_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'STRIPE_TERMINAL',
           payment_intent_id: pi.payment_intent_id,
@@ -163,7 +164,7 @@ export function CheckoutScreen() {
         const sq = await sqRes.json()
         if (sq.error) throw new Error(sq.error)
 
-        savePending('SQUARE', sq.checkout_id, squareDeviceId, squareDeviceName)
+        savePending('SQUARE', sq.checkout_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'SQUARE',
           checkout_id: sq.checkout_id,
@@ -195,7 +196,7 @@ export function CheckoutScreen() {
         const cl = await clRes.json()
         if (cl.error) throw new Error(cl.error)
 
-        savePending('CLOVER', cl.clover_order_id, cloverDeviceId, cloverDeviceName)
+        savePending('CLOVER', cl.clover_order_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'CLOVER',
           clover_order_id: cl.clover_order_id,
@@ -224,7 +225,7 @@ export function CheckoutScreen() {
         const su = await suRes.json()
         if (su.error) throw new Error(su.error)
 
-        savePending('SUMUP', su.checkout_id, sumupReaderId, sumupReaderLabel)
+        savePending('SUMUP', su.checkout_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'SUMUP',
           sumup_checkout_id: su.checkout_id,

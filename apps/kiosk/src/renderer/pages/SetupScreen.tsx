@@ -6,7 +6,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 interface LoginResponse {
   authenticated: boolean
   error?: string
-  user?: { name: string; email: string }
+  user?: { id: string; name: string; email: string }
   branch?: { id: string; name: string }
   profile?: { theme?: string; idle_timeout_secs?: number; preset_amounts?: number[] } | null
   stripe_reader_id?: string | null
@@ -18,7 +18,7 @@ interface AzureConfig { client_id: string; authority: string }
 export function SetupScreen() {
   const {
     setBranchId, setTheme, setOrgName, setOrgLogoUrl,
-    setCardDevice, setDeviceConfigured, setLoggedInUser, setScreen,
+    setCardDevice, setDeviceConfigured, setLoggedInUser, setKioskDevice, setScreen,
   } = useKioskStore()
 
   const [username, setUsername] = useState('')
@@ -41,6 +41,7 @@ export function SetupScreen() {
     setOrgName(data.branch.name)
     if (data.profile?.theme) setTheme(data.profile.theme as KioskTheme)
     if (data.stripe_reader_id) setCardDevice('stripe_terminal', data.stripe_reader_id, data.reader_label || data.stripe_reader_id)
+    setKioskDevice(data.user.id || '', data.user.name || '')
     setLoggedInUser({ name: data.user.name, email: data.user.email, branch: data.branch.name })
     setDeviceConfigured(true)
     setScreen('idle')

@@ -234,6 +234,8 @@ interface KioskState {
     email: string; phone: string
     gdprConsent: boolean; termsConsent: boolean; anonymous: boolean
   } | null
+  kioskDeviceId: string
+  kioskDeviceName: string
   pendingPayment: boolean
   receiptSentByConfirm: boolean
   endScreenTemplate: EndScreenTemplate
@@ -242,6 +244,7 @@ interface KioskState {
   setFormTextConfig: (c: FormTextConfig) => void
   setGiftAidDeclaration: (decl: KioskState['giftAidDeclaration']) => void
   setContactInfo: (info: KioskState['contactInfo']) => void
+  setKioskDevice: (id: string, name: string) => void
   setPendingPayment: (v: boolean) => void
   setReceiptSentByConfirm: (v: boolean) => void
   setScreen: (screen: KioskScreen) => void
@@ -285,6 +288,8 @@ export const useKioskStore = create<KioskState>()(
   orgLogoUrl: '',
   giftAidDeclaration: null,
   contactInfo: null,
+  kioskDeviceId: '',
+  kioskDeviceName: '',
   pendingPayment: false,
   receiptSentByConfirm: false,
   endScreenTemplate: { icon: '🕉', thankYouLine: 'Jay Shri Krishna 🙏', subMessage: '' },
@@ -302,6 +307,7 @@ export const useKioskStore = create<KioskState>()(
   sumupReaderLabel: '',
   setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
   setContactInfo: (contactInfo) => set({ contactInfo }),
+  setKioskDevice: (kioskDeviceId, kioskDeviceName) => set({ kioskDeviceId, kioskDeviceName }),
   setPendingPayment: (pendingPayment) => set({ pendingPayment }),
   setReceiptSentByConfirm: (receiptSentByConfirm) => set({ receiptSentByConfirm }),
   setScreen: (screen) => set({ screen }),
@@ -360,6 +366,8 @@ export const useKioskStore = create<KioskState>()(
         sumupReaderId: state.sumupReaderId,
         sumupReaderLabel: state.sumupReaderLabel,
         branchId: state.branchId,
+        kioskDeviceId: state.kioskDeviceId,
+        kioskDeviceName: state.kioskDeviceName,
         deviceConfigured: state.deviceConfigured,
         loggedInUser: state.loggedInUser,
         endScreenTemplate: state.endScreenTemplate,
