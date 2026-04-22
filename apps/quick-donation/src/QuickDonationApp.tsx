@@ -8,12 +8,15 @@ import { ConfirmationScreen } from './pages/ConfirmationScreen'
 import { AdminScreen } from './pages/AdminScreen'
 
 export function QuickDonationApp() {
-  const { screen, setScreen, isDeviceLoggedIn } = useDonationStore()
+  const { screen, setScreen, isDeviceLoggedIn, _hasHydrated } = useDonationStore()
 
-  // First launch: send unconfigured devices to admin setup
+  // Wait for persisted state to load before deciding whether to show admin setup.
+  // Without this check, isDeviceLoggedIn is always false on first render (before
+  // Zustand rehydrates from localStorage), causing the admin screen to flash every load.
   useEffect(() => {
+    if (!_hasHydrated) return
     if (!isDeviceLoggedIn) setScreen('admin')
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [_hasHydrated]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const pageVariants = {
     initial: { opacity: 0, scale: 0.96 },

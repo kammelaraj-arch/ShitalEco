@@ -43,6 +43,9 @@ export interface DonationState {
   isDeviceLoggedIn: boolean
   loggedInName: string
 
+  _hasHydrated: boolean
+  setHasHydrated: (v: boolean) => void
+
   setScreen: (screen: Screen) => void
   setAmount: (amount: number) => void
   setBranchId: (id: string) => void
@@ -79,6 +82,9 @@ export const useDonationStore = create<DonationState>()(
 
       isDeviceLoggedIn: false,
       loggedInName: '',
+
+      _hasHydrated: false,
+      setHasHydrated: (v) => set({ _hasHydrated: v }),
 
       setScreen: (screen) => set({ screen }),
       setAmount: (amount) => set({ amount }),
@@ -119,6 +125,9 @@ export const useDonationStore = create<DonationState>()(
         isDeviceLoggedIn: state.isDeviceLoggedIn,
         loggedInName: state.loggedInName,
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true)
+      },
     }
   )
 )
