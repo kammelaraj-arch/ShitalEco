@@ -27,14 +27,13 @@ interface AzureConfig { client_id: string; authority: string }
 export function AdminScreen() {
   const {
     branchId, stripeReaderId, stripeReaderLabel,
-    setBranchId, setReader, setDeviceFlags, setScreen,
+    isDeviceLoggedIn, loggedInName,
+    setBranchId, setReader, setDeviceFlags, setDeviceLoggedIn, setScreen,
   } = useDonationStore()
 
   const [readers, setReaders] = useState<Reader[]>([])
   const [loading, setLoading] = useState(false)
 
-  const [loggedInName, setLoggedInName] = useState('')
-  const [loggedIn, setLoggedIn] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
@@ -49,7 +48,12 @@ export function AdminScreen() {
       .catch(() => {})
   }, [])
 
-  function applyLogin(data: LoginResponse) {
+  // Auto-load readers when already logged in (e.g. after reboot)
+  useEffect(() => {
+    if (isDeviceLoggedIn) loadReaders()
+  }, [isDeviceLoggedIn]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function applyLogin(data: LoginResponse, enteredUsername: string) {
     if (!data.branch) return
     setBranchId(data.branch.id)
     const readerId = data.stripe_reader_id || data.profile?.stripe_reader_id || ''
@@ -63,8 +67,8 @@ export function AdminScreen() {
       monthlyGivingText: data.monthly_giving_text ?? 'Make a big impact from just £5/month',
       monthlyGivingAmount: data.monthly_giving_amount ?? 5,
     })
-    setLoggedInName(data.user?.name || username)
-    setLoggedIn(true)
+    // Persist login — survives reboots until explicit logout
+    setDeviceLoggedIn(true, data.user?.name || enteredUsername)
     loadReaders()
   }
 
@@ -82,7 +86,7 @@ export function AdminScreen() {
         return
       }
       const data: LoginResponse = await res.json()
-      if (data.authenticated) applyLogin(data)
+      if (data.authenticated) applyLogin(data, username.trim())
       else setLoginError(data.error || 'Login failed')
     } catch (err) {
       setLoginError(err instanceof TypeError ? 'Cannot reach server — check network.' : 'Login failed. Please try again.')
@@ -111,7 +115,7 @@ export function AdminScreen() {
             body: JSON.stringify({ id_token: idToken }),
           })
           const data: LoginResponse = await res.json()
-          if (data.authenticated) applyLogin(data)
+          if (data.authenticated) applyLogin(data, '')
           else setLoginError(data.error || 'Azure login failed')
           setLoginLoading(false)
         }
@@ -129,14 +133,14 @@ export function AdminScreen() {
     setLoading(false)
   }
 
-  async function handleAssignReader(readerId: string, readerLabel: string) {
-    setReader(readerId, readerLabel)
+  function handleLogout() {
+    setDeviceLoggedIn(false, '')
+    setUsername('')
+    setPassword('')
   }
 
-  useEffect(() => { if (loggedIn) loadReaders() }, [loggedIn])
-
-  // ── Login screen (kiosk-style dark theme) ──────────────────────────────────
-  if (!loggedIn) {
+  // ── Login screen — only shown on first use or after explicit logout ──────────
+  if (!isDeviceLoggedIn) {
     return (
       <div className="w-screen h-screen flex flex-col items-center justify-center px-8"
         style={{ background: 'linear-gradient(160deg,#1a0a00 0%,#2d1200 100%)' }}>
@@ -158,7 +162,7 @@ export function AdminScreen() {
               <input
                 type="text" value={username} onChange={e => setUsername(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                placeholder="e.g. wembley-1"
+                placeholder="e.g. qkk1"
                 className="w-full px-4 py-3 rounded-xl text-sm border outline-none"
                 style={{ background: 'rgba(255,255,255,0.07)', color: '#fff',
                   border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }}
@@ -231,12 +235,12 @@ export function AdminScreen() {
             </p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => { setLoggedIn(false); setUsername(''); setPassword('') }}
+            <button onClick={handleLogout}
               className="px-3 py-2 rounded-xl text-xs font-bold"
               style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }}>
               Logout
             </button>
-            <button onClick={() => setScreen('idle')}
+            <button onClick={() => setScreen('donate')}
               className="px-3 py-2 rounded-xl text-xs font-bold"
               style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}>
               ← Done
@@ -266,7 +270,7 @@ export function AdminScreen() {
           </div>
           <div className="space-y-2">
             {readers.map(r => (
-              <button key={r.id} onClick={() => handleAssignReader(r.id, r.label)}
+              <button key={r.id} onClick={() => setReader(r.id, r.label)}
                 className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
                 style={{
                   background: stripeReaderId === r.id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',

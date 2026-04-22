@@ -12,12 +12,12 @@ import { AdminScreen } from './pages/AdminScreen'
 const SCREENSAVER_TIMEOUT_MS = 120_000
 
 export function QuickDonationApp() {
-  const { screen, setScreen, stripeReaderId } = useDonationStore()
+  const { screen, setScreen, stripeReaderId, isDeviceLoggedIn } = useDonationStore()
   const idleTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // First launch: if no reader configured, go straight to admin login
+  // First launch only: if device has never been configured, open admin setup
   useEffect(() => {
-    if (!stripeReaderId) setScreen('admin')
+    if (!stripeReaderId && !isDeviceLoggedIn) setScreen('admin')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const resetIdle = useCallback(() => {
