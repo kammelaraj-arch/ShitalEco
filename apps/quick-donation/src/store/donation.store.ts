@@ -22,6 +22,7 @@ export interface DonationState {
   stripeReaderId: string
   stripeReaderLabel: string
   sumupReaderId: string          // SumUp Solo serial number
+  sumupReaderApiId: string       // SumUp reader API id (used in checkout push URL)
 
   orderId: string | null
   orderRef: string | null
@@ -50,7 +51,7 @@ export interface DonationState {
   setScreen: (screen: Screen) => void
   setAmount: (amount: number) => void
   setBranchId: (id: string) => void
-  setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string) => void
+  setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string, sumupApiId?: string) => void
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string, username?: string) => void
@@ -68,6 +69,7 @@ export const useDonationStore = create<DonationState>()(
       stripeReaderId: '',
       stripeReaderLabel: 'Temple Card Reader',
       sumupReaderId: '',
+      sumupReaderApiId: '',
       orderId: null,
       orderRef: null,
       paymentIntentId: null,
@@ -91,8 +93,8 @@ export const useDonationStore = create<DonationState>()(
       setScreen: (screen) => set({ screen }),
       setAmount: (amount) => set({ amount }),
       setBranchId: (branchId) => set({ branchId }),
-      setReader: (stripeReaderId, stripeReaderLabel, readerProvider = '', sumupReaderId = '') =>
-        set({ stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId }),
+      setReader: (stripeReaderId, stripeReaderLabel, readerProvider = '', sumupReaderId = '', sumupReaderApiId = '') =>
+        set({ stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, sumupReaderApiId }),
       setDeviceFlags: (flags) => set(flags),
       setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName, username) => set({
         isDeviceLoggedIn, loggedInName,
@@ -121,6 +123,7 @@ export const useDonationStore = create<DonationState>()(
         stripeReaderId: state.stripeReaderId,
         stripeReaderLabel: state.stripeReaderLabel,
         sumupReaderId: state.sumupReaderId,
+        sumupReaderApiId: state.sumupReaderApiId,
         showMonthlyGiving: state.showMonthlyGiving,
         enableGiftAid: state.enableGiftAid,
         tapAndGo: state.tapAndGo,

@@ -790,7 +790,8 @@ class SumUpCheckoutInput(BaseModel):
     amount_pence: int
     order_id: str
     description: str = "Temple Payment"
-    reader_serial: str = ""     # SumUp Solo/Air Plus serial number
+    reader_serial: str = ""   # SumUp reader serial (for fallback lookup)
+    reader_id: str = ""       # SumUp reader API id (preferred for push endpoint)
 
 
 @router.post("/sumup/checkout")
@@ -837,19 +838,35 @@ async def sumup_checkout(body: SumUpCheckoutInput):
             checkout = create_resp.json()
             checkout_id = checkout.get("id")
 
-            # 2. Push to physical reader if serial provided
-            reader_serial = body.reader_serial or await SecretsManager.get("SUMUP_READER_SERIAL") or ""
-            if reader_serial and checkout_id:
-                await client.post(
-                    f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_serial}/checkout",
+            # 2. Push to physical reader
+            # SumUp API uses reader ID (e.g. "2JNR3N") not serial number in the path.
+            # If only serial is provided, look up the ID from the readers list.
+            reader_id = body.reader_id.strip()
+            reader_serial = body.reader_serial.strip() or await SecretsManager.get("SUMUP_READER_SERIAL") or ""
+            if not reader_id and reader_serial:
+                rd_resp = await client.get(
+                    f"{base}/v0.1/merchants/{merchant_code}/readers",
+                    headers=headers,
+                )
+                if rd_resp.is_success:
+                    for rd in rd_resp.json() if isinstance(rd_resp.json(), list) else []:
+                        if rd.get("serial_number") == reader_serial:
+                            reader_id = rd.get("id", "")
+                            break
+            if reader_id and checkout_id:
+                push_resp = await client.post(
+                    f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_id}/checkout",
                     headers=headers,
                     json={"id": checkout_id},
                 )
+                if not push_resp.is_success:
+                    return {"error": f"Reader push failed ({push_resp.status_code}): {push_resp.text[:200]}"}
 
         return {
             "checkout_id": checkout_id,
             "checkout_reference": checkout_ref,
             "amount": amount,
+            "reader_id": reader_id,
             "reader_serial": reader_serial,
         }
     except Exception as e:
@@ -902,8 +919,16 @@ async def list_sumup_readers():
             )
         readers = resp.json() if resp.is_success else []
         if isinstance(readers, list):
-            return {"readers": [{"serial": r.get("serial_number", ""), "name": r.get("name", r.get("serial_number", "")), "status": r.get("status", "unknown")} for r in readers]}
-        return {"readers": []}
+            return {"readers": [
+                {
+                    "id":     r.get("id", r.get("serial_number", "")),
+                    "serial": r.get("serial_number", ""),
+                    "name":   r.get("name", r.get("serial_number", "")),
+                    "status": r.get("status", "unknown"),
+                }
+                for r in readers
+            ]}
+        return {"readers": [], "error": str(readers)}
     except Exception as e:
         return {"readers": [], "error": str(e)}
 

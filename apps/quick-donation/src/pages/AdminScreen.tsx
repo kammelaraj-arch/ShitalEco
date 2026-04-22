@@ -5,7 +5,7 @@ import { useDonationStore } from '../store/donation.store'
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
 interface Reader { id: string; label: string; device_type: string; status: string }
-interface SumUpReader { serial: string; name: string; status: string }
+interface SumUpReader { id: string; serial: string; name: string; status: string }
 
 interface LoginResponse {
   authenticated: boolean
@@ -200,10 +200,10 @@ export function AdminScreen() {
     finally { setSumupLoading(false) }
   }
 
-  function assignSumUp() {
+  function assignSumUp(apiId = '') {
     const serial = sumupSerial.trim()
     if (!serial) return
-    setReader('', `SumUp Solo ${serial}`, 'sumup', serial)
+    setReader('', `SumUp Solo ${serial}`, 'sumup', serial, apiId)
   }
 
   function handleLogout() {
@@ -400,7 +400,7 @@ export function AdminScreen() {
             {sumupReaders.length > 0 && (
               <div className="space-y-1.5 mt-3">
                 {sumupReaders.map(r => (
-                  <button key={r.serial} onClick={() => { setSumupSerial(r.serial); setSumupTestResult('idle') }}
+                  <button key={r.serial} onClick={() => { setSumupSerial(r.serial); setSumupTestResult('idle'); assignSumUp(r.id) }}
                     className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
                     style={{
                       background: sumupSerial === r.serial ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
@@ -409,7 +409,7 @@ export function AdminScreen() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="font-bold text-sm" style={{ color: sumupSerial === r.serial ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{r.name || r.serial}</p>
-                        <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{r.serial}</p>
+                        <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{r.serial} · ID: {r.id}</p>
                       </div>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
                         style={{ background: r.status === 'available' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',

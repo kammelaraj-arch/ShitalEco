@@ -22,7 +22,7 @@ function generateUUID(): string {
 export function ProcessingScreen() {
   const {
     amount, branchId, stripeReaderId,
-    readerProvider, sumupReaderId,
+    readerProvider, sumupReaderId, sumupReaderApiId,
     pendingGiftAid,
     setScreen, setOrderResult, setReader,
   } = useDonationStore()
@@ -81,6 +81,7 @@ export function ProcessingScreen() {
             order_id: basketId,
             description: `Shital Temple Donation £${amount.toFixed(2)}`,
             reader_serial: sumupReaderId,
+            reader_id: sumupReaderApiId,
           }),
         })
         if (!res.ok) {
