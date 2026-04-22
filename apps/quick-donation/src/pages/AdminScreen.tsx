@@ -14,6 +14,8 @@ interface LoginResponse {
   profile?: { profile_name: string; stripe_reader_id: string; device_label: string } | null
   stripe_reader_id?: string | null
   reader_label?: string | null
+  reader_provider?: string | null
+  sumup_reader_serial?: string | null
   show_monthly_giving?: boolean
   enable_gift_aid?: boolean
   tap_and_go?: boolean
@@ -58,7 +60,9 @@ export function AdminScreen() {
     setBranchId(data.branch.id)
     const readerId = data.stripe_reader_id || data.profile?.stripe_reader_id || ''
     const readerLabel = data.reader_label || data.profile?.device_label || readerId
-    if (readerId) setReader(readerId, readerLabel)
+    const provider = (data.reader_provider || 'stripe_terminal') as import('../store/donation.store').ReaderProvider
+    const sumupSerial = data.sumup_reader_serial || ''
+    if (readerId || sumupSerial) setReader(readerId, readerLabel, provider, sumupSerial)
     setDeviceFlags({
       showMonthlyGiving: data.show_monthly_giving ?? false,
       enableGiftAid: data.enable_gift_aid ?? false,

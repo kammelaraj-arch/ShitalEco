@@ -1613,6 +1613,8 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
                        kd.card_reader_id,
                        td.stripe_reader_id, td.label AS reader_label,
+                       COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
+                       COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
                        b.name AS branch_name
                 FROM kiosk_devices kd
                 LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
@@ -1636,6 +1638,8 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "profile": None,
             "stripe_reader_id": device["stripe_reader_id"],
             "reader_label": device["reader_label"],
+            "reader_provider": device["reader_provider"],
+            "sumup_reader_serial": device["sumup_reader_serial"],
             "show_monthly_giving": bool(device["show_monthly_giving"]),
             "enable_gift_aid": bool(device["enable_gift_aid"]),
             "tap_and_go": bool(device["tap_and_go"]),
@@ -1701,13 +1705,17 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     # Look up card reader from admin Devices page for this branch
     device_reader_id = None
     device_reader_label = None
+    device_reader_provider = "stripe_terminal"
+    device_sumup_serial = ""
     dev_flags: dict = {"show_monthly_giving": False, "enable_gift_aid": False, "tap_and_go": True, "donate_title": "Tap & Donate", "monthly_giving_text": "Make a big impact from just £5/month", "monthly_giving_amount": 5.0}
     async with SessionLocal() as db:
         dev_res = await db.execute(
             text("""
                 SELECT kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
                        kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
-                       td.stripe_reader_id, td.label AS reader_label
+                       td.stripe_reader_id, td.label AS reader_label,
+                       COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
+                       COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial
                 FROM kiosk_devices kd
                 LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
                 WHERE kd.branch_id = :branch_id
@@ -1721,9 +1729,11 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         )
         dev_row = dev_res.mappings().first()
         if dev_row:
-            if dev_row["stripe_reader_id"]:
+            if dev_row["stripe_reader_id"] or dev_row["sumup_reader_serial"]:
                 device_reader_id = dev_row["stripe_reader_id"]
                 device_reader_label = dev_row["reader_label"]
+                device_reader_provider = dev_row["reader_provider"]
+                device_sumup_serial = dev_row["sumup_reader_serial"]
             dev_flags = {
                 "show_monthly_giving": bool(dev_row["show_monthly_giving"]),
                 "enable_gift_aid": bool(dev_row["enable_gift_aid"]),
@@ -1743,6 +1753,8 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         "profile": profile,
         "stripe_reader_id": effective_reader_id,
         "reader_label": effective_reader_label,
+        "reader_provider": device_reader_provider,
+        "sumup_reader_serial": device_sumup_serial,
         **dev_flags,
     }
 

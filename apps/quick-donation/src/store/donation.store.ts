@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
 export type Screen = 'idle' | 'donate' | 'processing' | 'tap' | 'confirmation' | 'admin'
+export type ReaderProvider = 'stripe_terminal' | 'sumup' | ''
 
 export interface GiftAidData {
   firstName: string
@@ -15,11 +16,16 @@ export interface DonationState {
   screen: Screen
   amount: number
   branchId: string
+
+  // Card reader — provider determines which payment flow is used
+  readerProvider: ReaderProvider
   stripeReaderId: string
   stripeReaderLabel: string
+  sumupReaderId: string          // SumUp Solo serial number
+
   orderId: string | null
   orderRef: string | null
-  paymentIntentId: string | null
+  paymentIntentId: string | null  // Stripe: payment intent ID; SumUp: checkout ID
   clientSecret: string | null
 
   // Gift Aid — collected on kiosk before card tap, cleared after record call
@@ -40,7 +46,7 @@ export interface DonationState {
   setScreen: (screen: Screen) => void
   setAmount: (amount: number) => void
   setBranchId: (id: string) => void
-  setReader: (readerId: string, label: string) => void
+  setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string) => void
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string) => void
@@ -54,8 +60,10 @@ export const useDonationStore = create<DonationState>()(
       screen: 'donate',
       amount: 0,
       branchId: 'main',
+      readerProvider: '',
       stripeReaderId: '',
-      stripeReaderLabel: 'Temple WisePOS E',
+      stripeReaderLabel: 'Temple Card Reader',
+      sumupReaderId: '',
       orderId: null,
       orderRef: null,
       paymentIntentId: null,
@@ -75,7 +83,8 @@ export const useDonationStore = create<DonationState>()(
       setScreen: (screen) => set({ screen }),
       setAmount: (amount) => set({ amount }),
       setBranchId: (branchId) => set({ branchId }),
-      setReader: (stripeReaderId, stripeReaderLabel) => set({ stripeReaderId, stripeReaderLabel }),
+      setReader: (stripeReaderId, stripeReaderLabel, readerProvider = '', sumupReaderId = '') =>
+        set({ stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId }),
       setDeviceFlags: (flags) => set(flags),
       setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName) => set({ isDeviceLoggedIn, loggedInName }),
       setOrderResult: (orderId, orderRef, paymentIntentId, clientSecret) =>
@@ -97,8 +106,10 @@ export const useDonationStore = create<DonationState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         branchId: state.branchId,
+        readerProvider: state.readerProvider,
         stripeReaderId: state.stripeReaderId,
         stripeReaderLabel: state.stripeReaderLabel,
+        sumupReaderId: state.sumupReaderId,
         showMonthlyGiving: state.showMonthlyGiving,
         enableGiftAid: state.enableGiftAid,
         tapAndGo: state.tapAndGo,
