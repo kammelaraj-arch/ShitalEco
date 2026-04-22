@@ -69,6 +69,7 @@ class SetKeyInput(BaseModel):
     value: str
     description: str = ""
     group_name: str = ""
+    is_sensitive: bool = True
 
 
 @router.put("/{key_name}")
@@ -86,20 +87,20 @@ async def set_key_value(
     from shital.core.fabrics.database import SessionLocal
     from shital.core.fabrics.secrets import SecretsManager
 
-    # Update metadata fields if provided
-    if body.description or body.group_name:
-        async with SessionLocal() as db:
-            if body.description:
-                await db.execute(
-                    text("UPDATE api_keys_store SET description = :d WHERE key_name = :k"),
-                    {"d": body.description, "k": key_name},
-                )
-            if body.group_name:
-                await db.execute(
-                    text("UPDATE api_keys_store SET group_name = :g WHERE key_name = :k"),
-                    {"g": body.group_name, "k": key_name},
-                )
-            await db.commit()
+    # Upsert metadata — ensures new custom keys get their group/description even if
+    # they weren't pre-seeded into api_keys_store by KNOWN_KEYS.
+    async with SessionLocal() as db:
+        await db.execute(
+            text("""
+                INSERT INTO api_keys_store (key_name, description, group_name, is_sensitive)
+                VALUES (:k, :d, :g, :s)
+                ON CONFLICT (key_name) DO UPDATE
+                  SET description = CASE WHEN :d != '' THEN :d ELSE api_keys_store.description END,
+                      group_name  = CASE WHEN :g != '' THEN :g ELSE api_keys_store.group_name  END
+            """),
+            {"k": key_name, "d": body.description or "", "g": body.group_name or "", "s": body.is_sensitive},
+        )
+        await db.commit()
 
     await SecretsManager.set(key_name, body.value, updated_by=ctx.user_email)
     return {"updated": True, "key_name": key_name}

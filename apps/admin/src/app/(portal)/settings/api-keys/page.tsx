@@ -358,7 +358,7 @@ function AddKeyModal({ pin, onClose, onSaved, existingGroups }: { pin: string; o
       const res = await fetch(`${API}/settings/api-keys/${name}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Admin-Pin': pin },
-        body: JSON.stringify({ value: value.trim(), description: description.trim(), group_name: resolvedGroup }),
+        body: JSON.stringify({ value: value.trim(), description: description.trim(), group_name: resolvedGroup, is_sensitive: isSensitive }),
       })
       const data = await res.json()
       if (data.updated) { onSaved(); onClose() }
