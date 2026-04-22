@@ -199,6 +199,20 @@ export function DonationScreen() {
   const [otherOpen, setOtherOpen] = useState(false)
   const [otherVal, setOtherVal]   = useState('')
 
+  // Hidden staff access: tap top-right corner 5× within 3 s → admin screen
+  const cornerTaps = React.useRef(0)
+  const cornerTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleCornerTap = () => {
+    cornerTaps.current += 1
+    if (cornerTimer.current) clearTimeout(cornerTimer.current)
+    if (cornerTaps.current >= 5) {
+      cornerTaps.current = 0
+      setScreen('admin')
+      return
+    }
+    cornerTimer.current = setTimeout(() => { cornerTaps.current = 0 }, 3000)
+  }
+
   // Gift Aid overlay state
   const [pendingAmount, setPendingAmount]     = useState<number | null>(null)
   const [giftAidStep, setGiftAidStep]         = useState<'none' | 'ask' | 'form'>('none')
@@ -281,12 +295,20 @@ export function DonationScreen() {
           <h1 className="text-4xl font-black text-gold-gradient">{donateTitle || 'Tap & Donate'}</h1>
           <p className="text-saffron-400/60 text-base mt-0.5">Tap an amount to donate</p>
         </div>
-        {enableGiftAid && (
-          <div className="flex items-center gap-1.5 px-3 py-2 rounded-2xl glass-card">
-            <span className="text-green-400 font-black text-sm">✓</span>
-            <span className="text-white/70 font-bold text-xs">Gift Aid</span>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {enableGiftAid && (
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-2xl glass-card">
+              <span className="text-green-400 font-black text-sm">✓</span>
+              <span className="text-white/70 font-bold text-xs">Gift Aid</span>
+            </div>
+          )}
+          {/* Hidden staff access zone — tap 5× to open admin */}
+          <div
+            onPointerDown={handleCornerTap}
+            className="w-10 h-10 rounded-xl select-none"
+            style={{ WebkitTapHighlightColor: 'transparent' }}
+          />
+        </div>
       </div>
 
       {/* ── Monthly Giving banner (admin-configured) ────────────────────────── */}
