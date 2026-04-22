@@ -1348,6 +1348,136 @@ async def list_kiosk_profiles(branch_id: str = ""):
     return {"profiles": profiles, "total": len(profiles)}
 
 
+# ── Monthly giving signup (Quick Donation kiosk) ──────────────────────────────
+
+class MonthlySignupInput(BaseModel):
+    first_name: str
+    surname: str
+    house_number: str = ""
+    postcode: str = ""
+    email: str
+    amount: float
+    gift_aid: bool = False
+    branch_id: str = "main"
+
+
+async def _create_kiosk_subscription(
+    first_name: str, surname: str, email: str, amount: float,
+    house_number: str = "", postcode: str = "",
+) -> tuple[str | None, str | None]:
+    """Create PayPal subscription for kiosk monthly giving. Returns (approval_url, sub_id)."""
+    import httpx
+    try:
+        from shital.core.fabrics.secrets import SecretsManager
+        client_id = await SecretsManager.get("PAYPAL_CLIENT_ID") or ""
+        secret    = await SecretsManager.get("PAYPAL_CLIENT_SECRET") or ""
+        env       = await SecretsManager.get("PAYPAL_ENV") or "live"
+        if not client_id or not secret:
+            return None, None
+        base = "https://api-m.paypal.com" if env == "live" else "https://api-m.sandbox.paypal.com"
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.post(f"{base}/v1/oauth2/token",
+                             auth=(client_id, secret), data={"grant_type": "client_credentials"})
+            r.raise_for_status()
+            token = r.json()["access_token"]
+            hdrs  = {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                     "Prefer": "return=representation"}
+            # reuse shared product helper
+            from shital.api.routers.recurring_giving import _ensure_product
+            product_id = await _ensure_product(token, base)
+            # create a fresh plan for this amount
+            plan_r = await c.post(f"{base}/v1/billing/plans", headers=hdrs, json={
+                "product_id": product_id,
+                "name": f"Shital Temple Monthly — £{amount:.2f}",
+                "status": "ACTIVE",
+                "billing_cycles": [{
+                    "frequency": {"interval_unit": "MONTH", "interval_count": 1},
+                    "tenure_type": "REGULAR", "sequence": 1, "total_cycles": 0,
+                    "pricing_scheme": {"fixed_price": {"value": f"{amount:.2f}", "currency_code": "GBP"}},
+                }],
+                "payment_preferences": {"auto_bill_outstanding": True, "payment_failure_threshold": 3},
+            })
+            plan_r.raise_for_status()
+            plan_id = plan_r.json()["id"]
+            sub_body: dict = {
+                "plan_id": plan_id,
+                "subscriber": {
+                    "name": {"given_name": first_name, "surname": surname},
+                    "email_address": email,
+                },
+                "application_context": {
+                    "brand_name": "Shital Temple",
+                    "return_url":  "https://shital.org.uk/donate/#monthly-complete",
+                    "cancel_url":  "https://shital.org.uk/donate/#monthly-cancel",
+                },
+            }
+            if postcode:
+                sub_body["subscriber"]["shipping_address"] = {
+                    "name": {"full_name": f"{first_name} {surname}"},
+                    "address": {"address_line_1": house_number,
+                                "postal_code": postcode.upper().replace(" ", ""),
+                                "country_code": "GB"},
+                }
+            sub_r = await c.post(f"{base}/v1/billing/subscriptions", headers=hdrs, json=sub_body)
+            sub_r.raise_for_status()
+            sub_data  = sub_r.json()
+            sub_id    = sub_data.get("id")
+            for link in sub_data.get("links", []):
+                if link.get("rel") == "approve":
+                    return link["href"], sub_id
+    except Exception as exc:
+        import structlog
+        structlog.get_logger().warning("kiosk_monthly_paypal_error", error=str(exc))
+    return None, None
+
+
+@router.post("/quick-donation/monthly-signup")
+async def quick_donation_monthly_signup(body: MonthlySignupInput):
+    """Record kiosk monthly-giving signup and create PayPal subscription."""
+    import uuid
+    from datetime import datetime
+    from sqlalchemy import text
+    from shital.core.fabrics.database import SessionLocal
+
+    now      = datetime.utcnow()
+    full_name = f"{body.first_name} {body.surname}".strip()
+    email_key = body.email.strip().lower()
+
+    approval_url, paypal_sub_id = await _create_kiosk_subscription(
+        body.first_name, body.surname, email_key,
+        body.amount, body.house_number, body.postcode,
+    )
+
+    status = "PENDING_APPROVAL" if approval_url else "PENDING_CONTACT"
+    signup_id = str(uuid.uuid4())
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO recurring_giving_subscriptions
+                (id, paypal_subscription_id, amount, frequency, status, branch_id,
+                 donor_name, donor_email, donor_first_name, donor_surname,
+                 donor_postcode, donor_address, created_at, updated_at)
+            VALUES
+                (:id, :sub_id, :amt, 'MONTH', :status, :bid,
+                 :name, :email, :fn, :sn, :pc, :addr, :now, :now)
+        """), {
+            "id": signup_id, "sub_id": paypal_sub_id,
+            "amt": body.amount, "status": status, "bid": body.branch_id,
+            "name": full_name, "email": email_key,
+            "fn": body.first_name, "sn": body.surname,
+            "pc": body.postcode, "addr": body.house_number, "now": now,
+        })
+        await db.commit()
+
+    return {
+        "ok": True,
+        "signup_id": signup_id,
+        "approval_url": approval_url,
+        "amount": body.amount,
+        "name": full_name,
+    }
+
+
 class QuickKioskLoginInput(BaseModel):
     email: str   # accepts full email or short username (e.g. "wembley-1")
     password: str

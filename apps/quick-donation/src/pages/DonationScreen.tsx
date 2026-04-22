@@ -4,6 +4,272 @@ import { useDonationStore } from '../store/donation.store'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
+// ── Monthly giving tiers ───────────────────────────────────────────────────────
+const MONTHLY_TIERS = [
+  { amount: 5,  title: 'Lamp Supporter',  desc: 'Supports daily lamp lighting at the temple' },
+  { amount: 11, title: 'Prasad Patron',   desc: 'Provides weekly prasad offering to devotees', popular: true },
+  { amount: 21, title: 'Puja Sponsor',    desc: 'Sponsors a monthly puja ceremony' },
+  { amount: 51, title: 'Festival Friend', desc: 'Helps cover special festival and event costs' },
+]
+
+type MonthlyStep = 0 | 1 | 2 | 3 | 'done'
+
+interface MonthlyResult { approval_url?: string | null; name: string; amount: number }
+
+function MonthlyGivingFlow({
+  defaultAmount,
+  branchId,
+  onClose,
+}: {
+  defaultAmount: number
+  branchId: string
+  onClose: () => void
+}) {
+  const [step, setStep]             = useState<MonthlyStep>(0)
+  const [amount, setAmount]         = useState(defaultAmount || 11)
+  const [firstName, setFirstName]   = useState('')
+  const [surname, setSurname]       = useState('')
+  const [houseNum, setHouseNum]     = useState('')
+  const [postcode, setPostcode]     = useState('')
+  const [email, setEmail]           = useState('')
+  const [giftAid, setGiftAid]       = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult]         = useState<MonthlyResult | null>(null)
+
+  async function handleSubmit() {
+    setSubmitting(true)
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/quick-donation/monthly-signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: firstName.trim(), surname: surname.trim(),
+          house_number: houseNum.trim(), postcode: postcode.trim(),
+          email: email.trim(), amount, gift_aid: giftAid, branch_id: branchId,
+        }),
+      })
+      const data = await res.json()
+      setResult({ approval_url: data.approval_url, name: data.name, amount })
+      setStep('done')
+    } catch {
+      setResult({ name: `${firstName} ${surname}`, amount })
+      setStep('done')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const inputCls = "w-full px-4 py-3.5 rounded-2xl text-base font-semibold outline-none"
+  const inputStyle = {
+    background: 'rgba(255,255,255,0.07)', color: '#fff',
+    border: '1.5px solid rgba(212,175,55,0.3)', caretColor: '#D4AF37',
+  }
+  const labelCls = "block text-xs font-black uppercase tracking-widest mb-2"
+  const labelStyle = { color: 'rgba(212,175,55,0.7)' }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 z-30 flex flex-col"
+      style={{ background: 'linear-gradient(160deg,#0d0500 0%,#1a0a00 60%,#0d0500 100%)' }}
+    >
+      {/* OM header */}
+      <div className="text-center pt-6 pb-2 flex-shrink-0">
+        <div className="text-3xl mb-1" style={{ color: '#D4AF37' }}>ॐ</div>
+        <h1 className="text-xl font-black tracking-widest" style={{ color: '#D4AF37', fontVariant: 'small-caps' }}>
+          Monthly Temple Support
+        </h1>
+        <p className="text-xs mt-0.5" style={{ color: 'rgba(212,175,55,0.5)' }}>
+          Join our family of regular supporters. Cancel anytime.
+        </p>
+      </div>
+
+      {/* Step indicator */}
+      {step !== 'done' && (
+        <div className="flex justify-center gap-2 py-3 flex-shrink-0">
+          {([0,1,2,3] as const).map(s => (
+            <div key={s} className="w-2 h-2 rounded-full transition-all"
+              style={{ background: step === s ? '#D4AF37' : 'rgba(212,175,55,0.2)', transform: step === s ? 'scale(1.3)' : 'scale(1)' }} />
+          ))}
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-5 pb-4">
+        <AnimatePresence mode="wait">
+
+          {/* Screen 0 — Amount picker */}
+          {step === 0 && (
+            <motion.div key="s0" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }}>
+              <p className="text-[10px] font-black uppercase tracking-widest text-center mb-4"
+                style={{ color: 'rgba(212,175,55,0.5)' }}>Choose your monthly amount</p>
+              <div className="grid grid-cols-2 gap-3">
+                {MONTHLY_TIERS.map(t => (
+                  <button key={t.amount} onClick={() => setAmount(t.amount)}
+                    className="relative text-left p-4 rounded-2xl transition-all active:scale-95"
+                    style={{
+                      background: amount === t.amount ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)',
+                      border: `1.5px solid ${amount === t.amount ? 'rgba(212,175,55,0.6)' : 'rgba(255,255,255,0.1)'}`,
+                      boxShadow: amount === t.amount ? '0 0 20px rgba(212,175,55,0.15)' : 'none',
+                    }}>
+                    {t.popular && (
+                      <span className="absolute top-2 right-2 text-[9px] font-black px-2 py-0.5 rounded-full"
+                        style={{ background: '#D4AF37', color: '#1a0000' }}>POPULAR</span>
+                    )}
+                    <p className="text-2xl font-black" style={{ color: amount === t.amount ? '#D4AF37' : '#fff' }}>
+                      £{t.amount}
+                    </p>
+                    <p className="text-xs font-bold mt-0.5" style={{ color: amount === t.amount ? '#D4AF37' : 'rgba(255,255,255,0.6)' }}>
+                      {t.title}
+                    </p>
+                    <p className="text-[10px] mt-1 leading-tight" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                      {t.desc}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Screen 1 — Name */}
+          {step === 1 && (
+            <motion.div key="s1" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
+              <div>
+                <label className={labelCls} style={labelStyle}>First Name *</label>
+                <input className={inputCls} style={inputStyle} placeholder="First name"
+                  value={firstName} onChange={e => setFirstName(e.target.value)} autoFocus />
+              </div>
+              <div>
+                <label className={labelCls} style={labelStyle}>Surname *</label>
+                <input className={inputCls} style={inputStyle} placeholder="Surname"
+                  value={surname} onChange={e => setSurname(e.target.value)} />
+              </div>
+            </motion.div>
+          )}
+
+          {/* Screen 2 — Address */}
+          {step === 2 && (
+            <motion.div key="s2" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
+              <div>
+                <label className={labelCls} style={labelStyle}>House Number</label>
+                <input className={inputCls} style={inputStyle} placeholder="House number"
+                  value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus />
+              </div>
+              <div>
+                <label className={labelCls} style={labelStyle}>Postcode</label>
+                <input className={inputCls} style={inputStyle} placeholder="e.g. HP7 9NQ"
+                  value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())} />
+              </div>
+            </motion.div>
+          )}
+
+          {/* Screen 3 — Email + Gift Aid */}
+          {step === 3 && (
+            <motion.div key="s3" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
+              <div>
+                <label className={labelCls} style={labelStyle}>Email *</label>
+                <input className={inputCls} style={inputStyle} placeholder="your@email.com"
+                  type="email" value={email} onChange={e => setEmail(e.target.value)} autoFocus />
+              </div>
+              <button onClick={() => setGiftAid(v => !v)}
+                className="w-full flex items-start gap-3 p-4 rounded-2xl text-left transition-all"
+                style={{
+                  background: giftAid ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.04)',
+                  border: `1.5px solid ${giftAid ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                }}>
+                <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
+                  style={{ background: giftAid ? '#22c55e' : 'rgba(255,255,255,0.1)', border: giftAid ? 'none' : '2px solid rgba(255,255,255,0.25)' }}>
+                  {giftAid && <span className="text-white text-xs font-black">✓</span>}
+                </div>
+                <div>
+                  <p className="text-sm font-bold" style={{ color: giftAid ? '#4ade80' : 'rgba(255,255,255,0.7)' }}>
+                    Gift Aid declaration
+                  </p>
+                  <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    I am a UK taxpayer. HMRC will add 25p to every £1 I donate at no cost to me.
+                  </p>
+                </div>
+              </button>
+            </motion.div>
+          )}
+
+          {/* Done — confirmation */}
+          {step === 'done' && result && (
+            <motion.div key="done" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+              className="flex flex-col items-center text-center pt-4 pb-6">
+              <div className="text-5xl mb-4">🙏</div>
+              <h2 className="text-xl font-black mb-1" style={{ color: '#D4AF37' }}>Thank You, {result.name.split(' ')[0]}!</h2>
+              <p className="text-sm mb-4" style={{ color: 'rgba(255,248,220,0.6)' }}>
+                Your monthly support of <span style={{ color: '#D4AF37', fontWeight: 900 }}>£{result.amount}/month</span> means the world to us.
+              </p>
+              {result.approval_url ? (
+                <>
+                  <div className="p-3 rounded-2xl mb-3" style={{ background: '#fff' }}>
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(result.approval_url)}`}
+                      alt="PayPal approval QR"
+                      className="w-44 h-44"
+                    />
+                  </div>
+                  <p className="text-xs font-bold mb-1" style={{ color: 'rgba(212,175,55,0.8)' }}>
+                    Scan with your phone to complete setup
+                  </p>
+                  <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                    Secure recurring payment via PayPal · Cancel anytime
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs px-4" style={{ color: 'rgba(255,248,220,0.45)' }}>
+                  We'll send setup details to <span style={{ color: '#D4AF37' }}>{email}</span>
+                </p>
+              )}
+              <button onClick={onClose}
+                className="mt-6 px-8 py-3 rounded-2xl font-black text-base"
+                style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
+                ← Back to Donate
+              </button>
+            </motion.div>
+          )}
+
+        </AnimatePresence>
+      </div>
+
+      {/* Nav buttons */}
+      {step !== 'done' && (
+        <div className="flex gap-3 px-5 pb-6 pt-3 flex-shrink-0"
+          style={{ borderTop: '1px solid rgba(212,175,55,0.1)' }}>
+          <button
+            onClick={() => step === 0 ? onClose() : setStep((step - 1) as MonthlyStep)}
+            className="flex-1 py-3.5 rounded-2xl font-black text-sm"
+            style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            {step === 0 ? '← Back' : 'Back'}
+          </button>
+          <button
+            onClick={() => {
+              if (step === 0) setStep(1)
+              else if (step === 1) { if (!firstName.trim() || !surname.trim()) return; setStep(2) }
+              else if (step === 2) setStep(3)
+              else if (step === 3) { if (!email.trim()) return; handleSubmit() }
+            }}
+            disabled={submitting || (step === 1 && (!firstName.trim() || !surname.trim())) || (step === 3 && !email.trim())}
+            className="flex-[2] py-3.5 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.98]"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
+            {submitting ? 'Setting up…' : step === 3 ? 'Complete →' : 'Next →'}
+          </button>
+        </div>
+      )}
+
+      {step === 0 && (
+        <p className="text-center text-[10px] pb-4 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.2)' }}>
+          Secure recurring payment via PayPal · Cancel anytime
+        </p>
+      )}
+    </motion.div>
+  )
+}
+
 interface AmountTile {
   id: string
   price: number
@@ -213,6 +479,9 @@ export function DonationScreen() {
     cornerTimer.current = setTimeout(() => { cornerTaps.current = 0 }, 3000)
   }
 
+  // Monthly giving flow
+  const [monthlyOpen, setMonthlyOpen] = useState(false)
+
   // Gift Aid overlay state
   const [pendingAmount, setPendingAmount]     = useState<number | null>(null)
   const [giftAidStep, setGiftAidStep]         = useState<'none' | 'ask' | 'form'>('none')
@@ -314,7 +583,8 @@ export function DonationScreen() {
       {/* ── Monthly Giving banner (admin-configured) ────────────────────────── */}
       {showMonthlyGiving && (
         <div className="mx-5 mb-3 flex-shrink-0">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+          <motion.button whileTap={{ scale: 0.98 }} onClick={() => setMonthlyOpen(true)}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-left"
             style={{ background: 'linear-gradient(135deg,rgba(22,163,74,0.18),rgba(15,107,50,0.12))',
               border: '1px solid rgba(74,222,128,0.3)' }}>
             <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -326,8 +596,8 @@ export function DonationScreen() {
               <p className="text-sm font-black leading-snug" style={{ color: '#4ade80' }}>{monthlyGivingText || `Make a big impact from just £${monthlyGivingAmount}/month`}</p>
               <p className="text-[10px]" style={{ color: 'rgba(74,222,128,0.55)' }}>Regular giving · Cancel anytime · Secure PayPal</p>
             </div>
-            <span className="text-white/30 text-lg flex-shrink-0">›</span>
-          </div>
+            <span className="text-green-400/60 text-lg flex-shrink-0">›</span>
+          </motion.button>
         </div>
       )}
 
@@ -463,6 +733,17 @@ export function DonationScreen() {
 
       {/* suppress unused warning */}
       {giftAidInfo && null}
+
+      {/* ── Monthly Giving flow ──────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {monthlyOpen && (
+          <MonthlyGivingFlow
+            defaultAmount={monthlyGivingAmount || 11}
+            branchId={branchId}
+            onClose={() => setMonthlyOpen(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }
