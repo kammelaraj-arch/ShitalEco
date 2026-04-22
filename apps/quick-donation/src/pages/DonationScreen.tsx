@@ -198,6 +198,30 @@ function MonthlyGivingFlow({
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult]         = useState<MonthlyResult | null>(null)
 
+  // Ideal Postcodes address lookup
+  const [addrList, setAddrList]         = useState<string[]>([])
+  const [selectedAddr, setSelectedAddr] = useState('')
+  const [lookingUp, setLookingUp]       = useState(false)
+  const [addrError, setAddrError]       = useState('')
+
+  async function lookupAddress() {
+    if (!postcode.trim()) return
+    setLookingUp(true); setAddrError(''); setAddrList([]); setSelectedAddr('')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/postcode/${encodeURIComponent(postcode.trim())}`)
+      const data = await res.json()
+      const all: Array<{ formatted: string }> = data.addresses || []
+      const filtered = houseNum.trim()
+        ? all.filter(a => a.formatted.toLowerCase().includes(houseNum.trim().toLowerCase()))
+        : all
+      const list = (filtered.length > 0 ? filtered : all).map(a => a.formatted)
+      if (!list.length) { setAddrError('No addresses found — check the postcode.'); return }
+      setAddrList(list)
+      if (list.length === 1) setSelectedAddr(list[0])
+    } catch { setAddrError('Lookup failed — please try again.') }
+    finally { setLookingUp(false) }
+  }
+
   async function handleSubmit() {
     setSubmitting(true)
     try {
@@ -206,7 +230,7 @@ function MonthlyGivingFlow({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           first_name: firstName.trim(), surname: surname.trim(),
-          house_number: houseNum.trim(), postcode: postcode.trim(),
+          house_number: selectedAddr || houseNum.trim(), postcode: postcode.trim(),
           email: email.trim(), amount, gift_aid: giftAid, branch_id: branchId,
         }),
       })
@@ -267,7 +291,7 @@ function MonthlyGivingFlow({
             <motion.div key="s0" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }}>
               <p className="text-[10px] font-black uppercase tracking-widest text-center mb-4"
                 style={{ color: 'rgba(212,175,55,0.5)' }}>Choose your monthly amount</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3 mb-4">
                 {MONTHLY_TIERS.map(t => (
                   <button key={t.amount} onClick={() => setAmount(t.amount)}
                     className="relative text-left p-4 rounded-2xl transition-all active:scale-95"
@@ -292,6 +316,10 @@ function MonthlyGivingFlow({
                   </button>
                 ))}
               </div>
+              <MonthlyNavButtons onBack={onClose} onNext={() => setStep(1)} canNext={true} nextLabel="Continue →" backLabel="← Close" />
+              <p className="text-center text-[10px] mt-3" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                Secure recurring payment via PayPal · Cancel anytime
+              </p>
             </motion.div>
           )}
 
@@ -306,24 +334,73 @@ function MonthlyGivingFlow({
               <div>
                 <label className={labelCls} style={labelStyle}>Surname *</label>
                 <input className={inputCls} style={inputStyle} placeholder="Surname"
-                  value={surname} onChange={e => setSurname(e.target.value)} />
+                  value={surname} onChange={e => setSurname(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && firstName.trim() && surname.trim() && setStep(2)} />
               </div>
+              <MonthlyNavButtons
+                onBack={() => setStep(0)}
+                onNext={() => setStep(2)}
+                canNext={!!firstName.trim() && !!surname.trim()}
+              />
             </motion.div>
           )}
 
-          {/* Screen 2 — Address */}
+          {/* Screen 2 — Address with Ideal Postcodes lookup */}
           {step === 2 && (
-            <motion.div key="s2" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
-              <div>
-                <label className={labelCls} style={labelStyle}>House Number</label>
-                <input className={inputCls} style={inputStyle} placeholder="House number"
-                  value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus />
+            <motion.div key="s2" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-3 pt-2">
+              <label className={labelCls} style={labelStyle}>Address Lookup</label>
+              {/* House no. + postcode + search on one row */}
+              <div className="flex gap-2">
+                <input
+                  className="px-3 py-3.5 rounded-2xl text-base font-semibold outline-none w-24 flex-shrink-0"
+                  style={inputStyle} placeholder="No."
+                  value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus
+                />
+                <input
+                  className="flex-1 px-3 py-3.5 rounded-2xl text-base font-semibold outline-none uppercase"
+                  style={inputStyle} placeholder="Postcode"
+                  value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())}
+                  onKeyDown={e => e.key === 'Enter' && lookupAddress()}
+                />
+                <button
+                  onClick={lookupAddress} disabled={lookingUp || !postcode.trim()}
+                  className="px-4 py-3.5 rounded-2xl font-black text-sm flex-shrink-0 disabled:opacity-40 active:scale-[0.96] transition-all"
+                  style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}
+                >
+                  {lookingUp ? '…' : '🔍'}
+                </button>
               </div>
-              <div>
-                <label className={labelCls} style={labelStyle}>Postcode</label>
-                <input className={inputCls} style={inputStyle} placeholder="e.g. HP7 9NQ"
-                  value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())} />
-              </div>
+
+              {addrError && (
+                <p className="text-xs px-1" style={{ color: '#f87171' }}>{addrError}</p>
+              )}
+
+              {addrList.length > 0 && (
+                <div>
+                  <label className={labelCls} style={{ ...labelStyle, marginBottom: '6px' }}>Select Address</label>
+                  <select
+                    value={selectedAddr} onChange={e => setSelectedAddr(e.target.value)}
+                    className="w-full px-4 py-3.5 rounded-2xl text-sm font-semibold outline-none"
+                    style={{ ...inputStyle, color: selectedAddr ? '#fff' : 'rgba(255,255,255,0.4)' }}
+                  >
+                    <option value="">— Select your address —</option>
+                    {addrList.map((a, i) => <option key={i} value={a}>{a}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {selectedAddr && (
+                <div className="px-4 py-2.5 rounded-xl text-xs font-semibold"
+                  style={{ background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.25)', color: '#4ade80' }}>
+                  ✓ {selectedAddr}
+                </div>
+              )}
+
+              <MonthlyNavButtons
+                onBack={() => setStep(1)}
+                onNext={() => setStep(3)}
+                canNext={!!postcode.trim()}
+              />
             </motion.div>
           )}
 
@@ -354,6 +431,13 @@ function MonthlyGivingFlow({
                   </p>
                 </div>
               </button>
+              <MonthlyNavButtons
+                onBack={() => setStep(2)}
+                onNext={handleSubmit}
+                canNext={!!email.trim()}
+                nextLabel={submitting ? 'Setting up…' : 'Complete →'}
+                disabled={submitting}
+              />
             </motion.div>
           )}
 
@@ -371,37 +455,36 @@ function MonthlyGivingFlow({
         </AnimatePresence>
       </div>
 
-      {/* Nav buttons */}
-      {step !== 'done' && (
-        <div className="flex gap-3 px-5 pb-6 pt-3 flex-shrink-0"
-          style={{ borderTop: '1px solid rgba(212,175,55,0.1)' }}>
-          <button
-            onClick={() => step === 0 ? onClose() : setStep((step - 1) as MonthlyStep)}
-            className="flex-1 py-3.5 rounded-2xl font-black text-sm"
-            style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
-            {step === 0 ? '← Back' : 'Back'}
-          </button>
-          <button
-            onClick={() => {
-              if (step === 0) setStep(1)
-              else if (step === 1) { if (!firstName.trim() || !surname.trim()) return; setStep(2) }
-              else if (step === 2) setStep(3)
-              else if (step === 3) { if (!email.trim()) return; handleSubmit() }
-            }}
-            disabled={submitting || (step === 1 && (!firstName.trim() || !surname.trim())) || (step === 3 && !email.trim())}
-            className="flex-[2] py-3.5 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.98]"
-            style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
-            {submitting ? 'Setting up…' : step === 3 ? 'Complete →' : 'Next →'}
-          </button>
-        </div>
-      )}
-
-      {step === 0 && (
-        <p className="text-center text-[10px] pb-4 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.2)' }}>
-          Secure recurring payment via PayPal · Cancel anytime
-        </p>
-      )}
     </motion.div>
+  )
+}
+
+function MonthlyNavButtons({ onBack, onNext, canNext, nextLabel = 'Next →', backLabel = '← Back', disabled = false }: {
+  onBack: () => void
+  onNext: () => void
+  canNext: boolean
+  nextLabel?: string
+  backLabel?: string
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex gap-3 pt-2">
+      <button
+        onClick={onBack}
+        className="flex-1 py-3.5 rounded-2xl font-black text-sm active:scale-[0.97] transition-all"
+        style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+      >
+        {backLabel}
+      </button>
+      <button
+        onClick={onNext}
+        disabled={!canNext || disabled}
+        className="flex-[2] py-3.5 rounded-2xl font-black text-base disabled:opacity-40 active:scale-[0.97] transition-all"
+        style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}
+      >
+        {nextLabel}
+      </button>
+    </div>
   )
 }
 
@@ -457,6 +540,30 @@ function GiftAidFlow({
   const [postcode, setPostcode] = useState('')
   const [email, setEmail]       = useState('')
   const [declared, setDeclared] = useState(false)
+
+  // Ideal Postcodes address lookup
+  const [addrList, setAddrList]         = useState<string[]>([])
+  const [selectedAddr, setSelectedAddr] = useState('')
+  const [lookingUp, setLookingUp]       = useState(false)
+  const [addrError, setAddrError]       = useState('')
+
+  async function lookupAddress() {
+    if (!postcode.trim()) return
+    setLookingUp(true); setAddrError(''); setAddrList([]); setSelectedAddr('')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/postcode/${encodeURIComponent(postcode.trim())}`)
+      const data = await res.json()
+      const all: Array<{ formatted: string }> = data.addresses || []
+      const filtered = houseNum.trim()
+        ? all.filter(a => a.formatted.toLowerCase().includes(houseNum.trim().toLowerCase()))
+        : all
+      const list = (filtered.length > 0 ? filtered : all).map(a => a.formatted)
+      if (!list.length) { setAddrError('No addresses found — check the postcode.'); return }
+      setAddrList(list)
+      if (list.length === 1) setSelectedAddr(list[0])
+    } catch { setAddrError('Lookup failed — please try again.') }
+    finally { setLookingUp(false) }
+  }
 
   const gaAmount    = (amount * 0.25).toFixed(2)
   const totalAmount = (amount * 1.25).toFixed(2)
@@ -569,21 +676,58 @@ function GiftAidFlow({
             </motion.div>
           )}
 
-          {/* Screen 2 — Address */}
+          {/* Screen 2 — Address with Ideal Postcodes lookup */}
           {step === 2 && (
-            <motion.div key="ga2" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
-              <div>
-                <label className={labelCls} style={labelStyle}>House Number</label>
-                <input className={inputCls} style={inputStyle} placeholder="House number or name"
-                  value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus />
-              </div>
-              <div>
-                <label className={labelCls} style={labelStyle}>Postcode</label>
-                <input className={inputCls} style={inputStyle} placeholder="e.g. HA9 0BB"
+            <motion.div key="ga2" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-3 pt-2">
+              <label className={labelCls} style={labelStyle}>Address Lookup</label>
+              {/* House no. + postcode + search on one row */}
+              <div className="flex gap-2">
+                <input
+                  className="px-3 py-4 rounded-2xl text-base font-semibold outline-none w-24 flex-shrink-0"
+                  style={inputStyle} placeholder="No."
+                  value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus
+                />
+                <input
+                  className="flex-1 px-3 py-4 rounded-2xl text-base font-semibold outline-none uppercase"
+                  style={inputStyle} placeholder="Postcode"
                   value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())}
-                  onKeyDown={e => e.key === 'Enter' && setStep(3)} />
+                  onKeyDown={e => e.key === 'Enter' && lookupAddress()}
+                />
+                <button
+                  onClick={lookupAddress} disabled={lookingUp || !postcode.trim()}
+                  className="px-4 py-4 rounded-2xl font-black text-sm flex-shrink-0 disabled:opacity-40 active:scale-[0.96] transition-all"
+                  style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff' }}
+                >
+                  {lookingUp ? '…' : '🔍'}
+                </button>
               </div>
-              <NavButtons step={step} canNext={true} onBack={() => setStep(1)} onNext={() => setStep(3)} />
+
+              {addrError && (
+                <p className="text-xs px-1" style={{ color: '#f87171' }}>{addrError}</p>
+              )}
+
+              {addrList.length > 0 && (
+                <div>
+                  <label className={labelCls} style={{ ...labelStyle, marginBottom: '6px' }}>Select Address</label>
+                  <select
+                    value={selectedAddr} onChange={e => setSelectedAddr(e.target.value)}
+                    className="w-full px-4 py-3.5 rounded-2xl text-sm font-semibold outline-none"
+                    style={{ ...inputStyle, color: selectedAddr ? '#fff' : 'rgba(255,255,255,0.4)' }}
+                  >
+                    <option value="">— Select your address —</option>
+                    {addrList.map((a, i) => <option key={i} value={a}>{a}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {selectedAddr && (
+                <div className="px-4 py-2.5 rounded-xl text-xs font-semibold"
+                  style={{ background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.25)', color: '#4ade80' }}>
+                  ✓ {selectedAddr}
+                </div>
+              )}
+
+              <NavButtons step={step} canNext={!!postcode.trim()} onBack={() => setStep(1)} onNext={() => setStep(3)} />
             </motion.div>
           )}
 
@@ -617,7 +761,7 @@ function GiftAidFlow({
               <NavButtons
                 step={step} canNext={canNext3}
                 onBack={() => setStep(2)}
-                onNext={() => onConfirm(firstName.trim(), surname.trim(), houseNum.trim(), postcode.trim(), email.trim())}
+                onNext={() => onConfirm(firstName.trim(), surname.trim(), selectedAddr || houseNum.trim(), postcode.trim(), email.trim())}
                 nextLabel="Confirm →"
               />
             </motion.div>
