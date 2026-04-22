@@ -97,9 +97,6 @@ async def list_donations(
     branch_filter = "AND d.branch_id = :branch_id" if branch_id else ""
     purpose_filter= "AND d.purpose ILIKE :purpose" if purpose else ""
     status_filter = "AND d.status = :status" if status else ""
-    # Skip recurring UNION leg entirely when filtering for a non-recurring source
-    skip_recurring = source and source != "monthly-giving"
-    rgs_src_filter = "" if not source else ("AND true" if source == "monthly-giving" else "AND false")
 
     params: dict[str, Any] = {"from_dt": from_dt, "to_dt": to_dt, "lim": limit}
     if source:    params["source"]    = source
@@ -107,12 +104,20 @@ async def list_donations(
     if purpose:   params["purpose"]   = f"%{purpose}%"
     if status:    params["status"]    = status
 
+    # Idempotently add source column — must commit DDL before running the query
     async with SessionLocal() as db:
-        # Idempotently add source column if not yet present
         await db.execute(text(
             "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source VARCHAR(64) DEFAULT 'manual'"
         ))
+        await db.commit()
 
+    rgs_branch = "AND rgs.branch_id = :branch_id" if branch_id else ""
+    rgs_status  = "AND rgs.status = :status"        if status    else ""
+
+    # When filtering by a one-time-only source, exclude recurring leg with 1=0
+    rgs_exclude = "AND 1=0" if (source and source != "monthly-giving") else ""
+
+    async with SessionLocal() as db:
         result = await db.execute(text(f"""
             SELECT
                 d.id::text,
@@ -125,18 +130,18 @@ async def list_donations(
                         WHEN 'paypal' THEN 'service-portal'
                         ELSE 'manual'
                     END
-                ) AS source,
+                )                AS source,
                 d.purpose,
                 d.payment_provider,
                 d.payment_ref,
                 d.gift_aid_eligible,
-                d.gift_aid_amount,
+                d.gift_aid_amount::numeric,
                 d.status,
                 d.reference,
                 d.contact_id::text,
-                c.full_name  AS contact_name,
-                c.email      AS contact_email,
-                'one-time'   AS donation_type,
+                c.full_name      AS contact_name,
+                c.email          AS contact_email,
+                'one-time'       AS donation_type,
                 d.created_at,
                 d.updated_at
             FROM donations d
@@ -155,29 +160,29 @@ async def list_donations(
                 rgs.id::text,
                 rgs.branch_id,
                 rgs.amount,
-                'GBP'                                     AS currency,
-                'monthly-giving'                          AS source,
+                'GBP'::varchar                            AS currency,
+                'monthly-giving'::varchar                 AS source,
                 COALESCE(t.label, 'Monthly Giving')       AS purpose,
-                'paypal'                                  AS payment_provider,
+                'paypal'::varchar                         AS payment_provider,
                 rgs.paypal_subscription_id                AS payment_ref,
                 false                                     AS gift_aid_eligible,
-                0                                         AS gift_aid_amount,
+                0::numeric                                AS gift_aid_amount,
                 rgs.status,
                 rgs.paypal_subscription_id                AS reference,
                 rgs.contact_id::text,
                 COALESCE(c2.full_name, rgs.donor_name)   AS contact_name,
                 COALESCE(c2.email,     rgs.donor_email)  AS contact_email,
-                'recurring'                               AS donation_type,
+                'recurring'::varchar                      AS donation_type,
                 rgs.created_at,
                 rgs.updated_at
             FROM recurring_giving_subscriptions rgs
-            LEFT JOIN recurring_giving_tiers t   ON t.id   = rgs.tier_id
-            LEFT JOIN contacts              c2   ON c2.id  = rgs.contact_id
+            LEFT JOIN recurring_giving_tiers t  ON t.id  = rgs.tier_id
+            LEFT JOIN contacts              c2  ON c2.id = rgs.contact_id
             WHERE rgs.created_at >= :from_dt
               AND rgs.created_at < :to_dt
-              {rgs_src_filter}
-              {'AND rgs.branch_id = :branch_id' if branch_id else ''}
-              {'AND rgs.status = :status'        if status    else ''}
+              {rgs_exclude}
+              {rgs_branch}
+              {rgs_status}
 
             ORDER BY created_at DESC
             LIMIT :lim
