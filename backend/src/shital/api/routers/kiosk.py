@@ -1458,8 +1458,8 @@ class MonthlySignupInput(BaseModel):
 async def _create_kiosk_subscription(
     first_name: str, surname: str, email: str, amount: float,
     house_number: str = "", postcode: str = "",
-) -> tuple[str | None, str | None]:
-    """Create PayPal subscription for kiosk monthly giving. Returns (approval_url, sub_id)."""
+) -> tuple[str | None, str | None, str | None]:
+    """Create PayPal subscription for kiosk monthly giving. Returns (approval_url, sub_id, plan_id)."""
     import httpx
     try:
         from shital.core.fabrics.secrets import SecretsManager
@@ -1467,7 +1467,7 @@ async def _create_kiosk_subscription(
         secret    = await SecretsManager.get("PAYPAL_CLIENT_SECRET") or ""
         env       = await SecretsManager.get("PAYPAL_ENV") or "live"
         if not client_id or not secret:
-            return None, None
+            return None, None, None
         base = "https://api-m.paypal.com" if env == "live" else "https://api-m.sandbox.paypal.com"
         async with httpx.AsyncClient(timeout=20) as c:
             r = await c.post(f"{base}/v1/oauth2/token",
