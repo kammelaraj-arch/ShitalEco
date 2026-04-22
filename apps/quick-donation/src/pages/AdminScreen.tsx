@@ -74,6 +74,7 @@ export function AdminScreen() {
     // Persist login — survives reboots until explicit logout
     setDeviceLoggedIn(true, data.user?.name || enteredUsername)
     loadReaders()
+    setScreen('donate')
   }
 
   async function handleLogin() {

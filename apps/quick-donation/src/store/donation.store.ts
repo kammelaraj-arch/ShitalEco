@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
-export type Screen = 'idle' | 'donate' | 'processing' | 'tap' | 'confirmation' | 'admin'
+export type Screen = 'donate' | 'processing' | 'tap' | 'confirmation' | 'admin'
 export type ReaderProvider = 'stripe_terminal' | 'sumup' | ''
 
 export interface GiftAidData {
