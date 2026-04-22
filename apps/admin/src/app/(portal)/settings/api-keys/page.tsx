@@ -17,16 +17,18 @@ interface ApiKey {
 
 // ── Group ordering ────────────────────────────────────────────────────────────
 
-const GROUP_ORDER = ['Stripe', 'Microsoft', 'AI', 'Email', 'Google', 'WhatsApp', 'PayPal', 'HMRC', 'Other']
+const GROUP_ORDER = ['Stripe', 'SumUp', 'PayPal', 'Microsoft', 'AI', 'Email', 'Google', 'WhatsApp', 'HMRC', 'Address', 'Other']
 const GROUP_ICONS: Record<string, string> = {
   Stripe:    '💳',
+  SumUp:     '🟦',
+  PayPal:    '🅿️',
   Microsoft: '🔷',
   AI:        '🤖',
   Email:     '✉️',
   Google:    '🔍',
   WhatsApp:  '💬',
-  PayPal:    '🅿️',
   HMRC:      '🏛️',
+  Address:   '📮',
   Other:     '🔑',
 }
 

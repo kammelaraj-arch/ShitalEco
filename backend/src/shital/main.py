@@ -988,6 +988,8 @@ async def _seed_api_key_metadata() -> None:
         ("GETADDRESS_API_KEY",        "GetAddress.io UK postcode lookup API key",       "Address",   True),
         ("IDEAL_POSTCODES_API_KEY",  "Ideal Postcodes UK address lookup API key",      "Address",   True),
         ("ADDRESS_LOOKUP_PROVIDER",  "Active address lookup provider (getaddress or ideal_postcodes)", "Address", False),
+        ("SUMUP_ACCESS_TOKEN",       "SumUp Personal API key (sup_pk_...)",            "SumUp",     True),
+        ("SUMUP_MERCHANT_CODE",      "SumUp merchant code (e.g. M602X5FC)",            "SumUp",     False),
         ("MEILISEARCH_MASTER_KEY",   "MeiliSearch master key",                         "Other",     True),
     ]
 
