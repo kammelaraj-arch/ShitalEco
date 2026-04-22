@@ -251,3 +251,102 @@ async def list_orders(limit: int = 50, offset: int = 0, status: str = "", branch
         total = _count_row["cnt"] if _count_row is not None else 0
 
     return {"orders": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+
+
+# ─── Addresses ──────────────────────────────────────────────────────────
+
+@router.get("/addresses")
+async def list_addresses(q: str = "", contact_id: str = "", page: int = 1, per_page: int = 50):
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    per_page = min(per_page, 200)
+    offset = (page - 1) * per_page
+    conditions: list[str] = []
+    params: dict[str, Any] = {"limit": per_page, "offset": offset}
+
+    if q:
+        conditions.append("(a.formatted ILIKE :q OR a.postcode ILIKE :q OR c.full_name ILIKE :q OR c.email ILIKE :q)")
+        params["q"] = f"%{q}%"
+    if contact_id:
+        conditions.append("a.contact_id = :cid")
+        params["cid"] = contact_id
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    async with SessionLocal() as db:
+        result = await db.execute(text(f"""
+            SELECT a.id, a.contact_id, a.formatted, a.postcode, a.uprn,
+                   a.is_primary, a.lookup_source, a.created_at,
+                   c.full_name AS contact_name, c.email AS contact_email
+              FROM addresses a
+              LEFT JOIN contacts c ON c.id = a.contact_id
+              {where}
+             ORDER BY a.created_at DESC
+             LIMIT :limit OFFSET :offset
+        """), params)
+        rows = result.mappings().all()
+
+        count_r = await db.execute(
+            text(f"SELECT COUNT(*) AS cnt FROM addresses a LEFT JOIN contacts c ON c.id = a.contact_id {where}"),
+            {k: v for k, v in params.items() if k not in ("limit", "offset")},
+        )
+        total = (count_r.mappings().first() or {}).get("cnt", 0)
+
+    return {"addresses": [dict(r) for r in rows], "total": total, "page": page, "per_page": per_page}
+
+
+# ─── Order Items ────────────────────────────────────────────────────────
+
+@router.get("/order-items")
+async def list_order_items(order_ref: str = "", branch_id: str = "", page: int = 1, per_page: int = 100):
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    per_page = min(per_page, 500)
+    offset = (page - 1) * per_page
+    conditions: list[str] = []
+    params: dict[str, Any] = {"limit": per_page, "offset": offset}
+
+    if order_ref:
+        conditions.append("o.reference ILIKE :ref")
+        params["ref"] = f"%{order_ref}%"
+    if branch_id:
+        conditions.append("o.branch_id = :bid")
+        params["bid"] = branch_id
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    async with SessionLocal() as db:
+        result = await db.execute(text(f"""
+            SELECT
+                bi.id, bi.basket_id, bi.item_type, bi.reference_id,
+                bi.name, bi.description, bi.quantity,
+                bi.unit_price, bi.total_price, bi.created_at,
+                o.reference AS order_ref, o.status AS order_status,
+                o.branch_id, o.customer_name, o.customer_email,
+                o.payment_provider, o.created_at AS order_date
+              FROM basket_items bi
+              JOIN baskets b ON b.id = bi.basket_id
+              JOIN orders o  ON o.basket_id = b.id
+              {where}
+             ORDER BY o.created_at DESC, bi.created_at ASC
+             LIMIT :limit OFFSET :offset
+        """), params)
+        rows = result.mappings().all()
+
+        count_r = await db.execute(
+            text(f"""
+                SELECT COUNT(*) AS cnt
+                  FROM basket_items bi
+                  JOIN baskets b ON b.id = bi.basket_id
+                  JOIN orders o  ON o.basket_id = b.id
+                  {where}
+            """),
+            {k: v for k, v in params.items() if k not in ("limit", "offset")},
+        )
+        total = (count_r.mappings().first() or {}).get("cnt", 0)
+
+    return {"items": [dict(r) for r in rows], "total": total, "page": page, "per_page": per_page}
