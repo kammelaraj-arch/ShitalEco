@@ -205,7 +205,7 @@ export function DonationScreen() {
   const handleCornerTap = () => {
     cornerTaps.current += 1
     if (cornerTimer.current) clearTimeout(cornerTimer.current)
-    if (cornerTaps.current >= 5) {
+    if (cornerTaps.current >= 3) {
       cornerTaps.current = 0
       setScreen('admin')
       return
