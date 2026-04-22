@@ -497,7 +497,7 @@ function GiftAidFlow({
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-5 pb-4">
+      <div className="flex-1 overflow-y-auto px-5 pb-6">
         <AnimatePresence mode="wait">
 
           {/* Screen 0 — Gift Aid prompt */}
@@ -562,8 +562,10 @@ function GiftAidFlow({
               <div>
                 <label className={labelCls} style={labelStyle}>First Name *</label>
                 <input className={inputCls} style={inputStyle} placeholder="First name"
-                  value={firstName} onChange={e => setFirstName(e.target.value)} />
+                  value={firstName} onChange={e => setFirstName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && canNext1 && setStep(2)} />
               </div>
+              <NavButtons step={step} canNext={canNext1} onBack={() => setStep(0)} onNext={() => setStep(2)} />
             </motion.div>
           )}
 
@@ -578,8 +580,10 @@ function GiftAidFlow({
               <div>
                 <label className={labelCls} style={labelStyle}>Postcode</label>
                 <input className={inputCls} style={inputStyle} placeholder="e.g. HA9 0BB"
-                  value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())} />
+                  value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())}
+                  onKeyDown={e => e.key === 'Enter' && setStep(3)} />
               </div>
+              <NavButtons step={step} canNext={true} onBack={() => setStep(1)} onNext={() => setStep(3)} />
             </motion.div>
           )}
 
@@ -610,36 +614,46 @@ function GiftAidFlow({
                   </p>
                 </div>
               </button>
+              <NavButtons
+                step={step} canNext={canNext3}
+                onBack={() => setStep(2)}
+                onNext={() => onConfirm(firstName.trim(), surname.trim(), houseNum.trim(), postcode.trim(), email.trim())}
+                nextLabel="Confirm →"
+              />
             </motion.div>
           )}
 
         </AnimatePresence>
       </div>
-
-      {/* Nav buttons */}
-      <div className="flex gap-3 px-5 pb-6 pt-3 flex-shrink-0"
-        style={{ borderTop: '1px solid rgba(74,222,128,0.1)' }}>
-        <button
-          onClick={() => step === 0 ? onSkip() : setStep((step - 1) as GiftAidFlowStep)}
-          className="flex-1 py-3.5 rounded-2xl font-black text-sm"
-          style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
-          {step === 0 ? '← Back' : 'Back'}
-        </button>
-        {step > 0 && (
-          <button
-            onClick={() => {
-              if (step === 1) { if (canNext1) setStep(2) }
-              else if (step === 2) setStep(3)
-              else if (step === 3) { if (canNext3) onConfirm(firstName.trim(), surname.trim(), houseNum.trim(), postcode.trim(), email.trim()) }
-            }}
-            disabled={(step === 1 && !canNext1) || (step === 3 && !canNext3)}
-            className="flex-[2] py-3.5 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.98]"
-            style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff' }}>
-            {step === 3 ? 'Next →' : 'Next →'}
-          </button>
-        )}
-      </div>
     </motion.div>
+  )
+}
+
+function NavButtons({ step, canNext, onBack, onNext, nextLabel = 'Next →' }: {
+  step: number
+  canNext: boolean
+  onBack: () => void
+  onNext: () => void
+  nextLabel?: string
+}) {
+  return (
+    <div className="flex gap-3 pt-2">
+      <button
+        onClick={onBack}
+        className="flex-1 py-3.5 rounded-2xl font-black text-sm active:scale-[0.97] transition-all"
+        style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+      >
+        ← Back
+      </button>
+      <button
+        onClick={onNext}
+        disabled={!canNext}
+        className="flex-[2] py-3.5 rounded-2xl font-black text-base disabled:opacity-35 active:scale-[0.97] transition-all"
+        style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff' }}
+      >
+        {nextLabel}
+      </button>
+    </div>
   )
 }
 
