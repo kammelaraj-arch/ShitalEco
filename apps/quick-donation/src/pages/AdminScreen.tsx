@@ -374,7 +374,7 @@ export function AdminScreen() {
                 style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)', border: '1px solid rgba(255,255,255,0.1)' }}>
                 {sumupLoading ? '…' : 'Fetch List'}
               </button>
-              <button onClick={assignSumUp} disabled={!sumupSerial.trim()}
+              <button onClick={() => assignSumUp()} disabled={!sumupSerial.trim()}
                 className="flex-1 py-2.5 rounded-xl text-xs font-black disabled:opacity-40 transition-all active:scale-[0.97]"
                 style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
                 Assign
