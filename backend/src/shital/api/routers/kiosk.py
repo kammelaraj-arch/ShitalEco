@@ -894,11 +894,14 @@ async def sumup_checkout(body: SumUpCheckoutInput):
             checkout_id = checkout.get("id")
 
             # 2. Push to physical reader
-            # SumUp API uses reader ID (e.g. "2JNR3N") not serial number in the path.
-            # If only serial is provided, look up the ID from the readers list.
-            reader_id = body.reader_id.strip()
-            reader_serial = body.reader_serial.strip() or await SecretsManager.get("SUMUP_READER_SERIAL") or ""
-            if not reader_id and reader_serial:
+            # reader_serial stored in device profile is SumUp's API reader ID (e.g. rdr_XXX).
+            # Use it directly — no lookup needed.
+            reader_id = (body.reader_id or "").strip()
+            reader_serial = (body.reader_serial or "").strip() or await SecretsManager.get("SUMUP_READER_SERIAL") or ""
+            if not reader_id:
+                reader_id = reader_serial  # profile stores the API ID, not the physical serial
+            if not reader_id:
+                # Fall back: look up from readers list
                 rd_resp = await client.get(
                     f"{base}/v0.1/merchants/{merchant_code}/readers",
                     headers=headers,
@@ -910,12 +913,14 @@ async def sumup_checkout(body: SumUpCheckoutInput):
                         if rd.get("serial_number") == reader_serial or rd.get("id") == reader_serial:
                             reader_id = rd.get("id", "")
                             break
+            push_status = None
             if reader_id and checkout_id:
                 push_resp = await client.post(
                     f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_id}/checkout",
                     headers=headers,
                     json={"id": checkout_id},
                 )
+                push_status = push_resp.status_code
                 if not push_resp.is_success:
                     return {"error": f"Reader push failed ({push_resp.status_code}): {push_resp.text[:200]}"}
 
@@ -925,6 +930,7 @@ async def sumup_checkout(body: SumUpCheckoutInput):
             "amount": amount,
             "reader_id": reader_id,
             "reader_serial": reader_serial,
+            "push_status": push_status,
         }
     except Exception as e:
         return {"error": str(e)}
