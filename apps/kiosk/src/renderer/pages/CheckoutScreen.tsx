@@ -86,9 +86,9 @@ export function CheckoutScreen() {
 
       const orderRef = `ORD-${basket_id.slice(0, 8).toUpperCase()}`
 
-      // Helper — fire-and-forget: save PENDING order before card reader sees it
-      const savePending = (provider: string, paymentIntentId = '') => {
-        fetch(`${API_BASE}/kiosk/order/pending`, {
+      // Save PENDING order — awaited before screen transition so the fetch is never cancelled by unmount
+      const savePending = async (provider: string, paymentIntentId = '') => {
+        await fetch(`${API_BASE}/kiosk/order/pending`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -140,7 +140,7 @@ export function CheckoutScreen() {
         const pr = await prRes.json()
         if (pr.error) throw new Error(pr.error)
 
-        savePending('STRIPE_TERMINAL', pi.payment_intent_id)
+        await savePending('STRIPE_TERMINAL', pi.payment_intent_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'STRIPE_TERMINAL',
           payment_intent_id: pi.payment_intent_id,
@@ -168,7 +168,7 @@ export function CheckoutScreen() {
         const sq = await sqRes.json()
         if (sq.error) throw new Error(sq.error)
 
-        savePending('SQUARE', sq.checkout_id)
+        await savePending('SQUARE', sq.checkout_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'SQUARE',
           checkout_id: sq.checkout_id,
@@ -200,7 +200,7 @@ export function CheckoutScreen() {
         const cl = await clRes.json()
         if (cl.error) throw new Error(cl.error)
 
-        savePending('CLOVER', cl.clover_order_id)
+        await savePending('CLOVER', cl.clover_order_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'CLOVER',
           clover_order_id: cl.clover_order_id,
@@ -213,6 +213,9 @@ export function CheckoutScreen() {
 
       // ── SumUp Solo ───────────────────────────────────────────────────────
       if (cardProvider === 'sumup') {
+        // Save order BEFORE sending to reader so it always appears in admin
+        await savePending('SUMUP', '')
+
         setStage('Sending to SumUp reader…')
         const suRes = await fetch(`${API_BASE}/kiosk/sumup/checkout`, {
           method: 'POST',
@@ -229,7 +232,6 @@ export function CheckoutScreen() {
         const su = await suRes.json()
         if (su.error) throw new Error(su.error)
 
-        savePending('SUMUP', su.checkout_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'SUMUP',
           sumup_checkout_id: su.checkout_id,
@@ -241,7 +243,7 @@ export function CheckoutScreen() {
       }
 
       // ── Cash / Counter ────────────────────────────────────────────────────
-      savePending('CASH')
+      await savePending('CASH')
       setOrderResult(basket_id, orderRef, { provider: 'CASH' })
       setScreen('payment')
 
