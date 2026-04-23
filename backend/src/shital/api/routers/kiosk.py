@@ -283,6 +283,11 @@ class OrderPendingInput(BaseModel):
     contact_email: str = ""
     contact_phone: str = ""
     gift_aid_eligible: bool = False
+    # Gift Aid declaration fields (optional — only sent when donor agreed)
+    ga_full_name: str = ""
+    ga_postcode: str = ""
+    ga_address: str = ""
+    ga_email: str = ""
 
 
 @router.post("/order/pending")
@@ -361,6 +366,56 @@ async def create_pending_order(body: OrderPendingInput):
             "ga": body.gift_aid_eligible,
             "cid": contact_id, "ikey": f"donation-{body.order_ref}", "now": now,
         })
+
+        # Save Gift Aid declaration + address when donor agreed
+        if body.gift_aid_eligible and body.ga_full_name and body.ga_postcode:
+            ga_email_key = body.ga_email.strip().lower() if body.ga_email.strip() else (
+                email_key  # fall back to checkout email
+            )
+            ga_contact_id = contact_id
+            if ga_email_key and ga_email_key != email_key:
+                # Different email for Gift Aid — upsert separately
+                ga_uuid = str(uuid.uuid4())
+                ga_parts = body.ga_full_name.strip().split(" ", 1)
+                ga_row = await db.execute(text(_upsert_contact_sql()), {
+                    "id": ga_uuid, "email": ga_email_key,
+                    "first": ga_parts[0], "surname": ga_parts[1] if len(ga_parts) > 1 else "",
+                    "name": body.ga_full_name, "phone": "",
+                    "branch": body.branch_id, "now": now,
+                })
+                r2 = ga_row.mappings().first()
+                ga_contact_id = str(r2["id"]) if r2 else ga_uuid
+
+            if ga_contact_id and body.ga_postcode:
+                await db.execute(text("""
+                    INSERT INTO addresses (id, contact_id, formatted, postcode, uprn,
+                                          is_primary, lookup_source, created_at)
+                    VALUES (:id, :cid, :fmt, :pc, '', true, 'kiosk', :now)
+                    ON CONFLICT DO NOTHING
+                """), {
+                    "id": str(uuid.uuid4()), "cid": ga_contact_id,
+                    "fmt": body.ga_address or body.ga_postcode,
+                    "pc": body.ga_postcode.upper().strip(), "now": now,
+                })
+
+            await db.execute(text("""
+                INSERT INTO gift_aid_declarations
+                    (id, order_ref, full_name, postcode, address, contact_email,
+                     donation_amount, donation_date, gift_aid_agreed,
+                     contact_id, hmrc_submitted, created_at)
+                VALUES
+                    (:id, :ref, :name, :pc, :addr, :email,
+                     :amount, :ddate, true,
+                     :cid, false, :now)
+                ON CONFLICT DO NOTHING
+            """), {
+                "id": str(uuid.uuid4()), "ref": body.order_ref,
+                "name": body.ga_full_name, "pc": body.ga_postcode.upper().strip(),
+                "addr": body.ga_address or "",
+                "email": body.ga_email.strip() or body.contact_email.strip(),
+                "amount": total, "ddate": now.date(),
+                "cid": ga_contact_id, "now": now,
+            })
 
         await db.execute(
             text("UPDATE baskets SET status = 'CHECKOUT', updated_at = :now WHERE id = :bid"),

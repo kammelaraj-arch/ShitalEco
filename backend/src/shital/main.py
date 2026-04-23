@@ -887,6 +887,8 @@ async def _patch_schema() -> None:
         # PayPal capture transaction ID (different from the PayPal order ID)
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
         "ALTER TABLE orders    ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
+        # Source channel on donations (kiosk, quick-donation, service, paypal, etc.)
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'kiosk'",
         # ── CRM: Contacts table ───────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS contacts (
             id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),

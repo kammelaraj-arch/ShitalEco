@@ -105,6 +105,10 @@ export function CheckoutScreen() {
             contact_email:     contactInfo?.anonymous ? '' : (contactInfo?.email || ''),
             contact_phone:     contactInfo?.anonymous ? '' : (contactInfo?.phone || ''),
             gift_aid_eligible: !!giftAidDeclaration?.agreed,
+            ga_full_name:  giftAidDeclaration?.agreed ? (giftAidDeclaration.fullName || '') : '',
+            ga_postcode:   giftAidDeclaration?.agreed ? (giftAidDeclaration.postcode || '') : '',
+            ga_address:    giftAidDeclaration?.agreed ? (giftAidDeclaration.address || '') : '',
+            ga_email:      giftAidDeclaration?.agreed ? (giftAidDeclaration.contactEmail || '') : '',
           }),
         }).catch(() => { /* non-fatal */ })
       }
