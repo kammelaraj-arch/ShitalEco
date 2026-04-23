@@ -52,7 +52,7 @@ export default function ContactsPage() {
       if (search) params.set('q', search)
       if (src)    params.set('source', src)
       const res = await fetch(`${API}/admin/contacts?${params}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
+        headers: { Authorization: `Bearer ${localStorage.getItem('shital_access_token') || ''}` },
       })
       if (!res.ok) throw new Error(`${res.status}`)
       const data = await res.json()

@@ -50,7 +50,7 @@ export default function OrderItemsPage() {
       if (ref) params.set('order_ref', ref)
       if (bid) params.set('branch_id', bid)
       const res = await fetch(`${API}/admin/order-items?${params}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
+        headers: { Authorization: `Bearer ${localStorage.getItem('shital_access_token') || ''}` },
       })
       if (!res.ok) throw new Error(`${res.status}`)
       const data = await res.json()

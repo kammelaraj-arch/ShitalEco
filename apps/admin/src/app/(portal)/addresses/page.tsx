@@ -32,7 +32,7 @@ export default function AddressesPage() {
       const params = new URLSearchParams({ page: String(pg), per_page: String(PER_PAGE) })
       if (search) params.set('q', search)
       const res = await fetch(`${API}/admin/addresses?${params}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
+        headers: { Authorization: `Bearer ${localStorage.getItem('shital_access_token') || ''}` },
       })
       if (!res.ok) throw new Error(`${res.status}`)
       const data = await res.json()
