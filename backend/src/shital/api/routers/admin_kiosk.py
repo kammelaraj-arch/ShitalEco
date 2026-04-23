@@ -238,6 +238,7 @@ async def list_orders(limit: int = 50, offset: int = 0, status: str = "", branch
             text(f"""
                 SELECT id, reference, branch_id, basket_id, status,
                        total_amount, currency, payment_provider, payment_ref,
+                       device_id, device_label, source,
                        customer_name, customer_email, customer_phone, created_at, updated_at
                 FROM orders {where}
                 ORDER BY created_at DESC
