@@ -62,7 +62,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
-          confirmOrder(orderRef, paymentIntentId || '', setReceiptSentByConfirm)
+          await confirmOrder(orderRef, paymentIntentId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (d.status === 'canceled') {
           clearInterval(poll)
@@ -91,7 +91,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
-          confirmOrder(orderRef, checkoutId || '', setReceiptSentByConfirm)
+          await confirmOrder(orderRef, checkoutId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (['CANCELED', 'CANCEL_REQUESTED'].includes(d.status)) {
           clearInterval(poll)
@@ -116,7 +116,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
-          confirmOrder(orderRef, sumupCheckoutId || '', setReceiptSentByConfirm)
+          await confirmOrder(orderRef, sumupCheckoutId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (d.status === 'FAILED') {
           clearInterval(poll)
@@ -145,7 +145,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
-          confirmOrder(orderRef, cloverOrderId || '', setReceiptSentByConfirm)
+          await confirmOrder(orderRef, cloverOrderId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (d.status === 'FAILED') {
           clearInterval(poll)

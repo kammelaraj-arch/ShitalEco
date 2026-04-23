@@ -221,8 +221,7 @@ export function CheckoutScreen() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amount: total,
-            currency: 'GBP',
+            amount_pence: Math.round(total * 100),
             description: 'Shital Temple Payment',
             order_id: basket_id,
             reader_serial: sumupReaderId,
