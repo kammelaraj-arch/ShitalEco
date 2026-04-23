@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useDonationStore } from '../store/donation.store'
 
-const AUTO_RESET_SECONDS = 30
+const AUTO_RESET_SECONDS = 12
 
 export function ConfirmationScreen() {
   const { amount, orderRef, branchId, reset } = useDonationStore()
