@@ -922,7 +922,7 @@ async def sumup_checkout(body: SumUpCheckoutInput):
                 )
                 push_status = push_resp.status_code
                 if not push_resp.is_success:
-                    return {"error": f"Reader push failed ({push_resp.status_code}): {push_resp.text[:200]}"}
+                    return {"error": f"Reader push failed ({push_resp.status_code}): {push_resp.text[:200]}", "reader_id_used": reader_id, "merchant_code_used": merchant_code}
 
         return {
             "checkout_id": checkout_id,
