@@ -43,10 +43,16 @@ export function TapScreen() {
           const res = await fetch(`${API_BASE}/kiosk/sumup/checkout/${paymentIntentId}`)
           const d = await res.json()
           const s = (d.status || '').toUpperCase()
-          if (s === 'COMPLETED') {
+          if (s === 'PAID' || s === 'COMPLETED') {
             clearInterval(poll)
             setReaderStatus('succeeded')
             setStatusMessage('Payment successful!')
+            // Confirm order in DB
+            fetch(`${API_BASE}/kiosk/order/confirm`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ order_ref: orderRef, payment_ref: paymentIntentId }),
+            }).catch(() => {})
             setTimeout(() => setScreen('confirmation'), 1500)
           } else if (s === 'FAILED' || s === 'EXPIRED') {
             clearInterval(poll)
