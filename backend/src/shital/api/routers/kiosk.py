@@ -918,7 +918,7 @@ async def sumup_checkout(body: SumUpCheckoutInput):
                 push_resp = await client.post(
                     f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_id}/checkout",
                     headers=headers,
-                    json={"id": checkout_id, "total_amount": body.amount_pence},
+                    json={"id": checkout_id, "total_amount": {"currency": "GBP", "minor_unit": 2, "value": body.amount_pence}},
                 )
                 push_status = push_resp.status_code
                 if not push_resp.is_success:
