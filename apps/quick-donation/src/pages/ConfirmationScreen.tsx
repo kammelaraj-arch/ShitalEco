@@ -95,7 +95,7 @@ export function ConfirmationScreen() {
 
       </div>
 
-      {/* New Donation CTA */}
+      {/* Start / New Donation CTA */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -104,10 +104,10 @@ export function ConfirmationScreen() {
       >
         <button
           onClick={reset}
-          className="w-full py-4 rounded-2xl text-white font-black text-lg shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-          style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)', boxShadow: '0 8px 24px #FF993350' }}
+          className="w-full py-5 rounded-2xl text-white font-black text-2xl shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+          style={{ background: 'linear-gradient(135deg,#22C55E,#16A34A)', boxShadow: '0 8px 28px #22C55E55' }}
         >
-          🙏 New Donation
+          ▶ Start
         </button>
       </motion.div>
 
