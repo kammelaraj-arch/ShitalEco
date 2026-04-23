@@ -32,7 +32,7 @@ export function ProcessingScreen() {
   const isSumUp = readerProvider === 'sumup'
   const isReaderError = isSumUp ? !sumupReaderId?.trim() : !stripeReaderId?.trim()
 
-  async function recordDonation(basketId: string, orderRef: string, amountPence: number, paymentRef: string, readerId: string) {
+  async function recordDonation(basketId: string, orderRef: string, amountPence: number, paymentRef: string, readerId: string, provider = 'SUMUP') {
     try {
       await fetch(`${API_BASE}/kiosk/quick-donation/record`, {
         method: 'POST',
@@ -43,6 +43,7 @@ export function ProcessingScreen() {
           amount_pence: amountPence,
           branch_id: branchId,
           payment_intent_id: paymentRef,
+          payment_provider: provider,
           reader_id: readerId,
           ...(pendingGiftAid ? {
             ga_first_name: pendingGiftAid.firstName,
@@ -72,6 +73,9 @@ export function ProcessingScreen() {
         const basketId = generateUUID()
         const orderRef = `DON-${basketId.slice(0, 8).toUpperCase()}`
 
+        // Save PENDING record before sending to reader so it always appears in admin
+        await recordDonation(basketId, orderRef, amountPence, '', sumupReaderId, 'SUMUP')
+
         setStage('Sending to SumUp reader...')
         const res = await fetch(`${API_BASE}/kiosk/sumup/checkout`, {
           method: 'POST',
@@ -91,7 +95,6 @@ export function ProcessingScreen() {
         const data = await res.json()
         if (data.error) throw new Error(data.error)
 
-        await recordDonation(basketId, orderRef, amountPence, data.checkout_id, sumupReaderId)
         setOrderResult(basketId, orderRef, data.checkout_id, '')
         setScreen('tap')
         return

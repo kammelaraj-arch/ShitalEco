@@ -1002,6 +1002,7 @@ class QuickDonationRecordInput(BaseModel):
     amount_pence: int
     branch_id: str = "main"
     payment_intent_id: str = ""
+    payment_provider: str = "SUMUP"
     reader_id: str = ""
     # Optional Gift Aid — collected before payment on the kiosk
     ga_first_name: str = ""
@@ -1064,15 +1065,16 @@ async def record_quick_donation(body: QuickDonationRecordInput):
             await db.execute(
                 text(
                     "INSERT INTO orders (id, user_id, branch_id, basket_id, reference, status, total_amount, currency, "
-                    "payment_provider, payment_ref, idempotency_key, metadata, created_at, updated_at) "
-                    "VALUES (:id, :uid, :bid, :basket, :ref, 'PENDING', :total, 'GBP', 'KIOSK', :pref, :ikey, "
-                    "'{\"source\": \"quick-donation\", \"anonymous\": true}'::jsonb, :now, :now) "
-                    "ON CONFLICT (id) DO NOTHING"
+                    "payment_provider, payment_ref, source, idempotency_key, created_at, updated_at) "
+                    "VALUES (:id, :uid, :bid, :basket, :ref, 'PENDING', :total, 'GBP', :provider, :pref, "
+                    "'quick-donation', :ikey, :now, :now) "
+                    "ON CONFLICT (idempotency_key) DO NOTHING"
                 ),
                 {
                     "id": order_id, "uid": anon_user_id, "bid": branch_id,
                     "basket": body.basket_id, "ref": body.order_ref,
                     "total": str(total), "pref": body.payment_intent_id,
+                    "provider": (body.payment_provider or "SUMUP").upper(),
                     "ikey": order_id, "now": now,
                 },
             )
