@@ -904,8 +904,10 @@ async def sumup_checkout(body: SumUpCheckoutInput):
                     headers=headers,
                 )
                 if rd_resp.is_success:
-                    for rd in rd_resp.json() if isinstance(rd_resp.json(), list) else []:
-                        if rd.get("serial_number") == reader_serial:
+                    rd_data = rd_resp.json()
+                    rd_list = rd_data if isinstance(rd_data, list) else rd_data.get("items", rd_data.get("readers", []))
+                    for rd in rd_list:
+                        if rd.get("serial_number") == reader_serial or rd.get("id") == reader_serial:
                             reader_id = rd.get("id", "")
                             break
             if reader_id and checkout_id:
