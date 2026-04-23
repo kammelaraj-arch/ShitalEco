@@ -6,14 +6,26 @@ Verifies: orders, basket_items, donations, contacts, addresses, gift_aid_declara
 Run on the server: python3 scripts/test_kiosk_flow.py
 """
 import json, sys, uuid, time
-from datetime import datetime
 try:
     import urllib.request as req
     import urllib.error as uerr
 except ImportError:
     sys.exit("Python 3 required")
 
-BASE = "http://localhost:8000/api/v1"
+# Auto-detect which backend port is responding
+def _find_base():
+    for port in (8000, 8001):
+        try:
+            with req.urlopen(f"http://localhost:{port}/api/v1/ping", timeout=3) as r:
+                if r.status == 200:
+                    print(f"  Using backend on port {port}")
+                    return f"http://localhost:{port}/api/v1"
+        except Exception:
+            pass
+    return "http://localhost:8000/api/v1"
+
+print("Detecting backend...")
+BASE = _find_base()
 TEST_EMAIL = f"test.kiosk.{int(time.time())}@shital-test.invalid"
 PASS_COUNT = 0
 FAIL_COUNT = 0
