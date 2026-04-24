@@ -1082,20 +1082,29 @@ async def record_quick_donation(body: QuickDonationRecordInput):
             ga = body.ga_declared and bool(body.ga_first_name or body.ga_surname)
 
             # 2. Record in donations table (for donation reporting, Gift Aid, finance)
+            provider_upper = (body.payment_provider or "SUMUP").upper()
+            # Estimated fee rates — will be replaced by actual settlement data via webhook
+            fee_pct = 0.0169 if provider_upper == "SUMUP" else 0.0175
+            fee_amount = round(total * fee_pct, 2)
+            net_amount = round(total - fee_amount, 2)
+
             await db.execute(
                 text(
                     "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
                     "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
+                    "fee_pct, fee_amount, net_amount, "
                     "status, source, idempotency_key, created_at, updated_at) "
                     "VALUES (:id, :uid, :bid, :amount, 'GBP', :ga_elig, 'General Fund', :ref, "
-                    "'KIOSK', :pref, 'PENDING', 'quick-donation', :ikey, :now, :now) "
+                    ":provider, :pref, :fee_pct, :fee_amount, :net_amount, "
+                    "'PENDING', 'quick-donation', :ikey, :now, :now) "
                     "ON CONFLICT (idempotency_key) DO NOTHING"
                 ),
                 {
                     "id": donation_id, "uid": anon_user_id, "bid": branch_id,
                     "amount": str(total), "ref": body.order_ref,
-                    "pref": body.payment_intent_id, "ikey": f"qd-{order_id}",
-                    "ga_elig": ga, "now": now,
+                    "provider": provider_upper, "pref": body.payment_intent_id,
+                    "fee_pct": str(fee_pct), "fee_amount": str(fee_amount), "net_amount": str(net_amount),
+                    "ikey": f"qd-{order_id}", "ga_elig": ga, "now": now,
                 },
             )
 

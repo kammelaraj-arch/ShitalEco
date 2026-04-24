@@ -10,7 +10,7 @@ type ReaderStatus = 'waiting' | 'processing' | 'succeeded' | 'failed' | 'cancell
 export function TapScreen() {
   const {
     amount, orderRef, paymentIntentId, stripeReaderId, stripeReaderLabel,
-    readerProvider,
+    readerProvider, sumupReaderId,
     setScreen, reset,
   } = useDonationStore()
 
@@ -18,7 +18,8 @@ export function TapScreen() {
   const [readerStatus, setReaderStatus] = useState<ReaderStatus>('waiting')
   const [statusMessage, setStatusMessage] = useState('Present your card to the reader')
 
-  const isSumUp = readerProvider === 'sumup'
+  // Treat as SumUp if provider is set, OR if only a SumUp serial is configured (no Stripe reader)
+  const isSumUp = readerProvider === 'sumup' || (!!sumupReaderId && !stripeReaderId)
 
   // Countdown timer — resets to donate screen on expiry
   useEffect(() => {

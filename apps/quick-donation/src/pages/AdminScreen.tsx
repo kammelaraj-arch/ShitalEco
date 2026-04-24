@@ -71,8 +71,9 @@ export function AdminScreen() {
     setBranchId(data.branch.id)
     const readerId = data.stripe_reader_id || data.profile?.stripe_reader_id || ''
     const readerLabel = data.reader_label || data.profile?.device_label || readerId
-    const provider = (data.reader_provider || 'stripe_terminal') as import('../store/donation.store').ReaderProvider
     const sumupSerial = data.sumup_reader_serial || ''
+    // If backend returns a SumUp serial, it's always a SumUp device regardless of provider field in DB
+    const provider = (sumupSerial ? 'sumup' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
     if (readerId || sumupSerial) setReader(readerId, readerLabel, provider, sumupSerial)
     setDeviceFlags({
       showMonthlyGiving: data.show_monthly_giving ?? false,
@@ -96,9 +97,10 @@ export function AdminScreen() {
       const data = await res.json()
       if (!data.ok) { setSyncResult('fail'); return }
       setBranchId(data.branch.id)
-      const provider = (data.reader_provider || 'stripe_terminal') as import('../store/donation.store').ReaderProvider
-      if (data.stripe_reader_id || data.sumup_reader_serial) {
-        setReader(data.stripe_reader_id || '', data.reader_label || '', provider, data.sumup_reader_serial || '')
+      const syncSerial = data.sumup_reader_serial || ''
+      const provider = (syncSerial ? 'sumup' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
+      if (data.stripe_reader_id || syncSerial) {
+        setReader(data.stripe_reader_id || '', data.reader_label || '', provider, syncSerial)
       }
       setDeviceFlags({
         showMonthlyGiving: data.show_monthly_giving ?? false,
