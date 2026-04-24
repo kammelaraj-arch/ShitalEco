@@ -1012,8 +1012,9 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
     PENDING but the reader processed a standalone (non-cloud-linked) payment.
     Returns {"paid": true, "transaction_id": "..."} or {"paid": false}.
     """
-    import httpx
     from datetime import UTC, timedelta
+
+    import httpx
 
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.secrets import SecretsManager
