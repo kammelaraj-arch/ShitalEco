@@ -12,9 +12,60 @@ env:
   PNPM_VERSION: "9.4.0"
 
 jobs:
+  # ─── Detect changed paths ─────────────────────────────────────────────────
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend:       ${{ steps.filter.outputs.backend }}
+      frontend:      ${{ steps.filter.outputs.frontend }}
+      quick-donation: ${{ steps.filter.outputs.quick-donation }}
+      admin:         ${{ steps.filter.outputs.admin }}
+      kiosk:         ${{ steps.filter.outputs.kiosk }}
+      screen:        ${{ steps.filter.outputs.screen }}
+      service:       ${{ steps.filter.outputs.service }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'apps/**'
+              - 'packages/**'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+              - 'package.json'
+            quick-donation:
+              - 'apps/quick-donation/**'
+              - 'packages/**'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+            admin:
+              - 'apps/admin/**'
+              - 'packages/**'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+            kiosk:
+              - 'apps/kiosk/**'
+              - 'packages/**'
+              - 'pnpm-lock.yaml'
+            screen:
+              - 'apps/screen/**'
+              - 'packages/**'
+              - 'pnpm-lock.yaml'
+            service:
+              - 'apps/service/**'
+              - 'packages/**'
+              - 'pnpm-lock.yaml'
+
   # ─── Python Backend Tests ──────────────────────────────────────────────────
   backend-tests:
     name: Python Backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -81,6 +132,8 @@ jobs:
   # ─── Frontend Tests ────────────────────────────────────────────────────────
   frontend-tests:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -113,13 +166,16 @@ jobs:
         run: pnpm build --filter=@shital/config --filter=@shital/db
 
   # ─── Build & Push to GHCR ─────────────────────────────────────────────────
-  # Runs on GitHub Actions runners (7 GB RAM, 2 CPUs) — NEVER on the VPS.
-  # Production server only does: docker pull + rolling restart.
   docker-build:
     name: Build & Push Images
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-tests]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/claude/')
+    needs: [changes, backend-tests, frontend-tests]
+    # Run even if test jobs were skipped (nothing changed), but not if they failed
+    if: |
+      always() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/claude/'))
     permissions:
       contents: read
       packages: write
@@ -147,6 +203,7 @@ jobs:
           fi
 
       - name: Build & push backend
+        if: needs.changes.outputs.backend == 'true'
         uses: docker/build-push-action@v5
         with:
           context: ./backend
@@ -157,6 +214,7 @@ jobs:
           cache-to: type=gha,scope=backend,mode=max
 
       - name: Build & push admin
+        if: needs.changes.outputs.admin == 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -170,6 +228,7 @@ jobs:
           cache-to: type=gha,scope=admin,mode=max
 
       - name: Build & push quick-donation
+        if: needs.changes.outputs.quick-donation == 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -183,6 +242,7 @@ jobs:
           cache-to: type=gha,scope=quick-donation,mode=max
 
       - name: Build & push kiosk
+        if: needs.changes.outputs.kiosk == 'true'
         uses: docker/build-push-action@v5
         with:
           context: ./apps/kiosk
@@ -196,6 +256,7 @@ jobs:
           cache-to: type=gha,scope=kiosk,mode=max
 
       - name: Build & push screen
+        if: needs.changes.outputs.screen == 'true'
         uses: docker/build-push-action@v5
         with:
           context: ./apps/screen
@@ -206,6 +267,7 @@ jobs:
           cache-to: type=gha,scope=screen,mode=max
 
       - name: Build & push service
+        if: needs.changes.outputs.service == 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -219,7 +281,6 @@ jobs:
             GIT_SHA=${{ github.sha }}
           cache-from: type=gha,scope=service
           cache-to: type=gha,scope=service,mode=max
-
 
       - name: Trigger production deploy
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/shital-erp-platform-iR2UF'
