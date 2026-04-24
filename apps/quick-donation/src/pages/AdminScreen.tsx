@@ -69,12 +69,15 @@ export function AdminScreen() {
   function applyLogin(data: LoginResponse, enteredUsername: string) {
     if (!data.branch) return
     setBranchId(data.branch.id)
-    const readerId = data.stripe_reader_id || data.profile?.stripe_reader_id || ''
-    const readerLabel = data.reader_label || data.profile?.device_label || readerId
+
+    // DB is the single source of truth for reader config.
+    // Always apply — clears stale localStorage if device has no reader assigned.
+    const readerId = data.stripe_reader_id || ''
     const sumupSerial = data.sumup_reader_serial || ''
-    // If backend returns a SumUp serial, it's always a SumUp device regardless of provider field in DB
+    const readerLabel = data.reader_label || readerId || sumupSerial
     const provider = (sumupSerial ? 'sumup' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
-    if (readerId || sumupSerial) setReader(readerId, readerLabel, provider, sumupSerial)
+    setReader(readerId, readerLabel, provider, sumupSerial)
+
     setDeviceFlags({
       showMonthlyGiving: data.show_monthly_giving ?? false,
       enableGiftAid: data.enable_gift_aid ?? false,
@@ -97,11 +100,10 @@ export function AdminScreen() {
       const data = await res.json()
       if (!data.ok) { setSyncResult('fail'); return }
       setBranchId(data.branch.id)
+      // Always overwrite reader from DB — same rule as login
       const syncSerial = data.sumup_reader_serial || ''
       const provider = (syncSerial ? 'sumup' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
-      if (data.stripe_reader_id || syncSerial) {
-        setReader(data.stripe_reader_id || '', data.reader_label || '', provider, syncSerial)
-      }
+      setReader(data.stripe_reader_id || '', data.reader_label || data.stripe_reader_id || syncSerial, provider, syncSerial)
       setDeviceFlags({
         showMonthlyGiving: data.show_monthly_giving ?? false,
         enableGiftAid: data.enable_gift_aid ?? false,
