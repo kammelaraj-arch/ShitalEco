@@ -1672,40 +1672,139 @@ class AssignDeviceInput(BaseModel):
 
 @router.post("/quick-donation/assign-device")
 async def assign_device_to_profile(body: AssignDeviceInput):
+    """Legacy endpoint — delegates to assign-reader."""
+    return await assign_reader(AssignReaderInput(
+        provider="stripe_terminal",
+        stripe_reader_id=body.stripe_reader_id,
+        label=body.device_label or body.stripe_reader_id,
+        branch_id=body.branch_id,
+        user_email=body.user_email,
+    ))
+
+
+class AssignReaderInput(BaseModel):
+    provider: str                  # 'stripe_terminal' | 'sumup'
+    stripe_reader_id: str = ""
+    sumup_reader_serial: str = ""
+    sumup_reader_api_id: str = ""
+    label: str = ""
+    # Identify the device — supply device_username (Path-1) or user_email (Path-2)
+    device_username: str = ""
+    user_email: str = ""
+    branch_id: str = ""
+
+
+@router.post("/quick-donation/assign-reader")
+async def assign_reader(body: AssignReaderInput):
     """
-    Assign a Stripe Terminal card reader to a kiosk profile.
-    Links the device in the kiosk_profiles mapping table.
+    Persist a card reader assignment for a kiosk device.
+    Works for both Stripe Terminal and SumUp readers.
+
+    Priority: if device_username is given, updates kiosk_devices → terminal_devices
+    (Path-1 device credentials).  If user_email is given, also updates kiosk_profiles
+    (Path-2 legacy accounts).  Both can be supplied to update both tables.
     """
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+
+    provider = body.provider.lower().strip()
+    if provider not in ("stripe_terminal", "sumup", "cash"):
+        return {"assigned": False, "error": f"Unknown provider: {provider}"}
+
     now = datetime.utcnow()
+    label = body.label or body.stripe_reader_id or body.sumup_reader_serial or provider
+    terminal_device_id: str | None = None
 
     async with SessionLocal() as db:
-        result = await db.execute(
-            text(
-                "UPDATE kiosk_profiles SET "
-                "  stripe_reader_id = :rid, device_label = :label, "
-                "  device_provider = 'stripe_terminal', updated_at = :now "
-                "WHERE branch_id = :bid AND user_email = :email AND deleted_at IS NULL "
-                "RETURNING id, profile_name"
-            ),
-            {
-                "rid": body.stripe_reader_id, "label": body.device_label or body.stripe_reader_id,
-                "bid": body.branch_id, "email": body.user_email, "now": now,
-            },
-        )
-        row = result.mappings().first()
-        await db.commit()
+        # 1. Upsert terminal_devices record based on unique identifier
+        unique_id = body.stripe_reader_id if provider == "stripe_terminal" else body.sumup_reader_serial
+        if unique_id:
+            existing = (await db.execute(
+                text("""
+                    SELECT id FROM terminal_devices
+                    WHERE (stripe_reader_id = :sid OR sumup_reader_serial = :serial)
+                      AND deleted_at IS NULL
+                    LIMIT 1
+                """),
+                {"sid": body.stripe_reader_id or "", "serial": body.sumup_reader_serial or ""},
+            )).mappings().first()
 
-    if not row:
-        return {"assigned": False, "error": "Profile not found for this branch/email combination"}
+            if existing:
+                terminal_device_id = str(existing["id"])
+                await db.execute(text("""
+                    UPDATE terminal_devices SET
+                        provider             = :prov,
+                        stripe_reader_id     = COALESCE(NULLIF(:sid,''),  stripe_reader_id),
+                        sumup_reader_serial  = COALESCE(NULLIF(:serial,''), sumup_reader_serial),
+                        label                = :label,
+                        updated_at           = :now
+                    WHERE id = :id
+                """), {
+                    "prov": provider, "sid": body.stripe_reader_id or "",
+                    "serial": body.sumup_reader_serial or "", "label": label,
+                    "now": now, "id": terminal_device_id,
+                })
+            else:
+                terminal_device_id = str(uuid.uuid4())
+                await db.execute(text("""
+                    INSERT INTO terminal_devices
+                        (id, label, provider, stripe_reader_id, sumup_reader_serial,
+                         branch_id, status, is_active, created_at, updated_at)
+                    VALUES
+                        (:id, :label, :prov, :sid, :serial,
+                         :branch, 'offline', true, :now, :now)
+                    ON CONFLICT DO NOTHING
+                """), {
+                    "id": terminal_device_id, "label": label, "prov": provider,
+                    "sid": body.stripe_reader_id or "", "serial": body.sumup_reader_serial or "",
+                    "branch": body.branch_id or "main", "now": now,
+                })
+
+        # 2. Link terminal_devices to kiosk_device (Path-1: device credentials)
+        if body.device_username and terminal_device_id:
+            await db.execute(text("""
+                UPDATE kiosk_devices
+                SET card_reader_id = :td_id, updated_at = :now
+                WHERE LOWER(device_username) = :uname AND deleted_at IS NULL
+            """), {"td_id": terminal_device_id, "uname": body.device_username.lower().strip(), "now": now})
+
+        # 3. Update kiosk_profiles (Path-2: legacy email login)
+        if body.user_email:
+            email = body.user_email.strip().lower()
+            if provider == "stripe_terminal":
+                await db.execute(text("""
+                    UPDATE kiosk_profiles SET
+                        stripe_reader_id     = :rid,
+                        sumup_reader_serial  = '',
+                        sumup_reader_api_id  = '',
+                        device_provider      = 'stripe_terminal',
+                        device_label         = :label,
+                        updated_at           = :now
+                    WHERE user_email = :email AND deleted_at IS NULL
+                """), {"rid": body.stripe_reader_id or "", "label": label, "now": now, "email": email})
+            else:
+                await db.execute(text("""
+                    UPDATE kiosk_profiles SET
+                        sumup_reader_serial  = :serial,
+                        sumup_reader_api_id  = :api_id,
+                        stripe_reader_id     = '',
+                        device_provider      = :prov,
+                        device_label         = :label,
+                        updated_at           = :now
+                    WHERE user_email = :email AND deleted_at IS NULL
+                """), {
+                    "serial": body.sumup_reader_serial or "", "api_id": body.sumup_reader_api_id or "",
+                    "prov": provider, "label": label, "now": now, "email": email,
+                })
+
+        await db.commit()
 
     return {
         "assigned": True,
-        "profile_id": row["id"],
-        "profile_name": row["profile_name"],
-        "device": body.stripe_reader_id,
+        "provider": provider,
+        "terminal_device_id": terminal_device_id,
+        "label": label,
     }
 
 
@@ -2052,8 +2151,22 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 "monthly_giving_amount": float(dev_row["monthly_giving_amount"] or 5),
             }
 
-    effective_reader_id = device_reader_id or (profile.get("stripe_reader_id") if profile else None)
-    effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
+    # Merge kiosk_devices reader (preferred) with kiosk_profiles reader (fallback)
+    profile_provider = (profile.get("device_provider") or "stripe_terminal") if profile else "stripe_terminal"
+    profile_sumup_serial = (profile.get("sumup_reader_serial") or "") if profile else ""
+    profile_stripe_id = (profile.get("stripe_reader_id") or "") if profile else ""
+
+    # If kiosk_devices had a configured reader, use it; otherwise fall back to kiosk_profiles
+    if device_reader_id or device_sumup_serial:
+        effective_reader_id = device_reader_id
+        effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
+        effective_provider = device_reader_provider
+        effective_sumup_serial = device_sumup_serial
+    else:
+        effective_reader_id = profile_stripe_id or None
+        effective_reader_label = (profile.get("device_label") if profile else None)
+        effective_provider = profile_provider
+        effective_sumup_serial = profile_sumup_serial
 
     return {
         "authenticated": True,
@@ -2062,8 +2175,8 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         "profile": profile,
         "stripe_reader_id": effective_reader_id,
         "reader_label": effective_reader_label,
-        "reader_provider": device_reader_provider,
-        "sumup_reader_serial": device_sumup_serial,
+        "reader_provider": effective_provider,
+        "sumup_reader_serial": effective_sumup_serial,
         **dev_flags,
     }
 

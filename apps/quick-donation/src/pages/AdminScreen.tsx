@@ -202,10 +202,35 @@ export function AdminScreen() {
     finally { setSumupLoading(false) }
   }
 
-  function assignSumUp(apiId = '') {
+  async function persistReaderToBackend(
+    provider: 'stripe_terminal' | 'sumup',
+    stripeId = '',
+    serial = '',
+    apiId = '',
+    lbl = '',
+  ) {
+    try {
+      await fetch(`${API_BASE}/kiosk/quick-donation/assign-reader`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          stripe_reader_id: stripeId,
+          sumup_reader_serial: serial,
+          sumup_reader_api_id: apiId,
+          label: lbl,
+          device_username: loggedInUsername || '',
+        }),
+      })
+    } catch { /* non-fatal — localStorage already updated */ }
+  }
+
+  async function assignSumUp(apiId = '') {
     const serial = sumupSerial.trim()
     if (!serial) return
-    setReader('', `SumUp Solo ${serial}`, 'sumup', serial, apiId)
+    const lbl = `SumUp Solo ${serial}`
+    setReader('', lbl, 'sumup', serial, apiId)
+    await persistReaderToBackend('sumup', '', serial, apiId, lbl)
   }
 
   function handleLogout() {
@@ -347,8 +372,7 @@ export function AdminScreen() {
         )}
 
         {/* ── SumUp Solo section ──────────────────────────────────────────── */}
-        {readerProvider === 'sumup' || (!readerProvider && !stripeReaderId) ? (
-          <div className="mb-6">
+        <div className="mb-6">
             <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(255,248,220,0.35)' }}>
               💳 SumUp Solo Reader
             </p>
@@ -424,11 +448,12 @@ export function AdminScreen() {
               </div>
             )}
           </div>
-        ) : (
-          /* ── Stripe Terminal section ──────────────────────────────────── */
-          <div className="mb-6">
+        </div>
+
+        {/* ── Stripe Terminal section ──────────────────────────────────── */}
+        <div className="mb-6">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.35)' }}>⚡ Assign Card Reader</p>
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.35)' }}>⚡ Stripe Terminal Reader</p>
               <button onClick={loadReaders} disabled={loading}
                 className="text-[10px] font-bold px-2 py-1 rounded-lg"
                 style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }}>
@@ -437,7 +462,7 @@ export function AdminScreen() {
             </div>
             <div className="space-y-2">
               {readers.map(r => (
-                <button key={r.id} onClick={() => setReader(r.id, r.label)}
+                <button key={r.id} onClick={async () => { setReader(r.id, r.label, 'stripe_terminal'); await persistReaderToBackend('stripe_terminal', r.id, '', '', r.label) }}
                   className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
                   style={{
                     background: stripeReaderId === r.id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
@@ -469,7 +494,6 @@ export function AdminScreen() {
               )}
             </div>
           </div>
-        )}
 
         {/* Branch info */}
         <div className="px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
