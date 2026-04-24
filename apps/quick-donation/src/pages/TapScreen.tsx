@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDonationStore } from '../store/donation.store'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
-const SESSION_SECONDS = 30
+const SESSION_SECONDS = 120
 
 type ReaderStatus = 'waiting' | 'processing' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -17,15 +17,24 @@ export function TapScreen() {
   const [timeLeft, setTimeLeft] = useState(SESSION_SECONDS)
   const [readerStatus, setReaderStatus] = useState<ReaderStatus>('waiting')
   const [statusMessage, setStatusMessage] = useState('Present your card to the reader')
+  const readerStatusRef = useRef<ReaderStatus>('waiting')
+
+  // Keep ref in sync so the timer closure can read latest status without a dep
+  useEffect(() => { readerStatusRef.current = readerStatus }, [readerStatus])
 
   const isSumUp = readerProvider === 'sumup' || (!!sumupReaderId && !stripeReaderId && !cloverDeviceId)
   const isClover = readerProvider === 'clover' || (!!cloverDeviceId && !stripeReaderId && !sumupReaderId)
 
-  // Countdown timer — resets to donate screen on expiry
+  // Countdown timer — resets to donate screen on expiry, but not mid-payment
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft(t => {
-        if (t <= 1) { clearInterval(timer); reset(); return 0 }
+        if (t <= 1) {
+          clearInterval(timer)
+          // Only abandon if no payment has succeeded yet
+          if (readerStatusRef.current !== 'succeeded') reset()
+          return 0
+        }
         return t - 1
       })
     }, 1000)
