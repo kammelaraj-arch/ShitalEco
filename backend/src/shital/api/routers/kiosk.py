@@ -1718,7 +1718,7 @@ async def assign_reader(body: AssignReaderInput):
     from shital.core.fabrics.database import SessionLocal
 
     provider = body.provider.lower().strip()
-    if provider not in ("stripe_terminal", "sumup", "cash"):
+    if provider not in ("stripe_terminal", "sumup", "clover", "cash"):
         return {"assigned": False, "error": f"Unknown provider: {provider}"}
 
     now = datetime.utcnow()
