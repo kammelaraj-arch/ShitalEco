@@ -49,13 +49,12 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('succeeded')
             setStatusMessage('Payment successful!')
-            // Confirm in DB and update to COMPLETED (awaited so it finishes before unmount)
-            await fetch(`${API_BASE}/kiosk/order/confirm`, {
+            setTimeout(() => setScreen('confirmation'), 1500)
+            fetch(`${API_BASE}/kiosk/order/confirm`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ order_ref: orderRef, payment_ref: paymentIntentId }),
             }).catch(() => {})
-            setTimeout(() => setScreen('confirmation'), 1500)
           } else if (s === 'FAILED' || s === 'DECLINED') {
             clearInterval(poll)
             setReaderStatus('failed')
@@ -80,12 +79,12 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('succeeded')
             setStatusMessage('Payment successful!')
-            await fetch(`${API_BASE}/kiosk/order/confirm`, {
+            setTimeout(() => setScreen('confirmation'), 1500)
+            fetch(`${API_BASE}/kiosk/order/confirm`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ order_ref: orderRef, payment_ref: paymentIntentId }),
             }).catch(() => {})
-            setTimeout(() => setScreen('confirmation'), 1500)
           } else if (d.status === 'canceled') {
             clearInterval(poll)
             setReaderStatus('cancelled')
