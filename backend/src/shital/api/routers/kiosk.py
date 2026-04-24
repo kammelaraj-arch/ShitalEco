@@ -894,14 +894,14 @@ async def sumup_checkout(body: SumUpCheckoutInput):
             checkout_id = checkout.get("id")
 
             # 2. Push to physical reader
-            # reader_serial stored in device profile is SumUp's API reader ID (e.g. rdr_XXX).
-            # Use it directly — no lookup needed.
+            # body.reader_id = SumUp API reader ID (rdr_XXX) if known
+            # body.reader_serial = physical serial number (e.g. 200101578509)
+            # Always look up the API reader ID from serial — serial cannot be used in the push URL
             reader_id = (body.reader_id or "").strip()
             reader_serial = (body.reader_serial or "").strip() or await SecretsManager.get("SUMUP_READER_SERIAL") or ""
-            if not reader_id:
-                reader_id = reader_serial  # profile stores the API ID, not the physical serial
-            if not reader_id:
-                # Fall back: look up from readers list
+
+            if not reader_id and reader_serial:
+                # Resolve serial → API reader ID via readers list
                 rd_resp = await client.get(
                     f"{base}/v0.1/merchants/{merchant_code}/readers",
                     headers=headers,
@@ -910,9 +910,15 @@ async def sumup_checkout(body: SumUpCheckoutInput):
                     rd_data = rd_resp.json()
                     rd_list = rd_data if isinstance(rd_data, list) else rd_data.get("items", rd_data.get("readers", []))
                     for rd in rd_list:
-                        if rd.get("serial_number") == reader_serial or rd.get("id") == reader_serial:
+                        # SumUp returns serial under device.identifier, not serial_number
+                        device_serial = rd.get("device", {}).get("identifier", rd.get("serial_number", ""))
+                        if device_serial == reader_serial or rd.get("id") == reader_serial:
                             reader_id = rd.get("id", "")
                             break
+
+            if not reader_id:
+                return {"error": f"Could not resolve SumUp reader ID for serial '{reader_serial}'. Ensure the reader is paired and SUMUP_MERCHANT_CODE is correct."}
+
             push_status = None
             if reader_id and checkout_id:
                 push_resp = await client.post(
@@ -980,18 +986,20 @@ async def list_sumup_readers():
                 f"https://api.sumup.com/v0.1/merchants/{merchant_code}/readers",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
-        readers = resp.json() if resp.is_success else []
-        if isinstance(readers, list):
-            return {"readers": [
-                {
-                    "id":     r.get("id", r.get("serial_number", "")),
-                    "serial": r.get("serial_number", ""),
-                    "name":   r.get("name", r.get("serial_number", "")),
-                    "status": r.get("status", "unknown"),
-                }
-                for r in readers
-            ]}
-        return {"readers": [], "error": str(readers)}
+        if not resp.is_success:
+            return {"readers": [], "error": f"SumUp API error ({resp.status_code}): {resp.text[:200]}"}
+        data = resp.json()
+        # SumUp returns {"items": [...]} — not a bare list and not "readers"
+        rd_list = data if isinstance(data, list) else data.get("items", data.get("readers", []))
+        return {"readers": [
+            {
+                "id":     r.get("id", ""),
+                "serial": r.get("device", {}).get("identifier", r.get("serial_number", "")),
+                "name":   r.get("name", ""),
+                "status": r.get("status", "unknown"),
+            }
+            for r in rd_list
+        ]}
     except Exception as e:
         return {"readers": [], "error": str(e)}
 
