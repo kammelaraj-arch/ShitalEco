@@ -981,7 +981,8 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
     from shital.core.fabrics.secrets import SecretsManager
 
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
-    if not access_token:
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+    if not access_token or not merchant_code:
         return {"paid": False, "error": "SumUp not configured"}
 
     amount_decimal = round(amount_pence / 100, 2)
@@ -991,7 +992,7 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
-                "https://api.sumup.com/v0.1/me/transactions/history",
+                f"https://api.sumup.com/v2.1/merchants/{merchant_code}/transactions/history",
                 headers={"Authorization": f"Bearer {access_token}"},
                 params={"limit": 10, "statuses": "SUCCESSFUL", "oldest_time": oldest},
             )
