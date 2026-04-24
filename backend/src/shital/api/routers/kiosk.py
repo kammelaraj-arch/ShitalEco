@@ -962,7 +962,10 @@ async def sumup_webhook(request: Request):
     checkout_id = body.get("id") or body.get("checkout_id")
     status = body.get("status")
     if checkout_id and status:
-        await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+        try:
+            await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+        except Exception:
+            pass  # Redis unavailable — webhook still accepted
     return {"ok": True}
 
 
@@ -980,9 +983,12 @@ async def sumup_checkout_status(checkout_id: str):
     from shital.core.fabrics.secrets import SecretsManager
 
     # Fast path: webhook already delivered the final status
-    cached = await cache_get(f"sumup:checkout:{checkout_id}")
-    if cached and cached.get("status") not in (None, "PENDING"):
-        return {"status": cached["status"], "source": "webhook"}
+    try:
+        cached = await cache_get(f"sumup:checkout:{checkout_id}")
+        if cached and cached.get("status") not in (None, "PENDING"):
+            return {"status": cached["status"], "source": "webhook"}
+    except Exception:
+        cached = None  # Redis unavailable — fall through to API poll
 
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
     if not access_token:
@@ -996,9 +1002,11 @@ async def sumup_checkout_status(checkout_id: str):
             )
         data = resp.json()
         status = data.get("status", "PENDING")
-        # Also cache whatever SumUp returns so future polls are instant
         if status and status != "PENDING":
-            await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+            try:
+                await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+            except Exception:
+                pass
         return {"status": status, "raw": data}
     except Exception as e:
         return {"status": "error", "error": str(e)}
