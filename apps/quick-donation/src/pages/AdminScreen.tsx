@@ -478,7 +478,6 @@ export function AdminScreen() {
                 ))}
               </div>
             )}
-          </div>
         </div>
 
         {/* ── Stripe Terminal section ──────────────────────────────────── */}
