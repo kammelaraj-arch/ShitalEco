@@ -975,7 +975,7 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
     Returns {"paid": true, "transaction_id": "..."} or {"paid": false}.
     """
     import httpx
-    from datetime import timezone
+    from datetime import timedelta, timezone
 
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.secrets import SecretsManager
@@ -986,7 +986,7 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
 
     amount_decimal = round(amount_pence / 100, 2)
     oldest = (datetime.utcnow().replace(tzinfo=timezone.utc) -
-              __import__("datetime").timedelta(seconds=since_seconds)).isoformat()
+              timedelta(seconds=since_seconds)).isoformat()
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
