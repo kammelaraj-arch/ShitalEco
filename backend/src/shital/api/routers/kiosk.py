@@ -1718,16 +1718,21 @@ async def assign_reader(body: AssignReaderInput):
 
     async with SessionLocal() as db:
         # 1. Upsert terminal_devices record based on unique identifier
-        unique_id = body.stripe_reader_id if provider == "stripe_terminal" else body.sumup_reader_serial
+        if provider == "stripe_terminal":
+            unique_id = body.stripe_reader_id
+        elif provider == "clover":
+            unique_id = body.clover_device_id
+        else:
+            unique_id = body.sumup_reader_serial
         if unique_id:
             existing = (await db.execute(
                 text("""
                     SELECT id FROM terminal_devices
-                    WHERE (stripe_reader_id = :sid OR sumup_reader_serial = :serial)
+                    WHERE (stripe_reader_id = :sid OR sumup_reader_serial = :serial OR clover_device_id = :clover)
                       AND deleted_at IS NULL
                     LIMIT 1
                 """),
-                {"sid": body.stripe_reader_id or "", "serial": body.sumup_reader_serial or ""},
+                {"sid": body.stripe_reader_id or "", "serial": body.sumup_reader_serial or "", "clover": body.clover_device_id or ""},
             )).mappings().first()
 
             if existing:
@@ -1737,27 +1742,29 @@ async def assign_reader(body: AssignReaderInput):
                         provider             = :prov,
                         stripe_reader_id     = COALESCE(NULLIF(:sid,''),  stripe_reader_id),
                         sumup_reader_serial  = COALESCE(NULLIF(:serial,''), sumup_reader_serial),
+                        clover_device_id     = COALESCE(NULLIF(:clover,''), clover_device_id),
                         label                = :label,
                         updated_at           = :now
                     WHERE id = :id
                 """), {
                     "prov": provider, "sid": body.stripe_reader_id or "",
-                    "serial": body.sumup_reader_serial or "", "label": label,
-                    "now": now, "id": terminal_device_id,
+                    "serial": body.sumup_reader_serial or "", "clover": body.clover_device_id or "",
+                    "label": label, "now": now, "id": terminal_device_id,
                 })
             else:
                 terminal_device_id = str(uuid.uuid4())
                 await db.execute(text("""
                     INSERT INTO terminal_devices
-                        (id, label, provider, stripe_reader_id, sumup_reader_serial,
+                        (id, label, provider, stripe_reader_id, sumup_reader_serial, clover_device_id,
                          branch_id, status, is_active, created_at, updated_at)
                     VALUES
-                        (:id, :label, :prov, :sid, :serial,
+                        (:id, :label, :prov, :sid, :serial, :clover,
                          :branch, 'offline', true, :now, :now)
                     ON CONFLICT DO NOTHING
                 """), {
                     "id": terminal_device_id, "label": label, "prov": provider,
                     "sid": body.stripe_reader_id or "", "serial": body.sumup_reader_serial or "",
+                    "clover": body.clover_device_id or "",
                     "branch": body.branch_id or "main", "now": now,
                 })
 
@@ -2023,6 +2030,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
                        COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
+                       COALESCE(td.clover_device_id, '') AS clover_device_id,
                        b.name AS branch_name
                 FROM kiosk_devices kd
                 LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
@@ -2048,6 +2056,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "reader_label": device["reader_label"],
             "reader_provider": device["reader_provider"],
             "sumup_reader_serial": device["sumup_reader_serial"],
+            "clover_device_id": device["clover_device_id"],
             "show_monthly_giving": bool(device["show_monthly_giving"]),
             "enable_gift_aid": bool(device["enable_gift_aid"]),
             "tap_and_go": bool(device["tap_and_go"]),
@@ -2115,6 +2124,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     device_reader_label = None
     device_reader_provider = "stripe_terminal"
     device_sumup_serial = ""
+    device_clover_id = ""
     dev_flags: dict = {"show_monthly_giving": False, "enable_gift_aid": False, "tap_and_go": True, "donate_title": "Tap & Donate", "monthly_giving_text": "Make a big impact from just £5/month", "monthly_giving_amount": 5.0}
     async with SessionLocal() as db:
         dev_res = await db.execute(
@@ -2137,11 +2147,12 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         )
         dev_row = dev_res.mappings().first()
         if dev_row:
-            if dev_row["stripe_reader_id"] or dev_row["sumup_reader_serial"]:
+            if dev_row["stripe_reader_id"] or dev_row["sumup_reader_serial"] or dev_row["clover_device_id"]:
                 device_reader_id = dev_row["stripe_reader_id"]
                 device_reader_label = dev_row["reader_label"]
                 device_reader_provider = dev_row["reader_provider"]
                 device_sumup_serial = dev_row["sumup_reader_serial"]
+                device_clover_id = dev_row["clover_device_id"]
             dev_flags = {
                 "show_monthly_giving": bool(dev_row["show_monthly_giving"]),
                 "enable_gift_aid": bool(dev_row["enable_gift_aid"]),
@@ -2157,16 +2168,18 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     profile_stripe_id = (profile.get("stripe_reader_id") or "") if profile else ""
 
     # If kiosk_devices had a configured reader, use it; otherwise fall back to kiosk_profiles
-    if device_reader_id or device_sumup_serial:
+    if device_reader_id or device_sumup_serial or device_clover_id:
         effective_reader_id = device_reader_id
         effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
         effective_provider = device_reader_provider
         effective_sumup_serial = device_sumup_serial
+        effective_clover_id = device_clover_id
     else:
         effective_reader_id = profile_stripe_id or None
         effective_reader_label = (profile.get("device_label") if profile else None)
         effective_provider = profile_provider
         effective_sumup_serial = profile_sumup_serial
+        effective_clover_id = ""  # kiosk_profiles has no clover field yet
 
     return {
         "authenticated": True,
@@ -2177,6 +2190,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         "reader_label": effective_reader_label,
         "reader_provider": effective_provider,
         "sumup_reader_serial": effective_sumup_serial,
+        "clover_device_id": effective_clover_id,
         **dev_flags,
     }
 
@@ -2206,6 +2220,7 @@ async def quick_kiosk_refresh_config(username: str):
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
                        COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
+                       COALESCE(td.clover_device_id, '') AS clover_device_id,
                        b.name AS branch_name
                 FROM kiosk_devices kd
                 LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
@@ -2229,6 +2244,7 @@ async def quick_kiosk_refresh_config(username: str):
         "reader_label": device["reader_label"],
         "reader_provider": device["reader_provider"],
         "sumup_reader_serial": device["sumup_reader_serial"],
+        "clover_device_id": device["clover_device_id"],
         "show_monthly_giving": bool(device["show_monthly_giving"]),
         "enable_gift_aid": bool(device["enable_gift_aid"]),
         "tap_and_go": bool(device["tap_and_go"]),

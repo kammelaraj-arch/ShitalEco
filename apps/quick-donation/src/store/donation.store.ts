@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
 export type Screen = 'donate' | 'processing' | 'tap' | 'confirmation' | 'admin'
-export type ReaderProvider = 'stripe_terminal' | 'sumup' | ''
+export type ReaderProvider = 'stripe_terminal' | 'sumup' | 'clover' | ''
 
 export interface GiftAidData {
   firstName: string
@@ -23,6 +23,7 @@ export interface DonationState {
   stripeReaderLabel: string
   sumupReaderId: string          // SumUp Solo serial number
   sumupReaderApiId: string       // SumUp reader API id (used in checkout push URL)
+  cloverDeviceId: string         // Clover Flex device ID
 
   orderId: string | null
   orderRef: string | null
@@ -51,7 +52,7 @@ export interface DonationState {
   setScreen: (screen: Screen) => void
   setAmount: (amount: number) => void
   setBranchId: (id: string) => void
-  setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string, sumupApiId?: string) => void
+  setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string, sumupApiId?: string, cloverDeviceId?: string) => void
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string, username?: string) => void
@@ -70,6 +71,7 @@ export const useDonationStore = create<DonationState>()(
       stripeReaderLabel: 'Temple Card Reader',
       sumupReaderId: '',
       sumupReaderApiId: '',
+      cloverDeviceId: '',
       orderId: null,
       orderRef: null,
       paymentIntentId: null,
@@ -93,8 +95,8 @@ export const useDonationStore = create<DonationState>()(
       setScreen: (screen) => set({ screen }),
       setAmount: (amount) => set({ amount }),
       setBranchId: (branchId) => set({ branchId }),
-      setReader: (stripeReaderId, stripeReaderLabel, readerProvider = '', sumupReaderId = '', sumupReaderApiId = '') =>
-        set({ stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, sumupReaderApiId }),
+      setReader: (stripeReaderId, stripeReaderLabel, readerProvider = '', sumupReaderId = '', sumupReaderApiId = '', cloverDeviceId = '') =>
+        set({ stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, sumupReaderApiId, cloverDeviceId }),
       setDeviceFlags: (flags) => set(flags),
       setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName, username) => set({
         isDeviceLoggedIn, loggedInName,
@@ -124,6 +126,7 @@ export const useDonationStore = create<DonationState>()(
         stripeReaderLabel: state.stripeReaderLabel,
         sumupReaderId: state.sumupReaderId,
         sumupReaderApiId: state.sumupReaderApiId,
+        cloverDeviceId: state.cloverDeviceId,
         showMonthlyGiving: state.showMonthlyGiving,
         enableGiftAid: state.enableGiftAid,
         tapAndGo: state.tapAndGo,

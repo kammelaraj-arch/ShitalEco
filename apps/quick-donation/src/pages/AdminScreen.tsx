@@ -17,6 +17,7 @@ interface LoginResponse {
   reader_label?: string | null
   reader_provider?: string | null
   sumup_reader_serial?: string | null
+  clover_device_id?: string | null
   show_monthly_giving?: boolean
   enable_gift_aid?: boolean
   tap_and_go?: boolean
@@ -27,9 +28,11 @@ interface LoginResponse {
 
 interface AzureConfig { client_id: string; authority: string }
 
+interface CloverDevice { id: string; name: string; model: string; serial: string; status: string }
+
 export function AdminScreen() {
   const {
-    branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId,
+    branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, cloverDeviceId,
     isDeviceLoggedIn, loggedInName, loggedInUsername,
     setBranchId, setReader, setDeviceFlags, setDeviceLoggedIn, setScreen,
   } = useDonationStore()
@@ -42,6 +45,11 @@ export function AdminScreen() {
 
   // SumUp state
   const [sumupReaders, setSumupReaders]     = useState<SumUpReader[]>([])
+
+  // Clover state
+  const [cloverReaders, setCloverReaders]   = useState<CloverDevice[]>([])
+  const [cloverLoading, setCloverLoading]   = useState(false)
+  const [cloverError, setCloverError]       = useState('')
   const [sumupSerial, setSumupSerial]       = useState(sumupReaderId || '')
   const [sumupLoading, setSumupLoading]     = useState(false)
   const [sumupTestResult, setSumupTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
@@ -74,9 +82,10 @@ export function AdminScreen() {
     // Always apply — clears stale localStorage if device has no reader assigned.
     const readerId = data.stripe_reader_id || ''
     const sumupSerial = data.sumup_reader_serial || ''
-    const readerLabel = data.reader_label || readerId || sumupSerial
-    const provider = (sumupSerial ? 'sumup' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
-    setReader(readerId, readerLabel, provider, sumupSerial)
+    const cloverId = data.clover_device_id || ''
+    const readerLabel = data.reader_label || readerId || sumupSerial || cloverId
+    const provider = (sumupSerial ? 'sumup' : cloverId ? 'clover' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
+    setReader(readerId, readerLabel, provider, sumupSerial, '', cloverId)
 
     setDeviceFlags({
       showMonthlyGiving: data.show_monthly_giving ?? false,
@@ -102,8 +111,9 @@ export function AdminScreen() {
       setBranchId(data.branch.id)
       // Always overwrite reader from DB — same rule as login
       const syncSerial = data.sumup_reader_serial || ''
-      const provider = (syncSerial ? 'sumup' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
-      setReader(data.stripe_reader_id || '', data.reader_label || data.stripe_reader_id || syncSerial, provider, syncSerial)
+      const syncClover = data.clover_device_id || ''
+      const provider = (syncSerial ? 'sumup' : syncClover ? 'clover' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
+      setReader(data.stripe_reader_id || '', data.reader_label || data.stripe_reader_id || syncSerial || syncClover, provider, syncSerial, '', syncClover)
       setDeviceFlags({
         showMonthlyGiving: data.show_monthly_giving ?? false,
         enableGiftAid: data.enable_gift_aid ?? false,
@@ -204,12 +214,30 @@ export function AdminScreen() {
     finally { setSumupLoading(false) }
   }
 
+  async function loadCloverDevices() {
+    setCloverLoading(true); setCloverError('')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/clover/devices`)
+      const data = await res.json()
+      if (data.error) { setCloverError(data.error); setCloverReaders([]); return }
+      setCloverReaders(data.devices || [])
+    } catch { setCloverError('Could not reach server.') }
+    finally { setCloverLoading(false) }
+  }
+
+  async function assignClover(device: CloverDevice) {
+    const lbl = device.name || `Clover ${device.model} ${device.serial}`
+    setReader('', lbl, 'clover', '', '', device.id)
+    await persistReaderToBackend('clover', '', '', '', lbl, device.id)
+  }
+
   async function persistReaderToBackend(
-    provider: 'stripe_terminal' | 'sumup',
+    provider: 'stripe_terminal' | 'sumup' | 'clover',
     stripeId = '',
     serial = '',
     apiId = '',
     lbl = '',
+    cloverId = '',
   ) {
     try {
       await fetch(`${API_BASE}/kiosk/quick-donation/assign-reader`, {
@@ -220,6 +248,7 @@ export function AdminScreen() {
           stripe_reader_id: stripeId,
           sumup_reader_serial: serial,
           sumup_reader_api_id: apiId,
+          clover_device_id: cloverId,
           label: lbl,
           device_username: loggedInUsername || '',
         }),
@@ -360,15 +389,15 @@ export function AdminScreen() {
         </div>
 
         {/* Active reader badge */}
-        {(stripeReaderId || sumupReaderId) && (
+        {(stripeReaderId || sumupReaderId || cloverDeviceId) && (
           <div className="mb-5 px-4 py-3 rounded-xl"
             style={{ background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.25)' }}>
             <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.6)' }}>
-              Active Card Reader · {readerProvider === 'sumup' ? 'SumUp' : 'Stripe Terminal'}
+              Active Card Reader · {readerProvider === 'sumup' ? 'SumUp Solo' : readerProvider === 'clover' ? 'Clover Flex' : 'Stripe Terminal'}
             </p>
             <p className="font-black text-sm mt-0.5" style={{ color: '#D4AF37' }}>{stripeReaderLabel}</p>
             <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(212,175,55,0.4)' }}>
-              {readerProvider === 'sumup' ? sumupReaderId : stripeReaderId}
+              {readerProvider === 'sumup' ? sumupReaderId : readerProvider === 'clover' ? cloverDeviceId : stripeReaderId}
             </p>
           </div>
         )}
@@ -496,6 +525,57 @@ export function AdminScreen() {
               )}
             </div>
           </div>
+
+        {/* ── Clover Flex section ──────────────────────────────────────── */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.35)' }}>🍀 Clover Flex Reader</p>
+            <button onClick={loadCloverDevices} disabled={cloverLoading}
+              className="text-[10px] font-bold px-2 py-1 rounded-lg"
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }}>
+              {cloverLoading ? '…' : 'Fetch List'}
+            </button>
+          </div>
+          {cloverError && (
+            <p className="text-xs px-3 py-2 rounded-lg mb-2 font-bold"
+              style={{ background: 'rgba(198,40,40,0.12)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }}>
+              {cloverError}
+            </p>
+          )}
+          <div className="space-y-2">
+            {cloverReaders.map(d => (
+              <button key={d.id} onClick={() => assignClover(d)}
+                className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
+                style={{
+                  background: cloverDeviceId === d.id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${cloverDeviceId === d.id ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-sm" style={{ color: cloverDeviceId === d.id ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{d.name || d.model}</p>
+                    <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{d.id} · {d.model}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {cloverDeviceId === d.id && (
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full"
+                        style={{ background: 'rgba(212,175,55,0.2)', color: '#D4AF37' }}>ACTIVE</span>
+                    )}
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                      style={{ background: d.status === 'online' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
+                        color: d.status === 'online' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
+                      {d.status}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            ))}
+            {!cloverLoading && cloverReaders.length === 0 && (
+              <p className="text-center text-xs py-4" style={{ color: 'rgba(255,248,220,0.25)' }}>
+                Press "Fetch List" to load Clover devices. Requires CLOVER_ACCESS_TOKEN in API Keys.
+              </p>
+            )}
+          </div>
+        </div>
 
         {/* Branch info */}
         <div className="px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>

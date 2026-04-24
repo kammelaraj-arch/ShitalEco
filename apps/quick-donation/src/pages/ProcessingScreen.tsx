@@ -22,7 +22,7 @@ function generateUUID(): string {
 export function ProcessingScreen() {
   const {
     amount, branchId, stripeReaderId,
-    readerProvider, sumupReaderId, sumupReaderApiId,
+    readerProvider, sumupReaderId, sumupReaderApiId, cloverDeviceId,
     pendingGiftAid,
     setScreen, setOrderResult, setReader,
   } = useDonationStore()
@@ -30,7 +30,10 @@ export function ProcessingScreen() {
   const [error, setError] = useState('')
   const [stage, setStage] = useState('Creating donation...')
   const isSumUp = readerProvider === 'sumup'
-  const isReaderError = isSumUp ? !sumupReaderId?.trim() : !stripeReaderId?.trim()
+  const isClover = readerProvider === 'clover'
+  const isReaderError = isSumUp ? !sumupReaderId?.trim()
+    : isClover ? !cloverDeviceId?.trim()
+    : !stripeReaderId?.trim()
 
   async function recordDonation(basketId: string, orderRef: string, amountPence: number, paymentRef: string, readerId: string, provider = 'SUMUP') {
     try {
@@ -96,6 +99,37 @@ export function ProcessingScreen() {
         if (data.error) throw new Error(data.error)
 
         setOrderResult(basketId, orderRef, data.checkout_id, '')
+        setScreen('tap')
+        return
+      }
+
+      if (isClover) {
+        // ── Clover Flex flow ─────────────────────────────────────────────────
+        setStage('Creating donation...')
+        const basketId = generateUUID()
+        const orderRef = `DON-${basketId.slice(0, 8).toUpperCase()}`
+
+        await recordDonation(basketId, orderRef, amountPence, '', cloverDeviceId, 'CLOVER')
+
+        setStage('Sending to Clover reader...')
+        const res = await fetch(`${API_BASE}/kiosk/clover/payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount_pence: amountPence,
+            order_id: basketId,
+            description: `Shital Temple Donation £${amount.toFixed(2)}`,
+            device_id: cloverDeviceId,
+          }),
+        })
+        if (!res.ok) {
+          const txt = await res.text()
+          throw new Error(`Clover error (${res.status}): ${txt.slice(0, 120)}`)
+        }
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
+
+        setOrderResult(basketId, orderRef, data.clover_order_id, '')
         setScreen('tap')
         return
       }
