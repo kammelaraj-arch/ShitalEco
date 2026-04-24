@@ -1013,7 +1013,7 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
     Returns {"paid": true, "transaction_id": "..."} or {"paid": false}.
     """
     import httpx
-    from datetime import timedelta, timezone
+    from datetime import UTC, timedelta
 
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.secrets import SecretsManager
@@ -1024,7 +1024,7 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
         return {"paid": False, "error": "SumUp not configured"}
 
     amount_decimal = round(amount_pence / 100, 2)
-    oldest = (datetime.utcnow().replace(tzinfo=timezone.utc) -
+    oldest = (datetime.utcnow().replace(tzinfo=UTC) -
               timedelta(seconds=since_seconds)).isoformat()
 
     try:
