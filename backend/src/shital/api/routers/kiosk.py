@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from shital.api.deps import OptionalSpace
@@ -875,7 +875,9 @@ async def sumup_checkout(body: SumUpCheckoutInput):
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            # 1. Create checkout
+            # 1. Create checkout — include return_url so SumUp calls our webhook
+            #    the instant the card payment completes on the reader
+            webhook_url = f"{settings.SITE_URL}/api/v1/kiosk/sumup/webhook"
             create_resp = await client.post(
                 f"{base}/v0.1/checkouts",
                 headers=headers,
@@ -885,6 +887,7 @@ async def sumup_checkout(body: SumUpCheckoutInput):
                     "currency": "GBP",
                     "merchant_code": merchant_code,
                     "description": body.description,
+                    "return_url": webhook_url,
                 },
             )
             if not create_resp.is_success:
@@ -942,13 +945,44 @@ async def sumup_checkout(body: SumUpCheckoutInput):
         return {"error": str(e)}
 
 
+@router.post("/sumup/webhook")
+async def sumup_webhook(request: Request):
+    """
+    SumUp calls this URL (set as return_url in checkout creation) the instant
+    a checkout status changes — typically PENDING → PAID after card tap.
+    We cache the status in Redis so the frontend poll returns it immediately.
+    """
+    from shital.core.fabrics.cache import cache_set
+
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False}
+
+    checkout_id = body.get("id") or body.get("checkout_id")
+    status = body.get("status")
+    if checkout_id and status:
+        await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+    return {"ok": True}
+
+
 @router.get("/sumup/checkout/{checkout_id}")
 async def sumup_checkout_status(checkout_id: str):
-    """Poll SumUp checkout status (PENDING / COMPLETED / FAILED / EXPIRED)."""
+    """
+    Return SumUp checkout status. Checks the Redis webhook cache first
+    (populated by POST /sumup/webhook the instant payment completes) then
+    falls back to polling the SumUp API directly.
+    """
     import httpx
 
+    from shital.core.fabrics.cache import cache_get, cache_set
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.secrets import SecretsManager
+
+    # Fast path: webhook already delivered the final status
+    cached = await cache_get(f"sumup:checkout:{checkout_id}")
+    if cached and cached.get("status") not in (None, "PENDING"):
+        return {"status": cached["status"], "source": "webhook"}
 
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
     if not access_token:
@@ -961,7 +995,11 @@ async def sumup_checkout_status(checkout_id: str):
                 headers={"Authorization": f"Bearer {access_token}"},
             )
         data = resp.json()
-        return {"status": data.get("status", "PENDING"), "raw": data}
+        status = data.get("status", "PENDING")
+        # Also cache whatever SumUp returns so future polls are instant
+        if status and status != "PENDING":
+            await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+        return {"status": status, "raw": data}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 

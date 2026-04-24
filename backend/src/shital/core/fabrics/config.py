@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     # SumUp
     SUMUP_ACCESS_TOKEN: str = ""
     SUMUP_MERCHANT_CODE: str = ""
+    SUMUP_READER_SERIAL: str = ""
+
+    # Public base URL (used for webhook return_url)
+    SITE_URL: str = "https://shital.org.uk"
 
     # MeiliSearch
     MEILISEARCH_URL: str = "http://localhost:7700"
