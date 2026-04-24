@@ -1691,10 +1691,11 @@ async def assign_device_to_profile(body: AssignDeviceInput):
 
 
 class AssignReaderInput(BaseModel):
-    provider: str                  # 'stripe_terminal' | 'sumup'
+    provider: str                  # 'stripe_terminal' | 'sumup' | 'clover'
     stripe_reader_id: str = ""
     sumup_reader_serial: str = ""
     sumup_reader_api_id: str = ""
+    clover_device_id: str = ""
     label: str = ""
     # Identify the device — supply device_username (Path-1) or user_email (Path-2)
     device_username: str = ""
