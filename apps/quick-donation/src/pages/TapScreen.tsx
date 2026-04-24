@@ -50,12 +50,13 @@ export function TapScreen() {
     const poll = setInterval(async () => {
       try {
         if (isSumUp) {
+          // Primary: poll checkout status
           const res = await fetch(`${API_BASE}/kiosk/sumup/checkout/${paymentIntentId}`)
           if (!res.ok) { setStatusMessage(`Poll error (${res.status}) — retrying...`); return }
           const d = await res.json()
           const s = (d.status || '').toUpperCase()
 
-          if (s === 'PAID' || s === 'COMPLETED' || s === 'SUCCESSFUL') {
+          const onSumUpSuccess = () => {
             clearInterval(poll)
             setReaderStatus('succeeded')
             setStatusMessage('Payment successful!')
@@ -65,6 +66,10 @@ export function TapScreen() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ order_ref: orderRef, payment_ref: paymentIntentId }),
             }).catch(() => {})
+          }
+
+          if (s === 'PAID' || s === 'COMPLETED' || s === 'SUCCESSFUL') {
+            onSumUpSuccess()
           } else if (s === 'FAILED' || s === 'DECLINED') {
             clearInterval(poll)
             setReaderStatus('failed')
@@ -73,13 +78,21 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('cancelled')
             setStatusMessage('Payment session expired.')
-          } else if (s === 'PROCESSING' || s === 'PENDING') {
-            setStatusMessage('Processing payment...')
-          } else if (s === 'ERROR') {
-            setStatusMessage('SumUp error — retrying...')
           } else {
-            // Show raw status so staff can see what SumUp is returning
-            setStatusMessage(`Reader status: ${s || 'checking...'}`)
+            // Checkout still PENDING — also check recent transactions as fallback
+            // (catches standalone reader payments not linked to a cloud checkout)
+            const amountPence = Math.round(amount * 100)
+            fetch(`${API_BASE}/kiosk/sumup/recent-transaction?amount_pence=${amountPence}`)
+              .then(r => r.json())
+              .then(t => { if (t.paid) onSumUpSuccess() })
+              .catch(() => {})
+            if (s === 'PROCESSING') {
+              setStatusMessage('Processing payment...')
+            } else if (s === 'ERROR') {
+              setStatusMessage('SumUp error — retrying...')
+            } else {
+              setStatusMessage(`Reader status: ${s || 'checking...'}`)
+            }
           }
         } else if (isClover) {
           // Clover Flex

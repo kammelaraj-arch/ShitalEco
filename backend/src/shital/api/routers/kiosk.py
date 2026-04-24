@@ -966,6 +966,46 @@ async def sumup_checkout_status(checkout_id: str):
         return {"status": "error", "error": str(e)}
 
 
+@router.get("/sumup/recent-transaction")
+async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
+    """
+    Check if a SumUp transaction of the given amount completed in the last
+    `since_seconds` seconds. Used as a fallback when the checkout status stays
+    PENDING but the reader processed a standalone (non-cloud-linked) payment.
+    Returns {"paid": true, "transaction_id": "..."} or {"paid": false}.
+    """
+    import httpx
+    from datetime import timezone
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    if not access_token:
+        return {"paid": False, "error": "SumUp not configured"}
+
+    amount_decimal = round(amount_pence / 100, 2)
+    oldest = (datetime.utcnow().replace(tzinfo=timezone.utc) -
+              __import__("datetime").timedelta(seconds=since_seconds)).isoformat()
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.sumup.com/v0.1/me/transactions/history",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"limit": 10, "statuses": "SUCCESSFUL", "oldest_time": oldest},
+            )
+        if not resp.is_success:
+            return {"paid": False, "error": f"SumUp API {resp.status_code}"}
+        txns = resp.json().get("items", [])
+        for t in txns:
+            if abs(float(t.get("amount", 0)) - amount_decimal) < 0.01:
+                return {"paid": True, "transaction_id": t.get("id"), "status": t.get("status")}
+        return {"paid": False}
+    except Exception as e:
+        return {"paid": False, "error": str(e)}
+
+
 @router.get("/sumup/readers")
 async def list_sumup_readers():
     """List SumUp readers registered to the merchant."""
