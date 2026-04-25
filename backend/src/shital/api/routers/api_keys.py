@@ -290,9 +290,11 @@ async def _write_azure_creds_env(conn_str: str, container: str) -> None:
         os.makedirs(os.path.dirname(_AZURE_CREDS_FILE), exist_ok=True)
         with open(_AZURE_CREDS_FILE, "w") as f:
             if conn_str:
-                f.write(f"AZURE_STORAGE_CONNECTION_STRING={conn_str}\n")
+                escaped_conn = conn_str.replace('"', '\\"')
+                f.write(f'AZURE_STORAGE_CONNECTION_STRING="{escaped_conn}"\n')
             if container:
-                f.write(f"AZURE_STORAGE_CONTAINER={container}\n")
+                escaped_container = container.replace('"', '\\"')
+                f.write(f'AZURE_STORAGE_CONTAINER="{escaped_container}"\n')
         os.chmod(_AZURE_CREDS_FILE, 0o600)
 
     try:
