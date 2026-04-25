@@ -1004,7 +1004,7 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
-                f"https://api.sumup.com/v0.1/me/transactions/history",
+                "https://api.sumup.com/v0.1/me/transactions/history",
                 headers={"Authorization": f"Bearer {access_token}"},
                 params={"limit": 10, "oldest_time": oldest},
             )
