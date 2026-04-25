@@ -123,7 +123,7 @@ if [ -n "${AZURE_STORAGE_CONNECTION_STRING:-}" ] && [ -n "${AZURE_STORAGE_CONTAI
     AZ_CMD="az"
   else
     # Use Azure CLI via Docker (no install needed on the host)
-    AZ_CMD="docker run --rm -v $BACKUP_DIR:/backups -e AZURE_STORAGE_CONNECTION_STRING mcr.microsoft.com/azure-cli az"
+    AZ_CMD="docker run --rm -v $BACKUP_DIR:$BACKUP_DIR -e AZURE_STORAGE_CONNECTION_STRING mcr.microsoft.com/azure-cli az"
   fi
 
   BLOB_PATH="daily/$(basename "$DAILY_FILE")"
