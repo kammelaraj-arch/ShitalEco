@@ -24,6 +24,11 @@ interface LoginResponse {
   donate_title?: string
   monthly_giving_text?: string
   monthly_giving_amount?: number
+  confirmation_text?: string
+  kiosk_theme?: string
+  org_logo_url?: string
+  org_name?: string
+  bg_color?: string
 }
 
 interface AzureConfig { client_id: string; authority: string }
