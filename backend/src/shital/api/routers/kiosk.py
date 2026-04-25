@@ -967,6 +967,22 @@ async def sumup_checkout_status(checkout_id: str):
         return {"status": "error", "error": str(e)}
 
 
+@router.delete("/sumup/checkout/{checkout_id}")
+async def sumup_cancel_checkout(checkout_id: str):
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    if not access_token:
+        return {"cancelled": False, "error": "SumUp not configured"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.delete(
+                f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        return {"cancelled": resp.status_code in (200, 204)}
+    except Exception as e:
+        return {"cancelled": False, "error": str(e)}
+
+
 @router.get("/sumup/recent-transaction")
 async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
     """

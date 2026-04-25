@@ -154,7 +154,9 @@ export function TapScreen() {
   }, [paymentIntentId, isSumUp, isClover, setScreen, orderRef])
 
   const handleCancel = async () => {
-    if (!isSumUp && stripeReaderId && paymentIntentId) {
+    if (isSumUp && paymentIntentId) {
+      await fetch(`${API_BASE}/kiosk/sumup/checkout/${paymentIntentId}`, { method: 'DELETE' }).catch(() => {})
+    } else if (stripeReaderId && paymentIntentId) {
       await fetch(`${API_BASE}/kiosk/terminal/cancel-action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
