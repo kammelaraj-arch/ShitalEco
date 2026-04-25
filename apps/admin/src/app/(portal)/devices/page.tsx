@@ -33,6 +33,8 @@ interface KioskDevice {
   donate_title?: string
   monthly_giving_text?: string
   monthly_giving_amount?: number
+  confirmation_text?: string
+  bg_color?: string
   show_monthly_giving: boolean
   enable_gift_aid: boolean
   tap_and_go: boolean
@@ -79,6 +81,8 @@ const EMPTY_FORM = {
   donate_title: 'Tap & Donate',
   monthly_giving_text: 'Make a big impact from just £5/month',
   monthly_giving_amount: 5,
+  confirmation_text: '',
+  bg_color: '',
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -177,6 +181,8 @@ export default function DevicesPage() {
       donate_title: d.donate_title || 'Tap & Donate',
       monthly_giving_text: d.monthly_giving_text || 'Make a big impact from just £5/month',
       monthly_giving_amount: d.monthly_giving_amount ?? 5,
+      confirmation_text: d.confirmation_text || '',
+      bg_color: d.bg_color || '',
     })
     setError('')
     setDrawerOpen(true)
@@ -624,6 +630,18 @@ export default function DevicesPage() {
                       <p className="text-white/30 text-[10px] mt-1">Shown as the main heading on the donation screen</p>
                     </div>
 
+                    {/* Confirmation screen message */}
+                    <div>
+                      <p className={lbl}>Confirmation Message</p>
+                      <input
+                        className={inp}
+                        value={form.confirmation_text}
+                        onChange={e => setForm(f => ({ ...f, confirmation_text: e.target.value }))}
+                        placeholder="Jay Shri Krishna (default)"
+                      />
+                      <p className="text-white/30 text-[10px] mt-1">Shown on the thank-you screen after a successful donation</p>
+                    </div>
+
                     {/* Monthly Giving text + amount — shown when toggle is on */}
                     {form.show_monthly_giving && (
                       <div className="space-y-3 pt-1 pl-1" style={{ borderLeft: '2px solid rgba(74,222,128,0.25)' }}>
@@ -760,6 +778,62 @@ export default function DevicesPage() {
                           <p className="text-white/30 text-[10px]">Logo preview</p>
                         </div>
                       )}
+                    </div>
+
+                    {/* Background colour override */}
+                    <div>
+                      <p className={lbl}>Background Colour Override</p>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {[
+                          { label: 'None (use theme)', value: '' },
+                          { label: 'Deep Saffron',    value: '#1a0a00' },
+                          { label: 'Crimson Night',   value: '#5C0000' },
+                          { label: 'Royal Indigo',    value: '#0D0D2B' },
+                          { label: 'Peacock Teal',    value: '#003333' },
+                          { label: 'Lotus Cream',     value: '#FFF3E0' },
+                          { label: 'Jasmine White',   value: '#FFF8E1' },
+                          { label: 'Midnight Black',  value: '#0a0a0a' },
+                          { label: 'Forest Green',    value: '#0d2b0d' },
+                        ].map(opt => {
+                          const active = form.bg_color === opt.value
+                          return (
+                            <button
+                              key={opt.value} type="button"
+                              onClick={() => setForm(f => ({ ...f, bg_color: opt.value }))}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-bold transition-all"
+                              style={{
+                                background: active ? 'rgba(255,153,51,0.2)' : 'rgba(255,255,255,0.05)',
+                                border: active ? '1.5px solid rgba(255,153,51,0.6)' : '1.5px solid rgba(255,255,255,0.1)',
+                                color: active ? '#FF9933' : 'rgba(255,255,255,0.6)',
+                              }}
+                            >
+                              {opt.value && (
+                                <span
+                                  className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                                  style={{ background: opt.value, border: '1px solid rgba(255,255,255,0.2)' }}
+                                />
+                              )}
+                              {opt.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={form.bg_color || '#1a0a00'}
+                          onChange={e => setForm(f => ({ ...f, bg_color: e.target.value }))}
+                          className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent"
+                          title="Pick custom colour"
+                        />
+                        <input
+                          className={`${inp} flex-1`}
+                          value={form.bg_color}
+                          onChange={e => setForm(f => ({ ...f, bg_color: e.target.value }))}
+                          placeholder="e.g. #1a0a00 or linear-gradient(…) — blank = use theme"
+                        />
+                      </div>
+                      <p className="text-white/30 text-[10px] mt-1">Overrides the theme background with a solid colour or CSS gradient</p>
                     </div>
                   </div>
                 )}

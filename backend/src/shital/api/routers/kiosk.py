@@ -2062,7 +2062,12 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 SELECT kd.id, kd.name, kd.branch_id, kd.device_password_hash,
                        kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
                        kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
+                       COALESCE(kd.confirmation_text, '') AS confirmation_text,
+                       COALESCE(kd.bg_color, '') AS bg_color,
                        kd.card_reader_id,
+                       COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.org_logo_url, '') AS org_logo_url,
+                       COALESCE(kd.org_name, '') AS org_name,
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
                        COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
@@ -2099,6 +2104,11 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "donate_title": device["donate_title"] or "Tap & Donate",
             "monthly_giving_text": device["monthly_giving_text"] or "Make a big impact from just £5/month",
             "monthly_giving_amount": float(device["monthly_giving_amount"] or 5),
+            "confirmation_text": device["confirmation_text"] or "",
+            "bg_color": device["bg_color"] or "",
+            "kiosk_theme": device["kiosk_theme"] or "saffron",
+            "org_logo_url": device["org_logo_url"] or "",
+            "org_name": device["org_name"] or "",
         }
 
     # ── Path 2: Legacy user-table login (quickkiosk-* accounts) ──────────────
@@ -2161,12 +2171,17 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     device_reader_provider = "stripe_terminal"
     device_sumup_serial = ""
     device_clover_id = ""
-    dev_flags: dict = {"show_monthly_giving": False, "enable_gift_aid": False, "tap_and_go": True, "donate_title": "Tap & Donate", "monthly_giving_text": "Make a big impact from just £5/month", "monthly_giving_amount": 5.0}
+    dev_flags: dict = {"show_monthly_giving": False, "enable_gift_aid": False, "tap_and_go": True, "donate_title": "Tap & Donate", "monthly_giving_text": "Make a big impact from just £5/month", "monthly_giving_amount": 5.0, "confirmation_text": "", "bg_color": "", "kiosk_theme": "saffron", "org_logo_url": "", "org_name": ""}
     async with SessionLocal() as db:
         dev_res = await db.execute(
             text("""
                 SELECT kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
                        kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
+                       COALESCE(kd.confirmation_text, '') AS confirmation_text,
+                       COALESCE(kd.bg_color, '') AS bg_color,
+                       COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.org_logo_url, '') AS org_logo_url,
+                       COALESCE(kd.org_name, '') AS org_name,
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
                        COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial
@@ -2196,6 +2211,11 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 "donate_title": dev_row["donate_title"] or "Tap & Donate",
                 "monthly_giving_text": dev_row["monthly_giving_text"] or "Make a big impact from just £5/month",
                 "monthly_giving_amount": float(dev_row["monthly_giving_amount"] or 5),
+                "confirmation_text": dev_row["confirmation_text"] or "",
+                "bg_color": dev_row["bg_color"] or "",
+                "kiosk_theme": dev_row["kiosk_theme"] or "saffron",
+                "org_logo_url": dev_row["org_logo_url"] or "",
+                "org_name": dev_row["org_name"] or "",
             }
 
     # Merge kiosk_devices reader (preferred) with kiosk_profiles reader (fallback)
@@ -2250,6 +2270,11 @@ async def quick_kiosk_refresh_config(username: str):
                 SELECT kd.id, kd.name, kd.branch_id,
                        kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
                        kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
+                       COALESCE(kd.confirmation_text, '') AS confirmation_text,
+                       COALESCE(kd.bg_color, '') AS bg_color,
+                       COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.org_logo_url, '') AS org_logo_url,
+                       COALESCE(kd.org_name, '') AS org_name,
                        kd.card_reader_id,
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
@@ -2285,6 +2310,11 @@ async def quick_kiosk_refresh_config(username: str):
         "donate_title": device["donate_title"] or "Tap & Donate",
         "monthly_giving_text": device["monthly_giving_text"] or "Make a big impact from just £5/month",
         "monthly_giving_amount": float(device["monthly_giving_amount"] or 5),
+        "confirmation_text": device["confirmation_text"] or "",
+        "bg_color": device["bg_color"] or "",
+        "kiosk_theme": device["kiosk_theme"] or "saffron",
+        "org_logo_url": device["org_logo_url"] or "",
+        "org_name": device["org_name"] or "",
     }
 
 

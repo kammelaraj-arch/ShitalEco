@@ -75,6 +75,8 @@ class DeviceIn(BaseModel):
     donate_title: str = "Tap & Donate"
     monthly_giving_text: str = "Make a big impact from just £5/month"
     monthly_giving_amount: float = 5.0
+    confirmation_text: str = ""
+    bg_color: str = ""
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -114,7 +116,7 @@ async def list_devices(
                        kiosk_theme, org_name, org_logo_url,
                        device_username,
                        show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
-                       monthly_giving_text, monthly_giving_amount,
+                       monthly_giving_text, monthly_giving_amount, confirmation_text, bg_color,
                        last_seen_at, notes, created_at, updated_at
                 FROM kiosk_devices
                 WHERE {where}
@@ -227,7 +229,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  device_token, notes, kiosk_theme, org_name, org_logo_url,
                  device_username, device_password_hash,
                  show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
-                 monthly_giving_text, monthly_giving_amount,
+                 monthly_giving_text, monthly_giving_amount, confirmation_text,
                  created_at, updated_at)
             VALUES
                 (:id, :name, :desc, :dtype, :bid, :loc, :status,
@@ -236,7 +238,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  :token, :notes, :ktheme, :oname, :ologo,
                  :dev_user, :dev_pw_hash,
                  :show_monthly, :gift_aid, :tap_go, :donate_title,
-                 :mg_text, :mg_amount,
+                 :mg_text, :mg_amount, :confirm_text, :bg_color,
                  :now, :now)
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
@@ -299,6 +301,8 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 donate_title = :donate_title,
                 monthly_giving_text = :mg_text,
                 monthly_giving_amount = :mg_amount,
+                confirmation_text = :confirm_text,
+                bg_color = :bg_color,
                 updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
         """), {
@@ -320,6 +324,8 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "donate_title": body.donate_title or "Tap & Donate",
             "mg_text": body.monthly_giving_text or "Make a big impact from just £5/month",
             "mg_amount": body.monthly_giving_amount or 5.0,
+            "confirm_text": body.confirmation_text or "",
+            "bg_color": body.bg_color or "",
             "now": now,
         })
         await db.commit()

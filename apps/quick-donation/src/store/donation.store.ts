@@ -40,6 +40,11 @@ export interface DonationState {
   donateTitle: string
   monthlyGivingText: string
   monthlyGivingAmount: number
+  confirmationText: string
+  kioskTheme: string
+  orgLogoUrl: string
+  orgName: string
+  bgColor: string
 
   // Persistent login — survives reboots; cleared only by explicit logout
   isDeviceLoggedIn: boolean
@@ -53,7 +58,7 @@ export interface DonationState {
   setAmount: (amount: number) => void
   setBranchId: (id: string) => void
   setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string, sumupApiId?: string, cloverDeviceId?: string) => void
-  setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number }) => void
+  setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number; confirmationText: string; kioskTheme: string; orgLogoUrl: string; orgName: string; bgColor: string }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string, username?: string) => void
   setPendingGiftAid: (data: GiftAidData | null) => void
@@ -84,6 +89,11 @@ export const useDonationStore = create<DonationState>()(
       donateTitle: 'Tap & Donate',
       monthlyGivingText: 'Make a big impact from just £5/month',
       monthlyGivingAmount: 5,
+      confirmationText: '',
+      kioskTheme: 'saffron',
+      orgLogoUrl: '',
+      orgName: '',
+      bgColor: '',
 
       isDeviceLoggedIn: false,
       loggedInName: '',
@@ -133,6 +143,11 @@ export const useDonationStore = create<DonationState>()(
         donateTitle: state.donateTitle,
         monthlyGivingText: state.monthlyGivingText,
         monthlyGivingAmount: state.monthlyGivingAmount,
+        confirmationText: state.confirmationText,
+        kioskTheme: state.kioskTheme,
+        orgLogoUrl: state.orgLogoUrl,
+        orgName: state.orgName,
+        bgColor: state.bgColor,
         isDeviceLoggedIn: state.isDeviceLoggedIn,
         loggedInName: state.loggedInName,
         loggedInUsername: state.loggedInUsername,

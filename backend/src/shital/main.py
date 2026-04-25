@@ -465,7 +465,9 @@ async def _patch_schema() -> None:
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS tap_and_go           BOOLEAN NOT NULL DEFAULT true",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS donate_title         VARCHAR(100) NOT NULL DEFAULT 'Tap & Donate'",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS monthly_giving_text  VARCHAR(200) NOT NULL DEFAULT 'Make a big impact from just £5/month'",
-        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS monthly_giving_amount NUMERIC(8,2) NOT NULL DEFAULT 5.00",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS monthly_giving_amount  NUMERIC(8,2) NOT NULL DEFAULT 5.00",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS confirmation_text      TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS bg_color              VARCHAR(20)  NOT NULL DEFAULT ''",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_username ON kiosk_devices(device_username) WHERE device_username IS NOT NULL",
         # ── Quick-donation kiosk profiles ─────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS kiosk_profiles (

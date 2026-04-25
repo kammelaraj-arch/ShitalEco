@@ -94,6 +94,11 @@ export function AdminScreen() {
       donateTitle: data.donate_title ?? 'Tap & Donate',
       monthlyGivingText: data.monthly_giving_text ?? 'Make a big impact from just £5/month',
       monthlyGivingAmount: data.monthly_giving_amount ?? 5,
+      confirmationText: data.confirmation_text ?? '',
+      kioskTheme: data.kiosk_theme ?? 'saffron',
+      orgLogoUrl: data.org_logo_url ?? '',
+      orgName: data.org_name ?? '',
+      bgColor: data.bg_color ?? '',
     })
     // Persist login — survives reboots until explicit logout
     setDeviceLoggedIn(true, data.user?.name || enteredUsername, enteredUsername)
@@ -121,6 +126,11 @@ export function AdminScreen() {
         donateTitle: data.donate_title ?? 'Tap & Donate',
         monthlyGivingText: data.monthly_giving_text ?? 'Make a big impact from just £5/month',
         monthlyGivingAmount: data.monthly_giving_amount ?? 5,
+        confirmationText: data.confirmation_text ?? '',
+        kioskTheme: data.kiosk_theme ?? 'saffron',
+        orgLogoUrl: data.org_logo_url ?? '',
+        orgName: data.org_name ?? '',
+        bgColor: data.bg_color ?? '',
       })
       setSyncResult('ok')
       setTimeout(() => setSyncResult('idle'), 3000)
