@@ -811,20 +811,6 @@ export function DonationScreen() {
   const [otherOpen, setOtherOpen] = useState(false)
   const [otherVal, setOtherVal]   = useState('')
 
-  // Hidden staff access: tap top-right corner 5× within 3 s → admin screen
-  const cornerTaps = React.useRef(0)
-  const cornerTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const handleCornerTap = () => {
-    cornerTaps.current += 1
-    if (cornerTimer.current) clearTimeout(cornerTimer.current)
-    if (cornerTaps.current >= 3) {
-      cornerTaps.current = 0
-      setScreen('admin')
-      return
-    }
-    cornerTimer.current = setTimeout(() => { cornerTaps.current = 0 }, 3000)
-  }
-
   // Monthly giving flow
   const [monthlyOpen, setMonthlyOpen] = useState(false)
 
@@ -910,12 +896,19 @@ export function DonationScreen() {
               <span className="text-white/70 font-bold text-xs">Gift Aid</span>
             </div>
           )}
-          {/* Hidden staff access zone — tap 5× to open admin */}
-          <div
-            onPointerDown={handleCornerTap}
-            className="w-10 h-10 rounded-xl select-none"
+          {/* Staff access — opens admin page */}
+          <button
+            type="button"
+            onClick={() => setScreen('admin')}
+            aria-label="Open admin settings"
+            className="w-11 h-11 rounded-xl flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 active:bg-white/15 transition-colors"
             style={{ WebkitTapHighlightColor: 'transparent' }}
-          />
+          >
+            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
         </div>
       </div>
 
