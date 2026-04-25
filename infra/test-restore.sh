@@ -168,7 +168,7 @@ FROM (
 
 echo ""
 echo "═══ Critical-table spot check (vs prod) ═══"
-for tbl in users orders donations branches kiosk_devices terminal_devices items api_keys_store; do
+for tbl in users orders donations branches kiosk_devices terminal_devices catalog_items api_keys_store gift_aid_declarations recurring_giving_subscriptions; do
   T_ROWS=$(docker exec "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" -X -A -t -c \
     "SELECT count(*) FROM $tbl;" 2>/dev/null || echo "n/a")
   P_ROWS=$(docker exec shitaleco-db-1 psql -U "$DB_USER" -d "$DB_NAME" -X -A -t -c \
