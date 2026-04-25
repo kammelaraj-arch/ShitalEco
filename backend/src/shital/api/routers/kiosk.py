@@ -977,29 +977,27 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
     """
     from datetime import UTC, timedelta
 
-
-
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
     merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
     if not access_token or not merchant_code:
         return {"paid": False, "error": "SumUp not configured"}
 
     amount_decimal = round(amount_pence / 100, 2)
-    oldest = (datetime.utcnow().replace(tzinfo=UTC) -
-              timedelta(seconds=since_seconds)).isoformat()
+    oldest = (datetime.utcnow().replace(tzinfo=UTC) - timedelta(seconds=since_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
-                f"https://api.sumup.com/v2.1/merchants/{merchant_code}/transactions/history",
+                f"https://api.sumup.com/v0.1/me/transactions/history",
                 headers={"Authorization": f"Bearer {access_token}"},
-                params={"limit": 10, "statuses": "SUCCESSFUL", "oldest_time": oldest},
+                params={"limit": 10, "oldest_time": oldest},
             )
         if not resp.is_success:
-            return {"paid": False, "error": f"SumUp API {resp.status_code}"}
+            return {"paid": False, "error": f"SumUp API {resp.status_code}: {resp.text}"}
         txns = resp.json().get("items", [])
         for t in txns:
-            if abs(float(t.get("amount", 0)) - amount_decimal) < 0.01:
+            t_status = (t.get("status") or "").upper()
+            if t_status == "SUCCESSFUL" and abs(float(t.get("amount", 0)) - amount_decimal) < 0.01:
                 return {"paid": True, "transaction_id": t.get("id"), "status": t.get("status")}
         return {"paid": False}
     except Exception as e:
