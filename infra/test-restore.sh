@@ -140,14 +140,14 @@ fi
 echo ""
 echo "═══ Sanity check: row counts per table ═══"
 docker exec "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" -X -A -F $'\t' -t -c "
-SELECT format('%-40s %10s', schemaname || '.' || relname,
+SELECT format('%-40s %10s', schemaname || '.' || tablename,
               (xpath('/row/c/text()',
                      query_to_xml(format('SELECT count(*) AS c FROM %I.%I',
-                                          schemaname, relname),
+                                          schemaname, tablename),
                                   false, true, '')))[1]::text)
 FROM pg_catalog.pg_tables
 WHERE schemaname NOT IN ('pg_catalog','information_schema')
-ORDER BY schemaname, relname;
+ORDER BY schemaname, tablename;
 "
 
 echo ""
@@ -159,7 +159,7 @@ SELECT
 FROM (
   SELECT (xpath('/row/c/text()',
                 query_to_xml(format('SELECT count(*) AS c FROM %I.%I',
-                                     schemaname, relname),
+                                     schemaname, tablename),
                              false, true, '')))[1]::text::bigint AS rows
   FROM pg_catalog.pg_tables
   WHERE schemaname = 'public'
