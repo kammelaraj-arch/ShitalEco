@@ -65,7 +65,7 @@ def load_from_secrets_manager() -> dict[str, str]:
     try:
         result = subprocess.run(
             ["docker", "exec", BACKEND_CONTAINER, "python", "-c", fetch],
-            capture_output=True, text=True, timeout=20, check=False,
+            capture_output=True, text=True, timeout=60, check=False,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return {}
