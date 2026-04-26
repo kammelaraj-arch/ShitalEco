@@ -93,7 +93,7 @@ asyncio.run(main())
     try:
         result = subprocess.run(
             ["docker", "exec", BACKEND_CONTAINER, "python", "-c", fetch],
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True, text=True, timeout=45, check=False,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return {}
