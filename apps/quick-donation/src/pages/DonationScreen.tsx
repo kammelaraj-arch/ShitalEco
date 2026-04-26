@@ -1010,32 +1010,39 @@ export function DonationScreen() {
               <span className="text-white/50 text-sm font-semibold">Enter custom amount</span>
               <div className="text-3xl font-black text-gold-gradient">£{otherVal || '0'}</div>
             </div>
-            <div className="grid grid-cols-3 gap-2 max-w-xs mx-auto">
-              {NUM_ROWS.map((row, ri) => (
-                <React.Fragment key={ri}>
-                  {row.map(k => <NumKey key={k} k={k} onPress={handleKey} />)}
-                </React.Fragment>
-              ))}
-            </div>
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={() => { setOtherOpen(false); setOtherVal('') }}
-                className="flex-1 py-3 rounded-2xl text-white/50 font-bold text-sm"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
-              >
-                Cancel
-              </button>
+            <div className="flex gap-2 max-w-md mx-auto">
+              <div className="flex-1 flex flex-col gap-2 min-w-0">
+                <div className="grid grid-cols-3 gap-2">
+                  {NUM_ROWS.map((row, ri) => (
+                    <React.Fragment key={ri}>
+                      {row.map(k => <NumKey key={k} k={k} onPress={handleKey} />)}
+                    </React.Fragment>
+                  ))}
+                </div>
+                <button
+                  onClick={() => { setOtherOpen(false); setOtherVal('') }}
+                  className="w-full py-3 rounded-2xl text-white/50 font-bold text-sm"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                >
+                  Cancel
+                </button>
+              </div>
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={handleOtherConfirm}
                 disabled={otherAmount <= 0}
-                className="flex-[2] py-3 rounded-2xl font-black text-base text-white disabled:opacity-30"
+                aria-label={otherAmount > 0 ? `Donate £${otherAmount.toFixed(2)}` : 'Enter amount to donate'}
+                className="flex-shrink-0 w-16 rounded-2xl font-black text-white disabled:opacity-30 flex flex-col items-center justify-center gap-0.5 py-3"
                 style={{
                   background: otherAmount > 0 ? 'linear-gradient(135deg,#FF9933,#FF6B00)' : 'rgba(255,255,255,0.08)',
                   boxShadow: otherAmount > 0 ? '0 6px 20px rgba(255,153,51,0.45)' : 'none',
+                  fontSize: '22px',
+                  lineHeight: 1,
                 }}
               >
-                {otherAmount > 0 ? `Donate £${otherAmount.toFixed(2)}` : 'Enter amount'}
+                {'Donate'.split('').map((c, i) => (
+                  <span key={i}>{c}</span>
+                ))}
               </motion.button>
             </div>
           </motion.div>
