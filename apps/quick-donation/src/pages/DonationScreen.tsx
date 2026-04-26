@@ -881,7 +881,7 @@ export function DonationScreen() {
   const otherAmount = parseFloat(otherVal) || 0
 
   return (
-    <div className="w-full h-full flex flex-col bg-temple-gradient relative">
+    <div className="w-full h-full flex flex-col relative">
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="px-6 pt-6 pb-3 flex-shrink-0 flex items-center justify-between">
