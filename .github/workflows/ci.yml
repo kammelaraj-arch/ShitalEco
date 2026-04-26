@@ -5,6 +5,7 @@ on:
     branches: [main, 'claude/**', develop]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   PYTHON_VERSION: "3.12"
@@ -175,7 +176,7 @@ jobs:
       always() &&
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled') &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/claude/'))
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/claude/') || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
       packages: write
@@ -203,7 +204,7 @@ jobs:
           fi
 
       - name: Build & push backend
-        if: needs.changes.outputs.backend == 'true'
+        if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v5
         with:
           context: ./backend
@@ -214,7 +215,7 @@ jobs:
           cache-to: type=gha,scope=backend,mode=max
 
       - name: Build & push admin
-        if: needs.changes.outputs.admin == 'true'
+        if: needs.changes.outputs.admin == 'true' || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -228,7 +229,7 @@ jobs:
           cache-to: type=gha,scope=admin,mode=max
 
       - name: Build & push quick-donation
-        if: needs.changes.outputs.quick-donation == 'true'
+        if: needs.changes.outputs.quick-donation == 'true' || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v5
         with:
           context: .
