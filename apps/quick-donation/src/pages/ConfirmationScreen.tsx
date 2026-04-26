@@ -31,7 +31,8 @@ export function ConfirmationScreen() {
 
   return (
     <div className="w-full h-full flex flex-col bg-white" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <div className="flex-1 flex flex-col items-center justify-center px-8 text-center gap-6">
+      <div className="flex-1 overflow-y-auto">
+        <div className="min-h-full flex flex-col items-center justify-center px-8 py-6 text-center gap-6">
         {/* Logo or emoji */}
         <motion.div
           initial={{ scale: 0, rotate: -30 }}
@@ -106,23 +107,20 @@ export function ConfirmationScreen() {
           </p>
         </motion.div>
 
-      </div>
-
-      {/* Start / New Donation CTA */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.75 }}
-        className="w-full px-6 pb-2"
-      >
-        <button
+        {/* Start / New Donation CTA — sits inline with content so it's always visible */}
+        <motion.button
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.75 }}
           onClick={reset}
-          className="w-full py-5 rounded-2xl text-white font-black text-2xl shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+          className="w-full max-w-xs py-5 rounded-2xl text-white font-black text-2xl shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-3"
           style={{ background: 'linear-gradient(135deg,#22C55E,#16A34A)', boxShadow: '0 8px 28px #22C55E55' }}
         >
           ▶ Start
-        </button>
-      </motion.div>
+        </motion.button>
+
+        </div>
+      </div>
 
       {/* Countdown */}
       <div className="flex-shrink-0 px-5 pb-4 pt-2">
