@@ -483,3 +483,109 @@ async def _write_azure_creds_env(conn_str: str, container: str) -> None:
         await loop.run_in_executor(None, _write)
     except Exception:
         pass
+
+
+# ── Monitor alert recipients ──────────────────────────────────────────────────
+
+_MONITOR_RECIPIENT_DEFAULTS: dict[str, str] = {
+    "critical": "rajk@shirdisai.org.uk,vinitl@shirdisai.org.uk,it@shirdisai.org.uk,gtrustees@shirdisai.org.uk",
+    "high":     "rajk@shirdisai.org.uk,it@shirdisai.org.uk,gtrustees@shirdisai.org.uk",
+    "medium":   "wembley@shirdisai.org.uk,rajk@shirdisai.org.uk",
+    "digest":   "gtrustees@shirdisai.org.uk,it@shirdisai.org.uk",
+}
+
+_MONITOR_LEVELS = ("critical", "high", "medium", "digest")
+
+
+class MonitorRecipientsInput(BaseModel):
+    critical: str | None = None
+    high: str | None = None
+    medium: str | None = None
+    digest: str | None = None
+
+
+def _normalize_recipient_list(raw: str) -> str:
+    """Parse a comma/space/newline-separated list, dedupe, validate, return CSV."""
+    import re
+    seen: list[str] = []
+    seen_set: set[str] = set()
+    parts = re.split(r"[\s,;]+", raw or "")
+    for p in parts:
+        p = p.strip().lower()
+        if not p:
+            continue
+        if "@" not in p or " " in p or len(p) > 254:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid email address: {p}",
+            )
+        if p in seen_set:
+            continue
+        seen_set.add(p)
+        seen.append(p)
+    return ",".join(seen)
+
+
+@settings_router.get("/monitor-recipients")
+async def get_monitor_recipients(ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    from shital.core.fabrics.secrets import SecretsManager
+    out: dict[str, Any] = {"levels": {}, "defaults": _MONITOR_RECIPIENT_DEFAULTS}
+    for level in _MONITOR_LEVELS:
+        key = f"MONITOR_RECIPIENTS_{level.upper()}"
+        val = await SecretsManager.get(key)
+        out["levels"][level] = {
+            "value": val or _MONITOR_RECIPIENT_DEFAULTS[level],
+            "is_custom": bool(val),
+        }
+    return out
+
+
+@settings_router.post("/monitor-recipients")
+async def set_monitor_recipients(
+    body: MonitorRecipientsInput,
+    ctx: CurrentSpace,
+    x_admin_pin: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_admin(ctx)
+    await _verify_pin_or_raise(x_admin_pin)
+    from shital.core.fabrics.secrets import SecretsManager
+
+    updates = {
+        "critical": body.critical,
+        "high":     body.high,
+        "medium":   body.medium,
+        "digest":   body.digest,
+    }
+    saved: dict[str, str] = {}
+    for level, raw in updates.items():
+        if raw is None:
+            continue
+        normalized = _normalize_recipient_list(raw)
+        if not normalized:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"At least one email required for {level}",
+            )
+        await SecretsManager.set(
+            f"MONITOR_RECIPIENTS_{level.upper()}",
+            normalized,
+            updated_by=ctx.user_email,
+        )
+        saved[level] = normalized
+    return {"ok": True, "saved": saved}
+
+
+@settings_router.delete("/monitor-recipients/{level}")
+async def reset_monitor_recipients(
+    level: str,
+    ctx: CurrentSpace,
+    x_admin_pin: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_admin(ctx)
+    await _verify_pin_or_raise(x_admin_pin)
+    if level not in _MONITOR_LEVELS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown level")
+    from shital.core.fabrics.secrets import SecretsManager
+    await SecretsManager.delete(f"MONITOR_RECIPIENTS_{level.upper()}")
+    return {"ok": True, "level": level, "value": _MONITOR_RECIPIENT_DEFAULTS[level]}

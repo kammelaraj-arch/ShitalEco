@@ -71,6 +71,20 @@ function PinOverlay({ onVerified }: { onVerified: (pin: string) => void }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 type BackupBlob = { name: string; size: number; last_modified: string | null; tier?: string }
+type RecipientLevel = 'critical' | 'high' | 'medium' | 'digest'
+type RecipientRow = { value: string; is_custom: boolean }
+type RecipientsResponse = {
+  levels: Record<RecipientLevel, RecipientRow>
+  defaults: Record<RecipientLevel, string>
+}
+
+const LEVEL_META: Record<RecipientLevel, { label: string; description: string; emoji: string }> = {
+  critical: { label: 'Critical',      description: 'Site down, backups failing, DB unreachable',                        emoji: '🚨' },
+  high:     { label: 'High',          description: 'TLS expiring soon, disk filling, restore-test stale',                emoji: '⚠️' },
+  medium:   { label: 'Medium',        description: 'No donations in last 24h (kiosks possibly broken)',                  emoji: '📉' },
+  digest:   { label: 'Weekly digest', description: 'All-green status report every Sunday morning',                       emoji: '📰' },
+}
+
 type BackupHealth = {
   configured: boolean
   container: string
@@ -118,6 +132,10 @@ export default function AzureBackupPage() {
   const [health, setHealth] = useState<BackupHealth | null>(null)
   const [blobs, setBlobs] = useState<BackupBlob[] | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [recipients, setRecipients] = useState<RecipientsResponse | null>(null)
+  const [recipDraft, setRecipDraft] = useState<Record<RecipientLevel, string>>({ critical: '', high: '', medium: '', digest: '' })
+  const [recipSaving, setRecipSaving] = useState(false)
+  const [recipMsg, setRecipMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   async function loadHealthAndList() {
     setRefreshing(true)
@@ -137,6 +155,71 @@ export default function AzureBackupPage() {
     }
   }
 
+  async function loadRecipients() {
+    try {
+      const res = await fetch(`${API}/settings/monitor-recipients`, { headers: { Authorization: `Bearer ${token()}` } })
+      const d: RecipientsResponse = await res.json()
+      setRecipients(d)
+      setRecipDraft({
+        critical: d.levels.critical.value,
+        high:     d.levels.high.value,
+        medium:   d.levels.medium.value,
+        digest:   d.levels.digest.value,
+      })
+    } catch {
+      // ignore — UI shows last-known state
+    }
+  }
+
+  async function saveRecipients() {
+    if (!pin || !recipients) return
+    setRecipSaving(true); setRecipMsg(null)
+    try {
+      const body: Record<string, string> = {}
+      for (const lvl of ['critical', 'high', 'medium', 'digest'] as RecipientLevel[]) {
+        if (recipDraft[lvl] !== recipients.levels[lvl].value) {
+          body[lvl] = recipDraft[lvl]
+        }
+      }
+      if (Object.keys(body).length === 0) {
+        setRecipMsg({ text: 'No changes to save.', ok: true })
+        setRecipSaving(false)
+        return
+      }
+      const res = await fetch(`${API}/settings/monitor-recipients`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}`, 'X-Admin-Pin': pin },
+        body: JSON.stringify(body),
+      })
+      const d = await res.json()
+      if (d.ok) {
+        setRecipMsg({ text: `Saved: ${Object.keys(d.saved || {}).join(', ')}`, ok: true })
+        await loadRecipients()
+      } else {
+        setRecipMsg({ text: d.detail || 'Save failed', ok: false })
+      }
+    } catch {
+      setRecipMsg({ text: 'Network error — please try again', ok: false })
+    } finally {
+      setRecipSaving(false)
+    }
+  }
+
+  async function resetRecipientsLevel(level: RecipientLevel) {
+    if (!pin) return
+    if (!confirm(`Reset ${LEVEL_META[level].label} recipients to defaults?`)) return
+    try {
+      await fetch(`${API}/settings/monitor-recipients/${level}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token()}`, 'X-Admin-Pin': pin },
+      })
+      setRecipMsg({ text: `${LEVEL_META[level].label} reset to defaults.`, ok: true })
+      await loadRecipients()
+    } catch {
+      setRecipMsg({ text: 'Network error', ok: false })
+    }
+  }
+
   useEffect(() => {
     fetch(`${API}/settings/azure-backup`, {
       headers: { Authorization: `Bearer ${token()}` },
@@ -145,6 +228,7 @@ export default function AzureBackupPage() {
       .then(d => { setStatus(d); setContainer(d.container || 'shitaleco-backups') })
       .catch(() => {})
     loadHealthAndList()
+    loadRecipients()
   }, [])
 
   async function save() {
@@ -542,6 +626,92 @@ export default function AzureBackupPage() {
           </p>
         </div>
       </div>
+
+      {/* Alert recipients */}
+      {recipients && (
+        <div className={card} style={cardStyle}>
+          <div className="flex items-center gap-3 pb-1">
+            <span className="text-2xl">📧</span>
+            <div>
+              <h2 className="text-white font-bold text-base">Alert Recipients</h2>
+              <p className="text-white/40 text-xs">
+                Email lists for the infra monitor (runs every 15 min, plus a Sunday digest)
+              </p>
+            </div>
+          </div>
+
+          {recipMsg && (
+            <div className={`px-4 py-2.5 rounded-xl text-xs ${recipMsg.ok ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+              {recipMsg.text}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {(['critical', 'high', 'medium', 'digest'] as RecipientLevel[]).map(lvl => {
+              const meta = LEVEL_META[lvl]
+              const row = recipients.levels[lvl]
+              const dirty = recipDraft[lvl] !== row.value
+              return (
+                <div key={lvl}>
+                  <div className="flex items-center justify-between gap-3 mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">{meta.emoji}</span>
+                      <label className="text-xs font-semibold uppercase tracking-wider text-white/70">
+                        {meta.label}
+                      </label>
+                      {row.is_custom ? (
+                        <span className="text-[10px] uppercase tracking-wider text-orange-400/80">custom</span>
+                      ) : (
+                        <span className="text-[10px] uppercase tracking-wider text-white/30">default</span>
+                      )}
+                    </div>
+                    {row.is_custom && (
+                      <button
+                        type="button"
+                        onClick={() => resetRecipientsLevel(lvl)}
+                        className="text-[11px] text-white/40 hover:text-red-400 transition-colors"
+                      >
+                        Reset to default
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    value={recipDraft[lvl]}
+                    onChange={e => setRecipDraft(d => ({ ...d, [lvl]: e.target.value }))}
+                    rows={2}
+                    placeholder="comma-separated emails"
+                    className="w-full rounded-xl px-4 py-2.5 text-xs font-mono focus:outline-none resize-y"
+                    style={{
+                      ...inputStyle,
+                      borderColor: dirty ? 'rgba(251,146,60,0.5)' : 'rgba(255,255,255,0.1)',
+                    }}
+                  />
+                  <p className="text-white/30 text-xs mt-1">
+                    {meta.description}
+                    {!row.is_custom && (
+                      <span className="text-white/25"> · default: <span className="font-mono">{recipients.defaults[lvl]}</span></span>
+                    )}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              onClick={saveRecipients}
+              disabled={recipSaving}
+              className="px-6 py-2.5 rounded-xl font-black text-sm text-white transition-all disabled:opacity-40 hover:scale-[1.02] active:scale-[0.98]"
+              style={{ background: 'linear-gradient(135deg, #d97706, #ea580c)', boxShadow: '0 4px 16px rgba(217,119,6,0.3)' }}
+            >
+              {recipSaving ? 'Saving…' : 'Save recipients'}
+            </button>
+            <p className="text-white/30 text-xs">
+              Changes apply on the next monitor run (within 15 minutes)
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

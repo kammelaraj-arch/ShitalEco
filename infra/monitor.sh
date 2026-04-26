@@ -29,10 +29,67 @@ DB_USER="shitaleco_db_user"
 DB_NAME="shitaleco_db"
 
 # ── Recipient groups ────────────────────────────────────────────────────────
+# Hardcoded defaults. The Admin UI (Azure Backup → Alert Recipients) can
+# override these via api_keys_store; resolve_recipients() pulls overrides
+# at runtime, falling back to these if nothing is set or DB is unreachable.
 RECIP_CRITICAL="rajk@shirdisai.org.uk,vinitl@shirdisai.org.uk,it@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
 RECIP_HIGH="rajk@shirdisai.org.uk,it@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
 RECIP_MEDIUM="wembley@shirdisai.org.uk,rajk@shirdisai.org.uk"
 RECIP_DIGEST="gtrustees@shirdisai.org.uk,it@shirdisai.org.uk"
+
+resolve_recipients() {
+    # Pull MONITOR_RECIPIENTS_* overrides from api_keys_store via a lightweight
+    # asyncpg query in the backend container. Times out cleanly so a slow or
+    # missing DB never blocks the monitor — defaults take over.
+    local fetch='
+import os, asyncio, json, base64, hashlib
+import asyncpg
+from cryptography.fernet import Fernet
+
+async def main():
+    db_url = os.environ.get("DATABASE_URL", "").replace("postgresql+asyncpg://", "postgresql://")
+    jwt_secret = os.environ.get("JWT_SECRET", "")
+    if not db_url or not jwt_secret:
+        print("{}"); return
+    key_bytes = hashlib.pbkdf2_hmac("sha256", jwt_secret.encode(), b"shital-api-keys-v1-salt", 100000, dklen=32)
+    fernet = Fernet(base64.urlsafe_b64encode(key_bytes))
+    conn = await asyncpg.connect(db_url)
+    try:
+        rows = await conn.fetch(
+            "SELECT key_name, encrypted_value FROM api_keys_store WHERE key_name = ANY($1::text[])",
+            ["MONITOR_RECIPIENTS_CRITICAL", "MONITOR_RECIPIENTS_HIGH", "MONITOR_RECIPIENTS_MEDIUM", "MONITOR_RECIPIENTS_DIGEST"],
+        )
+    finally:
+        await conn.close()
+    out = {}
+    for r in rows:
+        try:
+            out[r["key_name"]] = fernet.decrypt(r["encrypted_value"].encode()).decode()
+        except Exception:
+            pass
+    print(json.dumps(out))
+
+asyncio.run(main())
+'
+    local json
+    json=$(timeout 45 docker exec shitaleco-backend-1 python -c "$fetch" 2>/dev/null) || true
+    [ -z "$json" ] && return 0
+
+    local val
+    val=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('MONITOR_RECIPIENTS_CRITICAL',''))" 2>/dev/null)
+    [ -n "$val" ] && RECIP_CRITICAL="$val"
+
+    val=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('MONITOR_RECIPIENTS_HIGH',''))" 2>/dev/null)
+    [ -n "$val" ] && RECIP_HIGH="$val"
+
+    val=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('MONITOR_RECIPIENTS_MEDIUM',''))" 2>/dev/null)
+    [ -n "$val" ] && RECIP_MEDIUM="$val"
+
+    val=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('MONITOR_RECIPIENTS_DIGEST',''))" 2>/dev/null)
+    [ -n "$val" ] && RECIP_DIGEST="$val"
+}
+
+resolve_recipients
 
 mkdir -p "$BACKUP_DIR"
 touch "$STATE_FILE" "$LOG_FILE"
