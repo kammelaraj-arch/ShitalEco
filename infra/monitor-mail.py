@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
 Send a notification email via Microsoft Graph using application (client-credentials)
-auth. Reads MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET from env (loaded from
-/opt/shitaleco/.env). Stdin is the plain-text body. Exits non-zero on failure so
-monitor.sh can log the error.
+auth.
+
+Credentials are resolved in this order:
+  1. existing env vars MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET
+  2. /opt/shitaleco/.env
+  3. encrypted api_keys_store table (read by docker-exec'ing into the running
+     backend container, which holds the JWT_SECRET needed to decrypt)
+
+Stdin is the plain-text body. Exits non-zero on failure so monitor.sh can log
+the error.
 
 Requires the app registration to have `Mail.Send` *application* permission with
 admin consent. Sends from a fixed mailbox so the recipients always see who it
@@ -16,12 +23,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
 
 ENV_FILE = "/opt/shitaleco/.env"
-SENDER = "it@shirdisai.org.uk"
+BACKEND_CONTAINER = "shitaleco-backend-1"
+SENDER = "noreply@shital.org.uk"
 GRAPH = "https://graph.microsoft.com/v1.0"
 LOGIN = "https://login.microsoftonline.com"
 
@@ -37,6 +46,67 @@ def load_env() -> None:
             k, _, v = line.partition("=")
             v = v.strip().strip('"').strip("'")
             os.environ.setdefault(k.strip(), v)
+
+
+def load_from_secrets_manager() -> dict[str, str]:
+    """Fetch MS_* values from the encrypted api_keys_store.
+
+    Bypasses the full shital app import (which loads FastAPI + routers and
+    can take ~100s to start) and goes straight to postgres via asyncpg
+    plus Fernet decryption — both already in the backend image.
+    """
+    fetch = """
+import os, asyncio, json, base64, hashlib
+import asyncpg
+from cryptography.fernet import Fernet
+
+async def main():
+    db_url = os.environ.get('DATABASE_URL', '').replace('postgresql+asyncpg://', 'postgresql://')
+    if not db_url:
+        print(json.dumps({}))
+        return
+    jwt_secret = os.environ.get('JWT_SECRET', '')
+    if not jwt_secret:
+        print(json.dumps({}))
+        return
+    key_bytes = hashlib.pbkdf2_hmac('sha256', jwt_secret.encode(), b'shital-api-keys-v1-salt', 100000, dklen=32)
+    fernet = Fernet(base64.urlsafe_b64encode(key_bytes))
+    conn = await asyncpg.connect(db_url)
+    try:
+        rows = await conn.fetch(
+            \"SELECT key_name, encrypted_value FROM api_keys_store \"
+            \"WHERE key_name = ANY($1::text[])\",
+            ['MS_TENANT_ID', 'MS_CLIENT_ID', 'MS_CLIENT_SECRET'],
+        )
+    finally:
+        await conn.close()
+    out = {}
+    for r in rows:
+        try:
+            out[r['key_name']] = fernet.decrypt(r['encrypted_value'].encode()).decode()
+        except Exception:
+            pass
+    print(json.dumps(out))
+
+asyncio.run(main())
+"""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", BACKEND_CONTAINER, "python", "-c", fetch],
+            capture_output=True, text=True, timeout=45, check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return {}
+    if result.returncode != 0:
+        return {}
+    # Find the JSON line (asyncpg may print warnings before)
+    for line in reversed(result.stdout.strip().splitlines()):
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return {}
 
 
 def get_token(tenant: str, cid: str, secret: str) -> str:
@@ -94,10 +164,23 @@ def main() -> int:
     tenant = os.environ.get("MS_TENANT_ID", "")
     cid = os.environ.get("MS_CLIENT_ID", "")
     secret = os.environ.get("MS_CLIENT_SECRET", "")
+
+    # If anything's still missing, fall through to the encrypted secrets store
+    if not (tenant and cid and secret):
+        from_db = load_from_secrets_manager()
+        tenant = tenant or from_db.get("MS_TENANT_ID", "")
+        cid = cid or from_db.get("MS_CLIENT_ID", "")
+        secret = secret or from_db.get("MS_CLIENT_SECRET", "")
+
     missing = [k for k, v in (("MS_TENANT_ID", tenant), ("MS_CLIENT_ID", cid),
                               ("MS_CLIENT_SECRET", secret)) if not v]
     if missing:
-        print(f"ERROR: missing env: {','.join(missing)}", file=sys.stderr)
+        print(
+            f"ERROR: missing credentials: {','.join(missing)}. "
+            f"Set them in Admin > API Keys, in /opt/shitaleco/.env, "
+            f"or as env vars before running.",
+            file=sys.stderr,
+        )
         return 3
 
     recipients = [a.strip() for a in args.to.split(",") if a.strip()]
