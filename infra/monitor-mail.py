@@ -30,7 +30,7 @@ import urllib.request
 
 ENV_FILE = "/opt/shitaleco/.env"
 BACKEND_CONTAINER = "shitaleco-backend-1"
-SENDER = "it@shirdisai.org.uk"
+SENDER = "noreply@shital.org.uk"
 GRAPH = "https://graph.microsoft.com/v1.0"
 LOGIN = "https://login.microsoftonline.com"
 
