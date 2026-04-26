@@ -172,7 +172,7 @@ export function TapScreen() {
     '#FF9933'
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center px-8 bg-temple-gradient">
+    <div className="w-full h-full flex flex-col items-center justify-center px-8">
       <motion.div
         initial={{ opacity: 0, scale: 0.92 }}
         animate={{ opacity: 1, scale: 1 }}

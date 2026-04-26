@@ -220,7 +220,7 @@ export function ProcessingScreen() {
   }, [])
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center gap-6 px-8 bg-temple-gradient">
+    <div className="w-full h-full flex flex-col items-center justify-center gap-6 px-8">
       {error ? (
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="text-center max-w-sm w-full">
           <div className="text-6xl mb-4">⚠️</div>
