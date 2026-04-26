@@ -2,7 +2,7 @@
 from alembic import op
 
 revision = '016'
-down_revision = '015'
+down_revision = '015_payment_providers'
 branch_labels = None
 depends_on = None
 
