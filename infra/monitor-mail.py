@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
 Send a notification email via Microsoft Graph using application (client-credentials)
-auth. Reads MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET from env (loaded from
-/opt/shitaleco/.env). Stdin is the plain-text body. Exits non-zero on failure so
-monitor.sh can log the error.
+auth.
+
+Credentials are resolved in this order:
+  1. existing env vars MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET
+  2. /opt/shitaleco/.env
+  3. encrypted api_keys_store table (read by docker-exec'ing into the running
+     backend container, which holds the JWT_SECRET needed to decrypt)
+
+Stdin is the plain-text body. Exits non-zero on failure so monitor.sh can log
+the error.
 
 Requires the app registration to have `Mail.Send` *application* permission with
 admin consent. Sends from a fixed mailbox so the recipients always see who it
@@ -16,11 +23,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
 
 ENV_FILE = "/opt/shitaleco/.env"
+BACKEND_CONTAINER = "shitaleco-backend-1"
 SENDER = "it@shirdisai.org.uk"
 GRAPH = "https://graph.microsoft.com/v1.0"
 LOGIN = "https://login.microsoftonline.com"
@@ -37,6 +46,38 @@ def load_env() -> None:
             k, _, v = line.partition("=")
             v = v.strip().strip('"').strip("'")
             os.environ.setdefault(k.strip(), v)
+
+
+def load_from_secrets_manager() -> dict[str, str]:
+    """Fetch MS_* values from the encrypted api_keys_store via the backend container."""
+    fetch = (
+        "import asyncio, json\n"
+        "from shital.core.fabrics.secrets import SecretsManager\n"
+        "async def main():\n"
+        "    out = {}\n"
+        "    for k in ('MS_TENANT_ID','MS_CLIENT_ID','MS_CLIENT_SECRET'):\n"
+        "        v = await SecretsManager.get(k)\n"
+        "        if v:\n"
+        "            out[k] = v\n"
+        "    print(json.dumps(out))\n"
+        "asyncio.run(main())\n"
+    )
+    try:
+        result = subprocess.run(
+            ["docker", "exec", BACKEND_CONTAINER, "python", "-c", fetch],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return {}
+    if result.returncode != 0:
+        return {}
+    line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+    if not line.startswith("{"):
+        return {}
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return {}
 
 
 def get_token(tenant: str, cid: str, secret: str) -> str:
@@ -94,10 +135,23 @@ def main() -> int:
     tenant = os.environ.get("MS_TENANT_ID", "")
     cid = os.environ.get("MS_CLIENT_ID", "")
     secret = os.environ.get("MS_CLIENT_SECRET", "")
+
+    # If anything's still missing, fall through to the encrypted secrets store
+    if not (tenant and cid and secret):
+        from_db = load_from_secrets_manager()
+        tenant = tenant or from_db.get("MS_TENANT_ID", "")
+        cid = cid or from_db.get("MS_CLIENT_ID", "")
+        secret = secret or from_db.get("MS_CLIENT_SECRET", "")
+
     missing = [k for k, v in (("MS_TENANT_ID", tenant), ("MS_CLIENT_ID", cid),
                               ("MS_CLIENT_SECRET", secret)) if not v]
     if missing:
-        print(f"ERROR: missing env: {','.join(missing)}", file=sys.stderr)
+        print(
+            f"ERROR: missing credentials: {','.join(missing)}. "
+            f"Set them in Admin > API Keys, in /opt/shitaleco/.env, "
+            f"or as env vars before running.",
+            file=sys.stderr,
+        )
         return 3
 
     recipients = [a.strip() for a in args.to.split(",") if a.strip()]
