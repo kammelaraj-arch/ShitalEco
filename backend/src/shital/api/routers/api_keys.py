@@ -278,6 +278,187 @@ async def test_azure_backup_connection(ctx: CurrentSpace) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:300]}
 
 
+@settings_router.get("/azure-backup/list")
+async def list_azure_backups(ctx: CurrentSpace, limit: int = 50) -> dict[str, Any]:
+    """List blobs in the Azure container, newest first."""
+    _require_admin(ctx)
+    import asyncio
+
+    from shital.core.fabrics.secrets import SecretsManager
+
+    conn = await SecretsManager.get("AZURE_STORAGE_CONNECTION_STRING")
+    container = await SecretsManager.get("AZURE_STORAGE_CONTAINER", fallback="shitaleco-backups") or "shitaleco-backups"
+    if not conn:
+        return {"ok": False, "error": "Azure Storage connection string is not configured", "blobs": []}
+
+    def _list_sync() -> dict[str, Any]:
+        from azure.storage.blob import BlobServiceClient
+        client = BlobServiceClient.from_connection_string(conn)
+        cc = client.get_container_client(container)
+        if not cc.exists():
+            return {"ok": True, "blobs": [], "container": container}
+        items = []
+        for b in cc.list_blobs():
+            items.append({
+                "name": b.name,
+                "size": int(b.size or 0),
+                "last_modified": b.last_modified.isoformat() if b.last_modified else None,
+                "tier": getattr(b, "blob_tier", None) or "",
+            })
+        items.sort(key=lambda x: x["last_modified"] or "", reverse=True)
+        return {"ok": True, "blobs": items[:limit], "total": len(items), "container": container}
+
+    try:
+        return await asyncio.get_event_loop().run_in_executor(None, _list_sync)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:300], "blobs": []}
+
+
+@settings_router.get("/azure-backup/health")
+async def azure_backup_health(ctx: CurrentSpace) -> dict[str, Any]:
+    """Health summary: latest backup age, Azure config state, recent failures."""
+    _require_admin(ctx)
+    import asyncio
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    from shital.core.fabrics.secrets import SecretsManager
+
+    conn = await SecretsManager.get("AZURE_STORAGE_CONNECTION_STRING")
+    container = await SecretsManager.get("AZURE_STORAGE_CONTAINER", fallback="shitaleco-backups") or "shitaleco-backups"
+
+    out: dict[str, Any] = {
+        "configured": bool(conn),
+        "container": container,
+        "local": {"daily_count": 0, "latest_local": None, "latest_size": 0},
+        "azure": {"latest_blob": None, "latest_at": None, "blob_count": 0},
+        "log": {"last_success": None, "last_failure": None, "recent_failures": 0},
+        "status": "unknown",
+    }
+
+    def _read_local() -> None:
+        daily_dir = "/opt/shitaleco/backups/daily"
+        if not os.path.isdir(daily_dir):
+            return
+        files = [
+            (f, os.path.getmtime(os.path.join(daily_dir, f)), os.path.getsize(os.path.join(daily_dir, f)))
+            for f in os.listdir(daily_dir) if f.endswith(".sql.gz")
+        ]
+        out["local"]["daily_count"] = len(files)
+        if files:
+            files.sort(key=lambda x: x[1], reverse=True)
+            latest = files[0]
+            out["local"]["latest_local"] = datetime.fromtimestamp(latest[1], tz=timezone.utc).isoformat()
+            out["local"]["latest_size"] = latest[2]
+
+    def _read_log() -> None:
+        log_path = "/opt/shitaleco/backups/backup.log"
+        if not os.path.exists(log_path):
+            return
+        try:
+            with open(log_path, errors="ignore") as f:
+                # Last ~80 KB is plenty for recent activity
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - 80_000))
+                tail = f.read().splitlines()
+        except Exception:
+            return
+        recent_failures = 0
+        last_success = None
+        last_failure = None
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        for line in tail:
+            ts = line[1:20] if len(line) > 21 and line[0] == "[" else None
+            try:
+                when = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc) if ts else None
+            except Exception:
+                when = None
+            if "Uploaded to azure" in line:
+                last_success = (ts, line)
+            elif "Azure upload failed" in line or "ERROR" in line:
+                last_failure = (ts, line)
+                if when and when > cutoff:
+                    recent_failures += 1
+        if last_success:
+            out["log"]["last_success"] = {"at": last_success[0], "line": last_success[1][-200:]}
+        if last_failure:
+            out["log"]["last_failure"] = {"at": last_failure[0], "line": last_failure[1][-200:]}
+        out["log"]["recent_failures"] = recent_failures
+
+    def _read_azure() -> None:
+        if not conn:
+            return
+        try:
+            from azure.storage.blob import BlobServiceClient
+            client = BlobServiceClient.from_connection_string(conn)
+            cc = client.get_container_client(container)
+            if not cc.exists():
+                return
+            latest = None
+            count = 0
+            for b in cc.list_blobs():
+                count += 1
+                if b.last_modified and (latest is None or b.last_modified > latest[1]):
+                    latest = (b.name, b.last_modified)
+            out["azure"]["blob_count"] = count
+            if latest:
+                out["azure"]["latest_blob"] = latest[0]
+                out["azure"]["latest_at"] = latest[1].isoformat()
+        except Exception as exc:
+            out["azure"]["error"] = str(exc)[:200]
+
+    def _gather() -> None:
+        _read_local()
+        _read_log()
+        _read_azure()
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, _gather)
+    except Exception as exc:
+        out["error"] = str(exc)[:200]
+
+    # Compute overall status
+    now = datetime.now(timezone.utc)
+    healthy = True
+    reasons: list[str] = []
+    latest_local = out["local"]["latest_local"]
+    latest_at = out["azure"]["latest_at"]
+
+    if not out["local"]["daily_count"]:
+        healthy = False
+        reasons.append("no local backups present")
+    elif latest_local:
+        try:
+            age_h = (now - datetime.fromisoformat(latest_local.replace("Z", "+00:00"))).total_seconds() / 3600
+            if age_h > 30:
+                healthy = False
+                reasons.append(f"latest local backup is {age_h:.0f}h old (>30h)")
+        except Exception:
+            pass
+
+    if conn:
+        if not latest_at:
+            healthy = False
+            reasons.append("Azure container has no blobs yet")
+        else:
+            try:
+                age_h = (now - datetime.fromisoformat(latest_at.replace("Z", "+00:00"))).total_seconds() / 3600
+                if age_h > 30:
+                    healthy = False
+                    reasons.append(f"latest Azure upload is {age_h:.0f}h old (>30h)")
+            except Exception:
+                pass
+
+    if out["log"]["recent_failures"] > 2:
+        healthy = False
+        reasons.append(f"{out['log']['recent_failures']} upload failures in last 7 days")
+
+    out["status"] = "healthy" if healthy else "degraded"
+    out["reasons"] = reasons
+    return out
+
+
 _AZURE_CREDS_FILE = "/opt/shitaleco/backups/.azure-creds.env"
 
 
