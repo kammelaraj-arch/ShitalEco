@@ -427,13 +427,12 @@ async def list_items(
             rows = result.mappings().all()
         return {"items": [_row_to_dict(r) for r in rows], "total": len(rows)}
     except Exception as exc:
-        # Try a minimal query to check if table exists and what columns are available
         try:
             async with SessionLocal() as db2:
                 cols_result = await db2.execute(text("""
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_name = 'catalog_items' AND table_schema = current_schema()
-                    ORDER BY ordinal_position
+                    SELECT attname FROM pg_attribute
+                    WHERE attrelid = 'catalog_items'::regclass AND attnum > 0 AND NOT attisdropped
+                    ORDER BY attnum
                 """))
                 cols = [r[0] for r in cols_result.fetchall()]
                 cnt_result = await db2.execute(text("SELECT COUNT(*) FROM catalog_items WHERE deleted_at IS NULL"))

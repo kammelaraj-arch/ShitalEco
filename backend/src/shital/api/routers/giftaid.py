@@ -97,8 +97,11 @@ async def update_gift_aid_config(ctx: CurrentSpace, config: GiftAidConfig):
 class StoreDeclarationInput(BaseModel):
     order_ref: str
     full_name: str
+    first_name: str = ""
+    surname: str = ""
     postcode: str
     address: str
+    uprn: str = ""
     contact_email: str = ""
     contact_phone: str = ""
     donation_amount: Decimal
@@ -116,24 +119,74 @@ async def store_declaration(ctx: CurrentSpace, body: StoreDeclarationInput):
     declaration_id = str(uuid.uuid4())
     now = datetime.utcnow()
     decl_date = body.donation_date or date.today()
+    first_name = body.first_name or body.full_name.split(" ", 1)[0]
+    surname = body.surname or (body.full_name.split(" ", 1)[1] if " " in body.full_name else "")
 
     try:
         async with SessionLocal() as db:
+            # ── CRM contact upsert ──────────────────────────────────────────
+            contact_id: str | None = None
+            email_key = body.contact_email.strip().lower() if body.contact_email.strip() else None
+            if email_key:
+                contact_uuid = str(uuid.uuid4())
+                c_result = await db.execute(text("""
+                    INSERT INTO contacts
+                        (id, email, first_name, surname, full_name, phone,
+                         gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                         first_source, first_branch_id, created_at, updated_at)
+                    VALUES
+                        (:id, :email, :first, :surname, :name, :phone,
+                         true, :now, true, :now,
+                         'kiosk', '', :now, :now)
+                    ON CONFLICT (email) DO UPDATE SET
+                        first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                        surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                        full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                        phone             = COALESCE(NULLIF(EXCLUDED.phone,''),      contacts.phone),
+                        gdpr_consent      = true,
+                        gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                        tac_consent       = true,
+                        tac_consented_at  = COALESCE(contacts.tac_consented_at,  EXCLUDED.tac_consented_at),
+                        updated_at        = EXCLUDED.updated_at
+                    RETURNING id
+                """), {
+                    "id": contact_uuid, "email": email_key,
+                    "first": first_name, "surname": surname,
+                    "name": body.full_name, "phone": body.contact_phone or "", "now": now,
+                })
+                row = c_result.mappings().first()
+                contact_id = str(row["id"]) if row else contact_uuid
+
+                if body.postcode or body.address:
+                    await db.execute(text("""
+                        INSERT INTO addresses
+                            (id, contact_id, formatted, postcode, uprn,
+                             is_primary, lookup_source, created_at)
+                        VALUES (:id, :cid, :fmt, :pc, :uprn, true, 'kiosk', :now)
+                    """), {
+                        "id": str(uuid.uuid4()), "cid": contact_id,
+                        "fmt": body.address or "", "pc": body.postcode.upper().strip(),
+                        "uprn": body.uprn or "", "now": now,
+                    })
+
             await db.execute(
                 text("""
                     INSERT INTO gift_aid_declarations
-                    (id, order_ref, full_name, postcode, address,
+                    (id, order_ref, full_name, first_name, surname, postcode, address, uprn,
                      contact_email, contact_phone, donation_amount, donation_date,
-                     gift_aid_agreed, hmrc_submitted, created_at)
-                    VALUES (:id, :ref, :name, :pc, :addr, :email, :phone,
-                            :amount, :ddate, :agreed, false, :now)
+                     gift_aid_agreed, contact_id, hmrc_submitted, created_at)
+                    VALUES (:id, :ref, :name, :first, :surname, :pc, :addr, :uprn,
+                            :email, :phone, :amount, :ddate, :agreed, :cid, false, :now)
                 """),
                 {
                     "id": declaration_id, "ref": body.order_ref,
-                    "name": body.full_name, "pc": body.postcode.upper().strip(),
-                    "addr": body.address, "email": body.contact_email,
-                    "phone": body.contact_phone, "amount": str(body.donation_amount),
-                    "ddate": decl_date, "agreed": body.gift_aid_agreed, "now": now,
+                    "name": body.full_name, "first": first_name, "surname": surname,
+                    "pc": body.postcode.upper().strip(),
+                    "addr": body.address, "uprn": body.uprn or "",
+                    "email": body.contact_email, "phone": body.contact_phone,
+                    "amount": str(body.donation_amount),
+                    "ddate": decl_date, "agreed": body.gift_aid_agreed,
+                    "cid": contact_id, "now": now,
                 },
             )
             await db.commit()

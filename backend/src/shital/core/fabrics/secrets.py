@@ -75,9 +75,11 @@ class SecretsManager:
     async def _load_all(cls) -> None:
         """Reload all keys from DB into the in-memory cache."""
         global _cache, _cache_ts
+        import structlog
         from sqlalchemy import text
 
         from shital.core.fabrics.database import SessionLocal
+        _log = structlog.get_logger()
         try:
             async with SessionLocal() as db:
                 result = await db.execute(
@@ -85,15 +87,26 @@ class SecretsManager:
                 )
                 rows = result.fetchall()
             fresh: dict[str, str] = {}
+            failed: list[str] = []
             for row in rows:
+                if not row[1]:
+                    fresh[row[0]] = ""
+                    continue
                 try:
-                    fresh[row[0]] = _decrypt(row[1]) if row[1] else ""
+                    fresh[row[0]] = _decrypt(row[1])
                 except Exception:
-                    fresh[row[0]] = ""      # bad ciphertext — treat as blank
+                    fresh[row[0]] = ""
+                    failed.append(row[0])
+            if failed:
+                _log.warning(
+                    "secrets_decryption_failed",
+                    keys=failed,
+                    hint="JWT_SECRET may have changed — re-save these keys in Admin > API Keys",
+                )
             _cache = fresh
             _cache_ts = time.monotonic()
-        except Exception:
-            # Table may not exist yet — just reset timestamp so we retry next call
+        except Exception as exc:
+            _log.error("secrets_load_failed", error=str(exc))
             _cache_ts = time.monotonic() - _TTL + 10  # retry in 10 s
 
     @classmethod

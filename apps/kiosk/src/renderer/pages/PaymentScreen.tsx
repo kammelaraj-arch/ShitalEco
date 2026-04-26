@@ -7,8 +7,20 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
 type ReaderStatus = 'waiting' | 'processing' | 'succeeded' | 'failed' | 'cancelled'
 
+async function confirmOrder(orderRef: string | null, paymentRef: string, setReceiptSentByConfirm: (v: boolean) => void) {
+  try {
+    const res = await fetch(`${API_BASE}/kiosk/order/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ref: orderRef || '', payment_ref: paymentRef }),
+    })
+    const data = await res.json()
+    if (data.email_sent) setReceiptSentByConfirm(true)
+  } catch { /* non-fatal */ }
+}
+
 export function PaymentScreen() {
-  const { setScreen, paymentIntent, orderRef, items, theme } = useKioskStore()
+  const { setScreen, paymentIntent, orderRef, items, theme, setReceiptSentByConfirm } = useKioskStore()
   const th = THEMES[theme]
 
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
@@ -50,6 +62,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
+          await confirmOrder(orderRef, paymentIntentId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (d.status === 'canceled') {
           clearInterval(poll)
@@ -78,6 +91,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
+          await confirmOrder(orderRef, checkoutId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (['CANCELED', 'CANCEL_REQUESTED'].includes(d.status)) {
           clearInterval(poll)
@@ -102,6 +116,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
+          await confirmOrder(orderRef, sumupCheckoutId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (d.status === 'FAILED') {
           clearInterval(poll)
@@ -130,6 +145,7 @@ export function PaymentScreen() {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
+          await confirmOrder(orderRef, cloverOrderId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
         } else if (d.status === 'FAILED') {
           clearInterval(poll)
@@ -249,7 +265,10 @@ export function PaymentScreen() {
             ← Cancel
           </button>
           {!isTerminal && (
-            <button onClick={() => setScreen('confirmation')} className="py-4 px-6 rounded-2xl text-white font-black text-sm transition-all active:scale-95 shadow-lg" style={{ background: `linear-gradient(135deg,${th.basketBtn},${th.basketBtnHover})`, flex: 2 }}>
+            <button onClick={() => {
+              confirmOrder(orderRef, '', setReceiptSentByConfirm)
+              setScreen('confirmation')
+            }} className="py-4 px-6 rounded-2xl text-white font-black text-sm transition-all active:scale-95 shadow-lg" style={{ background: `linear-gradient(135deg,${th.basketBtn},${th.basketBtnHover})`, flex: 2 }}>
               ✓ Confirm Payment
             </button>
           )}

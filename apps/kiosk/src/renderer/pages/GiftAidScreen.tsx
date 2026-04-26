@@ -85,6 +85,8 @@ function FieldInput({ isMobile, value, onChange, onTap, placeholder, type = 'tex
     return (
       <input
         type={inputType}
+        inputMode={type === 'email' ? 'email' : type === 'tel' ? 'tel' : type === 'postcode' ? 'text' : 'text'}
+        autoCapitalize={type === 'text' ? 'words' : 'off'}
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
@@ -127,24 +129,25 @@ export function GiftAidScreen() {
   const [step, setStep] = useState<'choice' | 'form' | 'no-form'>('choice')
 
   // Form state
-  const [fullName, setFullName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [surname, setSurname] = useState('')
   const [postcode, setPostcode] = useState('')
   const [addressList, setAddressList] = useState<string[]>([])
   const [address, setAddress] = useState('')
   const [lookingUp, setLookingUp] = useState(false)
-  const [contactMode, setContactMode] = useState<'email' | 'phone'>('email')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [declaration, setDeclaration] = useState(false)
   const [gaTerms,     setGaTerms]     = useState(false)
 
   // No-form — improved personal details capture
-  const [noAnonymous, setNoAnonymous] = useState(false)
-  const [noFormName,  setNoFormName]  = useState('')
-  const [noFormEmail, setNoFormEmail] = useState('')
-  const [noFormPhone, setNoFormPhone] = useState('')
-  const [noFormGdpr,  setNoFormGdpr]  = useState(false)
-  const [noFormTerms, setNoFormTerms] = useState(false)
+  const [noAnonymous,     setNoAnonymous]     = useState(false)
+  const [noFormFirstName, setNoFormFirstName] = useState('')
+  const [noFormSurname,   setNoFormSurname]   = useState('')
+  const [noFormEmail,     setNoFormEmail]     = useState('')
+  const [noFormPhone,     setNoFormPhone]     = useState('')
+  const [noFormGdpr,      setNoFormGdpr]      = useState(false)
+  const [noFormTerms,     setNoFormTerms]     = useState(false)
 
   // ── On-screen keyboard ──────────────────────────────────────────────────────
   const [activeField, setActiveField] = useState<string | null>(null)
@@ -157,22 +160,25 @@ export function GiftAidScreen() {
   const closeKb = () => setActiveField(null)
   const handleKbChange = (v: string) => {
     setKbValue(v)
-    if (activeField === 'name')    setFullName(v)
+    if (activeField === 'firstname') setFirstName(v)
+    else if (activeField === 'surname')  setSurname(v)
     else if (activeField === 'postcode') setPostcode(v)
     else if (activeField === 'address')  setAddress(v)
     else if (activeField === 'email')    setEmail(v)
     else if (activeField === 'phone')    setPhone(v)
-    else if (activeField === 'noname')   setNoFormName(v)
-    else if (activeField === 'noemail')  setNoFormEmail(v)
-    else if (activeField === 'nophone')  setNoFormPhone(v)
+    else if (activeField === 'nofirstname') setNoFormFirstName(v)
+    else if (activeField === 'nosurname')   setNoFormSurname(v)
+    else if (activeField === 'noemail')     setNoFormEmail(v)
+    else if (activeField === 'nophone')     setNoFormPhone(v)
   }
 
-  const noHasAnyData = !!(noFormName.trim() || noFormEmail.trim() || noFormPhone.trim())
-  const noContactOk  = noFormEmail.includes('@') || noFormPhone.trim().length > 7
-  const noFormValid  = noAnonymous
+  const noFormFullName = `${noFormFirstName.trim()} ${noFormSurname.trim()}`.trim()
+  const noHasAnyData   = !!(noFormFirstName.trim() || noFormSurname.trim() || noFormEmail.trim() || noFormPhone.trim())
+  const noContactOk    = noFormEmail.includes('@') || noFormPhone.trim().length > 7
+  const noFormValid    = noAnonymous
     ? true
     : hasNamedDonations
-      ? noFormName.trim().length > 1 && noContactOk && (!noHasAnyData || (noFormGdpr && noFormTerms))
+      ? noFormFirstName.trim().length > 0 && noFormSurname.trim().length > 0 && noContactOk && (!noHasAnyData || (noFormGdpr && noFormTerms))
       : !noHasAnyData || (noFormGdpr && noFormTerms)
 
   const handleLookup = async () => {
@@ -188,11 +194,11 @@ export function GiftAidScreen() {
   const handleConfirm = () => {
     setGiftAidDeclaration({
       agreed: true,
-      fullName,
+      fullName: `${firstName.trim()} ${surname.trim()}`.trim(),
       postcode,
       address,
-      contactEmail: contactMode === 'email' ? email : '',
-      contactPhone: contactMode === 'phone' ? phone : '',
+      contactEmail: email,
+      contactPhone: phone,
     })
     setPendingPayment(true)
     setScreen('checkout')
@@ -205,16 +211,18 @@ export function GiftAidScreen() {
   }
 
   const handleNoFormContinue = () => {
-    const name  = noAnonymous ? '' : noFormName.trim()
-    const email = noAnonymous ? '' : noFormEmail.trim()
-    const phone = noAnonymous ? '' : noFormPhone.trim()
+    const firstName = noAnonymous ? '' : noFormFirstName.trim()
+    const surname   = noAnonymous ? '' : noFormSurname.trim()
+    const name      = `${firstName} ${surname}`.trim()
+    const email     = noAnonymous ? '' : noFormEmail.trim()
+    const phone     = noAnonymous ? '' : noFormPhone.trim()
     setGiftAidDeclaration({ agreed: false, fullName: name, postcode: '', address: '', contactEmail: email, contactPhone: phone })
-    setContactInfo({ name, email, phone, gdprConsent: noAnonymous ? false : noFormGdpr, termsConsent: noAnonymous ? false : noFormTerms, anonymous: noAnonymous })
+    setContactInfo({ name, firstName, surname, email, phone, gdprConsent: noAnonymous ? false : noFormGdpr, termsConsent: noAnonymous ? false : noFormTerms, anonymous: noAnonymous })
     setPendingPayment(true)
     setScreen('checkout')
   }
 
-  const formValid = fullName.trim().length > 1 && address.trim().length > 3 && declaration && gaTerms && (email.trim() || phone.trim())
+  const formValid = firstName.trim().length > 0 && surname.trim().length > 0 && address.trim().length > 3 && declaration && gaTerms && email.includes('@')
 
   return (
     <div className="w-full h-full flex flex-col" style={{ fontFamily: 'Inter, system-ui, sans-serif', background: th.mainBg }}>
@@ -292,10 +300,16 @@ export function GiftAidScreen() {
           {step === 'form' && (
             <motion.div key="form" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
 
-              {/* Full Name */}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Full Name *</label>
-                <FieldInput isMobile={isMobile} value={fullName} onChange={v => { setFullName(v); setKbValue(v) }} onTap={() => openKb('name', fullName)} placeholder="Tap to enter full name" isActive={activeField === 'name'} isValid={fullName.length > 1} accent={th.langActive} />
+              {/* Name — split fields */}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">First Name *</label>
+                  <FieldInput isMobile={isMobile} value={firstName} onChange={v => { setFirstName(v); setKbValue(v) }} onTap={() => openKb('firstname', firstName)} placeholder="First name" isActive={activeField === 'firstname'} isValid={firstName.length > 0} accent={th.langActive} />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Surname *</label>
+                  <FieldInput isMobile={isMobile} value={surname} onChange={v => { setSurname(v); setKbValue(v) }} onTap={() => openKb('surname', surname)} placeholder="Surname" isActive={activeField === 'surname'} isValid={surname.length > 0} accent={th.langActive} />
+                </div>
               </div>
 
               {/* Postcode lookup */}
@@ -338,29 +352,16 @@ export function GiftAidScreen() {
                 <FieldInput isMobile={isMobile} value={address} onChange={v => { setAddress(v); setKbValue(v) }} onTap={() => openKb('address', address)} placeholder="Select from above or tap to enter" isActive={activeField === 'address'} isValid={address.length > 3} accent={th.langActive} multiline />
               </div>
 
-              {/* Contact — email or phone toggle */}
+              {/* Email — required */}
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Contact *</label>
-                <div className="flex gap-2 mb-2">
-                  {(['email', 'phone'] as const).map(mode => (
-                    <button
-                      key={mode}
-                      onClick={() => setContactMode(mode)}
-                      className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95"
-                      style={{
-                        background: contactMode === mode ? th.langActive : '#F3F4F6',
-                        color: contactMode === mode ? '#fff' : '#6B7280',
-                      }}
-                    >
-                      {mode === 'email' ? '📧 Email' : '📱 Phone'}
-                    </button>
-                  ))}
-                </div>
-                {contactMode === 'email' ? (
-                  <FieldInput isMobile={isMobile} value={email} onChange={v => { setEmail(v); setKbValue(v) }} onTap={() => openKb('email', email)} placeholder="Tap to enter email" type="email" isActive={activeField === 'email'} isValid={email.includes('@')} accent={th.langActive} />
-                ) : (
-                  <FieldInput isMobile={isMobile} value={phone} onChange={v => { setPhone(v); setKbValue(v) }} onTap={() => openKb('phone', phone)} placeholder="Tap to enter phone" type="tel" isActive={activeField === 'phone'} isValid={phone.length > 7} accent={th.langActive} />
-                )}
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Email Address <span className="text-red-500">*</span></label>
+                <FieldInput isMobile={isMobile} value={email} onChange={v => { setEmail(v); setKbValue(v) }} onTap={() => openKb('email', email)} placeholder="your@email.com" type="email" isActive={activeField === 'email'} isValid={email.includes('@')} accent={th.langActive} />
+              </div>
+
+              {/* Phone — optional */}
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Phone <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
+                <FieldInput isMobile={isMobile} value={phone} onChange={v => { setPhone(v); setKbValue(v) }} onTap={() => openKb('phone', phone)} placeholder="07700 000000" type="tel" isActive={activeField === 'phone'} isValid={phone.length > 7} accent={th.langActive} />
               </div>
 
               {/* Declaration — mandatory, starts un-ticked */}
@@ -460,7 +461,7 @@ export function GiftAidScreen() {
 
                 <button
                   type="button"
-                  onClick={() => { setNoAnonymous(true); setNoFormName(''); setNoFormEmail(''); setNoFormPhone('') }}
+                  onClick={() => { setNoAnonymous(true); setNoFormFirstName(''); setNoFormSurname(''); setNoFormEmail(''); setNoFormPhone('') }}
                   className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
                   style={{ borderColor: noAnonymous ? '#6B7280' : '#e5e7eb', background: noAnonymous ? '#F9FAFB' : '#fff' }}
                 >
@@ -480,16 +481,28 @@ export function GiftAidScreen() {
                 {!noAnonymous && (
                   <motion.div key="fields" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden space-y-3">
 
-                    {/* Full Name */}
-                    <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-                        {formTextConfig.nameLabel}&nbsp;
-                        {hasNamedDonations
-                          ? <span className="text-red-500">*</span>
-                          : <span className="text-gray-300 font-normal normal-case">(optional)</span>
-                        }
-                      </label>
-                      <FieldInput isMobile={isMobile} value={noFormName} onChange={v => { setNoFormName(v); setKbValue(v) }} onTap={() => openKb('noname', noFormName)} placeholder="Tap to enter full name" isActive={activeField === 'noname'} isValid={noFormName.length > 1} accent={th.langActive} />
+                    {/* First Name + Surname */}
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                          First Name&nbsp;
+                          {hasNamedDonations
+                            ? <span className="text-red-500">*</span>
+                            : <span className="text-gray-300 font-normal normal-case">(optional)</span>
+                          }
+                        </label>
+                        <FieldInput isMobile={isMobile} value={noFormFirstName} onChange={v => { setNoFormFirstName(v); setKbValue(v) }} onTap={() => openKb('nofirstname', noFormFirstName)} placeholder="First name" isActive={activeField === 'nofirstname'} isValid={noFormFirstName.trim().length > 0} accent={th.langActive} />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                          Surname&nbsp;
+                          {hasNamedDonations
+                            ? <span className="text-red-500">*</span>
+                            : <span className="text-gray-300 font-normal normal-case">(optional)</span>
+                          }
+                        </label>
+                        <FieldInput isMobile={isMobile} value={noFormSurname} onChange={v => { setNoFormSurname(v); setKbValue(v) }} onTap={() => openKb('nosurname', noFormSurname)} placeholder="Surname" isActive={activeField === 'nosurname'} isValid={noFormSurname.trim().length > 0} accent={th.langActive} />
+                      </div>
                     </div>
 
                     {/* Email */}

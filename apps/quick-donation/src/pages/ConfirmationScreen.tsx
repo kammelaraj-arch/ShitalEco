@@ -2,18 +2,22 @@ import React, { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useDonationStore } from '../store/donation.store'
 
-const AUTO_RESET_SECONDS = 30
+const AUTO_RESET_SECONDS = 12
 
 export function ConfirmationScreen() {
-  const { amount, orderRef, branchId, reset } = useDonationStore()
+  const { amount, orderRef, branchId, reset, orgLogoUrl, orgName, confirmationText, loggedInName } = useDonationStore()
   const [countdown, setCountdown] = useState(AUTO_RESET_SECONDS)
 
-  const branchName =
-    branchId === 'main' ? 'Wembley' :
-    branchId === 'leicester' ? 'Leicester' :
-    branchId === 'reading' ? 'Reading' :
-    branchId === 'mk' ? 'Milton Keynes' :
-    'Shital'
+  const displayName = orgName || loggedInName || 'Shital'
+
+  const branchLabel =
+    branchId === 'main'       ? 'Wembley' :
+    branchId === 'leicester'  ? 'Leicester' :
+    branchId === 'reading'    ? 'Reading' :
+    branchId === 'mk'         ? 'Milton Keynes' :
+    branchId
+
+  const locationLine = orgName ? orgName : `Shital ${branchLabel}`
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -28,14 +32,23 @@ export function ConfirmationScreen() {
   return (
     <div className="w-full h-full flex flex-col bg-white" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
       <div className="flex-1 flex flex-col items-center justify-center px-8 text-center gap-6">
-        {/* Success icon */}
+        {/* Logo or emoji */}
         <motion.div
           initial={{ scale: 0, rotate: -30 }}
           animate={{ scale: 1, rotate: 0 }}
           transition={{ type: 'spring', damping: 14, stiffness: 180 }}
-          className="text-8xl"
         >
-          🙏
+          {orgLogoUrl ? (
+            <img
+              src={orgLogoUrl}
+              alt={displayName}
+              className="w-24 h-24 object-contain rounded-2xl"
+              style={{ background: 'rgba(255,153,51,0.06)', padding: '8px' }}
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+            />
+          ) : (
+            <span className="text-8xl">🙏</span>
+          )}
         </motion.div>
 
         {/* Badge */}
@@ -59,7 +72,7 @@ export function ConfirmationScreen() {
             Thank You!
           </h1>
           <p className="font-black text-xl" style={{ color: '#FF9933' }}>
-            Jay Shri Krishna
+            {confirmationText || 'Jay Shri Krishna'}
           </p>
         </motion.div>
 
@@ -77,7 +90,7 @@ export function ConfirmationScreen() {
             Ref: <span className="font-black text-gray-600">{orderRef}</span>
           </p>
           <p className="text-xs text-gray-400 mt-1">
-            Shital {branchName}
+            {locationLine}
           </p>
         </motion.div>
 
@@ -95,7 +108,7 @@ export function ConfirmationScreen() {
 
       </div>
 
-      {/* New Donation CTA */}
+      {/* Start / New Donation CTA */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -104,10 +117,10 @@ export function ConfirmationScreen() {
       >
         <button
           onClick={reset}
-          className="w-full py-4 rounded-2xl text-white font-black text-lg shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-          style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)', boxShadow: '0 8px 24px #FF993350' }}
+          className="w-full py-5 rounded-2xl text-white font-black text-2xl shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+          style={{ background: 'linear-gradient(135deg,#22C55E,#16A34A)', boxShadow: '0 8px 28px #22C55E55' }}
         >
-          🙏 New Donation
+          ▶ Start
         </button>
       </motion.div>
 

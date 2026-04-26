@@ -174,8 +174,11 @@ export default function DashboardPage() {
               { href: '/settings/users', icon: '🔐', label: 'Users & Roles' },
               { href: '/finance', icon: '💰', label: 'Finance Accounts' },
               { href: '/hr', icon: '👥', label: 'HR Employees' },
+              { href: 'https://service.shital.org.uk', icon: '🙏', label: 'Service Portal (Donations)' },
             ].map((link) => (
               <a key={link.href} href={link.href}
+                target={link.href.startsWith('http') ? '_blank' : undefined}
+                rel={link.href.startsWith('http') ? 'noopener noreferrer' : undefined}
                 className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-all group">
                 <span className="text-xl">{link.icon}</span>
                 <span className="text-white/70 text-sm font-medium group-hover:text-white transition-colors">{link.label}</span>

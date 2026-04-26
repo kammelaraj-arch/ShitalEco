@@ -3,8 +3,8 @@ import './globals.css'
 import { Providers } from './providers'
 
 export const metadata: Metadata = {
-  title: 'Shital — Admin Portal',
-  description: 'Internal ERP portal for Shital (UK Charity)',
+  title: 'Shital — Business Portal',
+  description: 'Internal business portal for SHITAL (UK Charity No. 1138530)',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

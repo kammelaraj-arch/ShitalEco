@@ -49,7 +49,8 @@ function GiftAidScreen({
   const [agreed,    setAgreed]   = useState(true)
   const [gdpr,      setGdpr]     = useState(true)
   const [terms,     setTerms]    = useState(false)
-  const [fullName,  setFullName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [surname,   setSurname]   = useState('')
   const [postcode,  setPostcode] = useState('')
   const [addresses, setAddresses]= useState<string[]>([])
   const [resolvedPc,setResolvedPc]=useState('')
@@ -70,7 +71,8 @@ function GiftAidScreen({
   const closeKb = () => setActiveField(null)
   const handleKbChange = (v: string) => {
     setKbValue(v)
-    if (activeField === 'fullname') setFullName(v)
+    if (activeField === 'firstname') setFirstName(v)
+    else if (activeField === 'surname')  setSurname(v)
     else if (activeField === 'postcode') setPostcode(v.toUpperCase())
     else if (activeField === 'phone') setPhone(v)
     else if (activeField === 'email') setEmail(v)
@@ -101,11 +103,12 @@ function GiftAidScreen({
   function handleContinue() {
     if (!agreed) { setError('Please confirm the Gift Aid declaration'); return }
     if (!terms)  { setError('Please accept the Terms & Conditions to proceed'); return }
-    if (!fullName.trim()) { setError('Please enter your full name'); return }
+    if (!firstName.trim()) { setError('Please enter your first name'); return }
+    if (!surname.trim())   { setError('Please enter your surname'); return }
     if (!address) { setError('Please look up your postcode and select your address'); return }
     if (!phone.trim() && !email.trim()) { setError('Please enter a phone number or email'); return }
     setError('')
-    onConfirm({ fullName, postcode: resolvedPc || postcode.toUpperCase(), address, email, phone, agreed })
+    onConfirm({ fullName: `${firstName.trim()} ${surname.trim()}`, postcode: resolvedPc || postcode.toUpperCase(), address, email, phone, agreed })
   }
 
   return (
@@ -202,15 +205,27 @@ function GiftAidScreen({
           </p>
         </button>
 
-        {/* Full Name */}
-        <div>
-          <label className="block text-sm font-black text-gray-800 mb-1.5">Full Name <span className="text-red-500">*</span></label>
-          <div
-            onClick={() => openKb('fullname', fullName)}
-            className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
-            style={{ borderColor: activeField === 'fullname' ? '#16a34a' : fullName.length > 1 ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'fullname' ? '0 0 0 3px #16a34a25' : 'none' }}
-          >
-            {fullName ? <span className="text-gray-900">{fullName}</span> : <span className="text-gray-400">Tap to enter full name</span>}
+        {/* First Name + Surname */}
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <label className="block text-sm font-black text-gray-800 mb-1.5">First Name <span className="text-red-500">*</span></label>
+            <div
+              onClick={() => openKb('firstname', firstName)}
+              className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+              style={{ borderColor: activeField === 'firstname' ? '#16a34a' : firstName.length > 0 ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'firstname' ? '0 0 0 3px #16a34a25' : 'none' }}
+            >
+              {firstName ? <span className="text-gray-900">{firstName}</span> : <span className="text-gray-400">First name</span>}
+            </div>
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm font-black text-gray-800 mb-1.5">Surname <span className="text-red-500">*</span></label>
+            <div
+              onClick={() => openKb('surname', surname)}
+              className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+              style={{ borderColor: activeField === 'surname' ? '#16a34a' : surname.length > 0 ? '#16a34a' : '#e5e7eb', boxShadow: activeField === 'surname' ? '0 0 0 3px #16a34a25' : 'none' }}
+            >
+              {surname ? <span className="text-gray-900">{surname}</span> : <span className="text-gray-400">Surname</span>}
+            </div>
           </div>
         </div>
 
@@ -357,37 +372,42 @@ function ContactCaptureScreen({
   onConfirm: (info: { name: string; email: string; phone: string; anonymous: boolean }) => void
   onBack: () => void
 }) {
-  const [anonymous, setAnonymous] = useState(false)
-  const [name,  setName]  = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [gdpr,  setGdpr]  = useState(true)
-  const [terms, setTerms] = useState(true)
-  const [error, setError] = useState('')
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
 
-  // On-screen keyboard
+  const [anonymous,  setAnonymous]  = useState(false)
+  const [firstName,  setFirstName]  = useState('')
+  const [surname,    setSurname]    = useState('')
+  const [email,      setEmail]      = useState('')
+  const [phone,      setPhone]      = useState('')
+  const [gdpr,       setGdpr]       = useState(true)
+  const [terms,      setTerms]      = useState(true)
+  const [error,      setError]      = useState('')
+
+  // On-screen keyboard (kiosk only — hidden on mobile)
   const [activeField, setActiveField] = useState<string | null>(null)
   const [kbValue, setKbValue] = useState('')
   const kbMode = activeField === 'phone' ? 'numeric' as const : 'text' as const
 
-  const openKb = (field: string, initial: string) => { setKbValue(initial); setActiveField(field) }
+  const openKb = (field: string, initial: string) => { if (!isMobile) { setKbValue(initial); setActiveField(field) } }
   const closeKb = () => setActiveField(null)
   const handleKbChange = (v: string) => {
     setKbValue(v)
-    if (activeField === 'name') setName(v)
+    if (activeField === 'firstname') setFirstName(v)
+    else if (activeField === 'surname') setSurname(v)
     else if (activeField === 'email') setEmail(v)
     else if (activeField === 'phone') setPhone(v)
   }
 
   function handleContinue() {
     if (!anonymous) {
-      if (!name.trim()) { setError('Please enter your full name'); return }
-      if (!phone.trim() && !email.trim()) { setError('Please enter a phone number or email address'); return }
+      if (!firstName.trim()) { setError('Please enter your first name'); return }
+      if (!surname.trim()) { setError('Please enter your surname'); return }
+      if (!email.trim() || !email.includes('@')) { setError('Please enter a valid email address'); return }
       if (!terms) { setError('Please accept the Terms & Conditions to proceed'); return }
       if (!gdpr) { setError('Please accept the privacy consent'); return }
     }
     setError('')
-    onConfirm({ name, email, phone, anonymous })
+    onConfirm({ name: `${firstName.trim()} ${surname.trim()}`.trim(), email, phone, anonymous })
   }
 
   return (
@@ -472,37 +492,90 @@ function ContactCaptureScreen({
         {/* Contact fields — hidden when anonymous */}
         {!anonymous && (
           <>
-            <div>
-              <label className="block text-sm font-black text-gray-800 mb-1.5">Full Name <span className="text-red-500">*</span></label>
-              <div
-                onClick={() => openKb('name', name)}
-                className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
-                style={{ borderColor: activeField === 'name' ? '#FF9933' : name.length > 1 ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'name' ? '0 0 0 3px #FF993325' : 'none' }}
-              >
-                {name ? <span className="text-gray-900">{name}</span> : <span className="text-gray-400">Tap to enter full name</span>}
+            {/* First Name + Surname side by side */}
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="block text-sm font-black text-gray-800 mb-1.5">First Name <span className="text-red-500">*</span></label>
+                {isMobile ? (
+                  <input
+                    type="text" inputMode="text" autoCapitalize="words"
+                    value={firstName} onChange={e => setFirstName(e.target.value)}
+                    placeholder="First name"
+                    className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium min-h-[52px] bg-white outline-none"
+                    style={{ borderColor: firstName.length > 0 ? '#FF9933' : '#e5e7eb' }}
+                  />
+                ) : (
+                  <div
+                    onClick={() => openKb('firstname', firstName)}
+                    className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white"
+                    style={{ borderColor: activeField === 'firstname' ? '#FF9933' : firstName.length > 0 ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'firstname' ? '0 0 0 3px #FF993325' : 'none' }}
+                  >
+                    {firstName ? <span className="text-gray-900">{firstName}</span> : <span className="text-gray-400">First name</span>}
+                  </div>
+                )}
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-black text-gray-800 mb-1.5">Surname <span className="text-red-500">*</span></label>
+                {isMobile ? (
+                  <input
+                    type="text" inputMode="text" autoCapitalize="words"
+                    value={surname} onChange={e => setSurname(e.target.value)}
+                    placeholder="Surname"
+                    className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium min-h-[52px] bg-white outline-none"
+                    style={{ borderColor: surname.length > 0 ? '#FF9933' : '#e5e7eb' }}
+                  />
+                ) : (
+                  <div
+                    onClick={() => openKb('surname', surname)}
+                    className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white"
+                    style={{ borderColor: activeField === 'surname' ? '#FF9933' : surname.length > 0 ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'surname' ? '0 0 0 3px #FF993325' : 'none' }}
+                  >
+                    {surname ? <span className="text-gray-900">{surname}</span> : <span className="text-gray-400">Surname</span>}
+                  </div>
+                )}
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-black text-gray-800 mb-1.5">Email Address <span className="text-gray-400 font-normal text-xs">(required if no phone)</span></label>
-              <div
-                onClick={() => openKb('email', email)}
-                className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
-                style={{ borderColor: activeField === 'email' ? '#FF9933' : email.includes('@') ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'email' ? '0 0 0 3px #FF993325' : 'none' }}
-              >
-                {email ? <span className="text-gray-900">{email}</span> : <span className="text-gray-400">Tap to enter email address</span>}
-              </div>
+              <label className="block text-sm font-black text-gray-800 mb-1.5">Email Address <span className="text-red-500">*</span></label>
+              {isMobile ? (
+                <input
+                  type="email" inputMode="email"
+                  value={email} onChange={e => setEmail(e.target.value)}
+                  placeholder="your@email.com"
+                  className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium min-h-[52px] bg-white outline-none"
+                  style={{ borderColor: email.includes('@') ? '#FF9933' : '#e5e7eb' }}
+                />
+              ) : (
+                <div
+                  onClick={() => openKb('email', email)}
+                  className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+                  style={{ borderColor: activeField === 'email' ? '#FF9933' : email.includes('@') ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'email' ? '0 0 0 3px #FF993325' : 'none' }}
+                >
+                  {email ? <span className="text-gray-900">{email}</span> : <span className="text-gray-400">Tap to enter email address</span>}
+                </div>
+              )}
             </div>
 
             <div>
-              <label className="block text-sm font-black text-gray-800 mb-1.5">Phone / WhatsApp <span className="text-gray-400 font-normal text-xs">(required if no email)</span></label>
-              <div
-                onClick={() => openKb('phone', phone)}
-                className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
-                style={{ borderColor: activeField === 'phone' ? '#FF9933' : phone.length > 7 ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'phone' ? '0 0 0 3px #FF993325' : 'none' }}
-              >
-                {phone ? <span className="text-gray-900">{phone}</span> : <span className="text-gray-400">Tap to enter phone number</span>}
-              </div>
+              <label className="block text-sm font-black text-gray-800 mb-1.5">Phone / WhatsApp <span className="text-gray-400 font-normal text-xs">(optional)</span></label>
+              {isMobile ? (
+                <input
+                  type="tel" inputMode="tel"
+                  value={phone} onChange={e => setPhone(e.target.value)}
+                  placeholder="07700 000000"
+                  className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium min-h-[52px] bg-white outline-none"
+                  style={{ borderColor: phone.length > 7 ? '#FF9933' : '#e5e7eb' }}
+                />
+              ) : (
+                <div
+                  onClick={() => openKb('phone', phone)}
+                  className="w-full border-2 rounded-2xl px-4 py-3.5 text-base font-medium cursor-pointer flex items-center min-h-[52px] bg-white transition-colors"
+                  style={{ borderColor: activeField === 'phone' ? '#FF9933' : phone.length > 7 ? '#FF9933' : '#e5e7eb', boxShadow: activeField === 'phone' ? '0 0 0 3px #FF993325' : 'none' }}
+                >
+                  {phone ? <span className="text-gray-900">{phone}</span> : <span className="text-gray-400">Tap to enter phone number</span>}
+                </div>
+              )}
             </div>
 
             {/* GDPR */}
@@ -593,12 +666,16 @@ export function BasketScreen() {
   }
 
   function handleGiftAidConfirm(decl: { fullName: string; postcode: string; address: string; email: string; phone: string; agreed: boolean }) {
+    const parts = decl.fullName.trim().split(' ')
+    const fn = parts[0] || ''
+    const sn = parts.slice(1).join(' ') || ''
     setGiftAidDeclaration({
       agreed: decl.agreed, fullName: decl.fullName, postcode: decl.postcode,
       address: decl.address, contactEmail: decl.email, contactPhone: decl.phone,
     })
     setContactInfo({
-      name: decl.fullName, email: decl.email, phone: decl.phone,
+      name: decl.fullName, firstName: fn, surname: sn,
+      email: decl.email, phone: decl.phone,
       anonymous: false, gdprConsent: true, termsConsent: true,
     })
     setPendingPayment(true)

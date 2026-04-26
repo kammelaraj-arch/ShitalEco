@@ -24,33 +24,48 @@ export async function apiFetch<T = unknown>(
   init?: RequestInit,
   timeoutMs = 15000,
 ): Promise<T> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  let res: Response
-  try {
-    res = await fetch(`${API_BASE}${path}`, {
-      ...init,
-      signal: controller.signal,
-      headers: {
-        ...authHeaders(),
-        ...(init?.headers ?? {}),
-      },
-    })
-  } catch (err: unknown) {
-    clearTimeout(timer)
-    if (err instanceof Error && err.name === 'AbortError') throw new Error('Request timed out — please try again')
-    throw err
-  }
-  clearTimeout(timer)
-  if (res.status === 401) {
-    // Token expired or invalid — clear it and force re-login
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('shital_access_token')
-      window.location.replace('/admin/login')
+  const MAX_RETRIES = 3
+  const RETRYABLE = new Set([502, 503, 504])
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    let res: Response
+    try {
+      res = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        signal: controller.signal,
+        headers: {
+          ...authHeaders(),
+          ...(init?.headers ?? {}),
+        },
+      })
+    } catch (err: unknown) {
+      clearTimeout(timer)
+      if (err instanceof Error && err.name === 'AbortError') {
+        if (attempt < MAX_RETRIES) { await _sleep(1000 * 2 ** attempt); continue }
+        throw new Error('Request timed out — please try again')
+      }
+      throw err
     }
-    throw new Error('Session expired. Please log in again.')
-  }
-  if (!res.ok) {
+    clearTimeout(timer)
+
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('shital_access_token')
+        window.location.replace('/admin/login')
+      }
+      throw new Error('Session expired. Please log in again.')
+    }
+
+    if (res.ok) return res.json() as Promise<T>
+
+    // Auto-retry on gateway/timeout errors
+    if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES) {
+      await _sleep(1000 * 2 ** attempt)
+      continue
+    }
+
     let msg = ''
     const ct = res.headers.get('content-type') || ''
     if (ct.includes('application/json')) {
@@ -63,5 +78,7 @@ export async function apiFetch<T = unknown>(
     }
     throw new Error(msg)
   }
-  return res.json() as Promise<T>
+  throw new Error('Server is temporarily unavailable — please try again in a moment')
 }
+
+function _sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }

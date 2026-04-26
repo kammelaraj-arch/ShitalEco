@@ -7,7 +7,10 @@ import { clsx } from 'clsx'
 import { useBranding } from '@/lib/branding'
 import { useKeyboardEnabled } from '@/components/ui/AdminKeyboard'
 
-const NAV_SECTIONS = [
+interface NavItem { href: string; icon: string; label: string; external?: boolean }
+interface NavSection { label: string; items: NavItem[] }
+
+const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Overview',
     items: [
@@ -52,15 +55,23 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    label: 'CRM',
+    items: [
+      { href: '/contacts',   icon: '👤', label: 'Contacts' },
+      { href: '/addresses',  icon: '📍', label: 'Addresses' },
+    ],
+  },
+  {
     label: 'Kiosk',
     items: [
-      { href: '/kiosk/projects',    icon: '🏗️', label: 'Projects' },
-      { href: '/kiosk/services',    icon: '🛕', label: 'Services' },
-      { href: '/kiosk/items',          icon: '📦', label: 'Catalog Items' },
-      { href: '/kiosk/orders',         icon: '🧾', label: 'Orders' },
-      { href: '/kiosk/receipt-test',   icon: '🖨️', label: 'Receipt Printer Test' },
-      { href: '/devices',              icon: '🖥️', label: 'Devices' },
-      { href: '/terminal-devices',     icon: '💳', label: 'Card Readers' },
+      { href: '/kiosk/projects',     icon: '🏗️', label: 'Projects' },
+      { href: '/kiosk/services',     icon: '🛕', label: 'Services' },
+      { href: '/kiosk/items',        icon: '📦', label: 'Catalog Items' },
+      { href: '/kiosk/orders',       icon: '🧾', label: 'Orders' },
+      { href: '/kiosk/order-items',  icon: '🛒', label: 'Order Items' },
+      { href: '/kiosk/receipt-test', icon: '🖨️', label: 'Receipt Printer Test' },
+      { href: '/devices',            icon: '🖥️', label: 'Devices' },
+      { href: '/terminal-devices',   icon: '💳', label: 'Card Readers' },
     ],
   },
   {
@@ -72,6 +83,14 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    label: 'Portals',
+    items: [
+      { href: 'https://service.shital.org.uk', icon: '🙏', label: 'Service Portal', external: true },
+      { href: 'https://kiosk.shital.org.uk',   icon: '🖥️', label: 'Kiosk',          external: true },
+      { href: 'https://screen.shital.org.uk',  icon: '📺', label: 'Smart Screen',   external: true },
+    ],
+  },
+  {
     label: 'System',
     items: [
       { href: '/settings/branding',         icon: '🎨', label: 'Branding' },
@@ -80,6 +99,7 @@ const NAV_SECTIONS = [
       { href: '/settings/users',            icon: '🔐', label: 'Users & Roles' },
       { href: '/settings/azure-ad',         icon: '🔷', label: 'Azure AD / SSO' },
       { href: '/settings/address-lookup',   icon: '📮', label: 'Address Lookup' },
+      { href: '/settings/app-permissions',    icon: '🗂️', label: 'App Permissions' },
       { href: '/settings/api-keys',         icon: '🔑', label: 'API Keys' },
       { href: '/settings/azure-backup',     icon: '☁️', label: 'Azure Backups' },
       { href: '/settings/system',           icon: '🛡️', label: 'System & Backups' },
@@ -178,29 +198,37 @@ export function Sidebar({ open = true, onClose }: SidebarProps) {
             </p>
             <ul className="space-y-0.5">
               {section.items.map((item) => {
-                const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                const isActive = !item.external && (pathname === item.href || pathname.startsWith(item.href + '/'))
+                const inner = (
+                  <motion.div
+                    whileHover={{ x: 2 }}
+                    whileTap={{ scale: 0.98 }}
+                    className={clsx(
+                      'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all',
+                      isActive ? 'text-white' : 'text-white/45 hover:text-white/80 hover:bg-white/5'
+                    )}
+                    style={isActive ? {
+                      background: 'rgba(185,28,28,0.18)',
+                      border: '1px solid rgba(185,28,28,0.28)',
+                    } : {}}
+                  >
+                    <span className="text-lg leading-none">{item.icon}</span>
+                    <span className="font-medium text-sm flex-1">{item.label}</span>
+                    {isActive && (
+                      <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#E01010' }} />
+                    )}
+                    {item.external && (
+                      <span className="text-white/20 text-xs">↗</span>
+                    )}
+                  </motion.div>
+                )
                 return (
                   <li key={item.href}>
-                    <Link href={item.href}>
-                      <motion.div
-                        whileHover={{ x: 2 }}
-                        whileTap={{ scale: 0.98 }}
-                        className={clsx(
-                          'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all',
-                          isActive ? 'text-white' : 'text-white/45 hover:text-white/80 hover:bg-white/5'
-                        )}
-                        style={isActive ? {
-                          background: 'rgba(185,28,28,0.18)',
-                          border: '1px solid rgba(185,28,28,0.28)',
-                        } : {}}
-                      >
-                        <span className="text-lg leading-none">{item.icon}</span>
-                        <span className="font-medium text-sm flex-1">{item.label}</span>
-                        {isActive && (
-                          <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#E01010' }} />
-                        )}
-                      </motion.div>
-                    </Link>
+                    {item.external ? (
+                      <a href={item.href} target="_blank" rel="noopener noreferrer">{inner}</a>
+                    ) : (
+                      <Link href={item.href}>{inner}</Link>
+                    )}
                   </li>
                 )
               })}

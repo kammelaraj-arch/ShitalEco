@@ -205,6 +205,20 @@ export function HomeScreen() {
   const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl } = useKioskStore()
   const th = THEMES[theme]
   const [activeNav, setActiveNav] = useState(() => homeActiveNav || 'donations')
+
+  // Hidden staff access: tap top-right corner 3× within 3 s → admin screen
+  const cornerTaps = React.useRef(0)
+  const cornerTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleCornerTap = () => {
+    cornerTaps.current += 1
+    if (cornerTimer.current) clearTimeout(cornerTimer.current)
+    if (cornerTaps.current >= 3) {
+      cornerTaps.current = 0
+      setScreen('admin')
+      return
+    }
+    cornerTimer.current = setTimeout(() => { cornerTaps.current = 0 }, 3000)
+  }
   const [services, setServices] = useState<Service[]>([])
   const [softDonations, setSoftDonations] = useState<DbItem[]>([])
   const [brickTiers, setBrickTiers] = useState<DbItem[]>([])
@@ -414,6 +428,13 @@ export function HomeScreen() {
         >
           <span className="text-base">⚙️</span>
         </button>
+
+        {/* Hidden staff tap zone — 3 taps within 3 s → admin */}
+        <div
+          onPointerDown={handleCornerTap}
+          className="w-8 h-9 rounded-xl select-none flex-shrink-0"
+          style={{ WebkitTapHighlightColor: 'transparent' }}
+        />
       </header>
 
       {/* ══ MOBILE NAV (portrait phones) ══════════════════════════════════════ */}
@@ -558,6 +579,25 @@ export function HomeScreen() {
                   )
                 })}
               </div>
+            </div>
+          )}
+
+          {/* Monthly Giving banner — shown on donations tab */}
+          {activeNav === 'donations' && (
+            <div className="flex-shrink-0 px-3 pt-3 pb-1">
+              <button
+                onClick={() => setScreen('monthly-giving')}
+                className="w-full rounded-xl p-3 flex items-center gap-3 transition-all active:scale-[0.99]"
+                style={{ background: 'linear-gradient(135deg,rgba(22,163,74,0.12),rgba(21,128,61,0.08))', border: '1.5px solid rgba(34,197,94,0.3)' }}
+              >
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-xl"
+                  style={{ background: 'rgba(22,163,74,0.15)' }}>🔁</div>
+                <div className="flex-1 text-left">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-green-700">Monthly Giving</p>
+                  <p className="font-black text-sm text-gray-800">Make a big impact — from £5/month</p>
+                </div>
+                <span className="text-green-500 font-bold text-lg">›</span>
+              </button>
             </div>
           )}
 

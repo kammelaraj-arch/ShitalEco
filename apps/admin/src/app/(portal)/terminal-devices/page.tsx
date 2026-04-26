@@ -75,7 +75,7 @@ function providerBadge(provider: string) {
     stripe_terminal: { icon: '⚡', label: 'Stripe Terminal', cls: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/20' },
     square:          { icon: '◼', label: 'Square',          cls: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
     clover:          { icon: '🍀', label: 'Clover Flex',     cls: 'bg-orange-500/15 text-orange-400 border-orange-500/20' },
-    sumup:           { icon: '💳', label: 'SumUp',           cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20' },
+    sumup:           { icon: '💳', label: 'SumUp Reader',     cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20' },
     cash:            { icon: '💵', label: 'Cash',            cls: 'bg-green-500/15 text-green-400 border-green-500/20' },
   }
   return map[provider] ?? { icon: '?', label: provider, cls: 'bg-white/10 text-white/50 border-white/10' }
@@ -144,7 +144,7 @@ function DeviceModal({
     { id: 'stripe_terminal', label: 'Stripe Terminal (WisePOS E)', icon: '⚡' },
     { id: 'square',          label: 'Square Terminal',             icon: '◼' },
     { id: 'clover',          label: 'Clover Flex',                 icon: '🍀' },
-    { id: 'sumup',           label: 'SumUp Solo',                  icon: '💳' },
+    { id: 'sumup',           label: 'SumUp (Solo / Air Plus / Kiosk)', icon: '💳' },
     { id: 'cash',            label: 'Cash / Manual',               icon: '💵' },
   ]
 
@@ -226,7 +226,7 @@ function DeviceModal({
             <Field label="Clover Device ID" value={form.clover_device_id} onChange={v => set('clover_device_id', v)} placeholder="CLOVER_DEVICE_XXXXXXXXX" mono />
           )}
           {form.provider === 'sumup' && (
-            <Field label="SumUp Reader Serial" value={form.sumup_reader_serial} onChange={v => set('sumup_reader_serial', v)} placeholder="e.g. SNR-XXXXXXX" mono />
+            <Field label="SumUp Reader Serial" value={form.sumup_reader_serial} onChange={v => set('sumup_reader_serial', v)} placeholder="e.g. SNR-XXXXXXX (Solo / Air Plus / Kiosk)" mono />
           )}
 
           {/* Hardware */}
@@ -562,7 +562,9 @@ export default function TerminalDevicesPage() {
           >
             <option value="">All Providers</option>
             <option value="stripe_terminal">Stripe Terminal</option>
+            <option value="sumup">SumUp</option>
             <option value="square">Square</option>
+            <option value="clover">Clover</option>
             <option value="cash">Cash</option>
           </select>
         </div>
@@ -627,7 +629,7 @@ export default function TerminalDevicesPage() {
                       <td className="px-5 py-4 pl-6">
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-lg flex-shrink-0">
-                            {d.provider === 'stripe_terminal' ? '⚡' : d.provider === 'square' ? '◼' : '💵'}
+                            {{ stripe_terminal: '⚡', square: '◼', clover: '🍀', sumup: '💳', cash: '💵' }[d.provider] ?? '💳'}
                           </div>
                           <div>
                             <p className="text-white font-semibold text-sm">{d.label}</p>
@@ -652,13 +654,12 @@ export default function TerminalDevicesPage() {
 
                       {/* Reader ID */}
                       <td className="px-5 py-4">
-                        {d.stripe_reader_id ? (
-                          <span className="text-white/50 text-xs font-mono bg-white/5 px-2 py-1 rounded-lg">{d.stripe_reader_id}</span>
-                        ) : d.square_device_id ? (
-                          <span className="text-white/50 text-xs font-mono bg-white/5 px-2 py-1 rounded-lg">{d.square_device_id}</span>
-                        ) : (
-                          <span className="text-white/20 text-xs">—</span>
-                        )}
+                        {(() => {
+                          const rid = d.stripe_reader_id || d.square_device_id || d.clover_device_id || d.sumup_reader_serial
+                          return rid
+                            ? <span className="text-white/50 text-xs font-mono bg-white/5 px-2 py-1 rounded-lg">{rid}</span>
+                            : <span className="text-white/20 text-xs">—</span>
+                        })()}
                       </td>
 
                       {/* Assigned to */}

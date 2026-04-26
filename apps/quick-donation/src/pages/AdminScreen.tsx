@@ -4,158 +4,193 @@ import { useDonationStore } from '../store/donation.store'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
-interface Reader {
-  id: string
-  label: string
-  device_type: string
-  status: string
+interface Reader { id: string; label: string; device_type: string; status: string }
+interface SumUpReader { id: string; serial: string; name: string; status: string }
+
+interface LoginResponse {
+  authenticated: boolean
+  error?: string
+  user?: { name: string; email: string }
+  branch?: { id: string; name: string }
+  profile?: { profile_name: string; stripe_reader_id: string; device_label: string } | null
+  stripe_reader_id?: string | null
+  reader_label?: string | null
+  reader_provider?: string | null
+  sumup_reader_serial?: string | null
+  clover_device_id?: string | null
+  show_monthly_giving?: boolean
+  enable_gift_aid?: boolean
+  tap_and_go?: boolean
+  donate_title?: string
+  monthly_giving_text?: string
+  monthly_giving_amount?: number
+  confirmation_text?: string
+  kiosk_theme?: string
+  org_logo_url?: string
+  org_name?: string
+  bg_color?: string
 }
 
-interface KioskProfile {
-  profile_name: string
-  kiosk_type: string
-  display_name: string
-  device_label: string
-  stripe_reader_id: string
-  preset_amounts: number[]
-  default_purpose: string
-  theme: string
-}
+interface AzureConfig { client_id: string; authority: string }
 
-interface LoggedInUser {
-  name: string
-  email: string
-  branch: { id: string; name: string }
-  profile: KioskProfile | null
-}
+interface CloverDevice { id: string; name: string; model: string; serial: string; status: string }
 
 export function AdminScreen() {
   const {
-    branchId, stripeReaderId, stripeReaderLabel,
-    setBranchId, setReader, setScreen,
+    branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, cloverDeviceId,
+    isDeviceLoggedIn, loggedInName, loggedInUsername,
+    setBranchId, setReader, setDeviceFlags, setDeviceLoggedIn, setScreen,
   } = useDonationStore()
+
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<'idle' | 'ok' | 'fail'>('idle')
 
   const [readers, setReaders] = useState<Reader[]>([])
   const [loading, setLoading] = useState(false)
 
-  // Login state
-  const [loggedIn, setLoggedIn] = useState<LoggedInUser | null>(null)
-  const [email, setEmail] = useState('')
+  // SumUp state
+  const [sumupReaders, setSumupReaders]     = useState<SumUpReader[]>([])
+
+  // Clover state
+  const [cloverReaders, setCloverReaders]   = useState<CloverDevice[]>([])
+  const [cloverLoading, setCloverLoading]   = useState(false)
+  const [cloverError, setCloverError]       = useState('')
+  const [sumupSerial, setSumupSerial]       = useState(sumupReaderId || '')
+  const [sumupLoading, setSumupLoading]     = useState(false)
+  const [sumupTestResult, setSumupTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const [sumupError, setSumupError]         = useState('')
+
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [azureEnabled, setAzureEnabled] = useState(false)
-  const [azureConfig, setAzureConfig] = useState<{ client_id: string; authority: string } | null>(null)
+  const [azureConfig, setAzureConfig] = useState<AzureConfig | null>(null)
 
-  // Check Azure AD availability on mount
   useEffect(() => {
     fetch(`${API_BASE}/auth/azure/config`)
       .then(r => r.json())
-      .then(d => {
-        if (d.enabled && d.client_id) {
-          setAzureEnabled(true)
-          setAzureConfig({ client_id: d.client_id, authority: d.authority })
-        }
-      })
+      .then(d => { if (d.enabled && d.client_id) { setAzureEnabled(true); setAzureConfig({ client_id: d.client_id, authority: d.authority }) } })
       .catch(() => {})
   }, [])
 
-  function applyProfile(data: { branch: { id: string; name: string }; user: { name: string; email: string }; profile: KioskProfile | null; stripe_reader_id?: string | null; reader_label?: string | null }) {
+  // Auto-load readers when already logged in (e.g. after reboot)
+  useEffect(() => {
+    if (isDeviceLoggedIn) loadReaders()
+  }, [isDeviceLoggedIn]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function applyLogin(data: LoginResponse, enteredUsername: string) {
+    if (!data.branch) return
     setBranchId(data.branch.id)
-    // Prefer the card reader assigned in admin Devices page (top-level),
-    // fall back to the kiosk_profiles reader if set.
-    const readerId = data.stripe_reader_id || data.profile?.stripe_reader_id || ''
-    const readerLabel = data.reader_label || data.profile?.device_label || readerId
-    if (readerId) {
-      setReader(readerId, readerLabel)
-    }
-    setLoggedIn({
-      name: data.user.name,
-      email: data.user.email,
-      branch: data.branch,
-      profile: data.profile,
+
+    // DB is the single source of truth for reader config.
+    // Always apply — clears stale localStorage if device has no reader assigned.
+    const readerId = data.stripe_reader_id || ''
+    const sumupSerial = data.sumup_reader_serial || ''
+    const cloverId = data.clover_device_id || ''
+    const readerLabel = data.reader_label || readerId || sumupSerial || cloverId
+    const provider = (sumupSerial ? 'sumup' : cloverId ? 'clover' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
+    setReader(readerId, readerLabel, provider, sumupSerial, '', cloverId)
+
+    setDeviceFlags({
+      showMonthlyGiving: data.show_monthly_giving ?? false,
+      enableGiftAid: data.enable_gift_aid ?? false,
+      tapAndGo: data.tap_and_go ?? true,
+      donateTitle: data.donate_title ?? 'Tap & Donate',
+      monthlyGivingText: data.monthly_giving_text ?? 'Make a big impact from just £5/month',
+      monthlyGivingAmount: data.monthly_giving_amount ?? 5,
+      confirmationText: data.confirmation_text ?? '',
+      kioskTheme: data.kiosk_theme ?? 'saffron',
+      orgLogoUrl: data.org_logo_url ?? '',
+      orgName: data.org_name ?? '',
+      bgColor: data.bg_color ?? '',
     })
+    // Persist login — survives reboots until explicit logout
+    setDeviceLoggedIn(true, data.user?.name || enteredUsername, enteredUsername)
+    loadReaders()
+    setScreen('donate')
+  }
+
+  async function handleSync() {
+    if (!loggedInUsername) return
+    setSyncing(true); setSyncResult('idle')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/quick-donation/refresh-config?username=${encodeURIComponent(loggedInUsername)}`)
+      const data = await res.json()
+      if (!data.ok) { setSyncResult('fail'); return }
+      setBranchId(data.branch.id)
+      // Always overwrite reader from DB — same rule as login
+      const syncSerial = data.sumup_reader_serial || ''
+      const syncClover = data.clover_device_id || ''
+      const provider = (syncSerial ? 'sumup' : syncClover ? 'clover' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
+      setReader(data.stripe_reader_id || '', data.reader_label || data.stripe_reader_id || syncSerial || syncClover, provider, syncSerial, '', syncClover)
+      setDeviceFlags({
+        showMonthlyGiving: data.show_monthly_giving ?? false,
+        enableGiftAid: data.enable_gift_aid ?? false,
+        tapAndGo: data.tap_and_go ?? true,
+        donateTitle: data.donate_title ?? 'Tap & Donate',
+        monthlyGivingText: data.monthly_giving_text ?? 'Make a big impact from just £5/month',
+        monthlyGivingAmount: data.monthly_giving_amount ?? 5,
+        confirmationText: data.confirmation_text ?? '',
+        kioskTheme: data.kiosk_theme ?? 'saffron',
+        orgLogoUrl: data.org_logo_url ?? '',
+        orgName: data.org_name ?? '',
+        bgColor: data.bg_color ?? '',
+      })
+      setSyncResult('ok')
+      setTimeout(() => setSyncResult('idle'), 3000)
+    } catch { setSyncResult('fail') }
+    finally { setSyncing(false) }
   }
 
   async function handleLogin() {
-    if (!email.trim() || !password.trim()) return
-    setLoginLoading(true)
-    setLoginError('')
+    if (!username.trim() || !password.trim()) return
+    setLoginLoading(true); setLoginError('')
     try {
       const res = await fetch(`${API_BASE}/kiosk/quick-donation/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ email: username.trim(), password }),
       })
-      const data = await res.json()
-      if (data.authenticated) {
-        applyProfile(data)
-        loadReaders()
-      } else {
-        setLoginError(data.error || 'Login failed')
+      if (!res.ok && res.status >= 500) {
+        setLoginError(`Server error (${res.status}) — try again in a moment.`)
+        return
       }
-    } catch {
-      setLoginError('Cannot reach server')
-    }
-    setLoginLoading(false)
+      const data: LoginResponse = await res.json()
+      if (data.authenticated) applyLogin(data, username.trim())
+      else setLoginError(data.error || 'Login failed')
+    } catch (err) {
+      setLoginError(err instanceof TypeError ? 'Cannot reach server — check network.' : 'Login failed. Please try again.')
+    } finally { setLoginLoading(false) }
   }
 
   async function handleAzureLogin() {
     if (!azureConfig) return
-    setLoginLoading(true)
-    setLoginError('')
-
-    // Open Azure AD popup for MSAL login
-    const width = 500
-    const height = 600
-    const left = window.screenX + (window.innerWidth - width) / 2
-    const top = window.screenY + (window.innerHeight - height) / 2
-
+    setLoginLoading(true); setLoginError('')
+    const w = 500, h = 600
+    const left = window.screenX + (window.innerWidth - w) / 2
+    const top  = window.screenY + (window.innerHeight - h) / 2
     const redirectUri = `${window.location.origin}/auth-callback`
-    const scope = encodeURIComponent('openid profile email')
-    const authUrl = `${azureConfig.authority}/oauth2/v2.0/authorize?client_id=${azureConfig.client_id}&response_type=id_token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&response_mode=fragment&nonce=${Date.now()}`
-
-    const popup = window.open(authUrl, 'AzureAD', `width=${width},height=${height},left=${left},top=${top}`)
-
-    // Poll for the popup to close and capture the token
-    const pollTimer = setInterval(async () => {
+    const url = `${azureConfig.authority}/oauth2/v2.0/authorize?client_id=${azureConfig.client_id}&response_type=id_token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent('openid profile email')}&response_mode=fragment&nonce=${Date.now()}`
+    const popup = window.open(url, 'AzureAD', `width=${w},height=${h},left=${left},top=${top}`)
+    const poll = setInterval(async () => {
       try {
-        if (!popup || popup.closed) {
-          clearInterval(pollTimer)
-          setLoginLoading(false)
-          return
-        }
+        if (!popup || popup.closed) { clearInterval(poll); setLoginLoading(false); return }
         const hash = popup.location.hash
-        if (hash && hash.includes('id_token=')) {
-          clearInterval(pollTimer)
-          popup.close()
-
-          const params = new URLSearchParams(hash.substring(1))
-          const idToken = params.get('id_token')
-          if (!idToken) {
-            setLoginError('No token received from Azure AD')
-            setLoginLoading(false)
-            return
-          }
-
-          // Send token to backend for kiosk login
+        if (hash?.includes('id_token=')) {
+          clearInterval(poll); popup.close()
+          const idToken = new URLSearchParams(hash.substring(1)).get('id_token')
+          if (!idToken) { setLoginError('No token from Azure AD'); setLoginLoading(false); return }
           const res = await fetch(`${API_BASE}/kiosk/quick-donation/login-azure`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id_token: idToken }),
           })
-          const data = await res.json()
-          if (data.authenticated) {
-            applyProfile(data)
-            loadReaders()
-          } else {
-            setLoginError(data.error || 'Azure AD login failed')
-          }
+          const data: LoginResponse = await res.json()
+          if (data.authenticated) applyLogin(data, '')
+          else setLoginError(data.error || 'Azure login failed')
           setLoginLoading(false)
         }
-      } catch {
-        // Cross-origin — keep polling until popup closes or navigates to our redirect URI
-      }
+      } catch { /* cross-origin polling */ }
     }, 500)
   }
 
@@ -165,251 +200,406 @@ export function AdminScreen() {
       const res = await fetch(`${API_BASE}/kiosk/terminal/readers`)
       const data = await res.json()
       setReaders(data.readers || [])
-    } catch {
-      setReaders([])
-    }
+    } catch { setReaders([]) }
     setLoading(false)
   }
 
-  async function handleAssignDevice(readerId: string, readerLabel: string) {
-    setReader(readerId, readerLabel)
-    // Persist assignment to kiosk_profiles
-    if (loggedIn) {
-      try {
-        await fetch(`${API_BASE}/kiosk/quick-donation/assign-device`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            branch_id: loggedIn.branch.id,
-            user_email: loggedIn.email,
-            stripe_reader_id: readerId,
-            device_label: readerLabel,
-          }),
-        })
-      } catch { /* best-effort */ }
-    }
+  async function loadSumUpReaders() {
+    setSumupLoading(true); setSumupError(''); setSumupTestResult('idle')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/sumup/readers`)
+      const data = await res.json()
+      if (data.error) { setSumupError(data.error); setSumupReaders([]); return }
+      setSumupReaders(data.readers || [])
+    } catch { setSumupError('Could not reach server.') }
+    finally { setSumupLoading(false) }
   }
 
-  useEffect(() => {
-    if (loggedIn) loadReaders()
-  }, [loggedIn])
+  async function testSumUpReader() {
+    const serial = sumupSerial.trim()
+    if (!serial) return
+    setSumupLoading(true); setSumupTestResult('idle'); setSumupError('')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/sumup/readers`)
+      const data = await res.json()
+      const found = (data.readers || []).some((r: SumUpReader) => r.serial === serial)
+      setSumupTestResult(found ? 'ok' : 'fail')
+      if (!found) setSumupError(`Serial ${serial} not found in your SumUp account.`)
+    } catch { setSumupTestResult('fail'); setSumupError('Test failed — check network.') }
+    finally { setSumupLoading(false) }
+  }
 
-  // ── Login Screen ──
-  if (!loggedIn) {
+  async function loadCloverDevices() {
+    setCloverLoading(true); setCloverError('')
+    try {
+      const res = await fetch(`${API_BASE}/kiosk/clover/devices`)
+      const data = await res.json()
+      if (data.error) { setCloverError(data.error); setCloverReaders([]); return }
+      setCloverReaders(data.devices || [])
+    } catch { setCloverError('Could not reach server.') }
+    finally { setCloverLoading(false) }
+  }
+
+  async function assignClover(device: CloverDevice) {
+    const lbl = device.name || `Clover ${device.model} ${device.serial}`
+    setReader('', lbl, 'clover', '', '', device.id)
+    await persistReaderToBackend('clover', '', '', '', lbl, device.id)
+  }
+
+  async function persistReaderToBackend(
+    provider: 'stripe_terminal' | 'sumup' | 'clover',
+    stripeId = '',
+    serial = '',
+    apiId = '',
+    lbl = '',
+    cloverId = '',
+  ) {
+    try {
+      await fetch(`${API_BASE}/kiosk/quick-donation/assign-reader`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          stripe_reader_id: stripeId,
+          sumup_reader_serial: serial,
+          sumup_reader_api_id: apiId,
+          clover_device_id: cloverId,
+          label: lbl,
+          device_username: loggedInUsername || '',
+        }),
+      })
+    } catch { /* non-fatal — localStorage already updated */ }
+  }
+
+  async function assignSumUp(apiId = '') {
+    const serial = sumupSerial.trim()
+    if (!serial) return
+    const lbl = `SumUp Solo ${serial}`
+    setReader('', lbl, 'sumup', serial, apiId)
+    await persistReaderToBackend('sumup', '', serial, apiId, lbl)
+  }
+
+  function handleLogout() {
+    setDeviceLoggedIn(false, '')
+    setUsername('')
+    setPassword('')
+  }
+
+  // ── Login screen — only shown on first use or after explicit logout ──────────
+  if (!isDeviceLoggedIn) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center bg-white px-8"
-        style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div className="w-screen h-screen flex flex-col items-center justify-center px-8"
+        style={{ background: 'linear-gradient(160deg,#1a0a00 0%,#2d1200 100%)' }}>
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-sm">
 
-          <div className="flex items-center justify-between mb-8">
-            <h1 className="text-2xl font-black text-gray-900">Kiosk Login</h1>
-            <button onClick={() => setScreen('idle')}
-              className="px-4 py-2 rounded-xl bg-gray-100 text-gray-600 font-semibold text-sm active:scale-95">
-              ← Back
-            </button>
+          <div className="text-center mb-8">
+            <div className="text-5xl mb-3">💳</div>
+            <h1 className="text-2xl font-black mb-1" style={{ color: '#D4AF37' }}>Device Login</h1>
+            <p className="text-sm" style={{ color: 'rgba(255,248,220,0.45)' }}>
+              Sign in to configure this Quick Donation terminal
+            </p>
           </div>
 
-          {/* Azure AD Login */}
-          {azureEnabled && (
-            <div className="mb-6">
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                style={{ color: 'rgba(212,175,55,0.6)' }}>Username</label>
+              <input
+                type="text" value={username} onChange={e => setUsername(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                placeholder="e.g. qkk1"
+                className="w-full px-4 py-3 rounded-xl text-sm border outline-none"
+                style={{ background: 'rgba(255,255,255,0.07)', color: '#fff',
+                  border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }}
+                autoComplete="username" autoFocus
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-widest mb-1.5"
+                style={{ color: 'rgba(212,175,55,0.6)' }}>Password</label>
+              <input
+                type="password" value={password} onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                placeholder="••••••••"
+                className="w-full px-4 py-3 rounded-xl text-sm border outline-none"
+                style={{ background: 'rgba(255,255,255,0.07)', color: '#fff',
+                  border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }}
+                autoComplete="current-password"
+              />
+            </div>
+
+            {loginError && (
+              <p className="text-sm rounded-xl px-4 py-2.5 font-medium"
+                style={{ background: 'rgba(198,40,40,0.18)', color: '#f87171',
+                  border: '1px solid rgba(198,40,40,0.3)' }}>{loginError}</p>
+            )}
+
+            <button
+              onClick={handleLogin} disabled={loginLoading || !username.trim() || !password.trim()}
+              className="w-full py-3.5 rounded-xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.98]"
+              style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}
+            >
+              {loginLoading ? 'Signing in…' : 'Sign In →'}
+            </button>
+
+            {azureEnabled && (
               <button
-                onClick={handleAzureLogin}
-                disabled={loginLoading}
-                className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-3"
-                style={{ background: 'linear-gradient(135deg, #0078D4, #005A9E)' }}
+                onClick={handleAzureLogin} disabled={loginLoading}
+                className="w-full py-3 rounded-xl font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
+                style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.7)',
+                  border: '1px solid rgba(255,255,255,0.12)' }}
               >
-                <svg className="w-5 h-5" viewBox="0 0 21 21" fill="currentColor">
+                <svg className="w-4 h-4" viewBox="0 0 21 21" fill="currentColor">
                   <path d="M0 0h10v10H0zM11 0h10v10H11zM0 11h10v10H0zM11 11h10v10H11z" />
                 </svg>
                 Sign in with Microsoft
               </button>
-              <div className="flex items-center gap-3 my-5">
-                <div className="flex-1 h-px bg-gray-200" />
-                <span className="text-gray-400 text-xs font-semibold">OR</span>
-                <div className="flex-1 h-px bg-gray-200" />
-              </div>
-            </div>
-          )}
-
-          {/* Email/Password Login */}
-          <div className="space-y-4 mb-6">
-            <div>
-              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">
-                Email
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="quickkiosk-wembley-1@shirdisai.org.uk"
-                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-orange-400"
-                onKeyDown={e => e.key === 'Enter' && handleLogin()}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">
-                Password
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="Enter password"
-                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-orange-400"
-                onKeyDown={e => e.key === 'Enter' && handleLogin()}
-              />
-            </div>
+            )}
           </div>
 
-          {loginError && (
-            <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
-              <p className="text-red-600 text-sm font-semibold">{loginError}</p>
-            </div>
-          )}
-
-          <button
-            onClick={handleLogin}
-            disabled={loginLoading || !email.trim() || !password.trim()}
-            className="w-full py-4 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.98] transition-all disabled:opacity-40"
-            style={{ background: 'linear-gradient(135deg,#FF9933,#FF6600)' }}
-          >
-            {loginLoading ? 'Logging in...' : 'Login with Email'}
-          </button>
-
-          <p className="text-gray-300 text-xs text-center mt-6">
-            QuickDonation Kiosk v1.0.0
+          <p className="text-center text-xs mt-6" style={{ color: 'rgba(255,248,220,0.2)' }}>
+            Quick Donation Terminal · Contact admin for access
           </p>
         </motion.div>
       </div>
     )
   }
 
-  // ── Settings Screen (post-login) ──
+  // ── Settings screen (post-login) ──────────────────────────────────────────
   return (
-    <div className="w-full h-full flex flex-col bg-white p-8 kiosk-scroll"
-      style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+    <div className="w-screen h-screen flex flex-col px-8 py-8 kiosk-scroll"
+      style={{ background: 'linear-gradient(160deg,#1a0a00 0%,#2d1200 100%)', fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm mx-auto">
+
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-black text-gray-900">Quick Donation Settings</h1>
-            <p className="text-gray-500 text-sm mt-0.5">
-              Logged in as <span className="font-bold">{loggedIn.name}</span>
+            <h1 className="text-xl font-black" style={{ color: '#D4AF37' }}>Device Settings</h1>
+            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>
+              Logged in as <span className="font-bold">{loggedInName}</span>
             </p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => { setLoggedIn(null); setEmail(''); setPassword('') }}
-              className="px-4 py-2 rounded-xl bg-red-50 text-red-600 font-semibold text-sm active:scale-95">
+            <button onClick={handleSync} disabled={syncing || !loggedInUsername}
+              className="px-3 py-2 rounded-xl text-xs font-bold disabled:opacity-40 transition-all active:scale-[0.97]"
+              style={syncResult === 'ok'
+                ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.3)' }
+                : syncResult === 'fail'
+                ? { background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }
+                : { background: 'rgba(212,175,55,0.1)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.25)' }}>
+              {syncing ? '…' : syncResult === 'ok' ? '✓ Synced' : syncResult === 'fail' ? '✗ Failed' : '↻ Sync'}
+            </button>
+            <button onClick={handleLogout}
+              className="px-3 py-2 rounded-xl text-xs font-bold"
+              style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }}>
               Logout
             </button>
-            <button onClick={() => setScreen('idle')}
-              className="px-4 py-2 rounded-xl bg-gray-100 text-gray-600 font-semibold text-sm active:scale-95">
+            <button onClick={() => setScreen('donate')}
+              className="px-3 py-2 rounded-xl text-xs font-bold"
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}>
               ← Done
             </button>
           </div>
         </div>
 
-        {/* Branch + Profile info */}
-        <div className="mb-6 px-4 py-3 bg-orange-50 border border-orange-200 rounded-xl">
-          <p className="text-orange-700 text-sm font-semibold">
-            Branch: <span className="font-black">{loggedIn.branch.name}</span>
-          </p>
-          <p className="text-orange-600 text-xs">{loggedIn.email}</p>
-          {loggedIn.profile && (
-            <p className="text-orange-500 text-xs mt-1">
-              Profile: {loggedIn.profile.profile_name}
+        {/* Active reader badge */}
+        {(stripeReaderId || sumupReaderId || cloverDeviceId) && (
+          <div className="mb-5 px-4 py-3 rounded-xl"
+            style={{ background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.25)' }}>
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.6)' }}>
+              Active Card Reader · {readerProvider === 'sumup' ? 'SumUp Solo' : readerProvider === 'clover' ? 'Clover Flex' : 'Stripe Terminal'}
             </p>
-          )}
+            <p className="font-black text-sm mt-0.5" style={{ color: '#D4AF37' }}>{stripeReaderLabel}</p>
+            <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(212,175,55,0.4)' }}>
+              {readerProvider === 'sumup' ? sumupReaderId : readerProvider === 'clover' ? cloverDeviceId : stripeReaderId}
+            </p>
+          </div>
+        )}
+
+        {/* ── SumUp Solo section ──────────────────────────────────────────── */}
+        <div className="mb-6">
+            <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(255,248,220,0.35)' }}>
+              💳 SumUp Solo Reader
+            </p>
+
+            {/* Serial input row */}
+            <div className="flex gap-2 mb-2">
+              <input
+                value={sumupSerial}
+                onChange={e => { setSumupSerial(e.target.value); setSumupTestResult('idle') }}
+                placeholder="Serial number e.g. 200101578509"
+                className="flex-1 px-3 py-2.5 rounded-xl text-xs font-mono outline-none"
+                style={{ background: 'rgba(255,255,255,0.07)', color: '#fff', border: '1px solid rgba(212,175,55,0.25)' }}
+              />
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2 mb-2">
+              <button onClick={testSumUpReader} disabled={sumupLoading || !sumupSerial.trim()}
+                className="flex-1 py-2.5 rounded-xl text-xs font-black disabled:opacity-40 transition-all active:scale-[0.97]"
+                style={{ background: 'rgba(96,165,250,0.15)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.25)' }}>
+                {sumupLoading ? '…' : '⚡ Test'}
+              </button>
+              <button onClick={loadSumUpReaders} disabled={sumupLoading}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold disabled:opacity-40 transition-all active:scale-[0.97]"
+                style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {sumupLoading ? '…' : 'Fetch List'}
+              </button>
+              <button onClick={() => assignSumUp()} disabled={!sumupSerial.trim()}
+                className="flex-1 py-2.5 rounded-xl text-xs font-black disabled:opacity-40 transition-all active:scale-[0.97]"
+                style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
+                Assign
+              </button>
+            </div>
+
+            {/* Test result */}
+            {sumupTestResult === 'ok' && (
+              <p className="text-xs px-3 py-2 rounded-lg font-bold" style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.25)' }}>
+                ✓ Reader found in your SumUp account
+              </p>
+            )}
+            {sumupTestResult === 'fail' && (
+              <p className="text-xs px-3 py-2 rounded-lg font-bold" style={{ background: 'rgba(198,40,40,0.12)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }}>
+                ✗ {sumupError || 'Reader not found'}
+              </p>
+            )}
+            {sumupError && sumupTestResult === 'idle' && (
+              <p className="text-xs mt-1" style={{ color: '#f87171' }}>{sumupError}</p>
+            )}
+
+            {/* Reader list from API */}
+            {sumupReaders.length > 0 && (
+              <div className="space-y-1.5 mt-3">
+                {sumupReaders.map(r => (
+                  <button key={r.serial} onClick={() => { setSumupSerial(r.serial); setSumupTestResult('idle'); assignSumUp(r.id) }}
+                    className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
+                    style={{
+                      background: sumupSerial === r.serial ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${sumupSerial === r.serial ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                    }}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-sm" style={{ color: sumupSerial === r.serial ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{r.name || r.serial}</p>
+                        <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{r.serial} · ID: {r.id}</p>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ background: r.status === 'available' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
+                          color: r.status === 'available' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
+                        {r.status}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
         </div>
 
-        {/* Card Reader Selection */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
-              Assign Card Reader
-            </h2>
-            <button onClick={loadReaders} disabled={loading}
-              className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 text-xs font-semibold">
-              {loading ? 'Loading...' : 'Refresh'}
-            </button>
+        {/* ── Stripe Terminal section ──────────────────────────────────── */}
+        <div className="mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.35)' }}>⚡ Stripe Terminal Reader</p>
+              <button onClick={loadReaders} disabled={loading}
+                className="text-[10px] font-bold px-2 py-1 rounded-lg"
+                style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }}>
+                {loading ? '…' : 'Refresh'}
+              </button>
+            </div>
+            <div className="space-y-2">
+              {readers.map(r => (
+                <button key={r.id} onClick={async () => { setReader(r.id, r.label, 'stripe_terminal'); await persistReaderToBackend('stripe_terminal', r.id, '', '', r.label) }}
+                  className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
+                  style={{
+                    background: stripeReaderId === r.id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${stripeReaderId === r.id ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                  }}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: stripeReaderId === r.id ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{r.label}</p>
+                      <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{r.id}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {stripeReaderId === r.id && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full"
+                          style={{ background: 'rgba(212,175,55,0.2)', color: '#D4AF37' }}>ACTIVE</span>
+                      )}
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ background: r.status === 'online' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
+                          color: r.status === 'online' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
+                        {r.status}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+              {!loading && readers.length === 0 && (
+                <p className="text-center text-xs py-4" style={{ color: 'rgba(255,248,220,0.25)' }}>
+                  No readers found. Ensure Stripe Terminal is configured.
+                </p>
+              )}
+            </div>
           </div>
 
-          {stripeReaderId && (
-            <div className="mb-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
-              <p className="text-green-700 text-sm font-semibold">
-                Active Reader: <span className="font-black">{stripeReaderLabel}</span>
-              </p>
-              <p className="text-green-600 text-xs">{stripeReaderId}</p>
-            </div>
+        {/* ── Clover Flex section ──────────────────────────────────────── */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.35)' }}>🍀 Clover Flex Reader</p>
+            <button onClick={loadCloverDevices} disabled={cloverLoading}
+              className="text-[10px] font-bold px-2 py-1 rounded-lg"
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }}>
+              {cloverLoading ? '…' : 'Fetch List'}
+            </button>
+          </div>
+          {cloverError && (
+            <p className="text-xs px-3 py-2 rounded-lg mb-2 font-bold"
+              style={{ background: 'rgba(198,40,40,0.12)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }}>
+              {cloverError}
+            </p>
           )}
-
           <div className="space-y-2">
-            {readers.map(r => (
-              <button
-                key={r.id}
-                onClick={() => handleAssignDevice(r.id, r.label)}
-                className={`w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98] ${
-                  stripeReaderId === r.id
-                    ? 'bg-orange-50 border-2 border-orange-400'
-                    : 'bg-gray-50 border-2 border-transparent'
-                }`}
-              >
+            {cloverReaders.map(d => (
+              <button key={d.id} onClick={() => assignClover(d)}
+                className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
+                style={{
+                  background: cloverDeviceId === d.id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${cloverDeviceId === d.id ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                }}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-bold text-gray-900 text-sm">{r.label}</p>
-                    <p className="text-gray-400 text-xs">{r.device_type} - {r.id}</p>
+                    <p className="font-bold text-sm" style={{ color: cloverDeviceId === d.id ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{d.name || d.model}</p>
+                    <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{d.id} · {d.model}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {stripeReaderId === r.id && (
-                      <span className="text-xs font-black px-2 py-1 rounded-lg bg-orange-100 text-orange-700">
-                        ASSIGNED
-                      </span>
+                    {cloverDeviceId === d.id && (
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full"
+                        style={{ background: 'rgba(212,175,55,0.2)', color: '#D4AF37' }}>ACTIVE</span>
                     )}
-                    <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
-                      r.status === 'online' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      {r.status}
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                      style={{ background: d.status === 'online' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
+                        color: d.status === 'online' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
+                      {d.status}
                     </span>
                   </div>
                 </div>
               </button>
             ))}
-            {!loading && readers.length === 0 && (
-              <p className="text-gray-400 text-sm text-center py-6">
-                No readers found. Ensure Stripe Terminal is configured.
+            {!cloverLoading && cloverReaders.length === 0 && (
+              <p className="text-center text-xs py-4" style={{ color: 'rgba(255,248,220,0.25)' }}>
+                Press "Fetch List" to load Clover devices. Requires CLOVER_ACCESS_TOKEN in API Keys.
               </p>
             )}
           </div>
         </div>
 
-        {/* Manual Reader ID */}
-        <div className="mb-8">
-          <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">
-            Manual Reader ID
-          </h2>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={stripeReaderId}
-              onChange={e => setReader(e.target.value, stripeReaderLabel)}
-              placeholder="tmr_xxxxx"
-              className="flex-1 border-2 border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-orange-400"
-            />
-            <input
-              type="text"
-              value={stripeReaderLabel}
-              onChange={e => setReader(stripeReaderId, e.target.value)}
-              placeholder="Reader label"
-              className="flex-1 border-2 border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-orange-400"
-            />
-          </div>
+        {/* Branch info */}
+        <div className="px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.25)' }}>Branch</p>
+          <p className="text-sm font-bold mt-0.5" style={{ color: 'rgba(255,248,220,0.5)' }}>{branchId}</p>
         </div>
 
-        {/* API info */}
-        <div className="text-center">
-          <p className="text-gray-400 text-xs">API: {API_BASE}</p>
-          <p className="text-gray-300 text-xs mt-1">QuickDonation Kiosk v1.0.0</p>
-        </div>
+        <p className="text-center text-[10px] mt-6" style={{ color: 'rgba(255,248,220,0.15)' }}>
+          API: {API_BASE}
+        </p>
       </motion.div>
     </div>
   )

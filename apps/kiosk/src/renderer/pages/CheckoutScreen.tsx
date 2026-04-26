@@ -17,7 +17,9 @@ export function CheckoutScreen() {
     squareDeviceId, squareDeviceName,
     cloverDeviceId, cloverDeviceName,
     sumupReaderId, sumupReaderLabel,
+    kioskDeviceId, kioskDeviceName,
     pendingPayment, setPendingPayment, theme,
+    contactInfo, giftAidDeclaration,
   } = useKioskStore()
   const th = THEMES[theme]
 
@@ -84,6 +86,33 @@ export function CheckoutScreen() {
 
       const orderRef = `ORD-${basket_id.slice(0, 8).toUpperCase()}`
 
+      // Save PENDING order — awaited before screen transition so the fetch is never cancelled by unmount
+      const savePending = async (provider: string, paymentIntentId = '') => {
+        await fetch(`${API_BASE}/kiosk/order/pending`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            basket_id:         basket_id,
+            order_ref:         orderRef,
+            payment_provider:  provider,
+            payment_intent_id: paymentIntentId,
+            branch_id:         branchId,
+            device_id:         kioskDeviceId,
+            device_label:      kioskDeviceName,
+            source:            'kiosk',
+            total_amount:      total,
+            contact_name:      contactInfo?.anonymous ? '' : (contactInfo?.name || ''),
+            contact_email:     contactInfo?.anonymous ? '' : (contactInfo?.email || ''),
+            contact_phone:     contactInfo?.anonymous ? '' : (contactInfo?.phone || ''),
+            gift_aid_eligible: !!giftAidDeclaration?.agreed,
+            ga_full_name:  giftAidDeclaration?.agreed ? (giftAidDeclaration.fullName || '') : '',
+            ga_postcode:   giftAidDeclaration?.agreed ? (giftAidDeclaration.postcode || '') : '',
+            ga_address:    giftAidDeclaration?.agreed ? (giftAidDeclaration.address || '') : '',
+            ga_email:      giftAidDeclaration?.agreed ? (giftAidDeclaration.contactEmail || '') : '',
+          }),
+        }).catch(() => { /* non-fatal */ })
+      }
+
       // ── Stripe Terminal ───────────────────────────────────────────────────
       if (cardProvider === 'stripe_terminal') {
         setStage('Preparing payment…')
@@ -111,6 +140,7 @@ export function CheckoutScreen() {
         const pr = await prRes.json()
         if (pr.error) throw new Error(pr.error)
 
+        await savePending('STRIPE_TERMINAL', pi.payment_intent_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'STRIPE_TERMINAL',
           payment_intent_id: pi.payment_intent_id,
@@ -138,6 +168,7 @@ export function CheckoutScreen() {
         const sq = await sqRes.json()
         if (sq.error) throw new Error(sq.error)
 
+        await savePending('SQUARE', sq.checkout_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'SQUARE',
           checkout_id: sq.checkout_id,
@@ -169,6 +200,7 @@ export function CheckoutScreen() {
         const cl = await clRes.json()
         if (cl.error) throw new Error(cl.error)
 
+        await savePending('CLOVER', cl.clover_order_id)
         setOrderResult(basket_id, orderRef, {
           provider: 'CLOVER',
           clover_order_id: cl.clover_order_id,
@@ -181,13 +213,15 @@ export function CheckoutScreen() {
 
       // ── SumUp Solo ───────────────────────────────────────────────────────
       if (cardProvider === 'sumup') {
+        // Save order BEFORE sending to reader so it always appears in admin
+        await savePending('SUMUP', '')
+
         setStage('Sending to SumUp reader…')
         const suRes = await fetch(`${API_BASE}/kiosk/sumup/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amount: total,
-            currency: 'GBP',
+            amount_pence: Math.round(total * 100),
             description: 'Shital Temple Payment',
             order_id: basket_id,
             reader_serial: sumupReaderId,
@@ -208,6 +242,7 @@ export function CheckoutScreen() {
       }
 
       // ── Cash / Counter ────────────────────────────────────────────────────
+      await savePending('CASH')
       setOrderResult(basket_id, orderRef, { provider: 'CASH' })
       setScreen('payment')
 

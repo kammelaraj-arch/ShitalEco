@@ -133,6 +133,10 @@ async def _patch_schema() -> None:
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_live         BOOLEAN NOT NULL DEFAULT true",
         # Migration 009 column on catalog_items
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS name_te         VARCHAR(200) NOT NULL DEFAULT ''",
+        # Missing columns referenced by list_items / kiosk queries
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS metadata_json   JSONB        NOT NULL DEFAULT '{}'",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS stock_qty       INTEGER",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS sort_order      INTEGER      NOT NULL DEFAULT 0",
         # Migration 007 columns on temple_services (if table exists)
         "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS available_from  TIMESTAMPTZ",
         "ALTER TABLE temple_services ADD COLUMN IF NOT EXISTS available_until TIMESTAMPTZ",
@@ -231,6 +235,16 @@ async def _patch_schema() -> None:
             updated_by  VARCHAR(200) NOT NULL DEFAULT ''
         )""",
         "CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys_store(group_name)",
+        # App settings (key/value config store — also created by migration 003)
+        """CREATE TABLE IF NOT EXISTS app_settings (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            key         VARCHAR(100) NOT NULL UNIQUE,
+            value       TEXT NOT NULL DEFAULT '',
+            description TEXT,
+            is_secret   BOOLEAN NOT NULL DEFAULT false,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
         # ── Smart Screen ─────────────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS screen_content_items (
             id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -440,9 +454,52 @@ async def _patch_schema() -> None:
         # ── Add card_reader_id to existing kiosk_devices rows ─────────────────
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS card_reader_id UUID",
         # ── Kiosk branding / appearance columns ───────────────────────────────
-        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS kiosk_theme   VARCHAR(20)  NOT NULL DEFAULT 'lotus'",
-        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS org_name      VARCHAR(100) NOT NULL DEFAULT ''",
-        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS org_logo_url  TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS kiosk_theme          VARCHAR(20)  NOT NULL DEFAULT 'lotus'",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS org_name             VARCHAR(100) NOT NULL DEFAULT ''",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS org_logo_url         TEXT         NOT NULL DEFAULT ''",
+        # ── Device-level credentials + quick donation feature flags ──────────────
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS device_username      VARCHAR(100) DEFAULT NULL",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS device_password_hash VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS show_monthly_giving  BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS enable_gift_aid      BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS tap_and_go           BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS donate_title         VARCHAR(100) NOT NULL DEFAULT 'Tap & Donate'",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS monthly_giving_text  VARCHAR(200) NOT NULL DEFAULT 'Make a big impact from just £5/month'",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS monthly_giving_amount  NUMERIC(8,2) NOT NULL DEFAULT 5.00",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS confirmation_text      TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS bg_color              VARCHAR(20)  NOT NULL DEFAULT ''",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_username ON kiosk_devices(device_username) WHERE device_username IS NOT NULL",
+        # ── Quick-donation kiosk profiles ─────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS kiosk_profiles (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id           VARCHAR(100) NOT NULL,
+            branch_name         VARCHAR(200) NOT NULL DEFAULT '',
+            user_id             UUID DEFAULT NULL,
+            user_email          VARCHAR(200) NOT NULL,
+            user_name           VARCHAR(200) NOT NULL DEFAULT '',
+            device_id           UUID DEFAULT NULL,
+            device_label        VARCHAR(255) DEFAULT '',
+            stripe_reader_id    VARCHAR(255) DEFAULT '',
+            device_provider     VARCHAR(50) DEFAULT 'stripe_terminal',
+            profile_name        VARCHAR(200) NOT NULL,
+            kiosk_type          VARCHAR(50) NOT NULL DEFAULT 'quick_donation',
+            display_name        VARCHAR(200) DEFAULT '',
+            preset_amounts      JSONB NOT NULL DEFAULT '[1, 2.5, 5, 10, 15, 20, 50]',
+            default_purpose     VARCHAR(200) DEFAULT 'General Fund',
+            gift_aid_prompt     BOOLEAN NOT NULL DEFAULT true,
+            idle_timeout_secs   INT NOT NULL DEFAULT 90,
+            theme               VARCHAR(50) DEFAULT 'saffron',
+            is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+            last_active_at      TIMESTAMPTZ DEFAULT NULL,
+            notes               TEXT DEFAULT '',
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at          TIMESTAMPTZ DEFAULT NULL,
+            UNIQUE(branch_id, user_email)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_kiosk_profiles_branch ON kiosk_profiles(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_kiosk_profiles_user   ON kiosk_profiles(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_kiosk_profiles_device ON kiosk_profiles(device_id)",
         # ── Deduplicate catalog_items — keep one row per (name, category, price) ─
         # Keeps the row with the earliest created_at; safe to re-run (idempotent)
         """
@@ -610,6 +667,9 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_terminal_devices_branch ON terminal_devices(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_terminal_devices_active ON terminal_devices(is_active) WHERE deleted_at IS NULL",
+        # Idempotent columns for providers added after initial schema
+        "ALTER TABLE terminal_devices ADD COLUMN IF NOT EXISTS clover_device_id   VARCHAR(255) NOT NULL DEFAULT ''",
+        "ALTER TABLE terminal_devices ADD COLUMN IF NOT EXISTS sumup_reader_serial VARCHAR(255) NOT NULL DEFAULT ''",
         # ── Gift Aid Declarations ─────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS gift_aid_declarations (
             id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -630,6 +690,8 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_gift_aid_decl_order_ref  ON gift_aid_declarations(order_ref)",
         "CREATE INDEX IF NOT EXISTS idx_gift_aid_decl_submitted  ON gift_aid_declarations(hmrc_submitted)",
+        "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS first_name VARCHAR(200) DEFAULT ''",
+        "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS surname    VARCHAR(200) DEFAULT ''",
         # ── Function Registry + Invocations ───────────────────────────────────
         """CREATE TABLE IF NOT EXISTS function_registry (
             id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -787,6 +849,102 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_payroll_runs_branch ON payroll_runs(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period)",
+        # ── Recurring Giving (Monthly Donations) ──────────────────────────────
+        """CREATE TABLE IF NOT EXISTS recurring_giving_tiers (
+            id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            amount          DECIMAL(10,2) NOT NULL,
+            label           VARCHAR(200)  NOT NULL DEFAULT '',
+            description     VARCHAR(500)            DEFAULT '',
+            frequency       VARCHAR(20)             DEFAULT 'MONTH',
+            is_active       BOOLEAN                 DEFAULT true,
+            is_default      BOOLEAN                 DEFAULT false,
+            display_order   INT                     DEFAULT 0,
+            paypal_plan_id  VARCHAR(255)            DEFAULT '',
+            created_at      TIMESTAMPTZ             DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ             DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS recurring_giving_subscriptions (
+            id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            paypal_subscription_id  VARCHAR(255) UNIQUE,
+            paypal_plan_id          VARCHAR(255)            DEFAULT '',
+            tier_id                 UUID        REFERENCES recurring_giving_tiers(id) ON DELETE SET NULL,
+            amount                  DECIMAL(10,2) NOT NULL,
+            frequency               VARCHAR(20)             DEFAULT 'MONTH',
+            status                  VARCHAR(50)             DEFAULT 'PENDING_APPROVAL',
+            branch_id               VARCHAR(100)            DEFAULT 'main',
+            donor_name              VARCHAR(255)            DEFAULT '',
+            donor_email             VARCHAR(255)            DEFAULT '',
+            approved_at             TIMESTAMPTZ,
+            cancelled_at            TIMESTAMPTZ,
+            created_at              TIMESTAMPTZ             DEFAULT NOW(),
+            updated_at              TIMESTAMPTZ             DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_rgs_status ON recurring_giving_subscriptions(status)",
+        "CREATE INDEX IF NOT EXISTS idx_rgs_email  ON recurring_giving_subscriptions(donor_email)",
+        # Add address/name columns to existing subscriptions table (idempotent)
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_first_name VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_surname VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_postcode VARCHAR(50) DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_address VARCHAR(500) DEFAULT ''",
+        # PayPal capture transaction ID (different from the PayPal order ID)
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE orders    ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
+        # Source channel on donations (kiosk, quick-donation, service, paypal, etc.)
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'kiosk'",
+        # ── CRM: Contacts table ───────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS contacts (
+            id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            email             VARCHAR(254) UNIQUE,
+            first_name        VARCHAR(200) NOT NULL DEFAULT '',
+            surname           VARCHAR(200) NOT NULL DEFAULT '',
+            full_name         VARCHAR(400) NOT NULL DEFAULT '',
+            phone             VARCHAR(50)  NOT NULL DEFAULT '',
+            gdpr_consent      BOOLEAN      NOT NULL DEFAULT false,
+            gdpr_consented_at TIMESTAMPTZ,
+            tac_consent       BOOLEAN      NOT NULL DEFAULT false,
+            tac_consented_at  TIMESTAMPTZ,
+            first_source      VARCHAR(50)  NOT NULL DEFAULT '',
+            first_branch_id   VARCHAR(100) NOT NULL DEFAULT '',
+            created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_contacts_email   ON contacts(email)",
+        "CREATE INDEX IF NOT EXISTS idx_contacts_surname ON contacts(surname)",
+        "CREATE INDEX IF NOT EXISTS idx_contacts_created ON contacts(created_at DESC)",
+        # ── CRM: Addresses table (linked to contacts, stores UPRN) ────────────
+        """CREATE TABLE IF NOT EXISTS addresses (
+            id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            contact_id   UUID        REFERENCES contacts(id) ON DELETE CASCADE,
+            formatted    TEXT        NOT NULL DEFAULT '',
+            postcode     VARCHAR(20) NOT NULL DEFAULT '',
+            uprn         VARCHAR(20) NOT NULL DEFAULT '',
+            is_primary   BOOLEAN     NOT NULL DEFAULT true,
+            lookup_source VARCHAR(30) NOT NULL DEFAULT '',
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_addresses_contact  ON addresses(contact_id)",
+        "CREATE INDEX IF NOT EXISTS idx_addresses_postcode ON addresses(postcode)",
+        "CREATE INDEX IF NOT EXISTS idx_addresses_uprn     ON addresses(uprn) WHERE uprn != ''",
+        # ── CRM: Link contact_id into transaction tables ───────────────────────
+        "ALTER TABLE orders                       ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
+        "ALTER TABLE donations                    ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
+        "ALTER TABLE gift_aid_declarations        ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
+        # ── Kiosk device tracking + origin on orders ─────────────────────────
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS device_id    VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS device_label VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS source       VARCHAR(64)  NOT NULL DEFAULT 'kiosk'",
+        # Store UPRN on gift_aid_declarations for HMRC record-keeping
+        "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS uprn VARCHAR(20) NOT NULL DEFAULT ''",
+        # Seed default tiers if none exist
+        """INSERT INTO recurring_giving_tiers (amount, label, description, is_active, is_default, display_order)
+        SELECT * FROM (VALUES
+            (5.00::DECIMAL,  'Lamp Supporter',  'Supports daily lamp lighting at the temple',    true, false, 1),
+            (11.00::DECIMAL, 'Prasad Patron',   'Provides weekly prasad offering to devotees',   true, true,  2),
+            (21.00::DECIMAL, 'Puja Sponsor',    'Sponsors a monthly puja ceremony',              true, false, 3),
+            (51.00::DECIMAL, 'Festival Friend', 'Helps cover special festival and event costs',  true, false, 4)
+        ) AS v(amount, label, description, is_active, is_default, display_order)
+        WHERE NOT EXISTS (SELECT 1 FROM recurring_giving_tiers LIMIT 1)""",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -830,6 +988,7 @@ async def _seed_api_key_metadata() -> None:
         ("META_WHATSAPP_VERIFY_TOKEN","Meta WhatsApp webhook verify token",             "WhatsApp",  True),
         ("PAYPAL_CLIENT_ID",          "PayPal REST API client ID",                      "PayPal",    False),
         ("PAYPAL_CLIENT_SECRET",      "PayPal REST API client secret",                  "PayPal",    True),
+        ("PAYPAL_ENV",                "PayPal environment: 'live' or 'sandbox'",        "PayPal",    False),
         ("HMRC_GIFT_AID_USER_ID",     "HMRC Government Gateway user ID",                "HMRC",      True),
         ("HMRC_GIFT_AID_PASSWORD",    "HMRC Government Gateway password",               "HMRC",      True),
         ("HMRC_GIFT_AID_VENDOR_ID",   "HMRC software vendor ID",                        "HMRC",      False),
@@ -837,6 +996,8 @@ async def _seed_api_key_metadata() -> None:
         ("GETADDRESS_API_KEY",        "GetAddress.io UK postcode lookup API key",       "Address",   True),
         ("IDEAL_POSTCODES_API_KEY",  "Ideal Postcodes UK address lookup API key",      "Address",   True),
         ("ADDRESS_LOOKUP_PROVIDER",  "Active address lookup provider (getaddress or ideal_postcodes)", "Address", False),
+        ("SUMUP_ACCESS_TOKEN",       "SumUp Personal API key (sup_pk_...)",            "SumUp",     True),
+        ("SUMUP_MERCHANT_CODE",      "SumUp merchant code (e.g. M602X5FC)",            "SumUp",     False),
         ("MEILISEARCH_MASTER_KEY",   "MeiliSearch master key",                         "Other",     True),
     ]
 
@@ -1200,6 +1361,10 @@ _mount("shital.api.routers.branches",         "router")
 _mount("shital.api.routers.projects",             "router")
 _mount("shital.api.routers.recurring_payments",   "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
+_mount("shital.api.routers.paypal",               "router")
+_mount("shital.api.routers.recurring_giving",     "router")
+_mount("shital.api.routers.contacts",             "router")
+_mount("shital.api.routers.app_permissions",      "router")
 
 
 @app.get("/health", tags=["system"])

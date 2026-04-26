@@ -50,6 +50,9 @@ services:
       MS_TENANT_ID: ${MS_TENANT_ID:-}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
       MS_REDIRECT_URI: ${MS_REDIRECT_URI:-https://admin.shital.org.uk/auth-callback}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      PAYPAL_ENV: ${PAYPAL_ENV:-live}
     volumes:
       - /opt/shitaleco/backups:/opt/shitaleco/backups
     depends_on:
@@ -77,10 +80,10 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/admin/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/health || exit 1"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 15s
       retries: 3
 
   quick-donation:
@@ -96,7 +99,7 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/health || exit 1"]
       interval: 30s
       timeout: 5s
       start_period: 20s
@@ -115,7 +118,7 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/health || exit 1"]
       interval: 30s
       timeout: 5s
       start_period: 20s
@@ -134,10 +137,29 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/health || exit 1"]
       interval: 30s
       timeout: 5s
       start_period: 20s
+      retries: 3
+
+  service:
+    image: ghcr.io/kammelaraj-arch/shitaleco-service:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+    depends_on:
+      - backend
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
       retries: 3
 
   backup-scheduler:

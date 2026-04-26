@@ -127,10 +127,10 @@ export const IDLE_RING_COLORS: Record<KioskTheme, string> = {
 }
 
 export type KioskScreen =
-  | 'idle' | 'language' | 'home' | 'services' | 'service-detail'
+  | 'setup' | 'idle' | 'language' | 'home' | 'services' | 'service-detail'
   | 'donate' | 'basket' | 'checkout' | 'payment' | 'confirmation'
   | 'admin' | 'admin-pin' | 'soft-donation' | 'project-donation' | 'shop'
-  | 'gift-aid' | 'receipt'
+  | 'gift-aid' | 'receipt' | 'monthly-giving'
 
 export interface EndScreenTemplate {
   icon: string          // e.g. "🕉"
@@ -211,6 +211,8 @@ interface KioskState {
   paymentIntent: Record<string, unknown> | null
   idleTimer: number
   branchId: string
+  deviceConfigured: boolean
+  loggedInUser: { name: string; email: string; branch: string } | null
   theme: KioskTheme
   orgName: string
   orgLogoUrl: string
@@ -228,22 +230,30 @@ interface KioskState {
     address: string; contactEmail: string; contactPhone: string
   } | null
   contactInfo: {
-    name: string; email: string; phone: string
+    name: string; firstName?: string; surname?: string
+    email: string; phone: string
     gdprConsent: boolean; termsConsent: boolean; anonymous: boolean
   } | null
+  kioskDeviceId: string
+  kioskDeviceName: string
   pendingPayment: boolean
+  receiptSentByConfirm: boolean
   endScreenTemplate: EndScreenTemplate
   setEndScreenTemplate: (t: EndScreenTemplate) => void
   formTextConfig: FormTextConfig
   setFormTextConfig: (c: FormTextConfig) => void
   setGiftAidDeclaration: (decl: KioskState['giftAidDeclaration']) => void
   setContactInfo: (info: KioskState['contactInfo']) => void
+  setKioskDevice: (id: string, name: string) => void
   setPendingPayment: (v: boolean) => void
+  setReceiptSentByConfirm: (v: boolean) => void
   setScreen: (screen: KioskScreen) => void
   setHomeActiveNav: (nav: string) => void
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
   setBranchId: (id: string) => void
+  setDeviceConfigured: (v: boolean) => void
+  setLoggedInUser: (u: { name: string; email: string; branch: string } | null) => void
   setOrgName: (name: string) => void
   setOrgLogoUrl: (url: string) => void
   setCardDevice: (provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash', deviceId: string, deviceLabel: string) => void
@@ -271,12 +281,17 @@ export const useKioskStore = create<KioskState>()(
   paymentIntent: null,
   idleTimer: 120,
   branchId: 'main',
+  deviceConfigured: false,
+  loggedInUser: null,
   theme: 'lotus',
   orgName: 'Shital',
   orgLogoUrl: '',
   giftAidDeclaration: null,
   contactInfo: null,
+  kioskDeviceId: '',
+  kioskDeviceName: '',
   pendingPayment: false,
+  receiptSentByConfirm: false,
   endScreenTemplate: { icon: '🕉', thankYouLine: 'Jay Shri Krishna 🙏', subMessage: '' },
   setEndScreenTemplate: (endScreenTemplate) => set({ endScreenTemplate }),
   formTextConfig: DEFAULT_FORM_TEXT,
@@ -292,12 +307,16 @@ export const useKioskStore = create<KioskState>()(
   sumupReaderLabel: '',
   setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
   setContactInfo: (contactInfo) => set({ contactInfo }),
+  setKioskDevice: (kioskDeviceId, kioskDeviceName) => set({ kioskDeviceId, kioskDeviceName }),
   setPendingPayment: (pendingPayment) => set({ pendingPayment }),
+  setReceiptSentByConfirm: (receiptSentByConfirm) => set({ receiptSentByConfirm }),
   setScreen: (screen) => set({ screen }),
   setHomeActiveNav: (homeActiveNav) => set({ homeActiveNav }),
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
   setBranchId: (branchId) => set({ branchId }),
+  setDeviceConfigured: (deviceConfigured) => set({ deviceConfigured }),
+  setLoggedInUser: (loggedInUser) => set({ loggedInUser }),
   setOrgName: (orgName) => set({ orgName }),
   setOrgLogoUrl: (orgLogoUrl) => set({ orgLogoUrl }),
   setCardDevice: (provider, deviceId, deviceLabel) => set(
@@ -325,7 +344,7 @@ export const useKioskStore = create<KioskState>()(
   })),
   clearBasket: () => set({ items: [], basketId: null }),
   setOrderResult: (orderId, orderRef, paymentIntent) => set({ orderId, orderRef, paymentIntent }),
-  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, contactInfo: null, pendingPayment: false }),
+  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, contactInfo: null, pendingPayment: false, receiptSentByConfirm: false }),
   get total() { return get().items.reduce((sum, i) => sum + i.totalPrice, 0) },
   get itemCount() { return get().items.reduce((sum, i) => sum + i.quantity, 0) },
     }),
@@ -347,6 +366,10 @@ export const useKioskStore = create<KioskState>()(
         sumupReaderId: state.sumupReaderId,
         sumupReaderLabel: state.sumupReaderLabel,
         branchId: state.branchId,
+        kioskDeviceId: state.kioskDeviceId,
+        kioskDeviceName: state.kioskDeviceName,
+        deviceConfigured: state.deviceConfigured,
+        loggedInUser: state.loggedInUser,
         endScreenTemplate: state.endScreenTemplate,
         formTextConfig: state.formTextConfig,
       }),

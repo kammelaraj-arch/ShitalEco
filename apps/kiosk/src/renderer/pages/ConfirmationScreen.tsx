@@ -7,7 +7,7 @@ const AUTO_RESET_SECONDS = 60
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
 export function ConfirmationScreen() {
-  const { orderRef, items, resetKiosk, contactInfo, branchId, endScreenTemplate } = useKioskStore()
+  const { orderRef, items, resetKiosk, contactInfo, branchId, endScreenTemplate, receiptSentByConfirm } = useKioskStore()
   const [countdown, setCountdown] = useState(AUTO_RESET_SECONDS)
   const [rating, setRating] = useState(0)
   const [hoverRating, setHoverRating] = useState(0)
@@ -29,14 +29,18 @@ export function ConfirmationScreen() {
 
   const hasContact = contactInfo && !contactInfo.anonymous && (contactInfo.email || contactInfo.phone)
 
-  // Pre-fill from contact info
+  // Pre-fill from contact info; mark as sent if backend already sent via confirm endpoint
   useEffect(() => {
     if (hasContact) setReceiptContact(contactInfo!.email || contactInfo!.phone)
+    if (receiptSentByConfirm && hasContact) {
+      setSentMsg(`Receipt sent to ${contactInfo!.email || contactInfo!.phone}`)
+      setReceiptMode('sent')
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-send if contact provided
+  // Auto-send if contact provided (skip if backend already sent via confirm endpoint)
   useEffect(() => {
-    if (autoSent || !hasContact) return
+    if (autoSent || !hasContact || receiptSentByConfirm) return
     setAutoSent(true)
     const destination = contactInfo!.email || contactInfo!.phone
     const type = contactInfo!.email ? 'email' : 'whatsapp'
@@ -150,7 +154,7 @@ export function ConfirmationScreen() {
         {/* Thank you + tagline */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
           <h1 className="font-black text-gray-900 leading-tight" style={{ fontSize: '1.75rem' }}>
-            Thank you{contactInfo?.name && !contactInfo.anonymous ? `, ${contactInfo.name.split(' ')[0]}` : ''}!
+            Thank you{contactInfo?.name && !contactInfo.anonymous ? `, ${contactInfo.firstName || contactInfo.name.split(' ')[0]}` : ''}!
           </h1>
           <p className="font-black mt-0.5" style={{ color: '#FF9933', fontSize: '1.2rem' }}>{thankYouLine}</p>
           {subMessage && <p className="text-gray-500 text-sm mt-1">{subMessage}</p>}

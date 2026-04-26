@@ -65,6 +65,18 @@ class DeviceIn(BaseModel):
     kiosk_theme: str = "lotus"          # lotus | saffron | royal | peacock | jasmine | crimson
     org_name: str = ""
     org_logo_url: str = ""
+    # Device-level login credentials
+    device_username: str | None = None
+    device_password: str | None = None  # plain text — hashed on save; None means no change
+    # Quick Donation feature flags
+    show_monthly_giving: bool = False
+    enable_gift_aid: bool = False
+    tap_and_go: bool = True
+    donate_title: str = "Tap & Donate"
+    monthly_giving_text: str = "Make a big impact from just £5/month"
+    monthly_giving_amount: float = 5.0
+    confirmation_text: str = ""
+    bg_color: str = ""
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -102,6 +114,9 @@ async def list_devices(
                        off_peak_playlist_id, default_donate_amount, card_reader_id,
                        serial_number, ip_address, device_token,
                        kiosk_theme, org_name, org_logo_url,
+                       device_username,
+                       show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
+                       monthly_giving_text, monthly_giving_amount, confirmation_text, bg_color,
                        last_seen_at, notes, created_at, updated_at
                 FROM kiosk_devices
                 WHERE {where}
@@ -202,6 +217,9 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
     token = _gen_token()
     now = datetime.utcnow()
 
+    import bcrypt as _bcrypt
+    pw_hash = _bcrypt.hashpw(body.device_password.encode(), _bcrypt.gensalt(12)).decode() if body.device_password else None
+
     async with SessionLocal() as db:
         await db.execute(text("""
             INSERT INTO kiosk_devices
@@ -209,12 +227,18 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  screen_profile_id, peak_start, peak_end, off_peak_playlist_id,
                  default_donate_amount, card_reader_id, serial_number, ip_address,
                  device_token, notes, kiosk_theme, org_name, org_logo_url,
+                 device_username, device_password_hash,
+                 show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
+                 monthly_giving_text, monthly_giving_amount, confirmation_text,
                  created_at, updated_at)
             VALUES
                 (:id, :name, :desc, :dtype, :bid, :loc, :status,
                  :prof_id, :peak_s, :peak_e, :offpeak_pl,
                  :dda, :card_rid, :serial, :ip,
                  :token, :notes, :ktheme, :oname, :ologo,
+                 :dev_user, :dev_pw_hash,
+                 :show_monthly, :gift_aid, :tap_go, :donate_title,
+                 :mg_text, :mg_amount, :confirm_text, :bg_color,
                  :now, :now)
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
@@ -227,6 +251,14 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "serial": body.serial_number, "ip": body.ip_address,
             "token": token, "notes": body.notes,
             "ktheme": body.kiosk_theme, "oname": body.org_name, "ologo": body.org_logo_url,
+            "dev_user": body.device_username.lower().strip() if body.device_username else None,
+            "dev_pw_hash": pw_hash,
+            "show_monthly": body.show_monthly_giving,
+            "gift_aid": body.enable_gift_aid,
+            "tap_go": body.tap_and_go,
+            "donate_title": body.donate_title or "Tap & Donate",
+            "mg_text": body.monthly_giving_text or "Make a big impact from just £5/month",
+            "mg_amount": body.monthly_giving_amount or 5.0,
             "now": now,
         })
         await db.commit()
@@ -244,9 +276,15 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
     if body.status not in STATUSES:
         raise HTTPException(status_code=400, detail=f"status must be one of {STATUSES}")
 
+    import bcrypt as _bcrypt
     now = datetime.utcnow()
+
+    # Only update password hash if a new password was provided
+    pw_clause = ", device_password_hash = :dev_pw_hash" if body.device_password else ""
+    pw_hash = _bcrypt.hashpw(body.device_password.encode(), _bcrypt.gensalt(12)).decode() if body.device_password else None
+
     async with SessionLocal() as db:
-        result = await db.execute(text("""
+        result = await db.execute(text(f"""
             UPDATE kiosk_devices SET
                 name = :name, description = :desc, device_type = :dtype,
                 branch_id = :bid, location = :loc, status = :status,
@@ -256,6 +294,15 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 serial_number = :serial, ip_address = :ip,
                 notes = :notes, kiosk_theme = :ktheme,
                 org_name = :oname, org_logo_url = :ologo,
+                device_username = :dev_user{pw_clause},
+                show_monthly_giving = :show_monthly,
+                enable_gift_aid = :gift_aid,
+                tap_and_go = :tap_go,
+                donate_title = :donate_title,
+                monthly_giving_text = :mg_text,
+                monthly_giving_amount = :mg_amount,
+                confirmation_text = :confirm_text,
+                bg_color = :bg_color,
                 updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
         """), {
@@ -269,6 +316,16 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "serial": body.serial_number, "ip": body.ip_address,
             "notes": body.notes,
             "ktheme": body.kiosk_theme, "oname": body.org_name, "ologo": body.org_logo_url,
+            "dev_user": body.device_username.lower().strip() if body.device_username else None,
+            **({"dev_pw_hash": pw_hash} if body.device_password else {}),
+            "show_monthly": body.show_monthly_giving,
+            "gift_aid": body.enable_gift_aid,
+            "tap_go": body.tap_and_go,
+            "donate_title": body.donate_title or "Tap & Donate",
+            "mg_text": body.monthly_giving_text or "Make a big impact from just £5/month",
+            "mg_amount": body.monthly_giving_amount or 5.0,
+            "confirm_text": body.confirmation_text or "",
+            "bg_color": body.bg_color or "",
             "now": now,
         })
         await db.commit()

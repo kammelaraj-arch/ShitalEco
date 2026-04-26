@@ -43,7 +43,7 @@ interface Dashboard {
 }
 
 const EMPTY = {
-  name:'', category:'MONTHLY', is_critical:false, amount:'', currency:'GBP',
+  name:'', category:'OTHER', is_critical:false, amount:'', currency:'GBP',
   frequency:'MONTHLY', branch_id:'main', start_date: new Date().toISOString().slice(0,10),
   end_date:'', day_of_month:'', renewal_date:'', notice_days:'30',
   payee:'', reference:'', notes:'', is_active:true,
@@ -76,14 +76,15 @@ export default function RecurringPaymentsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [pmts, d, br] = await Promise.all([
+      const [pmtsResult, dashResult, brResult] = await Promise.allSettled([
         apiFetch<{recurring_payments: RecurringPayment[]}>('/recurring-payments?include_inactive=true'),
         apiFetch<Dashboard>('/recurring-payments/dashboard'),
         apiFetch<{branches: Array<{branch_id:string;name:string}>}>('/branches'),
       ])
-      setPayments(pmts.recurring_payments || [])
-      setDash(d)
-      setBranches(br.branches || [])
+      if (pmtsResult.status === 'fulfilled') setPayments(pmtsResult.value.recurring_payments || [])
+      else setError(pmtsResult.reason instanceof Error ? pmtsResult.reason.message : 'Failed to load obligations')
+      if (dashResult.status === 'fulfilled') setDash(dashResult.value)
+      if (brResult.status === 'fulfilled') setBranches(brResult.value.branches || [])
     } catch(e:unknown) { setError(e instanceof Error ? e.message : 'Failed to load') }
     finally { setLoading(false) }
   }, [])

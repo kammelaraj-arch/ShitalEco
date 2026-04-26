@@ -217,6 +217,91 @@ function UserModal({ user, onClose, onSaved }: {
   )
 }
 
+// ─── Change Password modal ────────────────────────────────────────────────────
+
+function ChangePasswordModal({ user, onClose }: { user: User; onClose: () => void }) {
+  const [password, setPassword]   = useState('')
+  const [confirm, setConfirm]     = useState('')
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState('')
+  const [done, setDone]           = useState(false)
+
+  async function save() {
+    if (password.length < 8) { setError('Password must be at least 8 characters'); return }
+    if (password !== confirm) { setError('Passwords do not match'); return }
+    setError(''); setSaving(true)
+    try {
+      await apiFetch(`/users/${user.id}/password`, {
+        method: 'PUT',
+        body: JSON.stringify({ new_password: password }),
+      })
+      setDone(true)
+    } catch (e: any) {
+      setError(e.message || 'Failed to update password')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div initial={{ scale: 0.92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.92, opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-sm rounded-2xl flex flex-col overflow-hidden"
+          style={{ background: '#0f0008', border: '1px solid rgba(185,28,28,0.3)' }}>
+
+          <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
+            <div>
+              <h2 className="text-white font-black text-base">Change Password</h2>
+              <p className="text-white/40 text-xs mt-0.5">{user.name} · {user.email}</p>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 font-bold">×</button>
+          </div>
+
+          <div className="px-6 py-5 space-y-4">
+            {error && <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>}
+            {done ? (
+              <div className="bg-green-500/15 border border-green-500/20 text-green-400 text-sm px-4 py-3 rounded-xl text-center font-semibold">
+                ✅ Password updated successfully
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">New Password</label>
+                  <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                    placeholder="Min. 8 characters" autoComplete="new-password"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors" />
+                </div>
+                <div>
+                  <label className="block text-white/50 text-xs font-semibold mb-1.5 uppercase tracking-wider">Confirm Password</label>
+                  <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
+                    placeholder="Repeat password" autoComplete="new-password"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 placeholder-white/20 transition-colors" />
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="flex gap-3 px-6 py-4 border-t border-white/5">
+            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 text-white/60 text-sm font-semibold">
+              {done ? 'Close' : 'Cancel'}
+            </button>
+            {!done && (
+              <button onClick={save} disabled={saving}
+                className="flex-2 py-2.5 px-6 rounded-xl text-white text-sm font-black disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
+                style={{ background: 'linear-gradient(135deg, #d97706, #ea580c)', flex: 2 }}>
+                {saving ? 'Saving…' : 'Update Password'}
+              </button>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    </>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function UsersPage() {
@@ -226,7 +311,7 @@ export default function UsersPage() {
   const [filterRole, setFilterRole] = useState('')
   const [search, setSearch]         = useState('')
   const [showInactive, setShowInactive] = useState(false)
-  const [modal, setModal]           = useState<'create' | 'edit' | null>(null)
+  const [modal, setModal]           = useState<'create' | 'edit' | 'password' | null>(null)
   const [selected, setSelected]     = useState<User | null>(null)
 
   const load = useCallback(async () => {
@@ -420,6 +505,10 @@ export default function UsersPage() {
                         className="p-1.5 rounded-lg bg-white/5 text-white/40 hover:text-saffron-400 hover:bg-saffron-400/10 transition-colors text-xs" title="Change role">
                         ✏️
                       </button>
+                      <button onClick={() => { setSelected(u); setModal('password') }}
+                        className="p-1.5 rounded-lg bg-white/5 text-white/40 hover:text-amber-400 hover:bg-amber-400/10 transition-colors text-xs" title="Change password">
+                        🔑
+                      </button>
                       <button onClick={() => toggleActive(u)}
                         className={`p-1.5 rounded-lg bg-white/5 transition-colors text-xs ${u.is_active ? 'text-white/40 hover:text-yellow-400 hover:bg-yellow-400/10' : 'text-white/40 hover:text-green-400 hover:bg-green-400/10'}`}
                         title={u.is_active ? 'Deactivate' : 'Activate'}>
@@ -442,6 +531,7 @@ export default function UsersPage() {
       <AnimatePresence>
         {modal === 'create' && <UserModal user={null} onClose={() => setModal(null)} onSaved={load} />}
         {modal === 'edit' && selected && <UserModal user={selected} onClose={() => { setModal(null); setSelected(null) }} onSaved={load} />}
+        {modal === 'password' && selected && <ChangePasswordModal user={selected} onClose={() => { setModal(null); setSelected(null) }} />}
       </AnimatePresence>
     </div>
   )

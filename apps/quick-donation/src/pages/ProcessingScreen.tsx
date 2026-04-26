@@ -16,25 +16,125 @@ function generateUUID(): string {
 }
 
 /**
- * ProcessingScreen — creates basket, order, payment intent, and sends to Stripe Terminal.
- * Fully automated — no user interaction needed. Transitions to TapScreen on success.
+ * ProcessingScreen — creates basket, order, payment intent, and sends to card reader.
+ * Supports Stripe Terminal and SumUp Solo. Fully automated — transitions to TapScreen on success.
  */
 export function ProcessingScreen() {
   const {
-    amount, branchId, stripeReaderId, stripeReaderLabel,
-    setScreen, setOrderResult,
+    amount, branchId, stripeReaderId,
+    readerProvider, sumupReaderId, sumupReaderApiId, cloverDeviceId,
+    pendingGiftAid,
+    setScreen, setOrderResult, setReader,
   } = useDonationStore()
 
   const [error, setError] = useState('')
   const [stage, setStage] = useState('Creating donation...')
+  const isSumUp = readerProvider === 'sumup'
+  const isClover = readerProvider === 'clover'
+  const isReaderError = isSumUp ? !sumupReaderId?.trim()
+    : isClover ? !cloverDeviceId?.trim()
+    : !stripeReaderId?.trim()
+
+  async function recordDonation(basketId: string, orderRef: string, amountPence: number, paymentRef: string, readerId: string, provider = 'SUMUP') {
+    try {
+      await fetch(`${API_BASE}/kiosk/quick-donation/record`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          basket_id: basketId,
+          order_ref: orderRef,
+          amount_pence: amountPence,
+          branch_id: branchId,
+          payment_intent_id: paymentRef,
+          payment_provider: provider,
+          reader_id: readerId,
+          ...(pendingGiftAid ? {
+            ga_first_name: pendingGiftAid.firstName,
+            ga_surname: pendingGiftAid.surname,
+            ga_house_number: pendingGiftAid.houseNum,
+            ga_postcode: pendingGiftAid.postcode,
+            ga_email: pendingGiftAid.email,
+            ga_declared: true,
+          } : {}),
+        }),
+      })
+    } catch { /* non-fatal — reconciled via payment provider webhook */ }
+  }
 
   async function processPayment() {
     setError('')
-    if (!stripeReaderId || !stripeReaderId.trim()) {
-      setError('No card reader configured. Please go to Admin and assign a Stripe Terminal reader to this device.')
+    if (isReaderError) {
+      setError('No card reader configured for this device.')
       return
     }
     try {
+      const amountPence = Math.round(amount * 100)
+
+      if (isSumUp) {
+        // ── SumUp Solo flow ──────────────────────────────────────────────────
+        setStage('Creating donation...')
+        const basketId = generateUUID()
+        const orderRef = `DON-${basketId.slice(0, 8).toUpperCase()}`
+
+        // Save PENDING record before sending to reader so it always appears in admin
+        await recordDonation(basketId, orderRef, amountPence, '', sumupReaderId, 'SUMUP')
+
+        setStage('Sending to SumUp reader...')
+        const res = await fetch(`${API_BASE}/kiosk/sumup/checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount_pence: amountPence,
+            order_id: basketId,
+            description: `Shital Temple Donation £${amount.toFixed(2)}`,
+            reader_serial: sumupReaderId,
+            reader_id: sumupReaderApiId,
+          }),
+        })
+        if (!res.ok) {
+          const txt = await res.text()
+          throw new Error(`SumUp error (${res.status}): ${txt.slice(0, 120)}`)
+        }
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
+
+        setOrderResult(basketId, orderRef, data.checkout_id, '')
+        setScreen('tap')
+        return
+      }
+
+      if (isClover) {
+        // ── Clover Flex flow ─────────────────────────────────────────────────
+        setStage('Creating donation...')
+        const basketId = generateUUID()
+        const orderRef = `DON-${basketId.slice(0, 8).toUpperCase()}`
+
+        await recordDonation(basketId, orderRef, amountPence, '', cloverDeviceId, 'CLOVER')
+
+        setStage('Sending to Clover reader...')
+        const res = await fetch(`${API_BASE}/kiosk/clover/payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount_pence: amountPence,
+            order_id: basketId,
+            description: `Shital Temple Donation £${amount.toFixed(2)}`,
+            device_id: cloverDeviceId,
+          }),
+        })
+        if (!res.ok) {
+          const txt = await res.text()
+          throw new Error(`Clover error (${res.status}): ${txt.slice(0, 120)}`)
+        }
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
+
+        setOrderResult(basketId, orderRef, data.clover_order_id, '')
+        setScreen('tap')
+        return
+      }
+
+      // ── Stripe Terminal flow ─────────────────────────────────────────────
       // 1. Create basket
       setStage('Creating donation...')
       let basketId = generateUUID()
@@ -45,8 +145,8 @@ export function ProcessingScreen() {
           body: JSON.stringify({ branch_id: branchId }),
         })
         if (basketRes.ok) {
-          const data = await basketRes.json()
-          if (data.basket_id) basketId = data.basket_id
+          const bdata = await basketRes.json()
+          if (bdata.basket_id) basketId = bdata.basket_id
         }
       } catch { /* DB unavailable — continue with local UUID */ }
 
@@ -69,7 +169,6 @@ export function ProcessingScreen() {
 
       // 3. Create PaymentIntent via Stripe Terminal
       setStage('Preparing card reader...')
-      const amountPence = Math.round(amount * 100)
       const piRes = await fetch(`${API_BASE}/kiosk/terminal/payment-intent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -104,25 +203,9 @@ export function ProcessingScreen() {
       const pr = await prRes.json()
       if (pr.error) throw new Error(pr.error)
 
-      // 5. Store order result and move to tap screen
+      // 5. Record and transition
       const orderRef = `DON-${basketId.slice(0, 8).toUpperCase()}`
-
-      // Record order in DB (best-effort)
-      try {
-        await fetch(`${API_BASE}/kiosk/quick-donation/record`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            basket_id: basketId,
-            order_ref: orderRef,
-            amount_pence: amountPence,
-            branch_id: branchId,
-            payment_intent_id: pi.payment_intent_id,
-            reader_id: stripeReaderId,
-          }),
-        })
-      } catch { /* non-fatal — will be reconciled via Stripe webhook */ }
-
+      await recordDonation(basketId, orderRef, amountPence, pi.payment_intent_id, stripeReaderId)
       setOrderResult(basketId, orderRef, pi.payment_intent_id, pi.client_secret)
       setScreen('tap')
 
@@ -150,13 +233,23 @@ export function ProcessingScreen() {
             >
               ← Back
             </button>
-            <button
-              onClick={processPayment}
-              className="py-3.5 px-6 rounded-2xl bg-saffron-gradient text-white font-black text-sm shadow-lg"
-              style={{ flex: 2 }}
-            >
-              Try Again
-            </button>
+            {isReaderError ? (
+              <button
+                onClick={() => { setReader('', ''); setScreen('admin') }}
+                className="py-3.5 px-6 rounded-2xl bg-saffron-gradient text-white font-black text-sm shadow-lg"
+                style={{ flex: 2 }}
+              >
+                ⚙ Admin Setup
+              </button>
+            ) : (
+              <button
+                onClick={processPayment}
+                className="py-3.5 px-6 rounded-2xl bg-saffron-gradient text-white font-black text-sm shadow-lg"
+                style={{ flex: 2 }}
+              >
+                Try Again
+              </button>
+            )}
           </div>
         </motion.div>
       ) : (

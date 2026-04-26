@@ -4,10 +4,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+import httpx
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from shital.api.deps import OptionalSpace
+from shital.core.fabrics.cache import cache_get, cache_set
+from shital.core.fabrics.config import settings
+from shital.core.fabrics.database import SessionLocal
+from shital.core.fabrics.secrets import SecretsManager
 from shital.core.space.context import DigitalSpace
 
 router = APIRouter(prefix="/kiosk", tags=["kiosk"])
@@ -15,9 +21,7 @@ router = APIRouter(prefix="/kiosk", tags=["kiosk"])
 
 @router.get("/services")
 async def get_services(ctx: OptionalSpace, category: str = "", branch_id: str = "main"):
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
     conditions = ["is_active = true", "deleted_at IS NULL"]
     params: dict[str, Any] = {"bid": branch_id}
     if category:
@@ -65,9 +69,7 @@ class AddItemInput(BaseModel):
 
 @router.post("/basket")
 async def create_basket(body: CreateBasketInput):
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
     basket_id = str(uuid.uuid4())
     session_id = body.session_id or str(uuid.uuid4())
     now = datetime.utcnow()
@@ -82,9 +84,7 @@ async def create_basket(body: CreateBasketInput):
 
 @router.get("/basket/{basket_id}")
 async def get_basket(basket_id: str):
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         items_result = await db.execute(
             text("SELECT id, item_type, reference_id, name, description, quantity, unit_price, total_price, metadata FROM basket_items WHERE basket_id = :bid ORDER BY created_at"),
@@ -99,9 +99,7 @@ async def get_basket(basket_id: str):
 async def add_item(body: AddItemInput):
     import json
 
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
     item_id = str(uuid.uuid4())
     total = body.unit_price * body.quantity
     now = datetime.utcnow()
@@ -116,9 +114,7 @@ async def add_item(body: AddItemInput):
 
 @router.delete("/basket/{basket_id}/item/{item_id}")
 async def remove_item(basket_id: str, item_id: str):
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         await db.execute(text("DELETE FROM basket_items WHERE id = :iid AND basket_id = :bid"), {"iid": item_id, "bid": basket_id})
         await db.commit()
@@ -130,15 +126,18 @@ class CheckoutInput(BaseModel):
     payment_provider: str = "STRIPE"
     branch_id: str = "main"
     customer_name: str = ""
+    customer_first_name: str = ""
+    customer_surname: str = ""
     customer_email: str = ""
     customer_phone: str = ""
+    customer_postcode: str = ""
+    customer_address: str = ""
+    customer_uprn: str = ""
 
 
 @router.post("/checkout")
 async def checkout(body: CheckoutInput, ctx: OptionalSpace):
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         items_result = await db.execute(text("SELECT SUM(total_price) AS total FROM basket_items WHERE basket_id = :bid"), {"bid": body.basket_id})
         row = items_result.mappings().first()
@@ -154,22 +153,358 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
     from shital.capabilities.payments.capabilities import CreatePaymentInput, create_payment
     safe_ctx = ctx or DigitalSpace(user_id="kiosk", user_email="kiosk@shital.org", role="KIOSK", branch_id=body.branch_id, permissions=[], session_id=str(uuid.uuid4()))
     payment = await create_payment(safe_ctx, CreatePaymentInput(provider=body.payment_provider, amount_pence=amount_pence, currency="GBP", order_id=order_id, description=f"Shital Temple Order {ref}", idempotency_key=order_id))
+
+    full_name = body.customer_name or f"{body.customer_first_name} {body.customer_surname}".strip()
+    email_key = body.customer_email.strip().lower() if body.customer_email.strip() else None
+
     async with SessionLocal() as db:
+        # ── CRM contact upsert ──────────────────────────────────────────────
+        contact_id: str | None = None
+        if email_key:
+            contact_uuid = str(uuid.uuid4())
+            c_result = await db.execute(text("""
+                INSERT INTO contacts
+                    (id, email, first_name, surname, full_name, phone,
+                     gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                     first_source, first_branch_id, created_at, updated_at)
+                VALUES
+                    (:id, :email, :first, :surname, :name, :phone,
+                     true, :now, true, :now,
+                     'kiosk', :branch, :now, :now)
+                ON CONFLICT (email) DO UPDATE SET
+                    first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                    surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                    full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                    phone             = COALESCE(NULLIF(EXCLUDED.phone,''),      contacts.phone),
+                    gdpr_consent      = true,
+                    gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                    tac_consent       = true,
+                    tac_consented_at  = COALESCE(contacts.tac_consented_at,  EXCLUDED.tac_consented_at),
+                    updated_at        = EXCLUDED.updated_at
+                RETURNING id
+            """), {
+                "id": contact_uuid, "email": email_key,
+                "first": body.customer_first_name or "", "surname": body.customer_surname or "",
+                "name": full_name, "phone": body.customer_phone or "",
+                "branch": body.branch_id, "now": now,
+            })
+            row = c_result.mappings().first()
+            contact_id = str(row["id"]) if row else contact_uuid
+
+            if body.customer_postcode or body.customer_address:
+                await db.execute(text("""
+                    INSERT INTO addresses
+                        (id, contact_id, formatted, postcode, uprn,
+                         is_primary, lookup_source, created_at)
+                    VALUES (:id, :cid, :fmt, :pc, :uprn, true, 'kiosk', :now)
+                """), {
+                    "id": str(uuid.uuid4()), "cid": contact_id,
+                    "fmt": body.customer_address or "", "pc": body.customer_postcode.upper().strip(),
+                    "uprn": body.customer_uprn or "", "now": now,
+                })
+
         await db.execute(
-            text("INSERT INTO orders (id, branch_id, basket_id, reference, status, total_amount, currency, payment_provider, payment_ref, idempotency_key, created_at, updated_at) VALUES (:id, :bid, :basket, :ref, 'PENDING', :total, 'GBP', :provider, :pref, :ikey, :now, :now)"),
-            {"id": order_id, "bid": body.branch_id, "basket": body.basket_id, "ref": ref, "total": str(total), "provider": body.payment_provider, "pref": payment.get("payment_id"), "ikey": order_id, "now": now},
+            text("""INSERT INTO orders
+                (id, branch_id, basket_id, reference, status, total_amount, currency,
+                 payment_provider, payment_ref, customer_name, customer_email, customer_phone,
+                 contact_id, idempotency_key, created_at, updated_at)
+                VALUES (:id, :bid, :basket, :ref, 'PENDING', :total, 'GBP',
+                        :provider, :pref, :cname, :cemail, :cphone,
+                        :cid, :ikey, :now, :now)"""),
+            {
+                "id": order_id, "bid": body.branch_id, "basket": body.basket_id,
+                "ref": ref, "total": str(total), "provider": body.payment_provider,
+                "pref": payment.get("payment_id"),
+                "cname": full_name, "cemail": body.customer_email, "cphone": body.customer_phone,
+                "cid": contact_id, "ikey": order_id, "now": now,
+            },
         )
         await db.execute(text("UPDATE baskets SET status = 'CHECKOUT', updated_at = :now WHERE id = :bid"), {"now": now, "bid": body.basket_id})
+
+        # Record in donations table so the unified finance view picks it up
+        await db.execute(text(
+            "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
+            "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
+            "status, source, contact_id, idempotency_key, created_at, updated_at) "
+            "VALUES (:id, :uid, :bid, :amount, 'GBP', false, 'General Fund', :ref, "
+            ":provider, :pref, 'PENDING', 'kiosk', :cid, :ikey, :now, :now) "
+            "ON CONFLICT (idempotency_key) DO NOTHING"
+        ), {
+            "id": str(uuid.uuid4()), "uid": contact_id or "", "bid": body.branch_id,
+            "amount": str(total), "ref": ref,
+            "provider": body.payment_provider, "pref": payment.get("payment_id") or "",
+            "cid": contact_id, "ikey": f"kiosk-{order_id}", "now": now,
+        })
+
         await db.commit()
     return {"order_id": order_id, "reference": ref, "total": total, "currency": "GBP", "payment": payment}
+
+
+def _upsert_contact_sql() -> str:
+    return """
+        INSERT INTO contacts
+            (id, email, first_name, surname, full_name, phone,
+             gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+             first_source, first_branch_id, created_at, updated_at)
+        VALUES
+            (:id, :email, :first, :surname, :name, :phone,
+             true, :now, true, :now, 'kiosk', :branch, :now, :now)
+        ON CONFLICT (email) DO UPDATE SET
+            first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''),  contacts.first_name),
+            surname           = COALESCE(NULLIF(EXCLUDED.surname,''),     contacts.surname),
+            full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),   contacts.full_name),
+            phone             = COALESCE(NULLIF(EXCLUDED.phone,''),       contacts.phone),
+            gdpr_consent      = true,
+            gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+            tac_consent       = true,
+            tac_consented_at  = COALESCE(contacts.tac_consented_at,  EXCLUDED.tac_consented_at),
+            updated_at        = EXCLUDED.updated_at
+        RETURNING id
+    """
+
+
+class OrderPendingInput(BaseModel):
+    basket_id: str
+    order_ref: str
+    payment_provider: str
+    payment_intent_id: str = ""
+    branch_id: str = "main"
+    device_id: str = ""
+    device_label: str = ""
+    source: str = "kiosk"
+    total_amount: float = 0.0
+    contact_name: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    gift_aid_eligible: bool = False
+    # Gift Aid declaration fields (optional — only sent when donor agreed)
+    ga_full_name: str = ""
+    ga_postcode: str = ""
+    ga_address: str = ""
+    ga_email: str = ""
+
+
+@router.post("/order/pending")
+async def create_pending_order(body: OrderPendingInput):
+    """
+    Called immediately when payment is dispatched to the card reader.
+    Saves order + contact + donation with status PENDING so every initiated
+    payment is visible in the admin regardless of outcome.
+    Idempotent — safe to call multiple times.
+    """
+
+
+    now = datetime.utcnow()
+    order_id = str(uuid.uuid4())
+
+    email_key = body.contact_email.strip().lower() if body.contact_email.strip() else None
+    name_parts = body.contact_name.strip().split(" ", 1) if body.contact_name.strip() else []
+    first_name = name_parts[0] if name_parts else ""
+    surname    = name_parts[1] if len(name_parts) > 1 else ""
+
+    async with SessionLocal() as db:
+        items_result = await db.execute(
+            text("SELECT SUM(total_price) AS total FROM basket_items WHERE basket_id = :bid"),
+            {"bid": body.basket_id},
+        )
+        row = items_result.mappings().first()
+        total = float(str(row["total"] or 0)) if row and row["total"] else body.total_amount
+
+        contact_id: str | None = None
+        if email_key:
+            contact_uuid = str(uuid.uuid4())
+            c_row = await db.execute(text(_upsert_contact_sql()), {
+                "id": contact_uuid, "email": email_key,
+                "first": first_name, "surname": surname,
+                "name": body.contact_name, "phone": body.contact_phone or "",
+                "branch": body.branch_id, "now": now,
+            })
+            r = c_row.mappings().first()
+            contact_id = str(r["id"]) if r else contact_uuid
+
+        await db.execute(text("""
+            INSERT INTO orders
+                (id, branch_id, basket_id, reference, status, total_amount, currency,
+                 payment_provider, payment_ref, device_id, device_label, source,
+                 customer_name, customer_email, customer_phone,
+                 contact_id, idempotency_key, created_at, updated_at)
+            VALUES
+                (:id, :bid, :basket, :ref, 'PENDING', :total, 'GBP',
+                 :provider, :pref, :did, :dlabel, :source,
+                 :cname, :cemail, :cphone,
+                 :cid, :ikey, :now, :now)
+            ON CONFLICT (idempotency_key) DO NOTHING
+        """), {
+            "id": order_id, "bid": body.branch_id, "basket": body.basket_id,
+            "ref": body.order_ref, "total": str(total),
+            "provider": body.payment_provider, "pref": body.payment_intent_id or "",
+            "did": body.device_id or "", "dlabel": body.device_label or "",
+            "source": body.source or "kiosk",
+            "cname": body.contact_name, "cemail": body.contact_email, "cphone": body.contact_phone,
+            "cid": contact_id, "ikey": body.order_ref, "now": now,
+        })
+
+        await db.execute(text(
+            "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
+            "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
+            "status, source, contact_id, idempotency_key, created_at, updated_at) "
+            "VALUES (:id, :uid, :bid, :amount, 'GBP', :ga, 'General Fund', :ref, "
+            ":provider, :pref, 'PENDING', 'kiosk', :cid, :ikey, :now, :now) "
+            "ON CONFLICT (idempotency_key) DO NOTHING"
+        ), {
+            "id": str(uuid.uuid4()), "uid": contact_id or "", "bid": body.branch_id,
+            "amount": str(total), "ref": body.order_ref,
+            "provider": body.payment_provider, "pref": body.payment_intent_id or "",
+            "ga": body.gift_aid_eligible,
+            "cid": contact_id, "ikey": f"donation-{body.order_ref}", "now": now,
+        })
+
+        # Save Gift Aid declaration + address when donor agreed
+        if body.gift_aid_eligible and body.ga_full_name and body.ga_postcode:
+            ga_email_key = body.ga_email.strip().lower() if body.ga_email.strip() else (
+                email_key  # fall back to checkout email
+            )
+            ga_contact_id = contact_id
+            if ga_email_key and ga_email_key != email_key:
+                # Different email for Gift Aid — upsert separately
+                ga_uuid = str(uuid.uuid4())
+                ga_parts = body.ga_full_name.strip().split(" ", 1)
+                ga_row = await db.execute(text(_upsert_contact_sql()), {
+                    "id": ga_uuid, "email": ga_email_key,
+                    "first": ga_parts[0], "surname": ga_parts[1] if len(ga_parts) > 1 else "",
+                    "name": body.ga_full_name, "phone": "",
+                    "branch": body.branch_id, "now": now,
+                })
+                r2 = ga_row.mappings().first()
+                ga_contact_id = str(r2["id"]) if r2 else ga_uuid
+
+            if ga_contact_id and body.ga_postcode:
+                await db.execute(text("""
+                    INSERT INTO addresses (id, contact_id, formatted, postcode, uprn,
+                                          is_primary, lookup_source, created_at)
+                    VALUES (:id, :cid, :fmt, :pc, '', true, 'kiosk', :now)
+                    ON CONFLICT DO NOTHING
+                """), {
+                    "id": str(uuid.uuid4()), "cid": ga_contact_id,
+                    "fmt": body.ga_address or body.ga_postcode,
+                    "pc": body.ga_postcode.upper().strip(), "now": now,
+                })
+
+            await db.execute(text("""
+                INSERT INTO gift_aid_declarations
+                    (id, order_ref, full_name, postcode, address, contact_email,
+                     donation_amount, donation_date, gift_aid_agreed,
+                     contact_id, hmrc_submitted, created_at)
+                VALUES
+                    (:id, :ref, :name, :pc, :addr, :email,
+                     :amount, :ddate, true,
+                     :cid, false, :now)
+                ON CONFLICT DO NOTHING
+            """), {
+                "id": str(uuid.uuid4()), "ref": body.order_ref,
+                "name": body.ga_full_name, "pc": body.ga_postcode.upper().strip(),
+                "addr": body.ga_address or "",
+                "email": body.ga_email.strip() or body.contact_email.strip(),
+                "amount": total, "ddate": now.date(),
+                "cid": ga_contact_id, "now": now,
+            })
+
+        await db.execute(
+            text("UPDATE baskets SET status = 'CHECKOUT', updated_at = :now WHERE id = :bid"),
+            {"now": now, "bid": body.basket_id},
+        )
+        await db.commit()
+
+    return {"order_id": order_id, "reference": body.order_ref, "status": "PENDING"}
+
+
+class OrderConfirmInput(BaseModel):
+    order_ref: str
+    payment_ref: str = ""
+
+
+@router.post("/order/confirm")
+async def confirm_order(body: OrderConfirmInput):
+    """
+    Called by PaymentScreen when payment succeeds.
+    Updates order + donation to COMPLETED with the real transaction ID.
+    Also sends receipt email if a customer email is on record.
+    Idempotent — safe to call multiple times.
+    """
+
+
+    now = datetime.utcnow()
+    email_sent = False
+
+    async with SessionLocal() as db:
+        # Update order to COMPLETED and record the real transaction ID
+        await db.execute(text("""
+            UPDATE orders
+               SET status = 'COMPLETED',
+                   payment_ref = CASE WHEN :pref != '' THEN :pref ELSE payment_ref END,
+                   updated_at  = :now
+             WHERE reference = :ref
+        """), {"pref": body.payment_ref or "", "now": now, "ref": body.order_ref})
+
+        await db.execute(text("""
+            UPDATE donations
+               SET status = 'COMPLETED',
+                   payment_ref = CASE WHEN :pref != '' THEN :pref ELSE payment_ref END,
+                   updated_at  = :now
+             WHERE reference = :ref
+        """), {"pref": body.payment_ref or "", "now": now, "ref": body.order_ref})
+
+        await db.execute(text("""
+            UPDATE baskets SET status = 'COMPLETED', updated_at = :now
+             WHERE id = (SELECT basket_id FROM orders WHERE reference = :ref LIMIT 1)
+        """), {"now": now, "ref": body.order_ref})
+
+        # Fetch data needed for the receipt
+        order_row = await db.execute(
+            text("SELECT basket_id, total_amount, branch_id, customer_email, customer_name FROM orders WHERE reference = :ref LIMIT 1"),
+            {"ref": body.order_ref},
+        )
+        order = order_row.mappings().first()
+        await db.commit()
+
+    if order and order["customer_email"]:
+        try:
+            # Load item names from basket_items
+            async with SessionLocal() as db:
+                items_result = await db.execute(
+                    text("SELECT name, quantity, unit_price FROM basket_items WHERE basket_id = :bid"),
+                    {"bid": order["basket_id"]},
+                )
+                db_items = [dict(r) for r in items_result.mappings().all()]
+
+            branch_id = order["branch_id"] or "main"
+            branch_label = (
+                "Wembley" if branch_id in ("main", "wembley") else
+                branch_id.replace("-", " ").title()
+            )
+            result = await send_receipt(ReceiptInput(
+                order_ref=body.order_ref,
+                type="email",
+                destination=order["customer_email"],
+                total=float(str(order["total_amount"])),
+                items=[
+                    {"name": r["name"], "quantity": r["quantity"], "unitPrice": float(str(r["unit_price"]))}
+                    for r in db_items
+                ],
+                branch_name=f"Shital {branch_label}",
+                customer_name=order["customer_name"] or "",
+            ))
+            email_sent = bool(result.get("sent"))
+        except Exception:
+            email_sent = False
+
+    return {"confirmed": True, "reference": body.order_ref, "email_sent": email_sent}
 
 
 @router.post("/terminal/connection-token")
 async def stripe_connection_token():
     import stripe
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         token = stripe.terminal.ConnectionToken.create()
@@ -190,8 +525,6 @@ class TerminalPaymentInput(BaseModel):
 async def create_terminal_payment_intent(body: TerminalPaymentInput):
     import stripe
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         intent = stripe.PaymentIntent.create(
@@ -215,8 +548,6 @@ async def process_payment_on_reader(body: ReaderActionInput):
         return {"error": "No card reader configured. Please assign a Stripe Terminal reader in Admin → Devices."}
     import stripe
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         action = stripe.terminal.Reader.process_payment_intent(body.reader_id, payment_intent=body.payment_intent_id)
@@ -229,8 +560,6 @@ async def process_payment_on_reader(body: ReaderActionInput):
 async def cancel_reader_action(body: ReaderActionInput):
     import stripe
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         stripe.terminal.Reader.cancel_action(body.reader_id)
@@ -244,8 +573,6 @@ async def get_payment_intent_status(id: str):
     """Poll a PaymentIntent status — used by kiosk to detect card tap success."""
     import stripe
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         intent = stripe.PaymentIntent.retrieve(id)
@@ -258,8 +585,6 @@ async def get_payment_intent_status(id: str):
 async def list_terminal_readers(location_id: str = ""):
     import stripe
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
         params: dict = {"limit": 20}
@@ -283,9 +608,7 @@ class SquareCheckoutInput(BaseModel):
 
 @router.post("/square/terminal-checkout")
 async def square_terminal_checkout(body: SquareCheckoutInput):
-    import httpx
 
-    from shital.core.fabrics.config import settings
     base = "https://connect.squareup.com" if settings.SQUARE_ENVIRONMENT == "production" else "https://connect.squareupsandbox.com"
     headers = {"Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}", "Content-Type": "application/json", "Square-Version": "2024-06-04"}
     payload = {"idempotency_key": body.order_id, "checkout": {"amount_money": {"amount": body.amount_pence, "currency": "GBP"}, "reference_id": body.order_id, "note": body.note or body.description, "device_options": {"device_id": body.device_id or settings.SQUARE_LOCATION_ID, "skip_receipt_screen": False, "collect_signature": False, "tip_settings": {"allow_tipping": False}}, "payment_type": "CARD_PRESENT"}}
@@ -302,9 +625,7 @@ async def square_terminal_checkout(body: SquareCheckoutInput):
 
 @router.get("/square/devices")
 async def list_square_devices():
-    import httpx
 
-    from shital.core.fabrics.config import settings
     base = "https://connect.squareup.com" if settings.SQUARE_ENVIRONMENT == "production" else "https://connect.squareupsandbox.com"
     headers = {"Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}", "Square-Version": "2024-06-04"}
     try:
@@ -319,9 +640,7 @@ async def list_square_devices():
 @router.get("/square/terminal-checkout/{checkout_id}")
 async def square_checkout_status(checkout_id: str):
     """Poll Square Terminal checkout status."""
-    import httpx
 
-    from shital.core.fabrics.config import settings
     base = "https://connect.squareup.com" if settings.SQUARE_ENVIRONMENT == "production" else "https://connect.squareupsandbox.com"
     headers = {"Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}", "Square-Version": "2024-06-04"}
     try:
@@ -359,10 +678,7 @@ async def clover_payment(body: CloverPaymentInput):
     The customer then taps/inserts their card on the device.
     Poll GET /clover/payment/{clover_order_id} to check completion.
     """
-    import httpx
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
 
     access_token = await SecretsManager.get("CLOVER_ACCESS_TOKEN") or settings.CLOVER_ACCESS_TOKEN
     merchant_id = await SecretsManager.get("CLOVER_MERCHANT_ID") or settings.CLOVER_MERCHANT_ID
@@ -420,10 +736,7 @@ async def clover_payment(body: CloverPaymentInput):
 @router.get("/clover/payment/{order_id}")
 async def clover_payment_status(order_id: str):
     """Poll Clover order for payment completion (expand=payments)."""
-    import httpx
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
 
     access_token = await SecretsManager.get("CLOVER_ACCESS_TOKEN") or settings.CLOVER_ACCESS_TOKEN
     merchant_id = await SecretsManager.get("CLOVER_MERCHANT_ID") or settings.CLOVER_MERCHANT_ID
@@ -458,10 +771,7 @@ async def clover_payment_status(order_id: str):
 @router.get("/clover/devices")
 async def list_clover_devices():
     """List Clover devices registered to the configured merchant."""
-    import httpx
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
 
     access_token = await SecretsManager.get("CLOVER_ACCESS_TOKEN") or settings.CLOVER_ACCESS_TOKEN
     merchant_id = await SecretsManager.get("CLOVER_MERCHANT_ID") or settings.CLOVER_MERCHANT_ID
@@ -498,7 +808,8 @@ class SumUpCheckoutInput(BaseModel):
     amount_pence: int
     order_id: str
     description: str = "Temple Payment"
-    reader_serial: str = ""     # SumUp Solo/Air Plus serial number
+    reader_serial: str = ""   # SumUp reader serial (for fallback lookup)
+    reader_id: str = ""       # SumUp reader API id (preferred for push endpoint)
 
 
 @router.post("/sumup/checkout")
@@ -509,10 +820,7 @@ async def sumup_checkout(body: SumUpCheckoutInput):
     """
     import uuid as _uuid
 
-    import httpx
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
 
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
     merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
@@ -527,7 +835,9 @@ async def sumup_checkout(body: SumUpCheckoutInput):
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            # 1. Create checkout
+            # 1. Create checkout — include return_url so SumUp calls our webhook
+            #    the instant the card payment completes on the reader
+            webhook_url = f"{settings.SITE_URL}/api/v1/kiosk/sumup/webhook"
             create_resp = await client.post(
                 f"{base}/v0.1/checkouts",
                 headers=headers,
@@ -537,6 +847,7 @@ async def sumup_checkout(body: SumUpCheckoutInput):
                     "currency": "GBP",
                     "merchant_code": merchant_code,
                     "description": body.description,
+                    "return_url": webhook_url,
                 },
             )
             if not create_resp.is_success:
@@ -545,32 +856,94 @@ async def sumup_checkout(body: SumUpCheckoutInput):
             checkout = create_resp.json()
             checkout_id = checkout.get("id")
 
-            # 2. Push to physical reader if serial provided
-            reader_serial = body.reader_serial or await SecretsManager.get("SUMUP_READER_SERIAL") or ""
-            if reader_serial and checkout_id:
-                await client.post(
-                    f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_serial}/checkout",
+            # 2. Push to physical reader
+            # body.reader_id = SumUp API reader ID (rdr_XXX) if known
+            # body.reader_serial = physical serial number (e.g. 200101578509)
+            # Always look up the API reader ID from serial — serial cannot be used in the push URL
+            reader_id = (body.reader_id or "").strip()
+            reader_serial = (body.reader_serial or "").strip() or await SecretsManager.get("SUMUP_READER_SERIAL") or ""
+
+            if not reader_id and reader_serial:
+                # Resolve serial → API reader ID via readers list
+                rd_resp = await client.get(
+                    f"{base}/v0.1/merchants/{merchant_code}/readers",
                     headers=headers,
-                    json={"id": checkout_id},
                 )
+                if rd_resp.is_success:
+                    rd_data = rd_resp.json()
+                    rd_list = rd_data if isinstance(rd_data, list) else rd_data.get("items", rd_data.get("readers", []))
+                    for rd in rd_list:
+                        # SumUp returns serial under device.identifier, not serial_number
+                        device_serial = rd.get("device", {}).get("identifier", rd.get("serial_number", ""))
+                        if device_serial == reader_serial or rd.get("id") == reader_serial:
+                            reader_id = rd.get("id", "")
+                            break
+
+            if not reader_id:
+                return {"error": f"Could not resolve SumUp reader ID for serial '{reader_serial}'. Ensure the reader is paired and SUMUP_MERCHANT_CODE is correct."}
+
+            push_status = None
+            if reader_id and checkout_id:
+                push_resp = await client.post(
+                    f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_id}/checkout",
+                    headers=headers,
+                    json={"id": checkout_id, "total_amount": {"currency": "GBP", "minor_unit": 2, "value": body.amount_pence}},
+                )
+                push_status = push_resp.status_code
+                if not push_resp.is_success:
+                    return {"error": f"Reader push failed ({push_resp.status_code}): {push_resp.text[:200]}", "reader_id_used": reader_id, "merchant_code_used": merchant_code}
 
         return {
             "checkout_id": checkout_id,
             "checkout_reference": checkout_ref,
             "amount": amount,
+            "reader_id": reader_id,
             "reader_serial": reader_serial,
+            "push_status": push_status,
         }
     except Exception as e:
         return {"error": str(e)}
 
 
+@router.post("/sumup/webhook")
+async def sumup_webhook(request: Request):
+    """
+    SumUp calls this URL (set as return_url in checkout creation) the instant
+    a checkout status changes — typically PENDING → PAID after card tap.
+    We cache the status in Redis so the frontend poll returns it immediately.
+    """
+
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False}
+
+    checkout_id = body.get("id") or body.get("checkout_id")
+    status = body.get("status")
+    if checkout_id and status:
+        try:
+            await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+        except Exception:
+            pass  # Redis unavailable — webhook still accepted
+    return {"ok": True}
+
+
 @router.get("/sumup/checkout/{checkout_id}")
 async def sumup_checkout_status(checkout_id: str):
-    """Poll SumUp checkout status (PENDING / COMPLETED / FAILED / EXPIRED)."""
-    import httpx
+    """
+    Return SumUp checkout status. Checks the Redis webhook cache first
+    (populated by POST /sumup/webhook the instant payment completes) then
+    falls back to polling the SumUp API directly.
+    """
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
+
+    # Fast path: webhook already delivered the final status
+    try:
+        cached = await cache_get(f"sumup:checkout:{checkout_id}")
+        if cached and cached.get("status") not in (None, "PENDING"):
+            return {"status": cached["status"], "source": "webhook"}
+    except Exception:
+        cached = None  # Redis unavailable — fall through to API poll
 
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
     if not access_token:
@@ -583,18 +956,74 @@ async def sumup_checkout_status(checkout_id: str):
                 headers={"Authorization": f"Bearer {access_token}"},
             )
         data = resp.json()
-        return {"status": data.get("status", "PENDING"), "raw": data}
+        status = data.get("status", "PENDING")
+        if status and status != "PENDING":
+            try:
+                await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+            except Exception:
+                pass
+        return {"status": status, "raw": data}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+@router.delete("/sumup/checkout/{checkout_id}")
+async def sumup_cancel_checkout(checkout_id: str):
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    if not access_token:
+        return {"cancelled": False, "error": "SumUp not configured"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.delete(
+                f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        return {"cancelled": resp.status_code in (200, 204)}
+    except Exception as e:
+        return {"cancelled": False, "error": str(e)}
+
+
+@router.get("/sumup/recent-transaction")
+async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
+    """
+    Check if a SumUp transaction of the given amount completed in the last
+    `since_seconds` seconds. Used as a fallback when the checkout status stays
+    PENDING but the reader processed a standalone (non-cloud-linked) payment.
+    Returns {"paid": true, "transaction_id": "..."} or {"paid": false}.
+    """
+    from datetime import UTC, timedelta
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+    if not access_token or not merchant_code:
+        return {"paid": False, "error": "SumUp not configured"}
+
+    amount_decimal = round(amount_pence / 100, 2)
+    oldest = (datetime.utcnow().replace(tzinfo=UTC) - timedelta(seconds=since_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.sumup.com/v0.1/me/transactions/history",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"limit": 10, "oldest_time": oldest},
+            )
+        if not resp.is_success:
+            return {"paid": False, "error": f"SumUp API {resp.status_code}: {resp.text}"}
+        txns = resp.json().get("items", [])
+        for t in txns:
+            t_status = (t.get("status") or "").upper()
+            if t_status == "SUCCESSFUL" and abs(float(t.get("amount", 0)) - amount_decimal) < 0.01:
+                return {"paid": True, "transaction_id": t.get("id"), "status": t.get("status")}
+        return {"paid": False}
+    except Exception as e:
+        return {"paid": False, "error": str(e)}
 
 
 @router.get("/sumup/readers")
 async def list_sumup_readers():
     """List SumUp readers registered to the merchant."""
-    import httpx
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.secrets import SecretsManager
 
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
     merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
@@ -608,10 +1037,20 @@ async def list_sumup_readers():
                 f"https://api.sumup.com/v0.1/merchants/{merchant_code}/readers",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
-        readers = resp.json() if resp.is_success else []
-        if isinstance(readers, list):
-            return {"readers": [{"serial": r.get("serial_number", ""), "name": r.get("name", r.get("serial_number", "")), "status": r.get("status", "unknown")} for r in readers]}
-        return {"readers": []}
+        if not resp.is_success:
+            return {"readers": [], "error": f"SumUp API error ({resp.status_code}): {resp.text[:200]}"}
+        data = resp.json()
+        # SumUp returns {"items": [...]} — not a bare list and not "readers"
+        rd_list = data if isinstance(data, list) else data.get("items", data.get("readers", []))
+        return {"readers": [
+            {
+                "id":     r.get("id", ""),
+                "serial": r.get("device", {}).get("identifier", r.get("serial_number", "")),
+                "name":   r.get("name", ""),
+                "status": r.get("status", "unknown"),
+            }
+            for r in rd_list
+        ]}
     except Exception as e:
         return {"readers": [], "error": str(e)}
 
@@ -622,21 +1061,27 @@ class QuickDonationRecordInput(BaseModel):
     amount_pence: int
     branch_id: str = "main"
     payment_intent_id: str = ""
+    payment_provider: str = "SUMUP"
     reader_id: str = ""
+    # Optional Gift Aid — collected before payment on the kiosk
+    ga_first_name: str = ""
+    ga_surname: str = ""
+    ga_house_number: str = ""
+    ga_postcode: str = ""
+    ga_email: str = ""
+    ga_declared: bool = False
 
 
 # Anonymous kiosk user/branch lookup — maps branch codes to UUIDs at runtime.
 # Falls back to using the code directly (works if DB stores string IDs).
 async def _resolve_branch_uuid(db: Any, branch_code: str) -> str:
     """Resolve a branch short code (e.g. 'main') to its UUID. Returns the code unchanged if not found."""
-    from sqlalchemy import text
-    row = (await db.execute(text("SELECT id FROM branches WHERE code = :code LIMIT 1"), {"code": branch_code})).mappings().first()
+    row = (await db.execute(text("SELECT id FROM branches WHERE branch_id = :code LIMIT 1"), {"code": branch_code})).mappings().first()
     return str(row["id"]) if row else branch_code
 
 
 async def _resolve_anonymous_user(db: Any) -> str:
     """Get or create a system 'anonymous-kiosk' user for recording anonymous donations."""
-    from sqlalchemy import text
     row = (await db.execute(text("SELECT id FROM users WHERE email = 'anonymous-kiosk@shital.org' LIMIT 1"))).mappings().first()
     if row:
         return str(row["id"])
@@ -661,9 +1106,7 @@ async def record_quick_donation(body: QuickDonationRecordInput):
     Record a quick donation as an anonymous entry in both the orders and donations tables.
     All quick donations are stored as anonymous — no personal data is captured.
     """
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
     order_id = body.basket_id
     donation_id = str(uuid.uuid4())
     total = body.amount_pence / 100
@@ -677,44 +1120,125 @@ async def record_quick_donation(body: QuickDonationRecordInput):
             await db.execute(
                 text(
                     "INSERT INTO orders (id, user_id, branch_id, basket_id, reference, status, total_amount, currency, "
-                    "payment_provider, payment_ref, idempotency_key, metadata, created_at, updated_at) "
-                    "VALUES (:id, :uid, :bid, :basket, :ref, 'PENDING', :total, 'GBP', 'KIOSK', :pref, :ikey, "
-                    "'{\"source\": \"quick-donation\", \"anonymous\": true}'::jsonb, :now, :now) "
-                    "ON CONFLICT (id) DO NOTHING"
+                    "payment_provider, payment_ref, source, idempotency_key, created_at, updated_at) "
+                    "VALUES (:id, :uid, :bid, :basket, :ref, 'PENDING', :total, 'GBP', :provider, :pref, "
+                    "'quick-donation', :ikey, :now, :now) "
+                    "ON CONFLICT (idempotency_key) DO NOTHING"
                 ),
                 {
                     "id": order_id, "uid": anon_user_id, "bid": branch_id,
                     "basket": body.basket_id, "ref": body.order_ref,
                     "total": str(total), "pref": body.payment_intent_id,
+                    "provider": (body.payment_provider or "SUMUP").upper(),
                     "ikey": order_id, "now": now,
                 },
             )
 
+            ga = body.ga_declared and bool(body.ga_first_name or body.ga_surname)
+
             # 2. Record in donations table (for donation reporting, Gift Aid, finance)
+            provider_upper = (body.payment_provider or "SUMUP").upper()
+            # Estimated fee rates — will be replaced by actual settlement data via webhook
+            fee_pct = 0.0169 if provider_upper == "SUMUP" else 0.0175
+            fee_amount = round(total * fee_pct, 2)
+            net_amount = round(total - fee_amount, 2)
+
             await db.execute(
                 text(
                     "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
                     "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
-                    "status, idempotency_key, created_at, updated_at) "
-                    "VALUES (:id, :uid, :bid, :amount, 'GBP', false, 'General Fund', :ref, "
-                    "'KIOSK', :pref, 'PENDING', :ikey, :now, :now) "
+                    "fee_pct, fee_amount, net_amount, "
+                    "status, source, idempotency_key, created_at, updated_at) "
+                    "VALUES (:id, :uid, :bid, :amount, 'GBP', :ga_elig, 'General Fund', :ref, "
+                    ":provider, :pref, :fee_pct, :fee_amount, :net_amount, "
+                    "'PENDING', 'quick-donation', :ikey, :now, :now) "
                     "ON CONFLICT (idempotency_key) DO NOTHING"
                 ),
                 {
                     "id": donation_id, "uid": anon_user_id, "bid": branch_id,
                     "amount": str(total), "ref": body.order_ref,
-                    "pref": body.payment_intent_id, "ikey": f"qd-{order_id}",
-                    "now": now,
+                    "provider": provider_upper, "pref": body.payment_intent_id,
+                    "fee_pct": str(fee_pct), "fee_amount": str(fee_amount), "net_amount": str(net_amount),
+                    "ikey": f"qd-{order_id}", "ga_elig": ga, "now": now,
                 },
             )
+
+            # 3. Store Gift Aid declaration + upsert contact (reuses gift_aid_declarations table)
+            declaration_id: str | None = None
+            if ga:
+                # Ensure source column exists (idempotent migration)
+                await db.execute(text(
+                    "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS source VARCHAR(64) DEFAULT 'kiosk'"
+                ))
+
+                full_name = f"{body.ga_first_name} {body.ga_surname}".strip()
+                email_key = body.ga_email.strip().lower() if body.ga_email.strip() else None
+                contact_id: str | None = None
+
+                if email_key:
+                    contact_uuid = str(uuid.uuid4())
+                    c_row = (await db.execute(text("""
+                        INSERT INTO contacts
+                            (id, email, first_name, surname, full_name, phone,
+                             gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                             first_source, first_branch_id, created_at, updated_at)
+                        VALUES
+                            (:id, :email, :first, :surname, :name, '',
+                             true, :now, true, :now, 'quick-donation', :branch, :now, :now)
+                        ON CONFLICT (email) DO UPDATE SET
+                            first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                            surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                            full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                            gdpr_consent      = true,
+                            gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                            updated_at        = EXCLUDED.updated_at
+                        RETURNING id
+                    """), {
+                        "id": contact_uuid, "email": email_key,
+                        "first": body.ga_first_name, "surname": body.ga_surname,
+                        "name": full_name, "branch": body.branch_id, "now": now,
+                    })).mappings().first()
+                    contact_id = str(c_row["id"]) if c_row else contact_uuid
+
+                    if body.ga_postcode:
+                        await db.execute(text("""
+                            INSERT INTO addresses
+                                (id, contact_id, formatted, postcode, uprn,
+                                 is_primary, lookup_source, created_at)
+                            VALUES (:id, :cid, :fmt, :pc, '', true, 'quick-donation', :now)
+                        """), {
+                            "id": str(uuid.uuid4()), "cid": contact_id,
+                            "fmt": body.ga_house_number or "", "pc": body.ga_postcode.upper().strip(), "now": now,
+                        })
+
+                declaration_id = str(uuid.uuid4())
+                await db.execute(text("""
+                    INSERT INTO gift_aid_declarations
+                        (id, order_ref, full_name, first_name, surname, postcode, address, uprn,
+                         contact_email, contact_phone, donation_amount, donation_date,
+                         gift_aid_agreed, contact_id, source, hmrc_submitted, created_at)
+                    VALUES
+                        (:id, :ref, :name, :first, :surname, :pc, :addr, '',
+                         :email, '', :amount, :ddate,
+                         true, :cid, 'quick-donation', false, :now)
+                """), {
+                    "id": declaration_id, "ref": body.order_ref,
+                    "name": full_name, "first": body.ga_first_name, "surname": body.ga_surname,
+                    "pc": body.ga_postcode.upper().strip() if body.ga_postcode else "",
+                    "addr": body.ga_house_number or "",
+                    "email": body.ga_email.strip().lower() if body.ga_email else "",
+                    "amount": str(total), "ddate": now.date(),
+                    "cid": contact_id, "now": now,
+                })
 
             await db.commit()
         return {
             "recorded": True,
             "order_id": order_id,
             "donation_id": donation_id,
+            "declaration_id": declaration_id,
             "reference": body.order_ref,
-            "anonymous": True,
+            "gift_aid": ga,
         }
     except Exception as e:
         return {"recorded": False, "error": str(e)}
@@ -769,7 +1293,6 @@ async def send_receipt(body: ReceiptInput):
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
-    from shital.core.fabrics.secrets import SecretsManager
 
     _log = logging.getLogger("shital.receipt")
 
@@ -787,9 +1310,7 @@ async def send_receipt(body: ReceiptInput):
 
     # ── Helper: load donation_receipt template from DB ────────────────────────
     async def _load_email_template() -> dict | None:
-        from sqlalchemy import text
 
-        from shital.core.fabrics.database import SessionLocal
         try:
             async with SessionLocal() as db:
                 result = await db.execute(
@@ -843,7 +1364,10 @@ async def send_receipt(body: ReceiptInput):
     <p style="color:#FF9933;font-size:18px;font-weight:900;text-align:center;">🙏 Jay Shri Krishna</p>
   </td></tr>
   <tr><td style="background:#f9f9f9;padding:16px;text-align:center;font-size:12px;color:#999;">
-    {body.branch_name} · Registered UK Charity
+    {body.branch_name} · Registered UK Charity<br>
+    <a href="https://shital.org.uk/terms" style="color:#FF9933;text-decoration:none;">Terms &amp; Conditions</a>
+    &nbsp;·&nbsp;
+    <a href="https://shital.org.uk/privacy" style="color:#FF9933;text-decoration:none;">Privacy Policy</a>
   </td></tr>
 </table></td></tr></table></body></html>"""
         text = (
@@ -851,7 +1375,7 @@ async def send_receipt(body: ReceiptInput):
             + (f"Dear {body.customer_name},\n\n" if body.customer_name else "")
             + f"Thank you for your generous donation!\n\nOrder: {body.order_ref}\nDate: {variables['date']}\n\n"
             + "\n".join(f"- {i.get('name','Item')} x{i.get('quantity',1)} = £{float(i.get('unitPrice',0))*int(i.get('quantity',1)):.2f}" for i in body.items)
-            + f"\n\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}"
+            + f"\n\nTotal: £{body.total:.2f}\n\nJay Shri Krishna 🙏\n{body.branch_name}\n\nTerms & Conditions: https://shital.org.uk/terms\nPrivacy Policy: https://shital.org.uk/privacy"
         )
         return subj, html, text
 
@@ -906,7 +1430,6 @@ async def send_receipt(body: ReceiptInput):
 
         # ── SendGrid fallback ─────────────────────────────────────────────────
         try:
-            import httpx
             content = [{"type": "text/html", "value": html_body}]
             if text_body:
                 content.append({"type": "text/plain", "value": text_body})
@@ -939,10 +1462,8 @@ async def send_receipt(body: ReceiptInput):
             return {"sent": False, "error": "WhatsApp not configured — add META_WHATSAPP_TOKEN and META_WHATSAPP_PHONE_ID in Admin → Settings → API Keys"}
 
         try:
-            from sqlalchemy import text
 
             from shital.api.routers.email_templates import render_template
-            from shital.core.fabrics.database import SessionLocal
 
             wa_template: dict | None = None
             try:
@@ -972,7 +1493,6 @@ async def send_receipt(body: ReceiptInput):
                     f"🙏 *Jay Shri Krishna*\n_{body.branch_name} — Registered UK Charity_"
                 )
 
-            import httpx
             phone = body.destination.replace(" ", "").replace("+", "")
             if phone.startswith("0"):
                 phone = "44" + phone[1:]
@@ -1043,9 +1563,7 @@ async def seed_quick_kiosk_accounts():
     Auto-creates the kiosk_profiles table if it doesn't exist (no migration needed).
     """
     import bcrypt
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
 
     def _hash(plain: str) -> str:
         return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(12)).decode()
@@ -1099,9 +1617,9 @@ async def seed_quick_kiosk_accounts():
             addr_json = json.dumps({"city": b["city"], "postcode": b["postcode"]})
             await db.execute(
                 text(
-                    "INSERT INTO branches (id, name, code, address, phone, is_active, created_at, updated_at) "
-                    "VALUES (:id, :name, :code, CAST(:addr AS jsonb), '', true, :now, :now) "
-                    "ON CONFLICT (code) DO NOTHING"
+                    "INSERT INTO branches (id, branch_id, name, address, phone, is_active, created_at, updated_at) "
+                    "VALUES (:id, :code, :name, CAST(:addr AS jsonb), '', true, :now, :now) "
+                    "ON CONFLICT (branch_id) DO NOTHING"
                 ),
                 {
                     "id": branch_id, "name": b["name"], "code": b["id"],
@@ -1118,7 +1636,7 @@ async def seed_quick_kiosk_accounts():
 
             # Resolve branch
             branch_row = (await db.execute(
-                text("SELECT id, name FROM branches WHERE code = :code LIMIT 1"),
+                text("SELECT id, name FROM branches WHERE branch_id = :code LIMIT 1"),
                 {"code": acct["branch_code"]},
             )).mappings().first()
             branch_uuid = str(branch_row["id"]) if branch_row else None
@@ -1200,49 +1718,152 @@ class AssignDeviceInput(BaseModel):
 
 @router.post("/quick-donation/assign-device")
 async def assign_device_to_profile(body: AssignDeviceInput):
-    """
-    Assign a Stripe Terminal card reader to a kiosk profile.
-    Links the device in the kiosk_profiles mapping table.
-    """
-    from sqlalchemy import text
+    """Legacy endpoint — delegates to assign-reader."""
+    return await assign_reader(AssignReaderInput(
+        provider="stripe_terminal",
+        stripe_reader_id=body.stripe_reader_id,
+        label=body.device_label or body.stripe_reader_id,
+        branch_id=body.branch_id,
+        user_email=body.user_email,
+    ))
 
-    from shital.core.fabrics.database import SessionLocal
+
+class AssignReaderInput(BaseModel):
+    provider: str                  # 'stripe_terminal' | 'sumup' | 'clover'
+    stripe_reader_id: str = ""
+    sumup_reader_serial: str = ""
+    sumup_reader_api_id: str = ""
+    clover_device_id: str = ""
+    label: str = ""
+    # Identify the device — supply device_username (Path-1) or user_email (Path-2)
+    device_username: str = ""
+    user_email: str = ""
+    branch_id: str = ""
+
+
+@router.post("/quick-donation/assign-reader")
+async def assign_reader(body: AssignReaderInput):
+    """
+    Persist a card reader assignment for a kiosk device.
+    Works for both Stripe Terminal and SumUp readers.
+
+    Priority: if device_username is given, updates kiosk_devices → terminal_devices
+    (Path-1 device credentials).  If user_email is given, also updates kiosk_profiles
+    (Path-2 legacy accounts).  Both can be supplied to update both tables.
+    """
+
+
+    provider = body.provider.lower().strip()
+    if provider not in ("stripe_terminal", "sumup", "clover", "cash"):
+        return {"assigned": False, "error": f"Unknown provider: {provider}"}
+
     now = datetime.utcnow()
+    label = body.label or body.stripe_reader_id or body.sumup_reader_serial or provider
+    terminal_device_id: str | None = None
 
     async with SessionLocal() as db:
-        result = await db.execute(
-            text(
-                "UPDATE kiosk_profiles SET "
-                "  stripe_reader_id = :rid, device_label = :label, "
-                "  device_provider = 'stripe_terminal', updated_at = :now "
-                "WHERE branch_id = :bid AND user_email = :email AND deleted_at IS NULL "
-                "RETURNING id, profile_name"
-            ),
-            {
-                "rid": body.stripe_reader_id, "label": body.device_label or body.stripe_reader_id,
-                "bid": body.branch_id, "email": body.user_email, "now": now,
-            },
-        )
-        row = result.mappings().first()
-        await db.commit()
+        # 1. Upsert terminal_devices record based on unique identifier
+        if provider == "stripe_terminal":
+            unique_id = body.stripe_reader_id
+        elif provider == "clover":
+            unique_id = body.clover_device_id
+        else:
+            unique_id = body.sumup_reader_serial
+        if unique_id:
+            existing = (await db.execute(
+                text("""
+                    SELECT id FROM terminal_devices
+                    WHERE (stripe_reader_id = :sid OR sumup_reader_serial = :serial OR clover_device_id = :clover)
+                      AND deleted_at IS NULL
+                    LIMIT 1
+                """),
+                {"sid": body.stripe_reader_id or "", "serial": body.sumup_reader_serial or "", "clover": body.clover_device_id or ""},
+            )).mappings().first()
 
-    if not row:
-        return {"assigned": False, "error": "Profile not found for this branch/email combination"}
+            if existing:
+                terminal_device_id = str(existing["id"])
+                await db.execute(text("""
+                    UPDATE terminal_devices SET
+                        provider             = :prov,
+                        stripe_reader_id     = COALESCE(NULLIF(:sid,''),  stripe_reader_id),
+                        sumup_reader_serial  = COALESCE(NULLIF(:serial,''), sumup_reader_serial),
+                        clover_device_id     = COALESCE(NULLIF(:clover,''), clover_device_id),
+                        label                = :label,
+                        updated_at           = :now
+                    WHERE id = :id
+                """), {
+                    "prov": provider, "sid": body.stripe_reader_id or "",
+                    "serial": body.sumup_reader_serial or "", "clover": body.clover_device_id or "",
+                    "label": label, "now": now, "id": terminal_device_id,
+                })
+            else:
+                terminal_device_id = str(uuid.uuid4())
+                await db.execute(text("""
+                    INSERT INTO terminal_devices
+                        (id, label, provider, stripe_reader_id, sumup_reader_serial, clover_device_id,
+                         branch_id, status, is_active, created_at, updated_at)
+                    VALUES
+                        (:id, :label, :prov, :sid, :serial, :clover,
+                         :branch, 'offline', true, :now, :now)
+                    ON CONFLICT DO NOTHING
+                """), {
+                    "id": terminal_device_id, "label": label, "prov": provider,
+                    "sid": body.stripe_reader_id or "", "serial": body.sumup_reader_serial or "",
+                    "clover": body.clover_device_id or "",
+                    "branch": body.branch_id or "main", "now": now,
+                })
+
+        # 2. Link terminal_devices to kiosk_device (Path-1: device credentials)
+        if body.device_username and terminal_device_id:
+            await db.execute(text("""
+                UPDATE kiosk_devices
+                SET card_reader_id = :td_id, updated_at = :now
+                WHERE LOWER(device_username) = :uname AND deleted_at IS NULL
+            """), {"td_id": terminal_device_id, "uname": body.device_username.lower().strip(), "now": now})
+
+        # 3. Update kiosk_profiles (Path-2: legacy email login)
+        if body.user_email:
+            email = body.user_email.strip().lower()
+            if provider == "stripe_terminal":
+                await db.execute(text("""
+                    UPDATE kiosk_profiles SET
+                        stripe_reader_id     = :rid,
+                        sumup_reader_serial  = '',
+                        sumup_reader_api_id  = '',
+                        device_provider      = 'stripe_terminal',
+                        device_label         = :label,
+                        updated_at           = :now
+                    WHERE user_email = :email AND deleted_at IS NULL
+                """), {"rid": body.stripe_reader_id or "", "label": label, "now": now, "email": email})
+            else:
+                await db.execute(text("""
+                    UPDATE kiosk_profiles SET
+                        sumup_reader_serial  = :serial,
+                        sumup_reader_api_id  = :api_id,
+                        stripe_reader_id     = '',
+                        device_provider      = :prov,
+                        device_label         = :label,
+                        updated_at           = :now
+                    WHERE user_email = :email AND deleted_at IS NULL
+                """), {
+                    "serial": body.sumup_reader_serial or "", "api_id": body.sumup_reader_api_id or "",
+                    "prov": provider, "label": label, "now": now, "email": email,
+                })
+
+        await db.commit()
 
     return {
         "assigned": True,
-        "profile_id": row["id"],
-        "profile_name": row["profile_name"],
-        "device": body.stripe_reader_id,
+        "provider": provider,
+        "terminal_device_id": terminal_device_id,
+        "label": label,
     }
 
 
 @router.get("/quick-donation/profiles")
 async def list_kiosk_profiles(branch_id: str = ""):
     """List all kiosk profiles with their branch, user, and device assignments."""
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
 
     conditions = ["deleted_at IS NULL"]
     params: dict[str, Any] = {}
@@ -1279,38 +1900,235 @@ async def list_kiosk_profiles(branch_id: str = ""):
     return {"profiles": profiles, "total": len(profiles)}
 
 
-class QuickKioskLoginInput(BaseModel):
+# ── Monthly giving signup (Quick Donation kiosk) ──────────────────────────────
+
+class MonthlySignupInput(BaseModel):
+    first_name: str
+    surname: str
+    house_number: str = ""
+    postcode: str = ""
     email: str
+    amount: float
+    gift_aid: bool = False
+    branch_id: str = "main"
+
+
+async def _create_kiosk_subscription(
+    first_name: str, surname: str, email: str, amount: float,
+    house_number: str = "", postcode: str = "",
+) -> tuple[str | None, str | None, str | None]:
+    """Create PayPal subscription for kiosk monthly giving. Returns (approval_url, sub_id, plan_id)."""
+    try:
+        client_id = await SecretsManager.get("PAYPAL_CLIENT_ID") or ""
+        secret    = await SecretsManager.get("PAYPAL_CLIENT_SECRET") or ""
+        env       = await SecretsManager.get("PAYPAL_ENV") or "live"
+        if not client_id or not secret:
+            return None, None, None
+        base = "https://api-m.paypal.com" if env == "live" else "https://api-m.sandbox.paypal.com"
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.post(f"{base}/v1/oauth2/token",
+                             auth=(client_id, secret), data={"grant_type": "client_credentials"})
+            r.raise_for_status()
+            token = r.json()["access_token"]
+            hdrs  = {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                     "Prefer": "return=representation"}
+            # reuse shared product helper
+            from shital.api.routers.recurring_giving import _ensure_product
+            product_id = await _ensure_product(token, base)
+            # create a fresh plan for this amount
+            plan_r = await c.post(f"{base}/v1/billing/plans", headers=hdrs, json={
+                "product_id": product_id,
+                "name": f"Shital Temple Monthly — £{amount:.2f}",
+                "status": "ACTIVE",
+                "billing_cycles": [{
+                    "frequency": {"interval_unit": "MONTH", "interval_count": 1},
+                    "tenure_type": "REGULAR", "sequence": 1, "total_cycles": 0,
+                    "pricing_scheme": {"fixed_price": {"value": f"{amount:.2f}", "currency_code": "GBP"}},
+                }],
+                "payment_preferences": {"auto_bill_outstanding": True, "payment_failure_threshold": 3},
+            })
+            plan_r.raise_for_status()
+            plan_id = plan_r.json()["id"]
+            sub_body: dict = {
+                "plan_id": plan_id,
+                "subscriber": {
+                    "name": {"given_name": first_name, "surname": surname},
+                    "email_address": email,
+                },
+                "application_context": {
+                    "brand_name": "Shital Temple",
+                    "return_url":  "https://shital.org.uk/donate/#monthly-complete",
+                    "cancel_url":  "https://shital.org.uk/donate/#monthly-cancel",
+                },
+            }
+            if postcode:
+                sub_body["subscriber"]["shipping_address"] = {
+                    "name": {"full_name": f"{first_name} {surname}"},
+                    "address": {"address_line_1": house_number,
+                                "postal_code": postcode.upper().replace(" ", ""),
+                                "country_code": "GB"},
+                }
+            sub_r = await c.post(f"{base}/v1/billing/subscriptions", headers=hdrs, json=sub_body)
+            sub_r.raise_for_status()
+            sub_data  = sub_r.json()
+            sub_id    = sub_data.get("id")
+            for link in sub_data.get("links", []):
+                if link.get("rel") == "approve":
+                    return link["href"], sub_id, plan_id
+    except Exception as exc:
+        import structlog
+        structlog.get_logger().warning("kiosk_monthly_paypal_error", error=str(exc))
+    return None, None, None
+
+
+@router.post("/quick-donation/monthly-signup")
+async def quick_donation_monthly_signup(body: MonthlySignupInput):
+    """Record kiosk monthly-giving signup and create PayPal subscription."""
+    import uuid
+    from datetime import datetime
+
+
+
+    now      = datetime.utcnow()
+    full_name = f"{body.first_name} {body.surname}".strip()
+    email_key = body.email.strip().lower()
+
+    approval_url, paypal_sub_id, plan_id = await _create_kiosk_subscription(
+        body.first_name, body.surname, email_key,
+        body.amount, body.house_number, body.postcode,
+    )
+
+    status = "PENDING_APPROVAL" if approval_url else "PENDING_CONTACT"
+    signup_id = str(uuid.uuid4())
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO recurring_giving_subscriptions
+                (id, paypal_subscription_id, paypal_plan_id, amount, frequency, status, branch_id,
+                 donor_name, donor_email, donor_first_name, donor_surname,
+                 donor_postcode, donor_address, created_at, updated_at)
+            VALUES
+                (:id, :sub_id, :plan_id, :amt, 'MONTH', :status, :bid,
+                 :name, :email, :fn, :sn, :pc, :addr, :now, :now)
+        """), {
+            "id": signup_id, "sub_id": paypal_sub_id, "plan_id": plan_id or "",
+            "amt": body.amount, "status": status, "bid": body.branch_id,
+            "name": full_name, "email": email_key,
+            "fn": body.first_name, "sn": body.surname,
+            "pc": body.postcode, "addr": body.house_number, "now": now,
+        })
+        await db.commit()
+
+    # Fetch PayPal client_id for the frontend SDK
+    paypal_client_id = ""
+    try:
+        paypal_client_id = await SecretsManager.get("PAYPAL_CLIENT_ID") or ""
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "signup_id": signup_id,
+        "approval_url": approval_url,
+        "plan_id": plan_id,
+        "paypal_client_id": paypal_client_id,
+        "amount": body.amount,
+        "name": full_name,
+    }
+
+
+class QuickKioskLoginInput(BaseModel):
+    email: str   # accepts full email or short username (e.g. "wembley-1")
     password: str
 
 
 @router.post("/quick-donation/login")
 async def quick_kiosk_login(body: QuickKioskLoginInput):
     """
-    Login for QuickDonation kiosk accounts.
-    Returns branch info, kiosk profile, and assigned device config.
-    Supports both password auth and Azure AD-linked accounts.
+    Login for QuickDonation kiosk devices.
+    First checks kiosk_devices.device_username (admin-configured credentials).
+    Falls back to users table (legacy quickkiosk-* accounts).
+    Returns branch info, card reader, and device feature flags.
     """
     import bcrypt
-    from sqlalchemy import text
 
-    from shital.core.fabrics.database import SessionLocal
+
+    login_input = body.email.lower().strip()
+
+    # ── Path 1: Device-level credentials (set in admin Edit Device form) ──────
+    async with SessionLocal() as db:
+        dev_res = await db.execute(
+            text("""
+                SELECT kd.id, kd.name, kd.branch_id, kd.device_password_hash,
+                       kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
+                       kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
+                       COALESCE(kd.confirmation_text, '') AS confirmation_text,
+                       COALESCE(kd.bg_color, '') AS bg_color,
+                       kd.card_reader_id,
+                       COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.org_logo_url, '') AS org_logo_url,
+                       COALESCE(kd.org_name, '') AS org_name,
+                       td.stripe_reader_id, td.label AS reader_label,
+                       COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
+                       COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
+                       COALESCE(td.clover_device_id, '') AS clover_device_id,
+                       b.name AS branch_name
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                LEFT JOIN branches b ON b.branch_id = kd.branch_id
+                WHERE LOWER(kd.device_username) = :uname
+                  AND kd.deleted_at IS NULL
+                  AND UPPER(kd.status) = 'ACTIVE'
+                LIMIT 1
+            """),
+            {"uname": login_input},
+        )
+        device = dev_res.mappings().first()
+
+    if device and device["device_password_hash"]:
+        if not bcrypt.checkpw(body.password.encode(), device["device_password_hash"].encode()):
+            return {"authenticated": False, "error": "Invalid username or password"}
+        return {
+            "authenticated": True,
+            "user": {"id": str(device["id"]), "email": login_input, "name": device["name"], "role": "KIOSK"},
+            "branch": {"id": device["branch_id"], "name": device["branch_name"] or device["branch_id"]},
+            "profile": None,
+            "stripe_reader_id": device["stripe_reader_id"],
+            "reader_label": device["reader_label"],
+            "reader_provider": device["reader_provider"],
+            "sumup_reader_serial": device["sumup_reader_serial"],
+            "clover_device_id": device["clover_device_id"],
+            "show_monthly_giving": bool(device["show_monthly_giving"]),
+            "enable_gift_aid": bool(device["enable_gift_aid"]),
+            "tap_and_go": bool(device["tap_and_go"]),
+            "donate_title": device["donate_title"] or "Tap & Donate",
+            "monthly_giving_text": device["monthly_giving_text"] or "Make a big impact from just £5/month",
+            "monthly_giving_amount": float(device["monthly_giving_amount"] or 5),
+            "confirmation_text": device["confirmation_text"] or "",
+            "bg_color": device["bg_color"] or "",
+            "kiosk_theme": device["kiosk_theme"] or "saffron",
+            "org_logo_url": device["org_logo_url"] or "",
+            "org_name": device["org_name"] or "",
+        }
+
+    # ── Path 2: Legacy user-table login (quickkiosk-* accounts) ──────────────
+    if "@" not in login_input:
+        login_input = f"quickkiosk-{login_input}@shirdisai.org.uk"
 
     async with SessionLocal() as db:
-        # Authenticate user
         result = await db.execute(
             text(
                 "SELECT u.id, u.email, u.name, u.password_hash, u.role, u.branch_id, u.is_active, "
-                "b.code AS branch_code, b.name AS branch_name "
-                "FROM users u LEFT JOIN branches b ON u.branch_id = b.id "
+                "b.branch_id AS branch_code, b.name AS branch_name "
+                "FROM users u LEFT JOIN branches b ON u.branch_id::text = b.id::text "
                 "WHERE u.email = :email AND u.deleted_at IS NULL"
             ),
-            {"email": body.email.lower().strip()},
+            {"email": login_input},
         )
         user = result.mappings().first()
 
     if not user or not user["password_hash"]:
-        return {"authenticated": False, "error": "Invalid email or password"}
+        return {"authenticated": False, "error": "Invalid username or password"}
     if not bcrypt.checkpw(body.password.encode(), user["password_hash"].encode()):
         return {"authenticated": False, "error": "Invalid email or password"}
     if not user["is_active"]:
@@ -1320,75 +2138,183 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
 
     branch_code = user["branch_code"] or "main"
 
-    # Fetch kiosk profile with device assignment
+    # Fetch kiosk profile
     profile = None
-    async with SessionLocal() as db:
-        prof_result = await db.execute(
-            text(
-                "SELECT id, profile_name, kiosk_type, display_name, "
-                "  device_label, stripe_reader_id, device_provider, "
-                "  preset_amounts, default_purpose, gift_aid_prompt, "
-                "  idle_timeout_secs, theme "
-                "FROM kiosk_profiles "
-                "WHERE user_email = :email AND is_active = true AND deleted_at IS NULL "
-                "LIMIT 1"
-            ),
-            {"email": user["email"]},
-        )
-        prof_row = prof_result.mappings().first()
-        if prof_row:
-            profile = dict(prof_row)
+    try:
+        async with SessionLocal() as db:
+            prof_result = await db.execute(
+                text(
+                    "SELECT id, profile_name, kiosk_type, display_name, "
+                    "  device_label, stripe_reader_id, device_provider, "
+                    "  preset_amounts, default_purpose, gift_aid_prompt, "
+                    "  idle_timeout_secs, theme "
+                    "FROM kiosk_profiles "
+                    "WHERE user_email = :email AND is_active = true AND deleted_at IS NULL "
+                    "LIMIT 1"
+                ),
+                {"email": user["email"]},
+            )
+            prof_row = prof_result.mappings().first()
+            if prof_row:
+                profile = dict(prof_row)
+            await db.execute(
+                text("UPDATE kiosk_profiles SET last_active_at = :now WHERE user_email = :email AND deleted_at IS NULL"),
+                {"now": datetime.utcnow(), "email": user["email"]},
+            )
+            await db.commit()
+    except Exception:
+        pass
 
-        # Update last_active_at
-        await db.execute(
-            text("UPDATE kiosk_profiles SET last_active_at = :now WHERE user_email = :email AND deleted_at IS NULL"),
-            {"now": datetime.utcnow(), "email": user["email"]},
-        )
-        await db.commit()
-
-    # Look up the card reader assigned to the QUICK_DONATION device for this branch
-    # in the admin Devices page (kiosk_devices → terminal_devices).
+    # Look up card reader from admin Devices page for this branch
     device_reader_id = None
     device_reader_label = None
+    device_reader_provider = "stripe_terminal"
+    device_sumup_serial = ""
+    device_clover_id = ""
+    dev_flags: dict = {"show_monthly_giving": False, "enable_gift_aid": False, "tap_and_go": True, "donate_title": "Tap & Donate", "monthly_giving_text": "Make a big impact from just £5/month", "monthly_giving_amount": 5.0, "confirmation_text": "", "bg_color": "", "kiosk_theme": "saffron", "org_logo_url": "", "org_name": ""}
     async with SessionLocal() as db:
         dev_res = await db.execute(
             text("""
-                SELECT td.stripe_reader_id, td.label AS reader_label
+                SELECT kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
+                       kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
+                       COALESCE(kd.confirmation_text, '') AS confirmation_text,
+                       COALESCE(kd.bg_color, '') AS bg_color,
+                       COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.org_logo_url, '') AS org_logo_url,
+                       COALESCE(kd.org_name, '') AS org_name,
+                       td.stripe_reader_id, td.label AS reader_label,
+                       COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
+                       COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial
                 FROM kiosk_devices kd
                 LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
                 WHERE kd.branch_id = :branch_id
                   AND kd.device_type = 'QUICK_DONATION'
                   AND kd.deleted_at IS NULL
-                  AND kd.status = 'active'
+                  AND UPPER(kd.status) = 'ACTIVE'
                 ORDER BY kd.updated_at DESC
                 LIMIT 1
             """),
-            {"branch_id": user["branch_id"]},
+            {"branch_id": branch_code},
         )
         dev_row = dev_res.mappings().first()
-        if dev_row and dev_row["stripe_reader_id"]:
-            device_reader_id = dev_row["stripe_reader_id"]
-            device_reader_label = dev_row["reader_label"]
+        if dev_row:
+            if dev_row["stripe_reader_id"] or dev_row["sumup_reader_serial"] or dev_row["clover_device_id"]:
+                device_reader_id = dev_row["stripe_reader_id"]
+                device_reader_label = dev_row["reader_label"]
+                device_reader_provider = dev_row["reader_provider"]
+                device_sumup_serial = dev_row["sumup_reader_serial"]
+                device_clover_id = dev_row["clover_device_id"]
+            dev_flags = {
+                "show_monthly_giving": bool(dev_row["show_monthly_giving"]),
+                "enable_gift_aid": bool(dev_row["enable_gift_aid"]),
+                "tap_and_go": bool(dev_row["tap_and_go"]),
+                "donate_title": dev_row["donate_title"] or "Tap & Donate",
+                "monthly_giving_text": dev_row["monthly_giving_text"] or "Make a big impact from just £5/month",
+                "monthly_giving_amount": float(dev_row["monthly_giving_amount"] or 5),
+                "confirmation_text": dev_row["confirmation_text"] or "",
+                "bg_color": dev_row["bg_color"] or "",
+                "kiosk_theme": dev_row["kiosk_theme"] or "saffron",
+                "org_logo_url": dev_row["org_logo_url"] or "",
+                "org_name": dev_row["org_name"] or "",
+            }
 
-    # Prefer admin device assignment over the profile's manually-set reader
-    effective_reader_id = device_reader_id or (profile.get("stripe_reader_id") if profile else None)
-    effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
+    # Merge kiosk_devices reader (preferred) with kiosk_profiles reader (fallback)
+    profile_provider = (profile.get("device_provider") or "stripe_terminal") if profile else "stripe_terminal"
+    profile_sumup_serial = (profile.get("sumup_reader_serial") or "") if profile else ""
+    profile_stripe_id = (profile.get("stripe_reader_id") or "") if profile else ""
+
+    # If kiosk_devices had a configured reader, use it; otherwise fall back to kiosk_profiles
+    if device_reader_id or device_sumup_serial or device_clover_id:
+        effective_reader_id = device_reader_id
+        effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
+        effective_provider = device_reader_provider
+        effective_sumup_serial = device_sumup_serial
+        effective_clover_id = device_clover_id
+    else:
+        effective_reader_id = profile_stripe_id or None
+        effective_reader_label = (profile.get("device_label") if profile else None)
+        effective_provider = profile_provider
+        effective_sumup_serial = profile_sumup_serial
+        effective_clover_id = ""  # kiosk_profiles has no clover field yet
 
     return {
         "authenticated": True,
-        "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "name": user["name"],
-            "role": user["role"],
-        },
-        "branch": {
-            "id": branch_code,
-            "name": user["branch_name"] or "Unknown",
-        },
+        "user": {"id": str(user["id"]), "email": user["email"], "name": user["name"], "role": user["role"]},
+        "branch": {"id": branch_code, "name": user["branch_name"] or "Unknown"},
         "profile": profile,
         "stripe_reader_id": effective_reader_id,
         "reader_label": effective_reader_label,
+        "reader_provider": effective_provider,
+        "sumup_reader_serial": effective_sumup_serial,
+        "clover_device_id": effective_clover_id,
+        **dev_flags,
+    }
+
+
+@router.get("/quick-donation/refresh-config")
+async def quick_kiosk_refresh_config(username: str):
+    """
+    Returns the latest device config (reader, flags, branch) for an already
+    logged-in device without requiring the password again.
+    Non-sensitive: only feature flags, reader IDs, and branch info are returned.
+    """
+
+
+    login_input = username.strip().lower()
+    if not login_input:
+        return {"ok": False, "error": "username required"}
+
+    async with SessionLocal() as db:
+        dev_res = await db.execute(
+            text("""
+                SELECT kd.id, kd.name, kd.branch_id,
+                       kd.show_monthly_giving, kd.enable_gift_aid, kd.tap_and_go,
+                       kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
+                       COALESCE(kd.confirmation_text, '') AS confirmation_text,
+                       COALESCE(kd.bg_color, '') AS bg_color,
+                       COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.org_logo_url, '') AS org_logo_url,
+                       COALESCE(kd.org_name, '') AS org_name,
+                       kd.card_reader_id,
+                       td.stripe_reader_id, td.label AS reader_label,
+                       COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
+                       COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
+                       COALESCE(td.clover_device_id, '') AS clover_device_id,
+                       b.name AS branch_name
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                LEFT JOIN branches b ON b.branch_id = kd.branch_id
+                WHERE LOWER(kd.device_username) = :uname
+                  AND kd.deleted_at IS NULL
+                  AND UPPER(kd.status) = 'ACTIVE'
+                LIMIT 1
+            """),
+            {"uname": login_input},
+        )
+        device = dev_res.mappings().first()
+
+    if not device:
+        return {"ok": False, "error": "Device not found"}
+
+    return {
+        "ok": True,
+        "branch": {"id": device["branch_id"], "name": device["branch_name"] or device["branch_id"]},
+        "stripe_reader_id": device["stripe_reader_id"],
+        "reader_label": device["reader_label"],
+        "reader_provider": device["reader_provider"],
+        "sumup_reader_serial": device["sumup_reader_serial"],
+        "clover_device_id": device["clover_device_id"],
+        "show_monthly_giving": bool(device["show_monthly_giving"]),
+        "enable_gift_aid": bool(device["enable_gift_aid"]),
+        "tap_and_go": bool(device["tap_and_go"]),
+        "donate_title": device["donate_title"] or "Tap & Donate",
+        "monthly_giving_text": device["monthly_giving_text"] or "Make a big impact from just £5/month",
+        "monthly_giving_amount": float(device["monthly_giving_amount"] or 5),
+        "confirmation_text": device["confirmation_text"] or "",
+        "bg_color": device["bg_color"] or "",
+        "kiosk_theme": device["kiosk_theme"] or "saffron",
+        "org_logo_url": device["org_logo_url"] or "",
+        "org_name": device["org_name"] or "",
     }
 
 
@@ -1403,11 +2329,7 @@ async def quick_kiosk_login_azure(body: AzureKioskLoginInput):
     Validates the Microsoft ID token, finds the linked KIOSK user,
     and returns branch + profile + device config.
     """
-    from sqlalchemy import text
 
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.database import SessionLocal
-    from shital.core.fabrics.secrets import SecretsManager
 
     ms_client_id = await SecretsManager.get("MS_CLIENT_ID") or settings.MS_CLIENT_ID
     if not ms_client_id:
@@ -1431,8 +2353,8 @@ async def quick_kiosk_login_azure(body: AzureKioskLoginInput):
         result = await db.execute(
             text(
                 "SELECT u.id, u.email, u.name, u.role, u.is_active, "
-                "b.code AS branch_code, b.name AS branch_name "
-                "FROM users u LEFT JOIN branches b ON u.branch_id = b.id "
+                "b.branch_id AS branch_code, b.name AS branch_name "
+                "FROM users u LEFT JOIN branches b ON u.branch_id::text = b.id::text "
                 "WHERE u.email = :email AND u.deleted_at IS NULL"
             ),
             {"email": email},
