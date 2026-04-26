@@ -49,35 +49,64 @@ def load_env() -> None:
 
 
 def load_from_secrets_manager() -> dict[str, str]:
-    """Fetch MS_* values from the encrypted api_keys_store via the backend container."""
-    fetch = (
-        "import asyncio, json\n"
-        "from shital.core.fabrics.secrets import SecretsManager\n"
-        "async def main():\n"
-        "    out = {}\n"
-        "    for k in ('MS_TENANT_ID','MS_CLIENT_ID','MS_CLIENT_SECRET'):\n"
-        "        v = await SecretsManager.get(k)\n"
-        "        if v:\n"
-        "            out[k] = v\n"
-        "    print(json.dumps(out))\n"
-        "asyncio.run(main())\n"
-    )
+    """Fetch MS_* values from the encrypted api_keys_store.
+
+    Bypasses the full shital app import (which loads FastAPI + routers and
+    can take ~100s to start) and goes straight to postgres via asyncpg
+    plus Fernet decryption — both already in the backend image.
+    """
+    fetch = """
+import os, asyncio, json, base64, hashlib
+import asyncpg
+from cryptography.fernet import Fernet
+
+async def main():
+    db_url = os.environ.get('DATABASE_URL', '').replace('postgresql+asyncpg://', 'postgresql://')
+    if not db_url:
+        print(json.dumps({}))
+        return
+    jwt_secret = os.environ.get('JWT_SECRET', '')
+    if not jwt_secret:
+        print(json.dumps({}))
+        return
+    key_bytes = hashlib.pbkdf2_hmac('sha256', jwt_secret.encode(), b'shital-api-keys-v1-salt', 100000, dklen=32)
+    fernet = Fernet(base64.urlsafe_b64encode(key_bytes))
+    conn = await asyncpg.connect(db_url)
+    try:
+        rows = await conn.fetch(
+            \"SELECT key_name, encrypted_value FROM api_keys_store \"
+            \"WHERE key_name = ANY($1::text[])\",
+            ['MS_TENANT_ID', 'MS_CLIENT_ID', 'MS_CLIENT_SECRET'],
+        )
+    finally:
+        await conn.close()
+    out = {}
+    for r in rows:
+        try:
+            out[r['key_name']] = fernet.decrypt(r['encrypted_value'].encode()).decode()
+        except Exception:
+            pass
+    print(json.dumps(out))
+
+asyncio.run(main())
+"""
     try:
         result = subprocess.run(
             ["docker", "exec", BACKEND_CONTAINER, "python", "-c", fetch],
-            capture_output=True, text=True, timeout=60, check=False,
+            capture_output=True, text=True, timeout=15, check=False,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return {}
     if result.returncode != 0:
         return {}
-    line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
-    if not line.startswith("{"):
-        return {}
-    try:
-        return json.loads(line)
-    except json.JSONDecodeError:
-        return {}
+    # Find the JSON line (asyncpg may print warnings before)
+    for line in reversed(result.stdout.strip().splitlines()):
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return {}
 
 
 def get_token(tenant: str, cid: str, secret: str) -> str:
