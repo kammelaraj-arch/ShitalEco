@@ -1,7 +1,7 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, API_BASE, getToken } from '@/lib/api'
 
 interface GiftAidConfig {
   hmrc_user_id: string
@@ -58,12 +58,70 @@ function EnvBadge({ env }: { env: string }) {
   )
 }
 
+interface SummaryData {
+  year: number
+  declarations_total: number
+  declarations_pending: number
+  donations_total: number
+  donations_pending: number
+  potential_claim: number
+  submissions_total: number
+  claimed_ytd: number
+  gasds_total: number
+  gasds_unclaimed: number
+  gasds_records: number
+  gasds_cap: number
+}
+
+interface GASDSCollection {
+  id: string
+  collection_date: string
+  amount: number
+  location: string
+  description: string
+  tax_year: number | null
+  claimed_at: string | null
+}
+
+const fmtGBP = (n: number | string) =>
+  `£${Number(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+// Trigger a CSV download via the auth-protected API
+async function downloadCsv(path: string, filename: string) {
+  const r = await fetch(`${API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  const blob = await r.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function GiftAidPage() {
-  const [tab, setTab] = useState<'config' | 'declarations' | 'submit' | 'history'>('config')
+  const [tab, setTab] = useState<'config' | 'declarations' | 'submit' | 'history' | 'gasds'>('config')
 
   // Config
   const [config, setConfig] = useState<GiftAidConfig | null>(null)
   const [configLoading, setConfigLoading] = useState(false)
+
+  // Summary
+  const [summary, setSummary] = useState<SummaryData | null>(null)
+
+  // History expansion + detail
+  const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null)
+  const [submissionDetail, setSubmissionDetail] = useState<{ declarations: Declaration[] } | null>(null)
+  const [submissionDetailLoading, setSubmissionDetailLoading] = useState(false)
+
+  // GASDS
+  const [gasdsCollections, setGasdsCollections] = useState<GASDSCollection[]>([])
+  const [gasdsLoading, setGasdsLoading] = useState(false)
+  const [gasdsForm, setGasdsForm] = useState({ date: '', amount: '', location: '', description: '' })
+  const [gasdsAdding, setGasdsAdding] = useState(false)
+  const [gasdsError, setGasdsError] = useState('')
 
   // Declarations
   const [declarations, setDeclarations] = useState<Declaration[]>([])
@@ -158,11 +216,98 @@ export default function GiftAidPage() {
     } catch { /* empty submissions table */ } finally { setHistLoading(false) }
   }, [])
 
+  const loadSummary = useCallback(async () => {
+    try {
+      const data = await apiFetch<SummaryData>('/gift-aid/summary')
+      setSummary(data)
+    } catch { /* ignore — summary failure is non-critical */ }
+  }, [])
+
+  const loadSubmissionDetail = async (id: string) => {
+    if (expandedSubmissionId === id) {
+      setExpandedSubmissionId(null)
+      setSubmissionDetail(null)
+      return
+    }
+    setExpandedSubmissionId(id)
+    setSubmissionDetailLoading(true)
+    try {
+      const data = await apiFetch<{ declarations: Declaration[] }>(`/gift-aid/submissions/${id}`)
+      setSubmissionDetail({ declarations: data.declarations || [] })
+    } catch {
+      setSubmissionDetail({ declarations: [] })
+    } finally {
+      setSubmissionDetailLoading(false)
+    }
+  }
+
+  const loadGasds = useCallback(async () => {
+    setGasdsLoading(true)
+    try {
+      const year = new Date().getFullYear()
+      const data = await apiFetch<{ collections: GASDSCollection[] }>(`/gift-aid/gasds/collections?year=${year}`)
+      setGasdsCollections(data.collections || [])
+    } catch { /* ignore */ } finally { setGasdsLoading(false) }
+  }, [])
+
+  const addGasdsCollection = async () => {
+    setGasdsError('')
+    if (!gasdsForm.date || !gasdsForm.amount) {
+      setGasdsError('Date and amount are required')
+      return
+    }
+    setGasdsAdding(true)
+    try {
+      await apiFetch<{ ok: boolean }>('/gift-aid/gasds/collections', {
+        method: 'POST',
+        body: JSON.stringify({
+          collection_date: gasdsForm.date,
+          amount: gasdsForm.amount,
+          location: gasdsForm.location,
+          description: gasdsForm.description,
+        }),
+      })
+      setGasdsForm({ date: '', amount: '', location: '', description: '' })
+      await loadGasds()
+      await loadSummary()
+    } catch (e: unknown) {
+      setGasdsError(e instanceof Error ? e.message : 'Failed to add')
+    } finally {
+      setGasdsAdding(false)
+    }
+  }
+
+  const deleteGasdsCollection = async (id: string) => {
+    if (!confirm('Delete this GASDS collection record?')) return
+    try {
+      await apiFetch(`/gift-aid/gasds/collections/${id}`, { method: 'DELETE' })
+      await loadGasds()
+      await loadSummary()
+    } catch { /* ignore */ }
+  }
+
+  const markGasdsClaimed = async () => {
+    const ids = gasdsCollections.filter(c => !c.claimed_at).map(c => c.id)
+    if (ids.length === 0) return
+    if (!confirm(`Mark ${ids.length} unclaimed collection(s) as claimed? Use this AFTER you've submitted them via HMRC's portal.`)) return
+    try {
+      await apiFetch('/gift-aid/gasds/mark-claimed', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      })
+      await loadGasds()
+      await loadSummary()
+    } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     if (tab === 'config') loadConfig()
-    else if (tab === 'declarations') loadDeclarations()
+    else if (tab === 'declarations') { loadDeclarations(); loadSummary() }
     else if (tab === 'history') loadHistory()
-  }, [tab, loadConfig, loadDeclarations, loadHistory])
+    else if (tab === 'gasds') { loadGasds(); loadSummary() }
+  }, [tab, loadConfig, loadDeclarations, loadHistory, loadSummary, loadGasds])
+
+  useEffect(() => { loadSummary() }, [loadSummary])
 
   useEffect(() => {
     if (tab === 'declarations' || tab === 'submit') loadDeclarations()
@@ -242,14 +387,49 @@ export default function GiftAidPage() {
         {config && <EnvBadge env={config.hmrc_environment || 'test'} />}
       </div>
 
+      {/* YTD summary banner */}
+      {summary && !summary.error && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          <div className="glass rounded-xl px-4 py-3">
+            <p className="text-white/40 text-xs uppercase tracking-wider">Claimed YTD</p>
+            <p className="text-green-400 font-black text-lg">{fmtGBP(summary.claimed_ytd)}</p>
+            <p className="text-white/30 text-xs">{summary.submissions_total} submission(s) {summary.year}</p>
+          </div>
+          <div className="glass rounded-xl px-4 py-3">
+            <p className="text-white/40 text-xs uppercase tracking-wider">Potential to claim</p>
+            <p className="text-saffron-400 font-black text-lg">{fmtGBP(summary.potential_claim)}</p>
+            <p className="text-white/30 text-xs">{summary.declarations_pending} pending</p>
+          </div>
+          <div className="glass rounded-xl px-4 py-3">
+            <p className="text-white/40 text-xs uppercase tracking-wider">Donations YTD</p>
+            <p className="text-white font-black text-lg">{fmtGBP(summary.donations_total)}</p>
+            <p className="text-white/30 text-xs">{summary.declarations_total} declaration(s)</p>
+          </div>
+          <div className="glass rounded-xl px-4 py-3">
+            <p className="text-white/40 text-xs uppercase tracking-wider">GASDS YTD</p>
+            <p className="text-white font-black text-lg">{fmtGBP(summary.gasds_total)}</p>
+            <p className="text-white/30 text-xs">{fmtGBP(summary.gasds_unclaimed)} unclaimed · cap {fmtGBP(summary.gasds_cap)}</p>
+          </div>
+          <div className="glass rounded-xl px-4 py-3">
+            <p className="text-white/40 text-xs uppercase tracking-wider">GASDS potential</p>
+            <p className="text-green-400/80 font-black text-lg">{fmtGBP(summary.gasds_unclaimed * 0.25)}</p>
+            <p className="text-white/30 text-xs">25% of unclaimed cash</p>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-1 p-1 glass rounded-xl w-fit flex-wrap">
-        {(['config', 'declarations', 'submit', 'history'] as const).map(t => (
+        {(['config', 'declarations', 'submit', 'history', 'gasds'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-all capitalize ${
               tab === t ? 'bg-saffron-gradient text-white shadow-saffron' : 'text-white/50 hover:text-white/80'
             }`}>
-            {t === 'submit' ? 'Submit to HMRC' : t === 'history' ? 'History' : t === 'declarations' ? `Declarations${pendingCount > 0 && !showSubmitted ? ` (${pendingCount})` : ''}` : t}
+            {t === 'submit' ? 'Submit to HMRC'
+              : t === 'history' ? 'History'
+              : t === 'gasds' ? 'GASDS (Cash)'
+              : t === 'declarations' ? `Declarations${pendingCount > 0 && !showSubmitted ? ` (${pendingCount})` : ''}`
+              : t}
           </button>
         ))}
       </div>
@@ -412,11 +592,27 @@ export default function GiftAidPage() {
                   <span className="text-saffron-400 text-sm font-bold">{selectedIds.size} selected</span>
                 )}
               </div>
-              <label className="flex items-center gap-2 text-white/50 text-sm cursor-pointer select-none">
-                <input type="checkbox" checked={showSubmitted} onChange={e => setShowSubmitted(e.target.checked)}
-                  className="w-4 h-4 rounded" />
-                Show submitted
-              </label>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-white/50 text-sm cursor-pointer select-none">
+                  <input type="checkbox" checked={showSubmitted} onChange={e => setShowSubmitted(e.target.checked)}
+                    className="w-4 h-4 rounded" />
+                  Show submitted
+                </label>
+                <button
+                  onClick={() => {
+                    const qs = new URLSearchParams()
+                    if (!showSubmitted) qs.set('submitted', 'false')
+                    if (fromDate) qs.set('from_date', fromDate)
+                    if (toDate) qs.set('to_date', toDate)
+                    qs.set('limit', '10000')
+                    downloadCsv(`/gift-aid/declarations.csv?${qs}`, `gift-aid-declarations-${new Date().toISOString().slice(0, 10)}.csv`)
+                      .catch(() => alert('Export failed'))
+                  }}
+                  className="px-3 py-2 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-all"
+                >
+                  ⬇ Export CSV
+                </button>
+              </div>
             </div>
 
             {declError && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{declError}</div>}
@@ -634,7 +830,16 @@ export default function GiftAidPage() {
         {/* History tab */}
         {tab === 'history' && (
           <motion.div key="history" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="glass rounded-2xl overflow-hidden border border-temple-border">
+            className="space-y-3">
+            <div className="flex justify-end">
+              <button
+                onClick={() => downloadCsv('/gift-aid/submissions.csv', `gift-aid-submissions-${new Date().toISOString().slice(0, 10)}.csv`).catch(() => alert('Export failed'))}
+                className="px-4 py-2 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-all"
+              >
+                ⬇ Export CSV
+              </button>
+            </div>
+            <div className="glass rounded-2xl overflow-hidden border border-temple-border">
             {histLoading ? (
               <div className="text-center py-20 text-white/30">Loading history…</div>
             ) : submissions.length === 0 ? (
@@ -647,31 +852,32 @@ export default function GiftAidPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-white/5">
-                      {['Date', 'Correlation ID', 'Declarations', 'Donated', 'Claimed', 'Env', 'Status'].map(h => (
+                      {['', 'Date', 'Correlation ID', 'Declarations', 'Donated', 'Claimed', 'Env', 'Status'].map(h => (
                         <th key={h} className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {submissions.map((s, i) => (
-                      <motion.tr key={s.id}
+                      <Fragment key={s.id}>
+                      <motion.tr
                         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
-                        className="border-b border-white/5 hover:bg-white/3 transition-colors">
+                        onClick={() => loadSubmissionDetail(s.id)}
+                        className={`border-b border-white/5 transition-colors cursor-pointer ${
+                          expandedSubmissionId === s.id ? 'bg-saffron-400/5' : 'hover:bg-white/3'
+                        }`}>
+                        <td className="px-4 py-3 text-white/40 text-sm">
+                          {expandedSubmissionId === s.id ? '▼' : '▶'}
+                        </td>
                         <td className="px-4 py-3 text-white/50 text-sm whitespace-nowrap">
                           {new Date(s.submitted_at).toLocaleDateString('en-GB')}{' '}
                           <span className="text-white/30 text-xs">{new Date(s.submitted_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
                         </td>
                         <td className="px-4 py-3 font-mono text-white/60 text-xs">{s.correlation_id}</td>
                         <td className="px-4 py-3 text-white text-sm">{s.declarations_count}</td>
-                        <td className="px-4 py-3 font-mono text-white/70 text-sm">
-                          £{Number(s.total_donated).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-green-400 font-bold text-sm">
-                          £{Number(s.amount_claimed).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-4 py-3">
-                          <EnvBadge env={s.environment} />
-                        </td>
+                        <td className="px-4 py-3 font-mono text-white/70 text-sm">{fmtGBP(s.total_donated)}</td>
+                        <td className="px-4 py-3 font-mono text-green-400 font-bold text-sm">{fmtGBP(s.amount_claimed)}</td>
+                        <td className="px-4 py-3"><EnvBadge env={s.environment} /></td>
                         <td className="px-4 py-3">
                           <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
                             s.status === 'submitted'
@@ -685,11 +891,192 @@ export default function GiftAidPage() {
                           )}
                         </td>
                       </motion.tr>
+                      {expandedSubmissionId === s.id && (
+                        <tr className="bg-black/20">
+                          <td colSpan={8} className="px-6 py-4">
+                            {submissionDetailLoading ? (
+                              <p className="text-white/30 text-sm">Loading declarations…</p>
+                            ) : !submissionDetail || submissionDetail.declarations.length === 0 ? (
+                              <p className="text-white/40 text-sm">No declarations linked to this submission. (May predate linking — older submissions might not have associated declaration records.)</p>
+                            ) : (
+                              <div>
+                                <p className="text-white/50 text-xs uppercase tracking-wider mb-2">
+                                  {submissionDetail.declarations.length} declaration(s) in this batch:
+                                </p>
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="text-white/40 text-xs">
+                                      <th className="text-left py-1">Donor</th>
+                                      <th className="text-left py-1">Postcode</th>
+                                      <th className="text-right py-1">Donated</th>
+                                      <th className="text-left py-1 pl-4">Date</th>
+                                      <th className="text-left py-1 pl-4">Order Ref</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {submissionDetail.declarations.map(d => (
+                                      <tr key={d.id} className="border-t border-white/5">
+                                        <td className="py-1 text-white">{d.full_name}</td>
+                                        <td className="py-1 text-white/60">{d.postcode}</td>
+                                        <td className="py-1 text-right font-mono text-white">{fmtGBP(d.donation_amount)}</td>
+                                        <td className="py-1 pl-4 text-white/50">
+                                          {d.donation_date ? new Date(d.donation_date).toLocaleDateString('en-GB') : '—'}
+                                        </td>
+                                        <td className="py-1 pl-4 text-white/40 font-mono text-xs">{d.order_ref || '—'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* GASDS tab */}
+        {tab === 'gasds' && (
+          <motion.div key="gasds" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="space-y-4">
+
+            <div className="glass rounded-2xl p-5 space-y-2">
+              <div className="flex items-start gap-3">
+                <span className="text-2xl">💰</span>
+                <div>
+                  <h2 className="text-white font-bold text-lg">Gift Aid Small Donations Scheme (GASDS)</h2>
+                  <p className="text-white/50 text-sm mt-1">
+                    Claim 25% on cash bucket donations (under £30 each, no declaration needed). Annual cap:{' '}
+                    <span className="text-saffron-400 font-bold">£8,000 per community building</span> — most temples qualify.
+                  </p>
+                  <p className="text-white/40 text-xs mt-2">
+                    Record your weekly/monthly cash collection totals here. Submit the claim through HMRC&apos;s portal,
+                    then click &quot;Mark all as claimed&quot; to update the audit trail.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {summary && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="glass rounded-xl px-4 py-3">
+                  <p className="text-white/40 text-xs uppercase tracking-wider">Collected {summary.year}</p>
+                  <p className="text-white font-black text-xl">{fmtGBP(summary.gasds_total)}</p>
+                  <p className="text-white/30 text-xs">{summary.gasds_records} record(s)</p>
+                </div>
+                <div className="glass rounded-xl px-4 py-3">
+                  <p className="text-white/40 text-xs uppercase tracking-wider">Unclaimed</p>
+                  <p className="text-saffron-400 font-black text-xl">{fmtGBP(summary.gasds_unclaimed)}</p>
+                  <p className="text-white/30 text-xs">→ claim {fmtGBP(summary.gasds_unclaimed * 0.25)} from HMRC</p>
+                </div>
+                <div className="glass rounded-xl px-4 py-3">
+                  <p className="text-white/40 text-xs uppercase tracking-wider">Annual cap remaining</p>
+                  <p className={`font-black text-xl ${summary.gasds_total > summary.gasds_cap ? 'text-red-400' : 'text-green-400'}`}>
+                    {fmtGBP(Math.max(0, summary.gasds_cap - summary.gasds_total))}
+                  </p>
+                  <p className="text-white/30 text-xs">{((summary.gasds_total / summary.gasds_cap) * 100).toFixed(0)}% of {fmtGBP(summary.gasds_cap)} used</p>
+                </div>
+              </div>
+            )}
+
+            {/* Add new collection */}
+            <div className="glass rounded-2xl p-5 space-y-3">
+              <h3 className="text-white font-bold">Record cash collection</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <label className={lbl}>Date</label>
+                  <input type="date" value={gasdsForm.date} onChange={e => setGasdsForm({ ...gasdsForm, date: e.target.value })} className={inp} />
+                </div>
+                <div>
+                  <label className={lbl}>Amount (£)</label>
+                  <input type="number" step="0.01" min="0" value={gasdsForm.amount} onChange={e => setGasdsForm({ ...gasdsForm, amount: e.target.value })} className={inp} placeholder="450.00" />
+                </div>
+                <div>
+                  <label className={lbl}>Location (optional)</label>
+                  <input type="text" value={gasdsForm.location} onChange={e => setGasdsForm({ ...gasdsForm, location: e.target.value })} className={inp} placeholder="Wembley temple" />
+                </div>
+                <div>
+                  <label className={lbl}>Description (optional)</label>
+                  <input type="text" value={gasdsForm.description} onChange={e => setGasdsForm({ ...gasdsForm, description: e.target.value })} className={inp} placeholder="Sunday darshan bucket" />
+                </div>
+              </div>
+              {gasdsError && <p className="text-red-400 text-sm">{gasdsError}</p>}
+              <button onClick={addGasdsCollection} disabled={gasdsAdding}
+                className="px-5 py-2.5 rounded-xl bg-saffron-gradient text-white font-bold text-sm shadow-saffron disabled:opacity-50">
+                {gasdsAdding ? 'Adding…' : '+ Add collection'}
+              </button>
+            </div>
+
+            {/* List */}
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-white font-semibold">Collections {new Date().getFullYear()}</h3>
+              <div className="flex gap-2">
+                {summary && summary.gasds_unclaimed > 0 && (
+                  <button onClick={markGasdsClaimed}
+                    className="px-4 py-2 rounded-xl bg-green-500/15 border border-green-500/30 text-green-400 text-sm font-semibold hover:bg-green-500/25 transition-all">
+                    ✓ Mark all unclaimed as claimed
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="glass rounded-2xl overflow-hidden border border-temple-border">
+              {gasdsLoading ? (
+                <div className="text-center py-20 text-white/30">Loading…</div>
+              ) : gasdsCollections.length === 0 ? (
+                <div className="text-center py-20 text-white/30">
+                  <p className="text-4xl mb-3">💷</p>
+                  <p>No GASDS collections recorded yet.</p>
+                  <p className="text-xs mt-1">Use the form above to record your first cash collection.</p>
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-white/5">
+                      {['Date', 'Amount', 'Location', 'Description', 'Status', ''].map(h => (
+                        <th key={h} className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gasdsCollections.map(c => (
+                      <tr key={c.id} className="border-b border-white/5 hover:bg-white/3">
+                        <td className="px-4 py-3 text-white/50 text-sm">{new Date(c.collection_date).toLocaleDateString('en-GB')}</td>
+                        <td className="px-4 py-3 font-mono font-bold text-white">{fmtGBP(c.amount)}</td>
+                        <td className="px-4 py-3 text-white/60 text-sm">{c.location || '—'}</td>
+                        <td className="px-4 py-3 text-white/50 text-sm">{c.description || '—'}</td>
+                        <td className="px-4 py-3">
+                          {c.claimed_at ? (
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">
+                              Claimed
+                            </span>
+                          ) : (
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                              Unclaimed
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {!c.claimed_at && (
+                            <button onClick={() => deleteGasdsCollection(c.id)}
+                              className="text-red-400/60 hover:text-red-400 text-xs">
+                              Delete
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
