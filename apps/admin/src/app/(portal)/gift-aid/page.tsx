@@ -72,6 +72,42 @@ export default function GiftAidPage() {
   const [showSubmitted, setShowSubmitted] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
+  // Date-range filter (controls both the list view and the submission scope)
+  type RangePreset = 'all' | 'this-month' | 'last-month' | 'this-quarter' | 'last-quarter' | 'custom'
+  const [rangePreset, setRangePreset] = useState<RangePreset>('last-month')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+
+  const yyyy = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const startOfMonth   = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
+  const endOfMonth     = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0)
+  const startOfQuarter = (d: Date) => new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1)
+  const endOfQuarter   = (d: Date) => new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3 + 3, 0)
+
+  const applyPreset = (preset: RangePreset) => {
+    setRangePreset(preset)
+    const now = new Date()
+    if (preset === 'all') { setFromDate(''); setToDate(''); return }
+    if (preset === 'this-month') {
+      setFromDate(yyyy(startOfMonth(now))); setToDate(yyyy(endOfMonth(now))); return
+    }
+    if (preset === 'last-month') {
+      const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      setFromDate(yyyy(startOfMonth(lm))); setToDate(yyyy(endOfMonth(lm))); return
+    }
+    if (preset === 'this-quarter') {
+      setFromDate(yyyy(startOfQuarter(now))); setToDate(yyyy(endOfQuarter(now))); return
+    }
+    if (preset === 'last-quarter') {
+      const lq = new Date(now.getFullYear(), now.getMonth() - 3, 1)
+      setFromDate(yyyy(startOfQuarter(lq))); setToDate(yyyy(endOfQuarter(lq))); return
+    }
+    // 'custom' — keep user-typed fromDate / toDate as-is
+  }
+
+  // Initialize range to "Last Month" on mount (best practice for monthly HMRC batches)
+  useEffect(() => { applyPreset('last-month') }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Submit
   const [claimToDate, setClaimToDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -100,15 +136,19 @@ export default function GiftAidPage() {
   const loadDeclarations = useCallback(async () => {
     setDeclLoading(true); setDeclError('')
     try {
-      const params = showSubmitted ? '' : '?submitted=false'
-      const data = await apiFetch<{ declarations: Declaration[] }>(`/gift-aid/declarations${params}&limit=200`)
+      const qs = new URLSearchParams()
+      if (!showSubmitted) qs.set('submitted', 'false')
+      if (fromDate) qs.set('from_date', fromDate)
+      if (toDate) qs.set('to_date', toDate)
+      qs.set('limit', '500')
+      const data = await apiFetch<{ declarations: Declaration[] }>(`/gift-aid/declarations?${qs.toString()}`)
       setDeclarations(data.declarations || [])
     } catch (e: unknown) {
       setDeclError(e instanceof Error ? e.message : 'Failed to load declarations')
     } finally {
       setDeclLoading(false)
     }
-  }, [showSubmitted])
+  }, [showSubmitted, fromDate, toDate])
 
   const loadHistory = useCallback(async () => {
     setHistLoading(true)
@@ -125,8 +165,8 @@ export default function GiftAidPage() {
   }, [tab, loadConfig, loadDeclarations, loadHistory])
 
   useEffect(() => {
-    if (tab === 'declarations') loadDeclarations()
-  }, [showSubmitted]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (tab === 'declarations' || tab === 'submit') loadDeclarations()
+  }, [showSubmitted, fromDate, toDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleAll = () => {
     const pending = declarations.filter(d => !d.hmrc_submitted)
@@ -153,13 +193,28 @@ export default function GiftAidPage() {
     }
   }
 
+  // Submission scope priority:
+  //   1. Explicit checkbox selection
+  //   2. Date-range filter (if active) → submits the currently-listed pending decls
+  //   3. All unsubmitted (legacy fallback)
+  const submissionScope = (): { ids: string[]; label: string } => {
+    if (selectedIds.size > 0) {
+      return { ids: Array.from(selectedIds), label: `${selectedIds.size} selected` }
+    }
+    if (fromDate || toDate) {
+      const ids = declarations.filter(d => !d.hmrc_submitted).map(d => d.id)
+      const range = `${fromDate || '…'} → ${toDate || 'today'}`
+      return { ids, label: `${ids.length} filtered (${range})` }
+    }
+    return { ids: [], label: `all ${pendingCount} unsubmitted` }
+  }
+
   const handleSubmit = async () => {
-    if (!confirm(
-      `Submit ${selectedIds.size > 0 ? selectedIds.size : 'all unsubmitted'} declaration(s) to HMRC ${config?.hmrc_environment?.toUpperCase() || 'TEST'}?\n\nThis cannot be undone.`
-    )) return
+    const { ids, label } = submissionScope()
+    const env = (config?.hmrc_environment || 'test').toUpperCase()
+    if (!confirm(`Submit ${label} declaration(s) to HMRC ${env}?\n\nThis cannot be undone.`)) return
     setSubmitting(true); setSubmitResult(null); setSubmitError('')
     try {
-      const ids = selectedIds.size > 0 ? Array.from(selectedIds) : []
       const res = await apiFetch<Record<string, unknown>>('/gift-aid/submit-to-hmrc', {
         method: 'POST',
         body: JSON.stringify({ declaration_ids: ids, claim_to_date: claimToDate || null }),
@@ -169,7 +224,8 @@ export default function GiftAidPage() {
     } catch (e: unknown) {
       setSubmitError(e instanceof Error ? e.message : 'Submission failed')
     } finally {
-      setSubmitting(false) }
+      setSubmitting(false)
+    }
   }
 
   const pendingCount = declarations.filter(d => !d.hmrc_submitted).length
@@ -285,6 +341,67 @@ export default function GiftAidPage() {
         {tab === 'declarations' && (
           <motion.div key="decls" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
             className="space-y-4">
+
+            {/* Date-range filter */}
+            <div className="glass rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-white/50 text-xs uppercase tracking-wider font-semibold mr-1">Date range:</span>
+                  {([
+                    { key: 'last-month',   label: 'Last Month',   recommended: true },
+                    { key: 'this-month',   label: 'This Month' },
+                    { key: 'last-quarter', label: 'Last Quarter' },
+                    { key: 'this-quarter', label: 'This Quarter' },
+                    { key: 'all',          label: 'All time' },
+                    { key: 'custom',       label: 'Custom' },
+                  ] as { key: RangePreset; label: string; recommended?: boolean }[]).map(p => (
+                    <button
+                      key={p.key}
+                      onClick={() => applyPreset(p.key)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        rangePreset === p.key
+                          ? 'bg-saffron-gradient text-white shadow-saffron'
+                          : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80 border border-white/10'
+                      }`}
+                    >
+                      {p.label}{p.recommended && rangePreset !== p.key ? ' ★' : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(rangePreset === 'custom' || (fromDate || toDate)) && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="text-white/40 text-xs">From</label>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={e => { setFromDate(e.target.value); setRangePreset('custom') }}
+                    className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm outline-none focus:border-saffron-400/50"
+                  />
+                  <label className="text-white/40 text-xs">To</label>
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={e => { setToDate(e.target.value); setRangePreset('custom') }}
+                    className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm outline-none focus:border-saffron-400/50"
+                  />
+                  {(fromDate || toDate) && (
+                    <button
+                      onClick={() => applyPreset('all')}
+                      className="text-white/40 text-xs hover:text-red-400 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <p className="text-white/30 text-xs">
+                ⭐ <span className="text-saffron-400/80">Last Month</span> is the recommended cadence — most UK charities batch monthly to HMRC for the best balance of cashflow and admin overhead.
+              </p>
+            </div>
+
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
                 <button onClick={toggleAll}
@@ -429,17 +546,31 @@ export default function GiftAidPage() {
                 <p className="text-white/30 text-xs mt-1">Leave blank to use today&apos;s date as the claim period end.</p>
               </div>
 
-              <div className="p-3 bg-white/5 rounded-xl border border-white/10 text-sm">
+              <div className="p-3 bg-white/5 rounded-xl border border-white/10 text-sm space-y-1">
                 {selectedIds.size > 0 ? (
                   <p className="text-white/70">
                     Submitting <span className="text-saffron-400 font-bold">{selectedIds.size} selected</span> declaration(s)
                   </p>
+                ) : (fromDate || toDate) ? (
+                  <p className="text-white/70">
+                    Submitting <span className="text-saffron-400 font-bold">{pendingCount}</span> declaration(s) in range{' '}
+                    <span className="font-mono text-white/80">{fromDate || '…'}</span> →{' '}
+                    <span className="font-mono text-white/80">{toDate || 'today'}</span>
+                    {pendingCount > 0 && (
+                      <>{' '}(£{pendingTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })} → claiming £{(pendingTotal * 0.25).toLocaleString('en-GB', { minimumFractionDigits: 2 })})</>
+                    )}
+                  </p>
                 ) : (
                   <p className="text-white/70">
                     Submitting <span className="text-white font-bold">all {pendingCount} unsubmitted</span> declaration(s)
-                    {' '}(£{pendingTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })} → claiming £{(pendingTotal * 0.25).toLocaleString('en-GB', { minimumFractionDigits: 2 })})
+                    {pendingCount > 0 && (
+                      <>{' '}(£{pendingTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })} → claiming £{(pendingTotal * 0.25).toLocaleString('en-GB', { minimumFractionDigits: 2 })})</>
+                    )}
                   </p>
                 )}
+                <p className="text-white/40 text-xs">
+                  Tip: change the date range on the Declarations tab to control which donations get submitted.
+                </p>
               </div>
 
               {/* XML Preview toggle */}
