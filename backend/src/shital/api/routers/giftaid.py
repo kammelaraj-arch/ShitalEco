@@ -683,7 +683,8 @@ async def export_submissions_csv(ctx: CurrentSpace):
 class GASDSCollectionInput(BaseModel):
     collection_date: date
     amount: Decimal
-    location: str = ""
+    branch_id: str = ""              # community building (matches branches.branch_id)
+    location: str = ""               # legacy free-text — kept for old records
     description: str = ""
 
 
@@ -692,6 +693,7 @@ async def list_gasds_collections(
     ctx: CurrentSpace,
     year: int | None = None,
     claimed: bool | None = None,
+    branch_id: str = "",
     limit: int = 200,
 ):
     from sqlalchemy import text
@@ -706,12 +708,15 @@ async def list_gasds_collections(
         conditions.append("claimed_at IS NOT NULL")
     elif claimed is False:
         conditions.append("claimed_at IS NULL")
+    if branch_id:
+        conditions.append("branch_id = :branch_id")
+        params["branch_id"] = branch_id
     where = " AND ".join(conditions)
     try:
         async with SessionLocal() as db:
             r = await db.execute(
                 text(f"""
-                    SELECT id, collection_date, amount, location, description,
+                    SELECT id, collection_date, amount, branch_id, location, description,
                            tax_year, claimed_at, claimed_in_submission_id,
                            created_by, created_at
                     FROM gasds_collections
@@ -727,6 +732,107 @@ async def list_gasds_collections(
         return {"collections": [], "total": 0, "error": str(e)}
 
 
+@router.get("/gasds/buildings")
+async def gasds_buildings_summary(ctx: CurrentSpace, year: int | None = None):
+    """Per-building (per-branch) GASDS totals + cap usage.
+
+    HMRC caps GASDS at £8,000/yr per community building. Each branch is one
+    community building. This returns one row per branch with collected total,
+    unclaimed total, claim potential (25%) and remaining cap.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    if year is None:
+        year = datetime.utcnow().year
+    cap = 8000.0
+    try:
+        async with SessionLocal() as db:
+            # All branches as a baseline, even if no GASDS records yet
+            br = await db.execute(text(
+                "SELECT id, branch_id, name FROM branches ORDER BY name"
+            ))
+            branches = [dict(b) for b in br.mappings().all()]
+
+            # GASDS aggregates per branch_id for the requested year
+            agg = await db.execute(text("""
+                SELECT
+                    COALESCE(branch_id, '') AS branch_id,
+                    COALESCE(SUM(amount), 0) AS total,
+                    COALESCE(SUM(amount) FILTER (WHERE claimed_at IS NULL), 0) AS unclaimed,
+                    COALESCE(SUM(amount) FILTER (WHERE claimed_at IS NOT NULL), 0) AS claimed,
+                    COUNT(*) AS records
+                FROM gasds_collections
+                WHERE deleted_at IS NULL
+                  AND EXTRACT(year FROM collection_date) = :y
+                GROUP BY branch_id
+            """), {"y": year})
+            agg_rows = {r["branch_id"]: r for r in agg.mappings().all()}
+
+        out: list[dict[str, Any]] = []
+        for b in branches:
+            code = b.get("branch_id") or ""
+            data = agg_rows.get(code, {})
+            total = float(data.get("total") or 0)
+            unclaimed = float(data.get("unclaimed") or 0)
+            claimed_amt = float(data.get("claimed") or 0)
+            out.append({
+                "branch_id": code,
+                "name":      b.get("name") or code or "(unknown)",
+                "total":     total,
+                "unclaimed": unclaimed,
+                "claimed":   claimed_amt,
+                "records":   int(data.get("records") or 0),
+                "cap":       cap,
+                "cap_remaining": max(0.0, cap - total),
+                "cap_used_pct":  round((total / cap) * 100, 1) if cap else 0,
+                "potential_claim": round(unclaimed * 0.25, 2),
+            })
+
+        # Include any orphan branch_ids in collections that don't match a branch row
+        unknown_codes = set(agg_rows.keys()) - {(b.get("branch_id") or "") for b in branches}
+        for code in unknown_codes:
+            if not code:
+                continue
+            data = agg_rows[code]
+            total = float(data.get("total") or 0)
+            unclaimed = float(data.get("unclaimed") or 0)
+            out.append({
+                "branch_id": code,
+                "name":      f"({code})",
+                "total":     total,
+                "unclaimed": unclaimed,
+                "claimed":   float(data.get("claimed") or 0),
+                "records":   int(data.get("records") or 0),
+                "cap":       cap,
+                "cap_remaining": max(0.0, cap - total),
+                "cap_used_pct":  round((total / cap) * 100, 1) if cap else 0,
+                "potential_claim": round(unclaimed * 0.25, 2),
+            })
+
+        # Unassigned collections (no branch_id set — legacy/older records)
+        if "" in agg_rows:
+            data = agg_rows[""]
+            total = float(data.get("total") or 0)
+            unclaimed = float(data.get("unclaimed") or 0)
+            out.append({
+                "branch_id": "",
+                "name":      "(no building)",
+                "total":     total,
+                "unclaimed": unclaimed,
+                "claimed":   float(data.get("claimed") or 0),
+                "records":   int(data.get("records") or 0),
+                "cap":       cap,
+                "cap_remaining": max(0.0, cap - total),
+                "cap_used_pct":  round((total / cap) * 100, 1) if cap else 0,
+                "potential_claim": round(unclaimed * 0.25, 2),
+            })
+
+        return {"year": year, "buildings": out}
+    except Exception as e:
+        return {"year": year, "buildings": [], "error": str(e)}
+
+
 @router.post("/gasds/collections")
 async def add_gasds_collection(ctx: CurrentSpace, body: GASDSCollectionInput):
     from sqlalchemy import text
@@ -739,18 +845,19 @@ async def add_gasds_collection(ctx: CurrentSpace, body: GASDSCollectionInput):
             r = await db.execute(
                 text("""
                     INSERT INTO gasds_collections
-                      (collection_date, amount, location, description, tax_year, created_by)
+                      (collection_date, amount, branch_id, location, description, tax_year, created_by)
                     VALUES
-                      (:dt, :amt, :loc, :desc, :y, :by)
+                      (:dt, :amt, :bid, :loc, :desc, :y, :by)
                     RETURNING id
                 """),
                 {
-                    "dt": body.collection_date,
-                    "amt": str(body.amount),
-                    "loc": body.location or "",
+                    "dt":   body.collection_date,
+                    "amt":  str(body.amount),
+                    "bid":  body.branch_id or None,
+                    "loc":  body.location or "",
                     "desc": body.description or "",
-                    "y": body.collection_date.year,
-                    "by": ctx.user_email,
+                    "y":    body.collection_date.year,
+                    "by":   ctx.user_email,
                 },
             )
             new_id = r.scalar_one()
