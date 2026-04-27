@@ -181,6 +181,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-shitaleco_db_user}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Bind-mount the script so updates take effect without rebuilding the
+      # scheduler image (the previous baked-in copy went stale and broke uploads)
       - ./infra/backup.sh:/opt/shitaleco/infra/backup.sh:ro
       - /opt/shitaleco/backups:/opt/shitaleco/backups
       - ./.env:/opt/shitaleco/.env:ro
