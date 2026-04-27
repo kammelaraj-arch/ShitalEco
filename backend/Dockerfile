@@ -29,7 +29,10 @@ COPY . .
 
 RUN pip install -e . --no-deps
 ARG GIT_SHA=dev
-RUN echo "Built commit ${GIT_SHA}"
+ARG BUILD_TIME=unknown
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_TIME=${BUILD_TIME}
+RUN echo "Built commit ${GIT_SHA} at ${BUILD_TIME}"
 
 EXPOSE 8000
 

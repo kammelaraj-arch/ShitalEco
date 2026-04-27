@@ -11,10 +11,11 @@ exec >> "$LOG" 2>&1
 echo "=== Deploy started $(date) ==="
 cd /workspace
 
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 git fetch origin
-git reset --hard origin/claude/shital-erp-platform-iR2UF
+git reset --hard "origin/${DEPLOY_BRANCH}"
 GIT_SHA=$(git rev-parse HEAD)
-echo "=== Deploying commit ${GIT_SHA} ==="
+echo "=== Deploying commit ${GIT_SHA} (${DEPLOY_BRANCH}) ==="
 
 # ── Login to GHCR so we can pull private images ──────────────────────────────
 if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -60,6 +61,11 @@ if [ "$BACKEND_OK" -eq 0 ]; then
              ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
   docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
   echo "Rolled back. Frontends NOT updated."
+  HISTORY_FILE=/workspace/backups/deploy-history.jsonl
+  mkdir -p "$(dirname "$HISTORY_FILE")"
+  cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","sha":"${GIT_SHA}","short":"${GIT_SHA:0:7}","branch":"${DEPLOY_BRANCH}","status":"rolled_back","message":"backend health check failed"}
+JSON
   exit 1
 fi
 
@@ -116,8 +122,17 @@ DEV_DIR=/opt/shitaleco-dev
 if [ -d "$DEV_DIR/.git" ]; then
   cd "$DEV_DIR"
   git fetch origin
-  git reset --hard origin/claude/shital-erp-platform-iR2UF
+  git reset --hard "origin/${DEPLOY_BRANCH}"
   docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
 fi
 
 echo "=== Deploy complete $(date) — commit ${GIT_SHA} ==="
+
+# ── Append deploy event for the admin UI to display ──────────────────────────
+HISTORY_FILE=/workspace/backups/deploy-history.jsonl
+mkdir -p "$(dirname "$HISTORY_FILE")"
+SHORT_SHA="${GIT_SHA:0:7}"
+COMMIT_MSG=$(cd /workspace && git log -1 --format='%s' "$GIT_SHA" 2>/dev/null | sed 's/"/\\"/g' | head -c 200)
+cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"success","message":"${COMMIT_MSG}"}
+JSON

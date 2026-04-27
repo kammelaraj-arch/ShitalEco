@@ -70,6 +70,21 @@ function PinOverlay({ onVerified }: { onVerified: (pin: string) => void }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+type VersionInfo = {
+  git_sha: string
+  git_sha_short: string
+  build_time: string
+  branch: string
+  now: string
+}
+type DeployEvent = {
+  at: string
+  sha: string
+  short: string
+  branch: string
+  status: 'success' | 'rolled_back' | string
+  message?: string
+}
 type BackupBlob = { name: string; size: number; last_modified: string | null; tier?: string }
 type RecipientLevel = 'critical' | 'high' | 'medium' | 'digest'
 type RecipientRow = { value: string; is_custom: boolean }
@@ -136,6 +151,49 @@ export default function AzureBackupPage() {
   const [recipDraft, setRecipDraft] = useState<Record<RecipientLevel, string>>({ critical: '', high: '', medium: '', digest: '' })
   const [recipSaving, setRecipSaving] = useState(false)
   const [recipMsg, setRecipMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [version, setVersion] = useState<VersionInfo | null>(null)
+  const [deploys, setDeploys] = useState<DeployEvent[] | null>(null)
+  const [deploying, setDeploying] = useState(false)
+  const [deployMsg, setDeployMsg] = useState<{ text: string; ok: boolean } | null>(null)
+
+  async function loadVersionAndDeploys() {
+    try {
+      const [vRes, dRes] = await Promise.all([
+        fetch(`${API}/admin/system/version`, { headers: { Authorization: `Bearer ${token()}` } }),
+        fetch(`${API}/admin/system/deploys?limit=10`, { headers: { Authorization: `Bearer ${token()}` } }),
+      ])
+      const v: VersionInfo = await vRes.json()
+      const d = await dRes.json()
+      setVersion(v)
+      setDeploys(d.deploys || [])
+    } catch {
+      // ignore
+    }
+  }
+
+  async function triggerDeploy() {
+    if (!pin) return
+    if (!confirm('Deploy the latest main branch to production? Backend will restart.')) return
+    setDeploying(true); setDeployMsg(null)
+    try {
+      const res = await fetch(`${API}/admin/system/trigger-deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token()}`, 'X-Admin-Pin': pin },
+      })
+      const d = await res.json()
+      if (d.ok) {
+        setDeployMsg({ text: `Deploy triggered. Webhook returned HTTP ${d.deployer_status}. Containers will restart in 1–2 min.`, ok: true })
+        // Refresh version + history after a delay
+        setTimeout(loadVersionAndDeploys, 90_000)
+      } else {
+        setDeployMsg({ text: d.detail || 'Deploy trigger failed', ok: false })
+      }
+    } catch {
+      setDeployMsg({ text: 'Network error — could not reach deployer', ok: false })
+    } finally {
+      setDeploying(false)
+    }
+  }
 
   async function loadHealthAndList() {
     setRefreshing(true)
@@ -229,6 +287,7 @@ export default function AzureBackupPage() {
       .catch(() => {})
     loadHealthAndList()
     loadRecipients()
+    loadVersionAndDeploys()
   }, [])
 
   async function save() {
@@ -308,6 +367,74 @@ export default function AzureBackupPage() {
           Store encrypted daily database backups in Azure Blob Storage for offsite redundancy.
         </p>
       </div>
+
+      {/* Deployed version + Deploy now */}
+      {version && (
+        <div className={card} style={cardStyle}>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">🚀</span>
+              <div>
+                <h2 className="text-white font-bold text-base">Deployed Version</h2>
+                <p className="text-white/50 text-xs mt-0.5">
+                  Branch: <span className="font-mono text-white/70">{version.branch}</span>
+                  {' · '}Commit:{' '}
+                  <a
+                    href={`https://github.com/kammelaraj-arch/ShitalEco/commit/${version.git_sha}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono text-orange-400 hover:underline"
+                  >
+                    {version.git_sha_short}
+                  </a>
+                  {version.build_time !== 'unknown' && (
+                    <>{' · '}Built: <span className="text-white/70">{fmtAge(version.build_time)}</span></>
+                  )}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={triggerDeploy}
+              disabled={deploying || !pin}
+              className="px-5 py-2.5 rounded-xl font-black text-sm text-white transition-all disabled:opacity-40 hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
+              style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', boxShadow: '0 4px 16px rgba(22,163,74,0.35)' }}
+            >
+              {deploying ? 'Triggering…' : '🚀 Deploy now'}
+            </button>
+          </div>
+
+          {deployMsg && (
+            <div className={`px-4 py-2.5 rounded-xl text-xs mt-3 ${deployMsg.ok ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+              {deployMsg.text}
+            </div>
+          )}
+
+          {deploys && deploys.length > 0 && (
+            <div className="mt-2">
+              <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Recent deploys</p>
+              <div className="space-y-1 text-xs font-mono">
+                {deploys.slice(0, 5).map((d, i) => (
+                  <div key={i} className="flex items-center gap-3 py-1 px-2 rounded" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <span className={d.status === 'success' ? 'text-green-400' : d.status === 'rolled_back' ? 'text-red-400' : 'text-white/50'}>
+                      {d.status === 'success' ? '✓' : d.status === 'rolled_back' ? '↩' : '?'}
+                    </span>
+                    <a
+                      href={`https://github.com/kammelaraj-arch/ShitalEco/commit/${d.sha}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-orange-400 hover:underline"
+                    >
+                      {d.short}
+                    </a>
+                    <span className="text-white/40 flex-shrink-0">{fmtAge(d.at)}</span>
+                    <span className="text-white/60 truncate">{d.message || ''}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Status */}
       {status && (
