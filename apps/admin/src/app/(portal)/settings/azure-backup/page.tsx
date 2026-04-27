@@ -79,11 +79,29 @@ type VersionInfo = {
 }
 type DeployEvent = {
   at: string
+  env?: 'dev' | 'prod' | string
   sha: string
   short: string
   branch: string
-  status: 'success' | 'rolled_back' | string
+  status: 'success' | 'rolled_back' | 'smoke_fail' | string
   message?: string
+}
+type EnvSummary = {
+  container: string
+  running: boolean
+  status?: string
+  started_at?: string
+  image_sha?: string
+  image_tag?: string
+  git_sha?: string
+  git_sha_short?: string
+  build_time?: string
+  url?: string
+  error?: string
+}
+type EnvironmentsResponse = {
+  environments: { dev?: EnvSummary; prod?: EnvSummary }
+  error?: string
 }
 type BackupBlob = { name: string; size: number; last_modified: string | null; tier?: string }
 type RecipientLevel = 'critical' | 'high' | 'medium' | 'digest'
@@ -152,38 +170,47 @@ export default function AzureBackupPage() {
   const [recipSaving, setRecipSaving] = useState(false)
   const [recipMsg, setRecipMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [version, setVersion] = useState<VersionInfo | null>(null)
+  const [environments, setEnvironments] = useState<EnvironmentsResponse | null>(null)
   const [deploys, setDeploys] = useState<DeployEvent[] | null>(null)
-  const [deploying, setDeploying] = useState(false)
+  const [deployingEnv, setDeployingEnv] = useState<'dev' | 'prod' | null>(null)
   const [deployMsg, setDeployMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   async function loadVersionAndDeploys() {
     try {
-      const [vRes, dRes] = await Promise.all([
+      const [vRes, eRes, dRes] = await Promise.all([
         fetch(`${API}/admin/system/version`, { headers: { Authorization: `Bearer ${token()}` } }),
+        fetch(`${API}/admin/system/environments`, { headers: { Authorization: `Bearer ${token()}` } }),
         fetch(`${API}/admin/system/deploys?limit=10`, { headers: { Authorization: `Bearer ${token()}` } }),
       ])
       const v: VersionInfo = await vRes.json()
+      const e: EnvironmentsResponse = await eRes.json()
       const d = await dRes.json()
       setVersion(v)
+      setEnvironments(e)
       setDeploys(d.deploys || [])
     } catch {
       // ignore
     }
   }
 
-  async function triggerDeploy() {
+  async function triggerEnvDeploy(env: 'dev' | 'prod') {
     if (!pin) return
-    if (!confirm('Deploy the latest main branch to production? Backend will restart.')) return
-    setDeploying(true); setDeployMsg(null)
+    const promptText = env === 'prod'
+      ? 'Promote the current dev image to PRODUCTION? The :dev image will be retagged as :latest and the prod backend will restart. No rebuild — bit-identical image.'
+      : 'Re-deploy the latest dev image to dev.shital.org.uk?'
+    if (!confirm(promptText)) return
+    setDeployingEnv(env); setDeployMsg(null)
     try {
-      const res = await fetch(`${API}/admin/system/trigger-deploy`, {
+      const res = await fetch(`${API}/admin/system/deploy/${env}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token()}`, 'X-Admin-Pin': pin },
       })
       const d = await res.json()
       if (d.ok) {
-        setDeployMsg({ text: `Deploy triggered. Webhook returned HTTP ${d.deployer_status}. Containers will restart in 1–2 min.`, ok: true })
-        // Refresh version + history after a delay
+        setDeployMsg({
+          text: `${env.toUpperCase()} deploy triggered (HTTP ${d.deployer_status}). Containers will restart in 1–2 min.`,
+          ok: true,
+        })
         setTimeout(loadVersionAndDeploys, 90_000)
       } else {
         setDeployMsg({ text: d.detail || 'Deploy trigger failed', ok: false })
@@ -191,7 +218,7 @@ export default function AzureBackupPage() {
     } catch {
       setDeployMsg({ text: 'Network error — could not reach deployer', ok: false })
     } finally {
-      setDeploying(false)
+      setDeployingEnv(null)
     }
   }
 
@@ -368,55 +395,116 @@ export default function AzureBackupPage() {
         </p>
       </div>
 
-      {/* Deployed version + Deploy now */}
-      {version && (
+      {/* Environments — Dev & Prod */}
+      {(environments || version) && (
         <div className={card} style={cardStyle}>
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">🚀</span>
-              <div>
-                <h2 className="text-white font-bold text-base">Deployed Version</h2>
-                <p className="text-white/50 text-xs mt-0.5">
-                  Branch: <span className="font-mono text-white/70">{version.branch}</span>
-                  {' · '}Commit:{' '}
-                  <a
-                    href={`https://github.com/kammelaraj-arch/ShitalEco/commit/${version.git_sha}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-mono text-orange-400 hover:underline"
-                  >
-                    {version.git_sha_short}
-                  </a>
-                  {version.build_time !== 'unknown' && (
-                    <>{' · '}Built: <span className="text-white/70">{fmtAge(version.build_time)}</span></>
-                  )}
-                </p>
-              </div>
+          <div className="flex items-center gap-3 pb-1">
+            <span className="text-2xl">🚀</span>
+            <div>
+              <h2 className="text-white font-bold text-base">Environments</h2>
+              <p className="text-white/40 text-xs">
+                Push to <span className="font-mono">main</span> auto-deploys to Dev. Click "Promote to Prod" to release.
+              </p>
             </div>
-            <button
-              onClick={triggerDeploy}
-              disabled={deploying || !pin}
-              className="px-5 py-2.5 rounded-xl font-black text-sm text-white transition-all disabled:opacity-40 hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
-              style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', boxShadow: '0 4px 16px rgba(22,163,74,0.35)' }}
-            >
-              {deploying ? 'Triggering…' : '🚀 Deploy now'}
-            </button>
           </div>
 
           {deployMsg && (
-            <div className={`px-4 py-2.5 rounded-xl text-xs mt-3 ${deployMsg.ok ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+            <div className={`px-4 py-2.5 rounded-xl text-xs ${deployMsg.ok ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
               {deployMsg.text}
             </div>
           )}
+
+          {environments?.error && (
+            <p className="text-red-400 text-xs">{environments.error}</p>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {(['dev', 'prod'] as const).map(env => {
+              const e = environments?.environments?.[env]
+              const isProd = env === 'prod'
+              const sha = e?.git_sha_short || (env === 'prod' ? version?.git_sha_short : '—')
+              const fullSha = e?.git_sha || (env === 'prod' ? version?.git_sha : '')
+              const built = e?.build_time
+              return (
+                <div
+                  key={env}
+                  className="rounded-xl px-4 py-3 flex flex-col gap-2"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${isProd ? 'rgba(34,197,94,0.2)' : 'rgba(251,146,60,0.2)'}` }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{isProd ? '🟢' : '🟠'}</span>
+                      <span className="font-black text-white text-sm uppercase tracking-wider">{env}</span>
+                      {e?.running ? (
+                        <span className="text-[10px] uppercase text-green-400/80">running</span>
+                      ) : (
+                        <span className="text-[10px] uppercase text-red-400/80">{e?.status || 'down'}</span>
+                      )}
+                    </div>
+                    {e?.url && (
+                      <a href={e.url} target="_blank" rel="noreferrer" className="text-xs text-orange-400 hover:underline">
+                        {e.url.replace(/^https?:\/\//, '')} ↗
+                      </a>
+                    )}
+                  </div>
+                  <div className="text-xs text-white/60 font-mono space-y-0.5">
+                    <div>
+                      Commit:{' '}
+                      {fullSha ? (
+                        <a
+                          href={`https://github.com/kammelaraj-arch/ShitalEco/commit/${fullSha}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-orange-400 hover:underline"
+                        >
+                          {sha}
+                        </a>
+                      ) : (
+                        <span className="text-white/30">unknown</span>
+                      )}
+                    </div>
+                    {built && built !== 'unknown' && (
+                      <div className="text-white/40">Built {fmtAge(built)}</div>
+                    )}
+                    {e?.started_at && (
+                      <div className="text-white/40">Container up {fmtAge(e.started_at)}</div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => triggerEnvDeploy(env)}
+                    disabled={deployingEnv !== null || !pin}
+                    className="mt-1 px-4 py-2 rounded-xl font-black text-sm text-white transition-all disabled:opacity-40 hover:scale-[1.02] active:scale-[0.98]"
+                    style={{
+                      background: isProd
+                        ? 'linear-gradient(135deg, #16a34a, #15803d)'
+                        : 'linear-gradient(135deg, #d97706, #ea580c)',
+                      boxShadow: isProd
+                        ? '0 4px 16px rgba(22,163,74,0.35)'
+                        : '0 4px 16px rgba(217,119,6,0.35)',
+                    }}
+                  >
+                    {deployingEnv === env
+                      ? 'Triggering…'
+                      : isProd
+                        ? '🚀 Promote to Prod'
+                        : '🔄 Re-deploy Dev'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
 
           {deploys && deploys.length > 0 && (
             <div className="mt-2">
               <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Recent deploys</p>
               <div className="space-y-1 text-xs font-mono">
-                {deploys.slice(0, 5).map((d, i) => (
+                {deploys.slice(0, 6).map((d, i) => (
                   <div key={i} className="flex items-center gap-3 py-1 px-2 rounded" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                    <span className={d.status === 'success' ? 'text-green-400' : d.status === 'rolled_back' ? 'text-red-400' : 'text-white/50'}>
-                      {d.status === 'success' ? '✓' : d.status === 'rolled_back' ? '↩' : '?'}
+                    <span className={d.status === 'success' ? 'text-green-400' : 'text-red-400'}>
+                      {d.status === 'success' ? '✓' : '↩'}
+                    </span>
+                    <span className={`text-[10px] uppercase tracking-wider ${d.env === 'prod' ? 'text-green-400/80' : 'text-orange-400/80'}`}>
+                      {d.env || '?'}
                     </span>
                     <a
                       href={`https://github.com/kammelaraj-arch/ShitalEco/commit/${d.sha}`}

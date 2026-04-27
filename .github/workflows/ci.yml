@@ -202,7 +202,11 @@ jobs:
       - name: Set image tag
         id: tag
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/claude/shital-erp-platform-iR2UF" ]; then
+          # Push and workflow_dispatch on main → :dev tag (auto-deploys to dev stack).
+          # Prod is updated by a manual "Promote to Prod" button which retags
+          # :dev → :latest. PR builds use :dev too (for review), claude/* legacy
+          # branch keeps :latest for backward compat.
+          if [ "${{ github.ref }}" = "refs/heads/claude/shital-erp-platform-iR2UF" ]; then
             echo "tag=latest" >> $GITHUB_OUTPUT
           else
             echo "tag=dev" >> $GITHUB_OUTPUT
@@ -294,11 +298,15 @@ jobs:
           cache-from: type=gha,scope=service
           cache-to: type=gha,scope=service,mode=max
 
-      - name: Trigger production deploy
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/shital-erp-platform-iR2UF'
+      - name: Trigger dev deploy
+        # Push or manual run → auto-deploy to DEV stack only.
+        # Prod is updated via the "Promote to Prod" button in the admin UI,
+        # which retags :dev → :latest without rebuilding.
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/claude/shital-erp-platform-iR2UF'
         run: |
           SECRET="${{ secrets.DEPLOY_SECRET }}"
           SECRET="${SECRET:-ShitalDeploy2026!}"
           curl -X POST https://shital.org.uk/deploy \
             -H "X-Deploy-Secret: ${SECRET}" \
+            -H "X-Deploy-Target: dev" \
             --max-time 15 --retry 3 --retry-delay 5 || true
