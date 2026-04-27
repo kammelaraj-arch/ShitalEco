@@ -1365,6 +1365,7 @@ _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
+_mount("shital.api.routers.system",                "router")
 
 
 @app.get("/health", tags=["system"])

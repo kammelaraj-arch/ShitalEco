@@ -171,11 +171,16 @@ jobs:
     name: Build & Push Images
     runs-on: ubuntu-latest
     needs: [changes, backend-tests, frontend-tests]
-    # Run even if test jobs were skipped (nothing changed), but not if they failed
+    # Build only on main/develop/claude branches or manual trigger.
+    # Tests must not have FAILED — but skipped (path-filter unmatched) is fine.
+    # Per-job checks instead of contains(needs.*.result, ...) which was unreliable.
     if: |
       always() &&
-      !contains(needs.*.result, 'failure') &&
-      !contains(needs.*.result, 'cancelled') &&
+      needs.changes.result == 'success' &&
+      needs.backend-tests.result != 'failure' &&
+      needs.backend-tests.result != 'cancelled' &&
+      needs.frontend-tests.result != 'failure' &&
+      needs.frontend-tests.result != 'cancelled' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/claude/') || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
@@ -203,6 +208,10 @@ jobs:
             echo "tag=dev" >> $GITHUB_OUTPUT
           fi
 
+      - name: Capture build timestamp
+        id: build_meta
+        run: echo "ts=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
       - name: Build & push backend
         if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v5
@@ -210,7 +219,9 @@ jobs:
           context: ./backend
           push: true
           tags: ghcr.io/kammelaraj-arch/shitaleco-backend:${{ steps.tag.outputs.tag }}
-          build-args: GIT_SHA=${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_TIME=${{ steps.build_meta.outputs.ts }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
 

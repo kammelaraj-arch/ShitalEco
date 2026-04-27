@@ -53,6 +53,8 @@ services:
       PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
       PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
       PAYPAL_ENV: ${PAYPAL_ENV:-live}
+      DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
+      DEPLOYER_URL: http://deployer:9000
     volumes:
       - /opt/shitaleco/backups:/opt/shitaleco/backups
     depends_on:
@@ -200,11 +202,15 @@ services:
           memory: 128M
     environment:
       DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
+      DEPLOY_BRANCH: ${DEPLOY_BRANCH:-main}
       DOCKER_BUILDKIT: "1"
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
       - /opt/shitaleco:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
+      # Mount deploy.sh so updates take effect on next webhook call without
+      # rebuilding the deployer image
+      - ./deployer/deploy.sh:/app/deploy.sh:ro
     networks:
       - internal
 

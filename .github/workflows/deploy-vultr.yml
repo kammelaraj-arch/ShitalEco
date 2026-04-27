@@ -58,10 +58,10 @@ jobs:
             if [ -d /opt/shitaleco/.git ]; then
               cd /opt/shitaleco
               git fetch origin
-              git reset --hard origin/claude/shital-erp-platform-iR2UF
+              git reset --hard origin/main
             else
               apt-get install -y git -q
-              git clone --branch claude/shital-erp-platform-iR2UF \
+              git clone --branch main \
                 https://${GH_PAT}@github.com/kammelaraj-arch/ShitalEco.git /opt/shitaleco
             fi
             cd /opt/shitaleco
