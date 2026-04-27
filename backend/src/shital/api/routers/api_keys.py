@@ -9,6 +9,7 @@ List endpoint (metadata only, no values) requires only a valid admin JWT.
 """
 from __future__ import annotations
 
+from datetime import UTC
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, status
@@ -320,7 +321,7 @@ async def azure_backup_health(ctx: CurrentSpace) -> dict[str, Any]:
     _require_admin(ctx)
     import asyncio
     import os
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from shital.core.fabrics.secrets import SecretsManager
 
@@ -348,7 +349,7 @@ async def azure_backup_health(ctx: CurrentSpace) -> dict[str, Any]:
         if files:
             files.sort(key=lambda x: x[1], reverse=True)
             latest = files[0]
-            out["local"]["latest_local"] = datetime.fromtimestamp(latest[1], tz=timezone.utc).isoformat()
+            out["local"]["latest_local"] = datetime.fromtimestamp(latest[1], tz=UTC).isoformat()
             out["local"]["latest_size"] = latest[2]
 
     def _read_log() -> None:
@@ -367,11 +368,11 @@ async def azure_backup_health(ctx: CurrentSpace) -> dict[str, Any]:
         recent_failures = 0
         last_success = None
         last_failure = None
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        cutoff = datetime.now(UTC) - timedelta(days=7)
         for line in tail:
             ts = line[1:20] if len(line) > 21 and line[0] == "[" else None
             try:
-                when = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc) if ts else None
+                when = datetime.fromisoformat(ts).replace(tzinfo=UTC) if ts else None
             except Exception:
                 when = None
             if "Uploaded to azure" in line:
@@ -419,7 +420,7 @@ async def azure_backup_health(ctx: CurrentSpace) -> dict[str, Any]:
         out["error"] = str(exc)[:200]
 
     # Compute overall status
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     healthy = True
     reasons: list[str] = []
     latest_local = out["local"]["latest_local"]
