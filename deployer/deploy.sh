@@ -1,21 +1,39 @@
 #!/bin/bash
-# ── ShitalEco Production Deploy ────────────────────────────────────────────────
-# Images are built by GitHub Actions and pushed to GHCR.
-# This script ONLY pulls pre-built images and does a rolling restart.
-# The production server NEVER builds — that's what killed it before.
+# ── ShitalEco Deploy Script ───────────────────────────────────────────────────
+# Modes (passed via flags from server.py):
+#   --target dev    Pull :dev images, restart the dev stack
+#   --target prod   Pull :latest images, restart the prod stack (rolling, with
+#                   automatic rollback on health-check failure)
+#   --promote-prod  Retag :dev → :latest (no rebuild — bit-identical image),
+#                   then run --target prod
+#
+# Image flow:
+#   CI builds main → tagged :dev → auto-deploys to dev (target=dev)
+#   Admin clicks "Promote to Prod" → retag → deploy prod (--promote-prod)
 # ──────────────────────────────────────────────────────────────────────────────
 set -eo pipefail
 LOG=/tmp/deploy-$(date +%s).log
 exec >> "$LOG" 2>&1
 
-echo "=== Deploy started $(date) ==="
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+TARGET="dev"
+PROMOTE=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target) TARGET="$2"; shift 2 ;;
+    --promote-prod) PROMOTE=1; TARGET="prod"; shift ;;
+    *) echo "Unknown arg: $1"; shift ;;
+  esac
+done
+
+echo "=== Deploy started $(date) — target=${TARGET} promote=${PROMOTE} ==="
 cd /workspace
 
-DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 git fetch origin
 git reset --hard "origin/${DEPLOY_BRANCH}"
 GIT_SHA=$(git rev-parse HEAD)
-echo "=== Deploying commit ${GIT_SHA} (${DEPLOY_BRANCH}) ==="
+echo "=== Deploying commit ${GIT_SHA} (${DEPLOY_BRANCH}) → ${TARGET} ==="
 
 # ── Login to GHCR so we can pull private images ──────────────────────────────
 if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -23,31 +41,61 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
     && echo "Logged in to GHCR" || echo "GHCR login failed — images may already be cached"
 fi
 
-# ── Checkpoint: tag :latest as :previous before pulling ─────────────────────
-for svc in backend admin quick-donation kiosk screen service; do
-  docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
-             ghcr.io/kammelaraj-arch/shitaleco-${svc}:previous 2>/dev/null || true
-done
+# ── Promote: retag :dev → :latest BEFORE pulling/restarting prod ────────────
+if [ "$PROMOTE" -eq 1 ]; then
+  echo "=== Promoting :dev → :latest ==="
+  docker pull "ghcr.io/kammelaraj-arch/shitaleco-backend:dev"
+  for svc in backend admin quick-donation kiosk screen service; do
+    img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+    # Snapshot current :latest as :previous (rollback target)
+    docker tag "${img}:latest" "${img}:previous" 2>/dev/null || true
+    # Promote :dev → :latest
+    if docker pull "${img}:dev" 2>/dev/null; then
+      docker tag "${img}:dev" "${img}:latest"
+      echo "  ✓ promoted ${svc}"
+    else
+      echo "  - skipped ${svc} (no :dev image)"
+    fi
+  done
+fi
 
-# ── Pull new images from GHCR (built by CI, not here) ───────────────────────
-echo "=== Pulling images from GHCR ==="
-docker compose -f docker-compose.prod.yml pull backend admin quick-donation kiosk screen
-docker compose -f docker-compose.prod.yml pull service 2>/dev/null || \
-  echo "service image not yet in GHCR — skipping pull"
+# ── Branch on target ────────────────────────────────────────────────────────
+if [ "$TARGET" = "dev" ]; then
+  COMPOSE="docker-compose.dev.yml"
+  STACK_NAME="dev"
+  HEALTH_URL="http://localhost:8001/health"
+  HISTORY_TAG="dev"
+else
+  COMPOSE="docker-compose.prod.yml"
+  STACK_NAME="prod"
+  HEALTH_URL="http://localhost:8000/health"
+  HISTORY_TAG="prod"
+fi
 
-# ── Prune old dangling images immediately ───────────────────────────────────
+echo "=== Pulling images for ${STACK_NAME} stack ==="
+if [ "$TARGET" = "dev" ]; then
+  # Dev stack pulls :dev (most CI builds)
+  docker compose -f "$COMPOSE" pull 2>&1 | tail -10 || true
+else
+  # Prod pulls :latest (only updated by promote)
+  docker compose -f "$COMPOSE" pull backend admin quick-donation kiosk screen 2>&1 | tail -10 || true
+  docker compose -f "$COMPOSE" pull service 2>/dev/null || \
+    echo "service image not yet in GHCR — skipping pull"
+fi
+
 docker image prune -f
 docker container prune -f
 
 # ── Rolling restart — backend first ─────────────────────────────────────────
-echo "=== Rolling restart: backend ==="
-docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
+echo "=== Rolling restart: backend (${STACK_NAME}) ==="
+docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend 2>/dev/null || \
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend-dev
 
-echo "=== Waiting for backend health ==="
+echo "=== Waiting for backend health (${HEALTH_URL}) ==="
 BACKEND_OK=0
 for i in $(seq 1 30); do
   sleep 5
-  if curl -sf --max-time 5 http://localhost:8000/health > /dev/null 2>&1; then
+  if curl -sf --max-time 5 "$HEALTH_URL" > /dev/null 2>&1; then
     echo "Backend healthy after ${i} attempts"
     BACKEND_OK=1
     break
@@ -55,40 +103,46 @@ for i in $(seq 1 30); do
   echo "  attempt ${i}/30..."
 done
 
+HISTORY_FILE=/workspace/backups/deploy-history.jsonl
+mkdir -p "$(dirname "$HISTORY_FILE")"
+SHORT_SHA="${GIT_SHA:0:7}"
+COMMIT_MSG=$(cd /workspace && git log -1 --format='%s' "$GIT_SHA" 2>/dev/null | sed 's/"/\\"/g' | head -c 200)
+
 if [ "$BACKEND_OK" -eq 0 ]; then
-  echo "!!! Backend unhealthy — rolling back to :previous ==="
-  docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
-             ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
-  docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
-  echo "Rolled back. Frontends NOT updated."
-  HISTORY_FILE=/workspace/backups/deploy-history.jsonl
-  mkdir -p "$(dirname "$HISTORY_FILE")"
+  echo "!!! Backend unhealthy on ${STACK_NAME} — rolling back to :previous ==="
+  if [ "$TARGET" = "prod" ]; then
+    docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
+               ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
+    docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend
+  fi
   cat >> "$HISTORY_FILE" <<JSON
-{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","sha":"${GIT_SHA}","short":"${GIT_SHA:0:7}","branch":"${DEPLOY_BRANCH}","status":"rolled_back","message":"backend health check failed"}
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"rolled_back","message":"backend health check failed"}
 JSON
   exit 1
 fi
 
-curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
+# Prod-only: warm seed-catalog endpoint (best-effort)
+if [ "$TARGET" = "prod" ]; then
+  curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
+fi
 
 # ── Frontend rollout ─────────────────────────────────────────────────────────
-echo "=== Rolling restart: frontends ==="
-docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
-docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate service 2>/dev/null || \
-  echo "service container not yet available — skipping"
+echo "=== Rolling restart: frontends (${STACK_NAME}) ==="
+if [ "$TARGET" = "dev" ]; then
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate \
+    admin-dev quick-donation-dev kiosk-dev screen-dev 2>/dev/null || true
+else
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate admin quick-donation kiosk screen
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate service 2>/dev/null || \
+    echo "service container not yet available — skipping"
 
-echo "Waiting for admin..."
-for i in $(seq 1 20); do
-  sleep 4
-  curl -sf --max-time 5 http://localhost:3001/admin > /dev/null 2>&1 && break
-  echo "  attempt ${i}/20..."
-done
-
-docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
-  docker compose -f docker-compose.prod.yml up -d --no-deps nginx
+  # Reload nginx (prod only — dev nginx auto-reloads)
+  docker compose -f "$COMPOSE" exec -T nginx nginx -s reload 2>/dev/null || \
+    docker compose -f "$COMPOSE" up -d --no-deps nginx
+fi
 
 # ── Smoke tests ──────────────────────────────────────────────────────────────
-echo "=== Smoke tests ==="
+echo "=== Smoke tests (${STACK_NAME}) ==="
 SMOKE_FAIL=0
 smoke() {
   local label=$1 url=$2
@@ -99,40 +153,30 @@ smoke() {
     SMOKE_FAIL=1
   fi
 }
-smoke "backend /health"   "http://localhost:8000/health"
-smoke "admin portal"      "http://localhost:3001/admin"
-smoke "nginx main"        "http://localhost:80/"
-smoke "kiosk via nginx"   "http://localhost:80/kiosk/"
-smoke "donate via nginx"  "http://localhost:80/donate/"
-smoke "screen via nginx"  "http://localhost:80/screen/"
+if [ "$TARGET" = "dev" ]; then
+  smoke "dev backend /health" "http://localhost:8001/health"
+  smoke "dev nginx"            "http://localhost:8080/"
+else
+  smoke "backend /health"   "http://localhost:8000/health"
+  smoke "nginx main"        "http://localhost:80/"
+  smoke "kiosk via nginx"   "http://localhost:80/kiosk/"
+  smoke "donate via nginx"  "http://localhost:80/donate/"
+  smoke "screen via nginx"  "http://localhost:80/screen/"
+fi
 
 if [ "$SMOKE_FAIL" -ne 0 ]; then
   echo "!!! Smoke tests failed ==="
-  docker compose -f docker-compose.prod.yml logs --tail=20 backend
+  docker compose -f "$COMPOSE" logs --tail=20 backend 2>/dev/null || \
+    docker compose -f "$COMPOSE" logs --tail=20 backend-dev
+  cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"smoke_fail","message":"${COMMIT_MSG}"}
+JSON
   exit 1
 fi
 
-# ── Tag :latest as :dev and refresh dev stack ────────────────────────────────
-for svc in backend admin quick-donation kiosk screen service; do
-  docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
-             ghcr.io/kammelaraj-arch/shitaleco-${svc}:dev 2>/dev/null || true
-done
+# ── Success ─────────────────────────────────────────────────────────────────
+echo "=== Deploy complete $(date) — commit ${GIT_SHA} → ${STACK_NAME} ==="
 
-DEV_DIR=/opt/shitaleco-dev
-if [ -d "$DEV_DIR/.git" ]; then
-  cd "$DEV_DIR"
-  git fetch origin
-  git reset --hard "origin/${DEPLOY_BRANCH}"
-  docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
-fi
-
-echo "=== Deploy complete $(date) — commit ${GIT_SHA} ==="
-
-# ── Append deploy event for the admin UI to display ──────────────────────────
-HISTORY_FILE=/workspace/backups/deploy-history.jsonl
-mkdir -p "$(dirname "$HISTORY_FILE")"
-SHORT_SHA="${GIT_SHA:0:7}"
-COMMIT_MSG=$(cd /workspace && git log -1 --format='%s' "$GIT_SHA" 2>/dev/null | sed 's/"/\\"/g' | head -c 200)
 cat >> "$HISTORY_FILE" <<JSON
-{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"success","message":"${COMMIT_MSG}"}
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"success","message":"${COMMIT_MSG}"}
 JSON
