@@ -77,10 +77,30 @@ interface GASDSCollection {
   id: string
   collection_date: string
   amount: number
+  branch_id: string | null
   location: string
   description: string
   tax_year: number | null
   claimed_at: string | null
+}
+
+interface Branch {
+  id: string
+  branch_id: string
+  name: string
+}
+
+interface GASDSBuilding {
+  branch_id: string
+  name: string
+  total: number
+  unclaimed: number
+  claimed: number
+  records: number
+  cap: number
+  cap_remaining: number
+  cap_used_pct: number
+  potential_claim: number
 }
 
 const fmtGBP = (n: number | string) =>
@@ -119,9 +139,11 @@ export default function GiftAidPage() {
   // GASDS
   const [gasdsCollections, setGasdsCollections] = useState<GASDSCollection[]>([])
   const [gasdsLoading, setGasdsLoading] = useState(false)
-  const [gasdsForm, setGasdsForm] = useState({ date: '', amount: '', location: '', description: '' })
+  const [gasdsForm, setGasdsForm] = useState({ date: '', amount: '', branch_id: '', description: '' })
   const [gasdsAdding, setGasdsAdding] = useState(false)
   const [gasdsError, setGasdsError] = useState('')
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [gasdsBuildings, setGasdsBuildings] = useState<GASDSBuilding[]>([])
 
   // Declarations
   const [declarations, setDeclarations] = useState<Declaration[]>([])
@@ -245,8 +267,14 @@ export default function GiftAidPage() {
     setGasdsLoading(true)
     try {
       const year = new Date().getFullYear()
-      const data = await apiFetch<{ collections: GASDSCollection[] }>(`/gift-aid/gasds/collections?year=${year}`)
-      setGasdsCollections(data.collections || [])
+      const [list, buildings, brs] = await Promise.all([
+        apiFetch<{ collections: GASDSCollection[] }>(`/gift-aid/gasds/collections?year=${year}`),
+        apiFetch<{ buildings: GASDSBuilding[] }>(`/gift-aid/gasds/buildings?year=${year}`),
+        apiFetch<{ branches: Branch[] }>('/branches').catch(() => ({ branches: [] })),
+      ])
+      setGasdsCollections(list.collections || [])
+      setGasdsBuildings(buildings.buildings || [])
+      setBranches(brs.branches || [])
     } catch { /* ignore */ } finally { setGasdsLoading(false) }
   }, [])
 
@@ -256,6 +284,10 @@ export default function GiftAidPage() {
       setGasdsError('Date and amount are required')
       return
     }
+    if (!gasdsForm.branch_id) {
+      setGasdsError('Building is required — pick which branch this cash was collected at (HMRC caps GASDS per building)')
+      return
+    }
     setGasdsAdding(true)
     try {
       await apiFetch<{ ok: boolean }>('/gift-aid/gasds/collections', {
@@ -263,11 +295,11 @@ export default function GiftAidPage() {
         body: JSON.stringify({
           collection_date: gasdsForm.date,
           amount: gasdsForm.amount,
-          location: gasdsForm.location,
+          branch_id: gasdsForm.branch_id,
           description: gasdsForm.description,
         }),
       })
-      setGasdsForm({ date: '', amount: '', location: '', description: '' })
+      setGasdsForm({ date: '', amount: '', branch_id: gasdsForm.branch_id, description: '' })
       await loadGasds()
       await loadSummary()
     } catch (e: unknown) {
@@ -964,24 +996,79 @@ export default function GiftAidPage() {
               </div>
             </div>
 
+            {/* Per-building cap usage — HMRC caps £8,000/yr per community building */}
+            {gasdsBuildings.length > 0 && (
+              <div>
+                <h3 className="text-white/70 font-semibold text-sm uppercase tracking-wider mb-2">
+                  Per-building cap usage
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {gasdsBuildings.map(b => {
+                    const overCap = b.total > b.cap
+                    const nearCap = b.cap_used_pct > 80 && !overCap
+                    return (
+                      <div key={b.branch_id || 'none'} className="glass rounded-xl px-4 py-3 space-y-2"
+                        style={{ borderLeft: `3px solid ${overCap ? '#f87171' : nearCap ? '#fbbf24' : '#22c55e'}` }}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-white font-bold text-sm">{b.name}</p>
+                            <p className="text-white/30 text-xs">{b.records} record(s)</p>
+                          </div>
+                          {overCap && (
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/30">
+                              OVER CAP
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-white/40 text-xs">Collected this year</p>
+                          <p className="text-white font-mono font-bold">{fmtGBP(b.total)}</p>
+                        </div>
+                        {/* progress bar */}
+                        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                          <div
+                            style={{
+                              width: `${Math.min(100, b.cap_used_pct)}%`,
+                              background: overCap ? '#f87171' : nearCap ? '#fbbf24' : 'linear-gradient(90deg, #22c55e, #16a34a)',
+                            }}
+                            className="h-full rounded-full transition-all"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-white/50">{b.cap_used_pct.toFixed(0)}% used</span>
+                          <span className={overCap ? 'text-red-400 font-bold' : 'text-white/60'}>
+                            {fmtGBP(b.cap_remaining)} left of {fmtGBP(b.cap)}
+                          </span>
+                        </div>
+                        {b.unclaimed > 0 && (
+                          <p className="text-saffron-400/80 text-xs">
+                            ⚠ <span className="font-bold">{fmtGBP(b.unclaimed)}</span> unclaimed → claim{' '}
+                            <span className="font-bold text-green-400">{fmtGBP(b.potential_claim)}</span> from HMRC
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {summary && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
                 <div className="glass rounded-xl px-4 py-3">
-                  <p className="text-white/40 text-xs uppercase tracking-wider">Collected {summary.year}</p>
+                  <p className="text-white/40 text-xs uppercase tracking-wider">All buildings — collected {summary.year}</p>
                   <p className="text-white font-black text-xl">{fmtGBP(summary.gasds_total)}</p>
                   <p className="text-white/30 text-xs">{summary.gasds_records} record(s)</p>
                 </div>
                 <div className="glass rounded-xl px-4 py-3">
-                  <p className="text-white/40 text-xs uppercase tracking-wider">Unclaimed</p>
+                  <p className="text-white/40 text-xs uppercase tracking-wider">All buildings — unclaimed</p>
                   <p className="text-saffron-400 font-black text-xl">{fmtGBP(summary.gasds_unclaimed)}</p>
                   <p className="text-white/30 text-xs">→ claim {fmtGBP(summary.gasds_unclaimed * 0.25)} from HMRC</p>
                 </div>
                 <div className="glass rounded-xl px-4 py-3">
-                  <p className="text-white/40 text-xs uppercase tracking-wider">Annual cap remaining</p>
-                  <p className={`font-black text-xl ${summary.gasds_total > summary.gasds_cap ? 'text-red-400' : 'text-green-400'}`}>
-                    {fmtGBP(Math.max(0, summary.gasds_cap - summary.gasds_total))}
-                  </p>
-                  <p className="text-white/30 text-xs">{((summary.gasds_total / summary.gasds_cap) * 100).toFixed(0)}% of {fmtGBP(summary.gasds_cap)} used</p>
+                  <p className="text-white/40 text-xs uppercase tracking-wider">Total cap pool</p>
+                  <p className="text-white font-black text-xl">{fmtGBP(summary.gasds_cap * Math.max(1, gasdsBuildings.length))}</p>
+                  <p className="text-white/30 text-xs">{fmtGBP(summary.gasds_cap)}/yr × {Math.max(1, gasdsBuildings.length)} building(s)</p>
                 </div>
               </div>
             )}
@@ -999,14 +1086,26 @@ export default function GiftAidPage() {
                   <input type="number" step="0.01" min="0" value={gasdsForm.amount} onChange={e => setGasdsForm({ ...gasdsForm, amount: e.target.value })} className={inp} placeholder="450.00" />
                 </div>
                 <div>
-                  <label className={lbl}>Location (optional)</label>
-                  <input type="text" value={gasdsForm.location} onChange={e => setGasdsForm({ ...gasdsForm, location: e.target.value })} className={inp} placeholder="Wembley temple" />
+                  <label className={lbl}>Building (community building)</label>
+                  <select
+                    value={gasdsForm.branch_id}
+                    onChange={e => setGasdsForm({ ...gasdsForm, branch_id: e.target.value })}
+                    className={inp}
+                  >
+                    <option value="">— Select building —</option>
+                    {branches.map(b => (
+                      <option key={b.branch_id || b.id} value={b.branch_id}>{b.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className={lbl}>Description (optional)</label>
                   <input type="text" value={gasdsForm.description} onChange={e => setGasdsForm({ ...gasdsForm, description: e.target.value })} className={inp} placeholder="Sunday darshan bucket" />
                 </div>
               </div>
+              <p className="text-white/30 text-xs">
+                💡 Each branch is treated as a separate community building for HMRC&apos;s £8,000/yr per-building cap.
+              </p>
               {gasdsError && <p className="text-red-400 text-sm">{gasdsError}</p>}
               <button onClick={addGasdsCollection} disabled={gasdsAdding}
                 className="px-5 py-2.5 rounded-xl bg-saffron-gradient text-white font-bold text-sm shadow-saffron disabled:opacity-50">
@@ -1040,17 +1139,20 @@ export default function GiftAidPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-white/5">
-                      {['Date', 'Amount', 'Location', 'Description', 'Status', ''].map(h => (
+                      {['Date', 'Amount', 'Building', 'Description', 'Status', ''].map(h => (
                         <th key={h} className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {gasdsCollections.map(c => (
+                    {gasdsCollections.map(c => {
+                      const branch = branches.find(b => b.branch_id === (c.branch_id || ''))
+                      const buildingLabel = branch?.name || c.location || (c.branch_id || '—')
+                      return (
                       <tr key={c.id} className="border-b border-white/5 hover:bg-white/3">
                         <td className="px-4 py-3 text-white/50 text-sm">{new Date(c.collection_date).toLocaleDateString('en-GB')}</td>
                         <td className="px-4 py-3 font-mono font-bold text-white">{fmtGBP(c.amount)}</td>
-                        <td className="px-4 py-3 text-white/60 text-sm">{c.location || '—'}</td>
+                        <td className="px-4 py-3 text-white/70 text-sm font-semibold">{buildingLabel}</td>
                         <td className="px-4 py-3 text-white/50 text-sm">{c.description || '—'}</td>
                         <td className="px-4 py-3">
                           {c.claimed_at ? (
@@ -1072,7 +1174,8 @@ export default function GiftAidPage() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               )}
