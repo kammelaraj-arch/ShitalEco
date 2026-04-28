@@ -539,7 +539,7 @@ async def gift_aid_summary(ctx: CurrentSpace, year: int | None = None):
                 """),
                 {"y": year},
             )
-            row = r.mappings().first() or {}
+            row: dict[str, Any] = dict(r.mappings().first() or {})
         # GASDS YTD
         try:
             async with SessionLocal() as db:
@@ -555,7 +555,7 @@ async def gift_aid_summary(ctx: CurrentSpace, year: int | None = None):
                     """),
                     {"y": year},
                 )
-                gasds = g.mappings().first() or {}
+                gasds: dict[str, Any] = dict(g.mappings().first() or {})
         except Exception:
             gasds = {"gasds_total": 0, "gasds_unclaimed": 0, "gasds_records": 0}
 
@@ -772,7 +772,7 @@ async def gasds_buildings_summary(ctx: CurrentSpace, year: int | None = None):
         out: list[dict[str, Any]] = []
         for b in branches:
             code = b.get("branch_id") or ""
-            data = agg_rows.get(code, {})
+            data: dict[str, Any] = agg_rows.get(code, {})
             total = float(data.get("total") or 0)
             unclaimed = float(data.get("unclaimed") or 0)
             claimed_amt = float(data.get("claimed") or 0)
