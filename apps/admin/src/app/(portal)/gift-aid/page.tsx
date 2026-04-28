@@ -126,7 +126,29 @@ async function downloadCsv(path: string, filename: string) {
 }
 
 export default function GiftAidPage() {
-  const [tab, setTab] = useState<'declarations' | 'submit' | 'history' | 'gasds'>('declarations')
+  const [tab, setTab] = useState<'dashboard' | 'declarations' | 'submit' | 'history' | 'gasds'>('dashboard')
+
+  // Per-branch dashboard
+  interface BranchCard {
+    branch_id: string
+    name: string
+    city: string
+    declarations_total: number
+    declarations_pending: number
+    donations_total: number
+    donations_pending: number
+    donations_claimed: number
+    potential_claim: number
+    gasds_total: number
+    gasds_unclaimed: number
+    gasds_records: number
+    gasds_cap: number
+    gasds_remaining: number
+    gasds_pct: number
+  }
+  const [branchCards, setBranchCards] = useState<BranchCard[]>([])
+  const [branchCardsLoading, setBranchCardsLoading] = useState(false)
+  const [branchFilter, setBranchFilter] = useState('')
 
   // Config
   const [config, setConfig] = useState<GiftAidConfig | null>(null)
@@ -224,6 +246,7 @@ export default function GiftAidPage() {
       if (!showSubmitted) qs.set('submitted', 'false')
       if (fromDate) qs.set('from_date', fromDate)
       if (toDate) qs.set('to_date', toDate)
+      if (branchFilter) qs.set('branch_id', branchFilter)
       qs.set('limit', '500')
       const data = await apiFetch<{ declarations: Declaration[] }>(`/gift-aid/declarations?${qs.toString()}`)
       setDeclarations(data.declarations || [])
@@ -232,7 +255,7 @@ export default function GiftAidPage() {
     } finally {
       setDeclLoading(false)
     }
-  }, [showSubmitted, fromDate, toDate])
+  }, [showSubmitted, fromDate, toDate, branchFilter])
 
   const loadHistory = useCallback(async () => {
     setHistLoading(true)
@@ -247,6 +270,18 @@ export default function GiftAidPage() {
       const data = await apiFetch<SummaryData>('/gift-aid/summary')
       setSummary(data)
     } catch { /* ignore — summary failure is non-critical */ }
+  }, [])
+
+  const loadBranchCards = useCallback(async () => {
+    setBranchCardsLoading(true)
+    try {
+      const data = await apiFetch<{ branches: BranchCard[] }>('/gift-aid/per-branch')
+      setBranchCards(data.branches || [])
+    } catch {
+      setBranchCards([])
+    } finally {
+      setBranchCardsLoading(false)
+    }
   }, [])
 
   const loadSubmissionDetail = async (id: string) => {
@@ -271,8 +306,10 @@ export default function GiftAidPage() {
     setGasdsLoading(true)
     try {
       const year = new Date().getFullYear()
+      const collQs = new URLSearchParams({ year: String(year) })
+      if (branchFilter) collQs.set('branch_id', branchFilter)
       const [list, buildings, brs] = await Promise.all([
-        apiFetch<{ collections: GASDSCollection[] }>(`/gift-aid/gasds/collections?year=${year}`),
+        apiFetch<{ collections: GASDSCollection[] }>(`/gift-aid/gasds/collections?${collQs.toString()}`),
         apiFetch<{ buildings: GASDSBuilding[] }>(`/gift-aid/gasds/buildings?year=${year}`),
         apiFetch<{ branches: Branch[] }>('/branches').catch(() => ({ branches: [] })),
       ])
@@ -280,7 +317,7 @@ export default function GiftAidPage() {
       setGasdsBuildings(buildings.buildings || [])
       setBranches(brs.branches || [])
     } catch { /* ignore */ } finally { setGasdsLoading(false) }
-  }, [])
+  }, [branchFilter])
 
   const addGasdsCollection = async () => {
     setGasdsError('')
@@ -340,10 +377,11 @@ export default function GiftAidPage() {
     // Config moved to Settings → Gift Aid (admin function, not daily ops).
     // Always load config in the background so the env badge stays accurate.
     loadConfig()
-    if (tab === 'declarations') { loadDeclarations(); loadSummary() }
+    if (tab === 'dashboard') { loadBranchCards(); loadSummary() }
+    else if (tab === 'declarations') { loadDeclarations(); loadSummary() }
     else if (tab === 'history') loadHistory()
     else if (tab === 'gasds') { loadGasds(); loadSummary() }
-  }, [tab, loadConfig, loadDeclarations, loadHistory, loadSummary, loadGasds])
+  }, [tab, loadConfig, loadDeclarations, loadHistory, loadSummary, loadGasds, loadBranchCards])
 
   useEffect(() => { loadSummary() }, [loadSummary])
 
@@ -458,12 +496,13 @@ export default function GiftAidPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 glass rounded-xl w-fit flex-wrap">
-        {(['declarations', 'submit', 'history', 'gasds'] as const).map(t => (
+        {(['dashboard', 'declarations', 'submit', 'history', 'gasds'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-all capitalize ${
               tab === t ? 'bg-saffron-gradient text-white shadow-saffron' : 'text-white/50 hover:text-white/80'
             }`}>
-            {t === 'submit' ? 'Submit to HMRC'
+            {t === 'dashboard' ? 'Dashboard'
+              : t === 'submit' ? 'Submit to HMRC'
               : t === 'history' ? 'History'
               : t === 'gasds' ? 'GASDS (Cash)'
               : t === 'declarations' ? `Declarations${pendingCount > 0 && !showSubmitted ? ` (${pendingCount})` : ''}`
@@ -476,7 +515,115 @@ export default function GiftAidPage() {
         </a>
       </div>
 
+      {/* Active branch filter pill — visible across non-dashboard tabs */}
+      {branchFilter && tab !== 'dashboard' && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-white/40">Filtered to branch:</span>
+          <span className="px-2.5 py-1 rounded-full bg-saffron-500/20 border border-saffron-500/40 text-saffron-300 font-bold">
+            {branchCards.find(b => b.branch_id === branchFilter)?.name || branchFilter}
+          </span>
+          <button onClick={() => setBranchFilter('')}
+            className="text-white/40 hover:text-white/80 text-xs underline">
+            clear
+          </button>
+        </div>
+      )}
+
       <AnimatePresence mode="wait">
+        {/* Dashboard tab — per-branch progress cards */}
+        {tab === 'dashboard' && (
+          <motion.div key="dash" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-white font-bold text-lg">Branches — {new Date().getFullYear()}</h2>
+              <button onClick={loadBranchCards}
+                className="text-xs text-white/40 hover:text-white/80 underline">Refresh</button>
+            </div>
+
+            {branchCardsLoading ? (
+              <div className="text-center py-10 text-white/30">Loading branches…</div>
+            ) : branchCards.length === 0 ? (
+              <div className="text-center py-10 text-white/30">No branch data yet.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                {branchCards.map(b => (
+                  <div key={b.branch_id || 'unassigned'}
+                    className="glass rounded-2xl p-5 space-y-4 hover:ring-1 hover:ring-saffron-400/40 transition">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-white font-black text-lg leading-tight">{b.name}</p>
+                        {b.city && <p className="text-white/40 text-xs">{b.city}</p>}
+                      </div>
+                      <span className="text-[10px] uppercase tracking-wider text-white/30 font-mono">
+                        {b.branch_id || '—'}
+                      </span>
+                    </div>
+
+                    {/* Gift Aid block */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-white/40 uppercase tracking-wider">Gift Aid</span>
+                        <span className="text-white/40">{b.declarations_total} decl{b.declarations_total === 1 ? '' : 's'}</span>
+                      </div>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-white font-bold text-xl">{fmtGBP(b.donations_total)}</span>
+                        {b.declarations_pending > 0 && (
+                          <span className="text-amber-400 text-xs font-bold">
+                            {b.declarations_pending} pending
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-green-400/80">Claim potential <span className="font-bold">{fmtGBP(b.potential_claim)}</span></span>
+                        <span className="text-white/40">Claimed {fmtGBP(b.donations_claimed * 0.25)}</span>
+                      </div>
+                    </div>
+
+                    {/* GASDS block */}
+                    <div className="space-y-1.5 pt-3 border-t border-white/5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-white/40 uppercase tracking-wider">GASDS (Cash)</span>
+                        <span className="text-white/40">{fmtGBP(b.gasds_remaining)} left</span>
+                      </div>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-white font-bold text-xl">{fmtGBP(b.gasds_total)}</span>
+                        <span className="text-white/40 text-xs">/ {fmtGBP(b.gasds_cap)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className={`h-full transition-all ${
+                            b.gasds_pct >= 90 ? 'bg-red-400'
+                              : b.gasds_pct >= 70 ? 'bg-amber-400'
+                              : 'bg-green-400'
+                          }`}
+                          style={{ width: `${b.gasds_pct}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-white/30">
+                        {b.gasds_pct.toFixed(1)}% of £8,000 annual cap used
+                      </p>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 pt-3 border-t border-white/5">
+                      <button
+                        onClick={() => { setBranchFilter(b.branch_id); setTab('declarations') }}
+                        className="flex-1 text-xs font-bold text-saffron-300 bg-saffron-500/10 hover:bg-saffron-500/20 border border-saffron-500/30 rounded-lg px-3 py-2 transition">
+                        View declarations →
+                      </button>
+                      <button
+                        onClick={() => { setBranchFilter(b.branch_id); setTab('gasds') }}
+                        className="flex-1 text-xs font-bold text-white/60 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg px-3 py-2 transition">
+                        GASDS →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+
         {/* Declarations tab */}
         {tab === 'declarations' && (
           <motion.div key="decls" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
