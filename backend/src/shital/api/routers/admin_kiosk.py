@@ -257,7 +257,7 @@ async def list_orders(limit: int = 50, offset: int = 0, status: str = "", branch
 # ─── Addresses ──────────────────────────────────────────────────────────
 
 @router.get("/addresses")
-async def list_addresses(q: str = "", contact_id: str = "", page: int = 1, per_page: int = 50):
+async def list_addresses(q: str = "", contact_id: str = "", account_id: str = "", unlinked: bool = False, page: int = 1, per_page: int = 50):
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
@@ -273,6 +273,11 @@ async def list_addresses(q: str = "", contact_id: str = "", page: int = 1, per_p
     if contact_id:
         conditions.append("a.contact_id = :cid")
         params["cid"] = contact_id
+    if account_id:
+        conditions.append("a.account_id = :aid")
+        params["aid"] = account_id
+    if unlinked:
+        conditions.append("a.account_id IS NULL")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

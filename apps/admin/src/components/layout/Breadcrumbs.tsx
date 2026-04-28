@@ -25,6 +25,7 @@ const PATH_LABELS: Record<string, string> = {
   items: 'Catalog Items',
   orders: 'Orders',
   'order-items': 'Order Items',
+  accounts: 'Accounts',
   contacts: 'Contacts',
   addresses: 'Addresses',
   'terminal-devices': 'Terminal Devices',

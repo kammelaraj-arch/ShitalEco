@@ -926,6 +926,56 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_addresses_postcode ON addresses(postcode)",
         "CREATE INDEX IF NOT EXISTS idx_addresses_uprn     ON addresses(uprn) WHERE uprn != ''",
         "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS house_number VARCHAR(50) NOT NULL DEFAULT ''",
+        # ── CRM: Accounts (companies/organisations) ────────────────────────────
+        """CREATE TABLE IF NOT EXISTS accounts (
+            id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name                 VARCHAR(300) NOT NULL,
+            legal_name           VARCHAR(300) NOT NULL DEFAULT '',
+            account_type         VARCHAR(50)  NOT NULL DEFAULT 'customer',
+            status               VARCHAR(20)  NOT NULL DEFAULT 'active',
+            website              VARCHAR(300) NOT NULL DEFAULT '',
+            email                VARCHAR(254) NOT NULL DEFAULT '',
+            phone                VARCHAR(50)  NOT NULL DEFAULT '',
+            industry             VARCHAR(100) NOT NULL DEFAULT '',
+            registration_number  VARCHAR(100) NOT NULL DEFAULT '',
+            vat_number           VARCHAR(50)  NOT NULL DEFAULT '',
+            charity_number       VARCHAR(50)  NOT NULL DEFAULT '',
+            primary_contact_id   UUID REFERENCES contacts(id) ON DELETE SET NULL,
+            parent_account_id    UUID REFERENCES accounts(id) ON DELETE SET NULL,
+            owner_user_id        UUID,
+            branch_id            VARCHAR(64) NOT NULL DEFAULT '',
+            notes                TEXT NOT NULL DEFAULT '',
+            created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at           TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_accounts_name    ON accounts(name)",
+        "CREATE INDEX IF NOT EXISTS idx_accounts_type    ON accounts(account_type)",
+        "CREATE INDEX IF NOT EXISTS idx_accounts_status  ON accounts(status) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_accounts_primary ON accounts(primary_contact_id)",
+        """CREATE TABLE IF NOT EXISTS account_contacts (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            account_id  UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            contact_id  UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            role        VARCHAR(150) NOT NULL DEFAULT '',
+            is_primary  BOOLEAN NOT NULL DEFAULT false,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (account_id, contact_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_account_contacts_acct ON account_contacts(account_id)",
+        "CREATE INDEX IF NOT EXISTS idx_account_contacts_cont ON account_contacts(contact_id)",
+        """CREATE TABLE IF NOT EXISTS account_services (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            account_id   UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            service_name VARCHAR(200) NOT NULL,
+            service_type VARCHAR(50)  NOT NULL DEFAULT '',
+            description  TEXT NOT NULL DEFAULT '',
+            is_active    BOOLEAN NOT NULL DEFAULT true,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_account_services_acct ON account_services(account_id)",
+        "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS account_id UUID REFERENCES accounts(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS idx_addresses_account ON addresses(account_id)",
         # ── CRM: Link contact_id into transaction tables ───────────────────────
         "ALTER TABLE orders                       ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
         "ALTER TABLE donations                    ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
@@ -1365,6 +1415,7 @@ _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.contacts",             "router")
+_mount("shital.api.routers.accounts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
 _mount("shital.api.routers.system",                "router")
 

@@ -57,6 +57,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'CRM',
     items: [
+      { href: '/accounts',   icon: '🏢', label: 'Accounts' },
       { href: '/contacts',   icon: '👤', label: 'Contacts' },
       { href: '/addresses',  icon: '📍', label: 'Addresses' },
     ],
