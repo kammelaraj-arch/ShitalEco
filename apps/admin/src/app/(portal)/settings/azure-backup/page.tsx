@@ -182,12 +182,12 @@ export default function AzureBackupPage() {
         fetch(`${API}/admin/system/environments`, { headers: { Authorization: `Bearer ${token()}` } }),
         fetch(`${API}/admin/system/deploys?limit=10`, { headers: { Authorization: `Bearer ${token()}` } }),
       ])
-      const v: VersionInfo = await vRes.json()
-      const e: EnvironmentsResponse = await eRes.json()
-      const d = await dRes.json()
-      setVersion(v)
-      setEnvironments(e)
-      setDeploys(d.deploys || [])
+      if (vRes.ok) setVersion(await vRes.json())
+      if (eRes.ok) setEnvironments(await eRes.json())
+      if (dRes.ok) {
+        const d = await dRes.json()
+        setDeploys(d.deploys || [])
+      }
     } catch {
       // ignore
     }
@@ -229,10 +229,18 @@ export default function AzureBackupPage() {
         fetch(`${API}/settings/azure-backup/health`, { headers: { Authorization: `Bearer ${token()}` } }),
         fetch(`${API}/settings/azure-backup/list?limit=50`, { headers: { Authorization: `Bearer ${token()}` } }),
       ])
-      const h = await hRes.json()
-      const b = await bRes.json()
-      setHealth(h)
-      setBlobs(b.ok ? (b.blobs || []) : [])
+      if (hRes.ok) {
+        const h = await hRes.json()
+        // Only accept the response if it has the expected shape — otherwise
+        // we'd render with health.local undefined and crash the page
+        if (h && typeof h === 'object' && h.local && h.azure && h.log) {
+          setHealth(h)
+        }
+      }
+      if (bRes.ok) {
+        const b = await bRes.json()
+        setBlobs(b.ok ? (b.blobs || []) : [])
+      }
     } catch {
       // ignore — UI shows last-known state
     } finally {
@@ -243,13 +251,15 @@ export default function AzureBackupPage() {
   async function loadRecipients() {
     try {
       const res = await fetch(`${API}/settings/monitor-recipients`, { headers: { Authorization: `Bearer ${token()}` } })
+      if (!res.ok) return
       const d: RecipientsResponse = await res.json()
+      if (!d || !d.levels) return
       setRecipients(d)
       setRecipDraft({
-        critical: d.levels.critical.value,
-        high:     d.levels.high.value,
-        medium:   d.levels.medium.value,
-        digest:   d.levels.digest.value,
+        critical: d.levels.critical?.value || '',
+        high:     d.levels.high?.value     || '',
+        medium:   d.levels.medium?.value   || '',
+        digest:   d.levels.digest?.value   || '',
       })
     } catch {
       // ignore — UI shows last-known state
