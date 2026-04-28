@@ -115,7 +115,8 @@ async def list_accounts(
             text(f"SELECT COUNT(*) AS cnt FROM accounts a WHERE {where}"),
             {k: v for k, v in params.items() if k not in ("limit", "offset")},
         )
-        total = int((count_r.mappings().first() or {}).get("cnt") or 0)
+        count_row = count_r.mappings().first()
+        total = int(count_row["cnt"]) if count_row else 0
 
     return {
         "accounts": [_account_to_dict(r) for r in rows],
@@ -144,7 +145,10 @@ async def create_account(ctx: CurrentSpace, body: AccountInput) -> dict[str, Any
                  :primary_contact_id, :parent_account_id, :branch_id, :notes, NOW())
             RETURNING id
         """), body.model_dump())
-        new_id = str(result.mappings().first()["id"])
+        new_row = result.mappings().first()
+        if not new_row:
+            raise HTTPException(status_code=500, detail="Account insert returned no row")
+        new_id = str(new_row["id"])
 
         # If primary_contact_id given, also create the link in account_contacts
         if body.primary_contact_id:
@@ -334,7 +338,10 @@ async def add_service(ctx: CurrentSpace, account_id: str, body: ServiceInput) ->
             "aid": account_id, "name": body.service_name.strip(),
             "type": body.service_type, "desc": body.description, "active": body.is_active,
         })
-        new_id = str(result.mappings().first()["id"])
+        new_row = result.mappings().first()
+        if not new_row:
+            raise HTTPException(status_code=500, detail="Service insert returned no row")
+        new_id = str(new_row["id"])
         await db.commit()
     return {"id": new_id, "ok": True}
 
