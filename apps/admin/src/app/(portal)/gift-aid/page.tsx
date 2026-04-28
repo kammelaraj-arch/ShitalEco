@@ -71,6 +71,7 @@ interface SummaryData {
   gasds_unclaimed: number
   gasds_records: number
   gasds_cap: number
+  error?: string
 }
 
 interface GASDSCollection {
