@@ -53,6 +53,11 @@ services:
       MS_TENANT_ID: ${MS_TENANT_ID:-}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
       MS_REDIRECT_URI: https://dev.shital.org.uk/auth-callback
+      # Dev admin doesn't promote to prod (different docker network from the
+      # deployer), but setting these stops the Environments card from showing
+      # "DEPLOY_SECRET not configured" errors. Promotion happens from prod admin.
+      DEPLOY_SECRET: ${DEPLOY_SECRET:-dev-only-placeholder-not-used}
+      DEPLOYER_URL: ${DEPLOYER_URL:-http://deployer:9000}
     depends_on:
       db-dev:
         condition: service_healthy
