@@ -79,7 +79,7 @@ export default function AccountsPage() {
         body: JSON.stringify({ name: createName.trim(), account_type: createType }),
       })
       setShowCreate(false); setCreateName(''); setCreateType('customer')
-      router.push(`/accounts/${data.id}`)
+      router.push(`/accounts/detail?id=${data.id}`)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to create')
     } finally {
@@ -174,10 +174,10 @@ export default function AccountsPage() {
               <tbody>
                 {accounts.map(a => (
                   <tr key={a.id}
-                    onClick={() => router.push(`/accounts/${a.id}`)}
+                    onClick={() => router.push(`/accounts/detail?id=${a.id}`)}
                     className="border-b border-white/5 hover:bg-white/[0.02] transition cursor-pointer">
                     <td className="px-4 py-3">
-                      <Link href={`/accounts/${a.id}`} className="text-white font-bold hover:text-saffron-400">
+                      <Link href={`/accounts/detail?id=${a.id}`} className="text-white font-bold hover:text-saffron-400">
                         {a.name}
                       </Link>
                       {a.legal_name && a.legal_name !== a.name && (

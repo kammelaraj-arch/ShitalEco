@@ -1,7 +1,7 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { apiFetch } from '@/lib/api'
 
 interface AccountDetail {
@@ -75,10 +75,19 @@ interface AddressSearchResult {
 const ACCOUNT_TYPES = ['customer', 'vendor', 'partner', 'donor', 'supplier', 'charity-partner']
 const STATUSES = ['active', 'prospect', 'inactive']
 
-export default function AccountDetailPage() {
+export default function AccountDetailPageWrapper() {
+  // useSearchParams() needs a Suspense boundary under static export.
+  return (
+    <Suspense fallback={<div className="text-center py-20 text-white/30">Loading…</div>}>
+      <AccountDetailPage />
+    </Suspense>
+  )
+}
+
+function AccountDetailPage() {
   const router = useRouter()
-  const params = useParams<{ id: string }>()
-  const id = params?.id
+  const searchParams = useSearchParams()
+  const id = searchParams.get('id') || ''
 
   const [account, setAccount] = useState<AccountDetail | null>(null)
   const [contacts, setContacts] = useState<ContactLink[]>([])
