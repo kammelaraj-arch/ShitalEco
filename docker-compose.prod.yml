@@ -53,7 +53,7 @@ services:
       PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
       PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
       PAYPAL_ENV: ${PAYPAL_ENV:-live}
-      DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
+      DEPLOY_SECRET: ${DEPLOY_SECRET:?DEPLOY_SECRET must be set in /opt/shitaleco/.env}
       DEPLOYER_URL: http://deployer:9000
     volumes:
       - /opt/shitaleco/backups:/opt/shitaleco/backups
@@ -203,16 +203,18 @@ services:
           cpus: '1.00'
           memory: 128M
     environment:
-      DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
+      DEPLOY_SECRET: ${DEPLOY_SECRET:?DEPLOY_SECRET must be set in /opt/shitaleco/.env}
       DEPLOY_BRANCH: ${DEPLOY_BRANCH:-main}
       DOCKER_BUILDKIT: "1"
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
       - /opt/shitaleco:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
-      # Mount deploy.sh so updates take effect on next webhook call without
-      # rebuilding the deployer image
+      # Bind-mount BOTH deploy.sh AND server.py so updates to either take
+      # effect on next webhook call without rebuilding the deployer image.
+      # Lesson learned: anything baked into a container image goes stale.
       - ./deployer/deploy.sh:/app/deploy.sh:ro
+      - ./deployer/server.py:/app/server.py:ro
     networks:
       - internal
 

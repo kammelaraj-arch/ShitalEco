@@ -174,9 +174,39 @@ JSON
   exit 1
 fi
 
+# ── Endpoint sanity check (catches stale images that "look healthy") ────────
+# Hit a few endpoints we KNOW only exist in newer code — if any returns 404
+# we're running an old image despite a "successful" restart.
+echo "=== Endpoint sanity check ==="
+ENDPOINT_FAIL=0
+endpoint_check() {
+  local label=$1 url=$2 expect=$3
+  local got
+  got=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 "$url" || echo 000)
+  if [ "$got" = "$expect" ] || { [ "$expect" = "401" ] && [ "$got" = "403" ]; }; then
+    echo "  ✓ $label ($got)"
+  else
+    echo "  ✗ $label expected $expect, got $got"
+    ENDPOINT_FAIL=1
+  fi
+}
+if [ "$TARGET" = "prod" ]; then
+  endpoint_check "/health"                          "http://localhost:8000/health"                       "200"
+  endpoint_check "/api/v1/admin/system/version"     "http://localhost:8000/api/v1/admin/system/version"  "401"
+  endpoint_check "/api/v1/admin/system/environments" "http://localhost:8000/api/v1/admin/system/environments" "401"
+  endpoint_check "/api/v1/gift-aid/gasds/buildings" "http://localhost:8000/api/v1/gift-aid/gasds/buildings"  "401"
+fi
+if [ "$ENDPOINT_FAIL" -ne 0 ]; then
+  echo "WARNING: One or more sanity-check endpoints did not respond as expected."
+  echo "         The deploy may have restarted with a stale image."
+fi
+
 # ── Success ─────────────────────────────────────────────────────────────────
 echo "=== Deploy complete $(date) — commit ${GIT_SHA} → ${STACK_NAME} ==="
 
+SANITY="true"
+[ "${ENDPOINT_FAIL:-0}" -ne 0 ] && SANITY="false"
+
 cat >> "$HISTORY_FILE" <<JSON
-{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"success","message":"${COMMIT_MSG}"}
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"success","message":"${COMMIT_MSG}","sanity_pass":${SANITY}}
 JSON

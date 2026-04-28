@@ -1,9 +1,19 @@
 import json
 import os
 import subprocess
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "")
+_PLACEHOLDER_SECRETS = {"", "shital-deploy-secret-change-me", "change-me"}
+if DEPLOY_SECRET in _PLACEHOLDER_SECRETS:
+    print(
+        "FATAL: DEPLOY_SECRET is empty or set to a placeholder value. "
+        "Set DEPLOY_SECRET in /opt/shitaleco/.env to a real secret. "
+        "GitHub Actions must send the SAME value via X-Deploy-Secret header.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 ENV_CONTAINERS = {
     "prod": "shitaleco-backend-1",

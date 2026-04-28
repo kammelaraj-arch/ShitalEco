@@ -228,6 +228,71 @@ check_donations_active() {
 
 # ── Email dispatch ──────────────────────────────────────────────────────────
 
+check_recent_deploy() {
+    # Notify rajk + it@ when a new deploy lands. We track the last-seen sha in
+    # the state file so we only email once per deploy regardless of how often
+    # the cron ticks.
+    local history="$BACKUP_DIR/deploy-history.jsonl"
+    [ ! -f "$history" ] && return 0
+    local last_event
+    last_event=$(tail -1 "$history" 2>/dev/null)
+    [ -z "$last_event" ] && return 0
+
+    local sha env status when short message
+    sha=$(echo "$last_event" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sha',''))" 2>/dev/null)
+    env=$(echo "$last_event" | python3 -c "import sys,json; print(json.load(sys.stdin).get('env',''))" 2>/dev/null)
+    status=$(echo "$last_event" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+    when=$(echo "$last_event" | python3 -c "import sys,json; print(json.load(sys.stdin).get('at',''))" 2>/dev/null)
+    short=$(echo "$last_event" | python3 -c "import sys,json; print(json.load(sys.stdin).get('short',''))" 2>/dev/null)
+    message=$(echo "$last_event" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))" 2>/dev/null)
+
+    [ -z "$sha" ] && return 0
+
+    local last_seen_sha
+    last_seen_sha=$(grep '^last_deploy_sha=' "$STATE_FILE" 2>/dev/null | tail -1 | cut -d= -f2 | awk '{print $1}')
+    NEW_STATE[last_deploy_sha]="$sha 0"
+
+    [ "$last_seen_sha" = "$sha" ] && return 0
+
+    # New deploy event — email it
+    local subject body recipients
+    case "$env" in
+        prod) recipients="rajk@shirdisai.org.uk,it@shirdisai.org.uk,gtrustees@shirdisai.org.uk" ;;
+        dev)  recipients="rajk@shirdisai.org.uk,it@shirdisai.org.uk" ;;
+        *)    recipients="rajk@shirdisai.org.uk,it@shirdisai.org.uk" ;;
+    esac
+
+    if [ "$status" = "success" ]; then
+        subject="[Deploy ${env^^}] ${short} succeeded"
+    elif [ "$status" = "rolled_back" ]; then
+        subject="[Deploy ${env^^}] ${short} ROLLED BACK"
+    else
+        subject="[Deploy ${env^^}] ${short} status=${status}"
+    fi
+
+    body=$(cat <<EOF
+Deploy event on ${env^^} — ${status}
+
+Commit:  ${short} (${sha})
+At:      ${when}
+Message: ${message}
+
+GitHub:  https://github.com/kammelaraj-arch/ShitalEco/commit/${sha}
+Admin:   https://admin.shital.org.uk/admin/settings/azure-backup/
+
+—
+ShitalEco infra monitor · automatic deploy notification
+EOF
+)
+
+    if echo "$body" | python3 "$MAIL_PY" --to "$recipients" --subject "$subject" >> "$LOG_FILE" 2>&1; then
+        log "DEPLOY EMAIL sent for ${env}/${short}"
+    else
+        log "DEPLOY EMAIL FAILED for ${env}/${short}"
+    fi
+}
+
+
 send_alert() {
     local severity=$1 name=$2 status=$3 msg=$4
     local recipients subject icon
@@ -350,6 +415,7 @@ check_restore_test_recent
 check_disk
 check_cert_expiry
 check_donations_active
+check_recent_deploy
 
 # Atomically replace state file
 {
