@@ -192,15 +192,16 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
             contact_id = str(row["id"]) if row else contact_uuid
 
             if body.customer_postcode or body.customer_address:
+                _house = (body.customer_address or "").split(",")[0].strip()[:50]
                 await db.execute(text("""
                     INSERT INTO addresses
-                        (id, contact_id, formatted, postcode, uprn,
+                        (id, contact_id, formatted, postcode, house_number, uprn,
                          is_primary, lookup_source, created_at)
-                    VALUES (:id, :cid, :fmt, :pc, :uprn, true, 'kiosk', :now)
+                    VALUES (:id, :cid, :fmt, :pc, :house, :uprn, true, 'kiosk', :now)
                 """), {
                     "id": str(uuid.uuid4()), "cid": contact_id,
                     "fmt": body.customer_address or "", "pc": body.customer_postcode.upper().strip(),
-                    "uprn": body.customer_uprn or "", "now": now,
+                    "house": _house, "uprn": body.customer_uprn or "", "now": now,
                 })
 
         await db.execute(
@@ -379,15 +380,16 @@ async def create_pending_order(body: OrderPendingInput):
                 ga_contact_id = str(r2["id"]) if r2 else ga_uuid
 
             if ga_contact_id and body.ga_postcode:
+                _ga_house = (body.ga_address or "").split(",")[0].strip()[:50]
                 await db.execute(text("""
-                    INSERT INTO addresses (id, contact_id, formatted, postcode, uprn,
+                    INSERT INTO addresses (id, contact_id, formatted, postcode, house_number, uprn,
                                           is_primary, lookup_source, created_at)
-                    VALUES (:id, :cid, :fmt, :pc, '', true, 'kiosk', :now)
+                    VALUES (:id, :cid, :fmt, :pc, :house, '', true, 'kiosk', :now)
                     ON CONFLICT DO NOTHING
                 """), {
                     "id": str(uuid.uuid4()), "cid": ga_contact_id,
                     "fmt": body.ga_address or body.ga_postcode,
-                    "pc": body.ga_postcode.upper().strip(), "now": now,
+                    "pc": body.ga_postcode.upper().strip(), "house": _ga_house, "now": now,
                 })
 
             await db.execute(text("""
@@ -1203,12 +1205,13 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                     if body.ga_postcode:
                         await db.execute(text("""
                             INSERT INTO addresses
-                                (id, contact_id, formatted, postcode, uprn,
+                                (id, contact_id, formatted, postcode, house_number, uprn,
                                  is_primary, lookup_source, created_at)
-                            VALUES (:id, :cid, :fmt, :pc, '', true, 'quick-donation', :now)
+                            VALUES (:id, :cid, :fmt, :pc, :house, '', true, 'quick-donation', :now)
                         """), {
                             "id": str(uuid.uuid4()), "cid": contact_id,
-                            "fmt": body.ga_house_number or "", "pc": body.ga_postcode.upper().strip(), "now": now,
+                            "fmt": body.ga_house_number or "", "pc": body.ga_postcode.upper().strip(),
+                            "house": (body.ga_house_number or "")[:50], "now": now,
                         })
 
                 declaration_id = str(uuid.uuid4())

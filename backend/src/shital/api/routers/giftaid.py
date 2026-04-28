@@ -158,23 +158,23 @@ async def store_declaration(ctx: CurrentSpace, body: StoreDeclarationInput):
                 row = c_result.mappings().first()
                 contact_id = str(row["id"]) if row else contact_uuid
 
-                if body.postcode or body.address:
-                    await db.execute(text("""
-                        INSERT INTO addresses
-                            (id, contact_id, formatted, postcode, uprn,
-                             is_primary, lookup_source, created_at)
-                        VALUES (:id, :cid, :fmt, :pc, :uprn, true, 'kiosk', :now)
-                    """), {
-                        "id": str(uuid.uuid4()), "cid": contact_id,
-                        "fmt": body.address or "", "pc": body.postcode.upper().strip(),
-                        "uprn": body.uprn or "", "now": now,
-                    })
-
             # Derive house_number if the kiosk didn't send it explicitly
             house_number = body.house_number or ""
             if not house_number and body.address:
                 # First comma-separated segment is conventionally the house num/name
                 house_number = body.address.split(",")[0].strip()[:50]
+
+            if contact_id and (body.postcode or body.address):
+                await db.execute(text("""
+                    INSERT INTO addresses
+                        (id, contact_id, formatted, postcode, house_number, uprn,
+                         is_primary, lookup_source, created_at)
+                    VALUES (:id, :cid, :fmt, :pc, :house, :uprn, true, 'kiosk', :now)
+                """), {
+                    "id": str(uuid.uuid4()), "cid": contact_id,
+                    "fmt": body.address or "", "pc": body.postcode.upper().strip(),
+                    "house": house_number, "uprn": body.uprn or "", "now": now,
+                })
 
             await db.execute(
                 text("""
@@ -217,31 +217,52 @@ async def list_declarations(
 
     from shital.core.fabrics.database import SessionLocal
 
-    conditions = ["deleted_at IS NULL"]
+    conditions = ["gad.deleted_at IS NULL"]
     params: dict[str, Any] = {"limit": limit}
 
     if submitted is not None:
-        conditions.append("hmrc_submitted = :submitted")
+        conditions.append("gad.hmrc_submitted = :submitted")
         params["submitted"] = submitted
     if from_date:
-        conditions.append("donation_date >= :from_date")
+        conditions.append("gad.donation_date >= :from_date")
         params["from_date"] = from_date
     if to_date:
-        conditions.append("donation_date <= :to_date")
+        conditions.append("gad.donation_date <= :to_date")
         params["to_date"] = to_date
 
     where = " AND ".join(conditions)
+    # LEFT JOIN to live CRM (contacts + their primary address) so the admin
+    # table shows the donor's *current* details. The snapshot columns on
+    # gift_aid_declarations remain the immutable HMRC compliance record and
+    # are returned as fallbacks via COALESCE for rows without contact_id.
     try:
         async with SessionLocal() as db:
             result = await db.execute(
                 text(f"""
-                    SELECT id, order_ref, full_name, first_name, surname,
-                           postcode, address, house_number,
-                           contact_email, contact_phone, donation_amount, donation_date,
-                           gift_aid_agreed, hmrc_submitted, hmrc_submission_ref, created_at
-                    FROM gift_aid_declarations
+                    SELECT
+                        gad.id, gad.order_ref,
+                        COALESCE(NULLIF(c.first_name, ''),  gad.first_name)   AS first_name,
+                        COALESCE(NULLIF(c.surname, ''),     gad.surname)      AS surname,
+                        COALESCE(NULLIF(c.full_name, ''),   gad.full_name)    AS full_name,
+                        COALESCE(NULLIF(a.postcode, ''),    gad.postcode)     AS postcode,
+                        COALESCE(NULLIF(a.formatted, ''),   gad.address)      AS address,
+                        COALESCE(NULLIF(a.house_number,''), gad.house_number) AS house_number,
+                        COALESCE(NULLIF(c.email, ''),       gad.contact_email) AS contact_email,
+                        COALESCE(NULLIF(c.phone, ''),       gad.contact_phone) AS contact_phone,
+                        gad.donation_amount, gad.donation_date,
+                        gad.gift_aid_agreed, gad.hmrc_submitted,
+                        gad.hmrc_submission_ref, gad.created_at
+                    FROM gift_aid_declarations gad
+                    LEFT JOIN contacts  c ON c.id = gad.contact_id
+                    LEFT JOIN LATERAL (
+                        SELECT formatted, postcode, house_number
+                        FROM addresses
+                        WHERE contact_id = gad.contact_id
+                        ORDER BY is_primary DESC, created_at DESC
+                        LIMIT 1
+                    ) a ON true
                     WHERE {where}
-                    ORDER BY created_at DESC
+                    ORDER BY gad.created_at DESC
                     LIMIT :limit
                 """),
                 params,

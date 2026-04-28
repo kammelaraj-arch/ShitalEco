@@ -925,6 +925,7 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_addresses_contact  ON addresses(contact_id)",
         "CREATE INDEX IF NOT EXISTS idx_addresses_postcode ON addresses(postcode)",
         "CREATE INDEX IF NOT EXISTS idx_addresses_uprn     ON addresses(uprn) WHERE uprn != ''",
+        "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS house_number VARCHAR(50) NOT NULL DEFAULT ''",
         # ── CRM: Link contact_id into transaction tables ───────────────────────
         "ALTER TABLE orders                       ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
         "ALTER TABLE donations                    ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
