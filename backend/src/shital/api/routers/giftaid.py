@@ -99,6 +99,7 @@ class StoreDeclarationInput(BaseModel):
     full_name: str
     first_name: str = ""
     surname: str = ""
+    house_number: str = ""
     postcode: str
     address: str
     uprn: str = ""
@@ -169,20 +170,28 @@ async def store_declaration(ctx: CurrentSpace, body: StoreDeclarationInput):
                         "uprn": body.uprn or "", "now": now,
                     })
 
+            # Derive house_number if the kiosk didn't send it explicitly
+            house_number = body.house_number or ""
+            if not house_number and body.address:
+                # First comma-separated segment is conventionally the house num/name
+                house_number = body.address.split(",")[0].strip()[:50]
+
             await db.execute(
                 text("""
                     INSERT INTO gift_aid_declarations
-                    (id, order_ref, full_name, first_name, surname, postcode, address, uprn,
+                    (id, order_ref, full_name, first_name, surname,
+                     postcode, address, house_number, uprn,
                      contact_email, contact_phone, donation_amount, donation_date,
                      gift_aid_agreed, contact_id, hmrc_submitted, created_at)
-                    VALUES (:id, :ref, :name, :first, :surname, :pc, :addr, :uprn,
+                    VALUES (:id, :ref, :name, :first, :surname,
+                            :pc, :addr, :house, :uprn,
                             :email, :phone, :amount, :ddate, :agreed, :cid, false, :now)
                 """),
                 {
                     "id": declaration_id, "ref": body.order_ref,
                     "name": body.full_name, "first": first_name, "surname": surname,
                     "pc": body.postcode.upper().strip(),
-                    "addr": body.address, "uprn": body.uprn or "",
+                    "addr": body.address, "house": house_number, "uprn": body.uprn or "",
                     "email": body.contact_email, "phone": body.contact_phone,
                     "amount": str(body.donation_amount),
                     "ddate": decl_date, "agreed": body.gift_aid_agreed,
@@ -226,7 +235,8 @@ async def list_declarations(
         async with SessionLocal() as db:
             result = await db.execute(
                 text(f"""
-                    SELECT id, order_ref, full_name, postcode, address,
+                    SELECT id, order_ref, full_name, first_name, surname,
+                           postcode, address, house_number,
                            contact_email, contact_phone, donation_amount, donation_date,
                            gift_aid_agreed, hmrc_submitted, hmrc_submission_ref, created_at
                     FROM gift_aid_declarations

@@ -1214,11 +1214,13 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                 declaration_id = str(uuid.uuid4())
                 await db.execute(text("""
                     INSERT INTO gift_aid_declarations
-                        (id, order_ref, full_name, first_name, surname, postcode, address, uprn,
+                        (id, order_ref, full_name, first_name, surname,
+                         postcode, address, house_number, uprn,
                          contact_email, contact_phone, donation_amount, donation_date,
                          gift_aid_agreed, contact_id, source, hmrc_submitted, created_at)
                     VALUES
-                        (:id, :ref, :name, :first, :surname, :pc, :addr, '',
+                        (:id, :ref, :name, :first, :surname,
+                         :pc, :addr, :house, '',
                          :email, '', :amount, :ddate,
                          true, :cid, 'quick-donation', false, :now)
                 """), {
@@ -1226,6 +1228,7 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                     "name": full_name, "first": body.ga_first_name, "surname": body.ga_surname,
                     "pc": body.ga_postcode.upper().strip() if body.ga_postcode else "",
                     "addr": body.ga_house_number or "",
+                    "house": (body.ga_house_number or "")[:50],
                     "email": body.ga_email.strip().lower() if body.ga_email else "",
                     "amount": str(total), "ddate": now.date(),
                     "cid": contact_id, "now": now,

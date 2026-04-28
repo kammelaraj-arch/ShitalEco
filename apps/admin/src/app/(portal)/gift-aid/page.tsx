@@ -17,6 +17,9 @@ interface GiftAidConfig {
 interface Declaration {
   id: string
   full_name: string
+  first_name?: string
+  surname?: string
+  house_number?: string
   contact_email: string
   postcode: string
   address: string
@@ -123,7 +126,7 @@ async function downloadCsv(path: string, filename: string) {
 }
 
 export default function GiftAidPage() {
-  const [tab, setTab] = useState<'config' | 'declarations' | 'submit' | 'history' | 'gasds'>('config')
+  const [tab, setTab] = useState<'declarations' | 'submit' | 'history' | 'gasds'>('declarations')
 
   // Config
   const [config, setConfig] = useState<GiftAidConfig | null>(null)
@@ -334,8 +337,10 @@ export default function GiftAidPage() {
   }
 
   useEffect(() => {
-    if (tab === 'config') loadConfig()
-    else if (tab === 'declarations') { loadDeclarations(); loadSummary() }
+    // Config moved to Settings → Gift Aid (admin function, not daily ops).
+    // Always load config in the background so the env badge stays accurate.
+    loadConfig()
+    if (tab === 'declarations') { loadDeclarations(); loadSummary() }
     else if (tab === 'history') loadHistory()
     else if (tab === 'gasds') { loadGasds(); loadSummary() }
   }, [tab, loadConfig, loadDeclarations, loadHistory, loadSummary, loadGasds])
@@ -453,7 +458,7 @@ export default function GiftAidPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 glass rounded-xl w-fit flex-wrap">
-        {(['config', 'declarations', 'submit', 'history', 'gasds'] as const).map(t => (
+        {(['declarations', 'submit', 'history', 'gasds'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-all capitalize ${
               tab === t ? 'bg-saffron-gradient text-white shadow-saffron' : 'text-white/50 hover:text-white/80'
@@ -465,91 +470,13 @@ export default function GiftAidPage() {
               : t}
           </button>
         ))}
+        <a href="/settings/gift-aid"
+          className="px-4 py-2.5 rounded-lg text-sm font-medium text-white/40 hover:text-white/80 transition-all">
+          ⚙️ Config
+        </a>
       </div>
 
-      {/* Config tab */}
       <AnimatePresence mode="wait">
-        {tab === 'config' && (
-          <motion.div key="config" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="glass rounded-2xl p-6 space-y-5 max-w-2xl">
-            {configLoading ? (
-              <div className="text-center py-10 text-white/30">Loading config…</div>
-            ) : config ? (
-              <>
-                <div className="flex items-center justify-between">
-                  <h2 className="text-white font-bold text-lg">HMRC Configuration</h2>
-                  <EnvBadge env={config.hmrc_environment || 'test'} />
-                </div>
-
-                <div className="space-y-3">
-                  <ConfigRow
-                    label="Government Gateway User ID"
-                    value={config.hmrc_user_id || '—'}
-                    set={!!config.hmrc_user_id}
-                  />
-                  <ConfigRow
-                    label="HMRC Password"
-                    value={config.hmrc_credentials_set ? '••••••••' : 'Not set'}
-                    set={config.hmrc_credentials_set}
-                  />
-                  <ConfigRow
-                    label="Charity HMRC Reference"
-                    value={config.hmrc_charity_ref || '—'}
-                    set={!!config.hmrc_charity_ref}
-                  />
-                  <ConfigRow
-                    label="Vendor ID"
-                    value={config.hmrc_vendor_id || '—'}
-                    set={!!config.hmrc_vendor_id}
-                  />
-                  <ConfigRow
-                    label="Charity Number"
-                    value={config.charity_number || '—'}
-                    set={!!config.charity_number}
-                  />
-                  <ConfigRow
-                    label="GetAddress.io API Key"
-                    value={config.getaddress_api_key_set ? config.getaddress_api_key_preview : 'Not set'}
-                    set={config.getaddress_api_key_set}
-                  />
-                  <ConfigRow
-                    label="Submission Environment"
-                    value={(config.hmrc_environment || 'test').toUpperCase()}
-                    set={true}
-                  />
-                </div>
-
-                <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-                  <p className="text-amber-300 text-sm font-semibold mb-2">How to update credentials</p>
-                  <p className="text-white/50 text-xs leading-relaxed">
-                    Set these environment variables on your backend server and restart:
-                  </p>
-                  <div className="mt-2 space-y-1 font-mono text-xs text-white/40">
-                    <div>HMRC_GIFT_AID_USER_ID=your-gateway-id</div>
-                    <div>HMRC_GIFT_AID_PASSWORD=your-gateway-password</div>
-                    <div>HMRC_GIFT_AID_CHARITY_HMO_REF=AB12345</div>
-                    <div>HMRC_GIFT_AID_VENDOR_ID=your-vendor-id</div>
-                    <div>HMRC_GIFT_AID_ENVIRONMENT=test  # or live</div>
-                  </div>
-                </div>
-
-                {!config.hmrc_credentials_set && (
-                  <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
-                    <p className="text-red-300 text-sm font-semibold">Credentials not configured</p>
-                    <p className="text-white/40 text-xs mt-1">
-                      HMRC submissions will fail until credentials are set. Register at{' '}
-                      <a href="https://www.gov.uk/guidance/charities-online" target="_blank" rel="noopener noreferrer"
-                        className="text-saffron-400 underline">gov.uk/guidance/charities-online</a>.
-                    </p>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-center py-10 text-white/30">Failed to load config</div>
-            )}
-          </motion.div>
-        )}
-
         {/* Declarations tab */}
         {tab === 'declarations' && (
           <motion.div key="decls" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
@@ -664,7 +591,7 @@ export default function GiftAidPage() {
                     <thead>
                       <tr className="border-b border-white/5">
                         <th className="px-4 py-3 w-8"></th>
-                        {['Donor', 'Postcode', 'Donation', 'Date', 'Order Ref', 'Status'].map(h => (
+                        {['First name', 'Surname', 'House #', 'Postcode', 'Email', 'Donation', 'Date', 'Status'].map(h => (
                           <th key={h} className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
                         ))}
                       </tr>
@@ -689,15 +616,25 @@ export default function GiftAidPage() {
                                 className="w-4 h-4 rounded accent-amber-400 pointer-events-none" />
                             )}
                           </td>
-                          <td className="px-4 py-3 text-white font-medium text-sm">{d.full_name}</td>
-                          <td className="px-4 py-3 text-white/60 text-sm">{d.postcode}</td>
+                          <td className="px-4 py-3 text-white font-medium text-sm">
+                            {d.first_name || (d.full_name?.split(' ', 1)[0] || '—')}
+                          </td>
+                          <td className="px-4 py-3 text-white font-medium text-sm">
+                            {d.surname || (d.full_name?.includes(' ') ? d.full_name.split(' ').slice(1).join(' ') : '—')}
+                          </td>
+                          <td className="px-4 py-3 text-white/70 text-sm font-mono">
+                            {d.house_number || (d.address ? d.address.split(',')[0].trim() : '—')}
+                          </td>
+                          <td className="px-4 py-3 text-white/60 text-sm font-mono">{d.postcode}</td>
+                          <td className="px-4 py-3 text-white/50 text-xs truncate max-w-[180px]" title={d.contact_email}>
+                            {d.contact_email || '—'}
+                          </td>
                           <td className="px-4 py-3 font-mono font-bold text-white text-sm">
                             £{Number(d.donation_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                           </td>
                           <td className="px-4 py-3 text-white/50 text-sm">
                             {d.donation_date ? new Date(d.donation_date).toLocaleDateString('en-GB') : '—'}
                           </td>
-                          <td className="px-4 py-3 text-white/40 text-xs font-mono">{d.order_ref || '—'}</td>
                           <td className="px-4 py-3">
                             <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
                               d.hmrc_submitted
