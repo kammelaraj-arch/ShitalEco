@@ -76,8 +76,14 @@ echo "=== Pulling images for ${STACK_NAME} stack ==="
 if [ "$TARGET" = "dev" ]; then
   # Dev stack pulls :dev (most CI builds)
   docker compose -f "$COMPOSE" pull 2>&1 | tail -10 || true
+elif [ "$PROMOTE" -eq 1 ]; then
+  # Prod promotion path — :latest was JUST retagged from :dev locally above.
+  # Skip the registry pull so we don't overwrite our promotion with whatever
+  # stale :latest happens to be on GHCR (CI builds :dev, not :latest, so the
+  # registry's :latest is from before the dev/prod split).
+  echo "Skipping docker pull — using locally promoted :latest tags"
 else
-  # Prod pulls :latest (only updated by promote)
+  # Plain prod deploy (no promotion) — fall back to pulling :latest from GHCR
   docker compose -f "$COMPOSE" pull backend admin quick-donation kiosk screen 2>&1 | tail -10 || true
   docker compose -f "$COMPOSE" pull service 2>/dev/null || \
     echo "service image not yet in GHCR — skipping pull"
