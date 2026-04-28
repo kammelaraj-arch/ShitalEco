@@ -767,7 +767,9 @@ async def gasds_buildings_summary(ctx: CurrentSpace, year: int | None = None):
                   AND EXTRACT(year FROM collection_date) = :y
                 GROUP BY branch_id
             """), {"y": year})
-            agg_rows = {r["branch_id"]: r for r in agg.mappings().all()}
+            agg_rows: dict[str, dict[str, Any]] = {
+                str(r["branch_id"] or ""): dict(r) for r in agg.mappings().all()
+            }
 
         out: list[dict[str, Any]] = []
         for b in branches:
