@@ -102,6 +102,9 @@ function AccountDetailPage() {
   const [contactQ, setContactQ] = useState('')
   const [contactResults, setContactResults] = useState<ContactSearchResult[]>([])
   const [linkRole, setLinkRole] = useState('')
+  const [showCreateContact, setShowCreateContact] = useState(false)
+  const [newContact, setNewContact] = useState({ first_name: '', surname: '', email: '', phone: '' })
+  const [creatingContact, setCreatingContact] = useState(false)
 
   // Service form
   const [serviceName, setServiceName] = useState('')
@@ -189,6 +192,52 @@ function AccountDetailPage() {
     }, 250)
     return () => clearTimeout(t)
   }, [contactQ])
+
+  // Pre-fill the new-contact form from whatever's in the search box (best guess).
+  // If the query has a space, treat it as "First Surname"; otherwise drop it
+  // into First name. Email goes in if it looks like one.
+  const openCreateContact = () => {
+    const q = contactQ.trim()
+    if (q.includes('@')) {
+      setNewContact({ first_name: '', surname: '', email: q, phone: '' })
+    } else if (q.includes(' ')) {
+      const [first, ...rest] = q.split(/\s+/)
+      setNewContact({ first_name: first, surname: rest.join(' '), email: '', phone: '' })
+    } else if (q) {
+      setNewContact({ first_name: q, surname: '', email: '', phone: '' })
+    }
+    setShowCreateContact(true)
+  }
+
+  const createAndLinkContact = async (makePrimary: boolean) => {
+    if (!newContact.first_name && !newContact.surname && !newContact.email) return
+    setCreatingContact(true)
+    try {
+      const created = await apiFetch<{ id: string }>('/admin/contacts', {
+        method: 'POST',
+        body: JSON.stringify({
+          first_name: newContact.first_name,
+          surname:    newContact.surname,
+          full_name:  `${newContact.first_name} ${newContact.surname}`.trim(),
+          email:      newContact.email,
+          phone:      newContact.phone,
+          first_source: 'admin',
+        }),
+      })
+      await apiFetch(`/admin/accounts/${id}/contacts`, {
+        method: 'POST',
+        body: JSON.stringify({ contact_id: created.id, role: linkRole, is_primary: makePrimary }),
+      })
+      setShowCreateContact(false)
+      setNewContact({ first_name: '', surname: '', email: '', phone: '' })
+      setContactQ(''); setContactResults([]); setLinkRole('')
+      await load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to create + link contact')
+    } finally {
+      setCreatingContact(false)
+    }
+  }
 
   const linkContact = async (cid: string, makePrimary: boolean) => {
     try {
@@ -391,9 +440,54 @@ function AccountDetailPage() {
                 ))}
               </div>
             )}
-            <p className="text-white/30 text-xs">
-              Need a new contact? <Link href="/contacts" className="text-saffron-400 underline">Create on Contacts page</Link>, then come back.
-            </p>
+
+            {/* No-match hint or create CTA */}
+            {!showCreateContact && (
+              <button onClick={openCreateContact}
+                className="text-saffron-400 hover:text-saffron-300 text-xs font-bold underline">
+                {contactQ && contactResults.length === 0
+                  ? `+ Create new contact "${contactQ}"`
+                  : '+ Create new contact'}
+              </button>
+            )}
+
+            {showCreateContact && (
+              <div className="rounded-lg border border-saffron-500/30 bg-saffron-500/5 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-saffron-300 text-sm font-bold">New contact</p>
+                  <button onClick={() => { setShowCreateContact(false); setNewContact({ first_name: '', surname: '', email: '', phone: '' }) }}
+                    className="text-white/40 hover:text-white/80 text-xs">Cancel</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <input value={newContact.first_name}
+                    onChange={e => setNewContact(c => ({ ...c, first_name: e.target.value }))}
+                    placeholder="First name"
+                    className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-saffron-500/60 text-sm" />
+                  <input value={newContact.surname}
+                    onChange={e => setNewContact(c => ({ ...c, surname: e.target.value }))}
+                    placeholder="Surname"
+                    className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-saffron-500/60 text-sm" />
+                  <input value={newContact.email} type="email"
+                    onChange={e => setNewContact(c => ({ ...c, email: e.target.value }))}
+                    placeholder="Email"
+                    className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-saffron-500/60 text-sm" />
+                  <input value={newContact.phone}
+                    onChange={e => setNewContact(c => ({ ...c, phone: e.target.value }))}
+                    placeholder="Phone"
+                    className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-saffron-500/60 text-sm" />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => createAndLinkContact(false)} disabled={creatingContact}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 disabled:opacity-40">
+                    {creatingContact ? 'Creating…' : 'Create & link'}
+                  </button>
+                  <button onClick={() => createAndLinkContact(true)} disabled={creatingContact}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-saffron-gradient text-white shadow-saffron hover:opacity-90 disabled:opacity-40">
+                    {creatingContact ? 'Creating…' : 'Create & link as primary'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {contacts.length === 0 ? (

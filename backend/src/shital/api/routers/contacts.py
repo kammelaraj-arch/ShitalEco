@@ -1,13 +1,28 @@
-"""CRM Contacts — admin read endpoints for donor contact records."""
+"""CRM Contacts — admin endpoints for donor contact records."""
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace
 
 router = APIRouter(prefix="/admin/contacts", tags=["admin-contacts"])
+
+
+class ContactInput(BaseModel):
+    email: str = ""
+    first_name: str = ""
+    surname: str = ""
+    full_name: str = ""
+    phone: str = ""
+    gdpr_consent: bool = False
+    tac_consent: bool = False
+    first_source: str = "admin"
+    first_branch_id: str = ""
 
 
 @router.get("")
@@ -135,3 +150,114 @@ async def get_contact(contact_id: str, space: CurrentSpace = None) -> dict[str, 
         "gift_aid_declarations": gift_aid,
         "subscriptions": subscriptions,
     }
+
+
+@router.post("")
+async def create_contact(body: ContactInput, space: CurrentSpace = None) -> dict[str, Any]:  # type: ignore[assignment]
+    """Create a contact directly from admin (e.g. when linking to an account)."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    full_name = body.full_name.strip() or f"{body.first_name} {body.surname}".strip()
+    if not full_name and not body.email:
+        raise HTTPException(400, detail="Provide at least a name or email")
+
+    new_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    email_key = body.email.strip().lower() or None
+
+    async with SessionLocal() as db:
+        # Upsert by email if given — otherwise plain insert
+        if email_key:
+            r = await db.execute(text("""
+                INSERT INTO contacts
+                    (id, email, first_name, surname, full_name, phone,
+                     gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                     first_source, first_branch_id, created_at, updated_at)
+                VALUES
+                    (:id, :email, :first, :surname, :name, :phone,
+                     :gdpr, :gdpr_at, :tac, :tac_at,
+                     :src, :branch, :now, :now)
+                ON CONFLICT (email) DO UPDATE SET
+                    first_name = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                    surname    = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                    full_name  = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                    phone      = COALESCE(NULLIF(EXCLUDED.phone,''),      contacts.phone),
+                    updated_at = EXCLUDED.updated_at
+                RETURNING id
+            """), {
+                "id": new_id, "email": email_key,
+                "first": body.first_name, "surname": body.surname,
+                "name": full_name, "phone": body.phone,
+                "gdpr": body.gdpr_consent, "gdpr_at": now if body.gdpr_consent else None,
+                "tac": body.tac_consent, "tac_at": now if body.tac_consent else None,
+                "src": body.first_source, "branch": body.first_branch_id, "now": now,
+            })
+            row = r.mappings().first()
+            contact_id = str(row["id"]) if row else new_id
+        else:
+            await db.execute(text("""
+                INSERT INTO contacts
+                    (id, first_name, surname, full_name, phone,
+                     gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                     first_source, first_branch_id, created_at, updated_at)
+                VALUES
+                    (:id, :first, :surname, :name, :phone,
+                     :gdpr, :gdpr_at, :tac, :tac_at,
+                     :src, :branch, :now, :now)
+            """), {
+                "id": new_id, "first": body.first_name, "surname": body.surname,
+                "name": full_name, "phone": body.phone,
+                "gdpr": body.gdpr_consent, "gdpr_at": now if body.gdpr_consent else None,
+                "tac": body.tac_consent, "tac_at": now if body.tac_consent else None,
+                "src": body.first_source, "branch": body.first_branch_id, "now": now,
+            })
+            contact_id = new_id
+        await db.commit()
+
+    return {"id": contact_id, "ok": True, "full_name": full_name, "email": email_key or ""}
+
+
+@router.patch("/{contact_id}")
+async def update_contact(contact_id: str, body: ContactInput, space: CurrentSpace = None) -> dict[str, Any]:  # type: ignore[assignment]
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    full_name = body.full_name.strip() or f"{body.first_name} {body.surname}".strip()
+
+    async with SessionLocal() as db:
+        r = await db.execute(text("""
+            UPDATE contacts SET
+                email      = COALESCE(NULLIF(:email, ''), email),
+                first_name = :first,
+                surname    = :surname,
+                full_name  = :name,
+                phone      = :phone,
+                updated_at = NOW()
+            WHERE id = :id
+            RETURNING id
+        """), {
+            "id": contact_id,
+            "email": body.email.strip().lower(),
+            "first": body.first_name, "surname": body.surname,
+            "name": full_name, "phone": body.phone,
+        })
+        if not r.mappings().first():
+            raise HTTPException(404, detail="Contact not found")
+        await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{contact_id}")
+async def delete_contact(contact_id: str, space: CurrentSpace = None) -> dict[str, Any]:  # type: ignore[assignment]
+    """Hard-delete a contact (CRM cleanup). FK cascades clean addresses + links."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        await db.execute(text("DELETE FROM contacts WHERE id = :id"), {"id": contact_id})
+        await db.commit()
+    return {"ok": True}
