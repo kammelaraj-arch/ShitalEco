@@ -62,7 +62,12 @@ services:
       db-dev:
         condition: service_healthy
     networks:
-      - dev-internal
+      dev-internal:
+        # screen-dev image hard-codes proxy_pass http://backend:8000 (works in
+        # the prod stack where the service is literally named "backend"). Alias
+        # backend-dev as "backend" on the dev network so screen-dev can resolve it.
+        aliases:
+          - backend
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
