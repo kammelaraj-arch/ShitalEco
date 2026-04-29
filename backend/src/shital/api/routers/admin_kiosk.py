@@ -274,10 +274,10 @@ async def list_addresses(q: str = "", contact_id: str = "", account_id: str = ""
         conditions.append("a.contact_id = :cid")
         params["cid"] = contact_id
     if account_id:
-        conditions.append("a.account_id = :aid")
+        conditions.append("a.crm_account_id = :aid")
         params["aid"] = account_id
     if unlinked:
-        conditions.append("a.account_id IS NULL")
+        conditions.append("a.crm_account_id IS NULL")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

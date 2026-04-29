@@ -1,9 +1,9 @@
 """CRM Accounts (companies / organisations).
 
 Reuses the existing contacts + addresses tables. An account links to
-many contacts (with role) via account_contacts, has a list of services
-it provides via account_services, and reuses the addresses table by
-attaching addresses with a non-null account_id.
+many contacts (with role) via crm_account_contacts, has a list of services
+it provides via crm_account_services, and reuses the addresses table by
+attaching addresses with a non-null crm_account_id.
 """
 from __future__ import annotations
 
@@ -101,9 +101,9 @@ async def list_accounts(
                 a.email, a.phone, a.website, a.industry, a.charity_number,
                 a.branch_id, a.created_at, a.updated_at,
                 pc.full_name AS primary_contact_name,
-                (SELECT COUNT(*) FROM account_contacts ac WHERE ac.account_id = a.id) AS contacts_count,
-                (SELECT COUNT(*) FROM account_services s WHERE s.account_id = a.id AND s.is_active) AS services_count
-            FROM accounts a
+                (SELECT COUNT(*) FROM crm_account_contacts ac WHERE ac.account_id = a.id) AS contacts_count,
+                (SELECT COUNT(*) FROM crm_account_services s WHERE s.account_id = a.id AND s.is_active) AS services_count
+            FROM crm_accounts a
             LEFT JOIN contacts pc ON pc.id = a.primary_contact_id
             WHERE {where}
             ORDER BY a.name
@@ -112,7 +112,7 @@ async def list_accounts(
         rows = result.mappings().all()
 
         count_r = await db.execute(
-            text(f"SELECT COUNT(*) AS cnt FROM accounts a WHERE {where}"),
+            text(f"SELECT COUNT(*) AS cnt FROM crm_accounts a WHERE {where}"),
             {k: v for k, v in params.items() if k not in ("limit", "offset")},
         )
         count_row = count_r.mappings().first()
@@ -135,7 +135,7 @@ async def create_account(ctx: CurrentSpace, body: AccountInput) -> dict[str, Any
 
     async with SessionLocal() as db:
         result = await db.execute(text("""
-            INSERT INTO accounts
+            INSERT INTO crm_accounts
                 (name, legal_name, account_type, status, website, email, phone,
                  industry, registration_number, vat_number, charity_number,
                  primary_contact_id, parent_account_id, branch_id, notes, updated_at)
@@ -150,10 +150,10 @@ async def create_account(ctx: CurrentSpace, body: AccountInput) -> dict[str, Any
             raise HTTPException(status_code=500, detail="Account insert returned no row")
         new_id = str(new_row["id"])
 
-        # If primary_contact_id given, also create the link in account_contacts
+        # If primary_contact_id given, also create the link in crm_account_contacts
         if body.primary_contact_id:
             await db.execute(text("""
-                INSERT INTO account_contacts (account_id, contact_id, role, is_primary)
+                INSERT INTO crm_account_contacts (account_id, contact_id, role, is_primary)
                 VALUES (:aid, :cid, 'Primary', true)
                 ON CONFLICT (account_id, contact_id) DO UPDATE SET is_primary = true
             """), {"aid": new_id, "cid": body.primary_contact_id})
@@ -175,9 +175,9 @@ async def get_account(ctx: CurrentSpace, account_id: str) -> dict[str, Any]:
         a = await db.execute(text("""
             SELECT a.*, pc.full_name AS primary_contact_name,
                    pa.name AS parent_account_name
-            FROM accounts a
+            FROM crm_accounts a
             LEFT JOIN contacts pc ON pc.id = a.primary_contact_id
-            LEFT JOIN accounts pa ON pa.id = a.parent_account_id
+            LEFT JOIN crm_accounts pa ON pa.id = a.parent_account_id
             WHERE a.id = :id AND a.deleted_at IS NULL
         """), {"id": account_id})
         account = a.mappings().first()
@@ -188,7 +188,7 @@ async def get_account(ctx: CurrentSpace, account_id: str) -> dict[str, Any]:
             SELECT ac.id AS link_id, ac.role, ac.is_primary, ac.created_at AS linked_at,
                    c.id AS contact_id, c.full_name, c.first_name, c.surname,
                    c.email, c.phone
-            FROM account_contacts ac
+            FROM crm_account_contacts ac
             JOIN contacts c ON c.id = ac.contact_id
             WHERE ac.account_id = :id
             ORDER BY ac.is_primary DESC, c.full_name
@@ -196,7 +196,7 @@ async def get_account(ctx: CurrentSpace, account_id: str) -> dict[str, Any]:
 
         services_r = await db.execute(text("""
             SELECT id, service_name, service_type, description, is_active, created_at
-            FROM account_services
+            FROM crm_account_services
             WHERE account_id = :id
             ORDER BY is_active DESC, service_name
         """), {"id": account_id})
@@ -204,7 +204,7 @@ async def get_account(ctx: CurrentSpace, account_id: str) -> dict[str, Any]:
         addresses_r = await db.execute(text("""
             SELECT id, formatted, postcode, house_number, uprn, is_primary, created_at
             FROM addresses
-            WHERE account_id = :id
+            WHERE crm_account_id = :id
             ORDER BY is_primary DESC, created_at DESC
         """), {"id": account_id})
 
@@ -224,7 +224,7 @@ async def update_account(ctx: CurrentSpace, account_id: str, body: AccountInput)
 
     async with SessionLocal() as db:
         result = await db.execute(text("""
-            UPDATE accounts SET
+            UPDATE crm_accounts SET
                 name                = :name,
                 legal_name          = :legal_name,
                 account_type        = :account_type,
@@ -258,7 +258,7 @@ async def delete_account(ctx: CurrentSpace, account_id: str) -> dict[str, Any]:
 
     async with SessionLocal() as db:
         await db.execute(
-            text("UPDATE accounts SET deleted_at = NOW() WHERE id = :id"),
+            text("UPDATE crm_accounts SET deleted_at = NOW() WHERE id = :id"),
             {"id": account_id},
         )
         await db.commit()
@@ -277,11 +277,11 @@ async def link_contact(ctx: CurrentSpace, account_id: str, body: LinkContactInpu
         # Promote/demote primary atomically
         if body.is_primary:
             await db.execute(text(
-                "UPDATE account_contacts SET is_primary = false WHERE account_id = :aid"
+                "UPDATE crm_account_contacts SET is_primary = false WHERE account_id = :aid"
             ), {"aid": account_id})
 
         await db.execute(text("""
-            INSERT INTO account_contacts (account_id, contact_id, role, is_primary)
+            INSERT INTO crm_account_contacts (account_id, contact_id, role, is_primary)
             VALUES (:aid, :cid, :role, :primary)
             ON CONFLICT (account_id, contact_id) DO UPDATE
                 SET role = EXCLUDED.role, is_primary = EXCLUDED.is_primary
@@ -292,7 +292,7 @@ async def link_contact(ctx: CurrentSpace, account_id: str, body: LinkContactInpu
 
         if body.is_primary:
             await db.execute(text(
-                "UPDATE accounts SET primary_contact_id = :cid, updated_at = NOW() WHERE id = :aid"
+                "UPDATE crm_accounts SET primary_contact_id = :cid, updated_at = NOW() WHERE id = :aid"
             ), {"cid": body.contact_id, "aid": account_id})
 
         await db.commit()
@@ -307,11 +307,11 @@ async def unlink_contact(ctx: CurrentSpace, account_id: str, contact_id: str) ->
 
     async with SessionLocal() as db:
         await db.execute(text(
-            "DELETE FROM account_contacts WHERE account_id = :aid AND contact_id = :cid"
+            "DELETE FROM crm_account_contacts WHERE account_id = :aid AND contact_id = :cid"
         ), {"aid": account_id, "cid": contact_id})
         # Clear primary if it pointed at the removed contact
         await db.execute(text("""
-            UPDATE accounts SET primary_contact_id = NULL, updated_at = NOW()
+            UPDATE crm_accounts SET primary_contact_id = NULL, updated_at = NOW()
             WHERE id = :aid AND primary_contact_id = :cid
         """), {"aid": account_id, "cid": contact_id})
         await db.commit()
@@ -331,7 +331,7 @@ async def add_service(ctx: CurrentSpace, account_id: str, body: ServiceInput) ->
 
     async with SessionLocal() as db:
         result = await db.execute(text("""
-            INSERT INTO account_services (account_id, service_name, service_type, description, is_active)
+            INSERT INTO crm_account_services (account_id, service_name, service_type, description, is_active)
             VALUES (:aid, :name, :type, :desc, :active)
             RETURNING id
         """), {
@@ -354,7 +354,7 @@ async def remove_service(ctx: CurrentSpace, account_id: str, service_id: str) ->
 
     async with SessionLocal() as db:
         await db.execute(text(
-            "DELETE FROM account_services WHERE id = :id AND account_id = :aid"
+            "DELETE FROM crm_account_services WHERE id = :id AND account_id = :aid"
         ), {"id": service_id, "aid": account_id})
         await db.commit()
     return {"ok": True}
@@ -371,7 +371,7 @@ async def link_address(ctx: CurrentSpace, account_id: str, body: LinkAddressInpu
 
     async with SessionLocal() as db:
         result = await db.execute(text("""
-            UPDATE addresses SET account_id = :aid
+            UPDATE addresses SET crm_account_id = :aid
             WHERE id = :addr_id
             RETURNING id
         """), {"aid": account_id, "addr_id": body.address_id})
@@ -389,8 +389,8 @@ async def unlink_address(ctx: CurrentSpace, account_id: str, address_id: str) ->
 
     async with SessionLocal() as db:
         await db.execute(text("""
-            UPDATE addresses SET account_id = NULL
-            WHERE id = :addr_id AND account_id = :aid
+            UPDATE addresses SET crm_account_id = NULL
+            WHERE id = :addr_id AND crm_account_id = :aid
         """), {"addr_id": address_id, "aid": account_id})
         await db.commit()
     return {"ok": True}
