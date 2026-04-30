@@ -101,15 +101,6 @@ export function ConfirmationScreen() {
     }
   }
 
-  // Auto-print on mount once. In Electron this is fully silent. In a browser
-  // it requires Chrome to be launched with `--kiosk-printing` so the dialog
-  // is suppressed automatically.
-  useEffect(() => {
-    const t = setTimeout(handlePrint, 500)
-    return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   // Group basket items by their type (SERVICE / DONATION) and then by category
   // so the receipt prints "Puja  £X / Prasad £Y / Donations £Z" sub-totalled.
   type Group = { label: string; items: typeof items; subtotal: number }
