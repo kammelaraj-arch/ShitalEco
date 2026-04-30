@@ -74,6 +74,32 @@ def image_metadata(tag: str) -> dict:
         return {}
 
 
+def container_metadata(name: str) -> dict:
+    """Return GIT_SHA + BUILD_TIME of the *running* container's env.
+
+    This is what we should report — the previous behaviour of reading the
+    tagged image (:dev/:latest) lied when a tag was updated but the container
+    hadn't been recreated to pick it up (Promote retag without restart, etc).
+    """
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", name,
+             "--format", "{{range .Config.Env}}{{println .}}{{end}}"],
+            capture_output=True, text=True, timeout=8, check=False,
+        )
+        if r.returncode != 0:
+            return {}
+        out: dict[str, str] = {}
+        for line in r.stdout.strip().splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                if k in {"GIT_SHA", "BUILD_TIME"}:
+                    out[k] = v
+        return out
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return {}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
@@ -96,8 +122,14 @@ class Handler(BaseHTTPRequestHandler):
             envs = {}
             for env, container in ENV_CONTAINERS.items():
                 running = inspect_container(container)
+                # Prefer the running container's baked env (truth: what's
+                # actually executing right now). Fall back to the tagged image
+                # only if the container is down so the UI can still show what
+                # *would* run if we deployed.
+                live_meta = container_metadata(container) if running.get("running") else {}
                 tag = "dev" if env == "dev" else "latest"
-                meta = image_metadata(tag)
+                tag_meta = image_metadata(tag)
+                meta = live_meta or tag_meta
                 sha = meta.get("GIT_SHA", "")
                 envs[env] = {
                     "container": container,
@@ -105,6 +137,15 @@ class Handler(BaseHTTPRequestHandler):
                     "git_sha": sha,
                     "git_sha_short": sha[:7] if sha and sha != "dev" else sha,
                     "build_time": meta.get("BUILD_TIME"),
+                    # If the running container's SHA differs from what's
+                    # currently tagged, surface a warning the UI can show.
+                    "stale": bool(
+                        live_meta and tag_meta
+                        and live_meta.get("GIT_SHA")
+                        and tag_meta.get("GIT_SHA")
+                        and live_meta["GIT_SHA"] != tag_meta["GIT_SHA"]
+                    ),
+                    "tag_git_sha": tag_meta.get("GIT_SHA", ""),
                     "url": "https://shital.org.uk" if env == "prod" else "https://dev.shital.org.uk",
                 }
             self._send_json(200, {"environments": envs})
