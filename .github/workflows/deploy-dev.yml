@@ -61,9 +61,9 @@ jobs:
             echo "=== Deploy to Dev — branch=${DEPLOY_REF} ==="
 
             # ── Pre-flight: every required secret must be present.
-            # Fail loudly here instead of letting the dev stack come up with
-            # silent placeholders (the recurring trap behind DEPLOY_SECRET 403,
-            # GITHUB_TOKEN auth failure, etc).
+            # Required = without it the dev stack cannot come up at all.
+            # MS_*/STRIPE_*/SENDGRID/ANTHROPIC are *optional* — empty values
+            # are fine; they just disable the corresponding feature on dev.
             require() {
               local var=$1
               if [ -z "${!var:-}" ]; then
@@ -71,11 +71,8 @@ jobs:
                 exit 1
               fi
             }
-            require GH_PAT
-            require DEPLOY_SECRET
-            require MS_CLIENT_ID
-            require MS_CLIENT_SECRET
-            require MS_TENANT_ID
+            require GH_PAT          # git clone + GHCR docker login
+            require DEPLOY_SECRET   # must match the prod deployer's value
 
             # ── Ensure repo exists on VPS (we only need docker-compose.dev.yml) ─
             if [ -d /opt/shitaleco-dev/.git ]; then
