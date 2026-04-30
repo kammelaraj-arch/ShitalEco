@@ -246,10 +246,11 @@ export function ConfirmationScreen() {
             <div style={{ marginTop: 4 }}>kiosk.shital.org.uk</div>
           </div>
 
-          {/* Trailing feed lines so the printer cuts AFTER the text, not through it.
-              Most thermal printer drivers cut at the end of the print job; the
-              extra height advances paper past the cutter blade. */}
-          <div style={{ height: 36 }}>&nbsp;</div>
+          {/* Tiny trailing margin (~3mm) so the cut doesn't slice the last
+              text line. Most printer drivers already feed the paper past the
+              cutter blade themselves — this just guarantees a clean edge
+              without wasting roll. Increase if your driver cuts too high. */}
+          <div style={{ height: 12 }}>&nbsp;</div>
         </div>
 
         {/* ── Star rating ── */}
