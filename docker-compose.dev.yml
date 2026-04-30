@@ -68,6 +68,9 @@ services:
         # backend-dev as "backend" on the dev network so screen-dev can resolve it.
         aliases:
           - backend
+      # Second NIC on the prod stack's network so we can reach the deployer
+      # container at http://deployer:9000 (deployer lives in the prod compose).
+      prod-bridge: {}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -158,3 +161,9 @@ volumes:
 networks:
   dev-internal:
     driver: bridge
+  # The deployer service runs in the prod compose stack on its own internal
+  # network. Reference it as external so backend-dev can resolve "deployer"
+  # and the dev admin Environments card stops showing "Deployer unreachable".
+  prod-bridge:
+    external: true
+    name: shitaleco_internal
