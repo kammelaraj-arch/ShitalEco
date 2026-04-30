@@ -101,6 +101,30 @@ export function ConfirmationScreen() {
     }
   }
 
+  // Auto-print on mount once. In Electron this is fully silent. In a browser
+  // it requires Chrome to be launched with `--kiosk-printing` so the dialog
+  // is suppressed automatically.
+  useEffect(() => {
+    const t = setTimeout(handlePrint, 500)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Group basket items by their type (SERVICE / DONATION) and then by category
+  // so the receipt prints "Puja  £X / Prasad £Y / Donations £Z" sub-totalled.
+  type Group = { label: string; items: typeof items; subtotal: number }
+  const itemGroups: Group[] = (() => {
+    const buckets = new Map<string, Group>()
+    for (const it of items) {
+      const cat = (it.category || it.type || 'OTHER').toString().toUpperCase()
+      let g = buckets.get(cat)
+      if (!g) { g = { label: cat, items: [], subtotal: 0 }; buckets.set(cat, g) }
+      g.items.push(it)
+      g.subtotal += it.totalPrice
+    }
+    return Array.from(buckets.values()).sort((a, b) => a.label.localeCompare(b.label))
+  })()
+
   function handleStarClick(star: number) {
     setRating(star)
     setTimeout(() => setRatedDone(true), 600)
@@ -177,27 +201,44 @@ export function ConfirmationScreen() {
 
         {/* Thermal receipt — hidden on screen, shown by @media print CSS */}
         <div className="print-receipt">
-          {/* Header */}
+          {/* Header — name + branch first per request */}
           <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: 8, marginBottom: 8 }}>
             <div style={{ fontSize: 16, fontWeight: 900, letterSpacing: 1 }}>🕉 Shital Temple</div>
-            <div style={{ fontSize: 10 }}>{`Shital ${branchName}`} · Registered UK Charity</div>
-            <div style={{ fontSize: 9, marginTop: 2, color: '#555' }}>{new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2 }}>Branch: {branchName}</div>
+            {contactInfo?.name && !contactInfo.anonymous && (
+              <div style={{ fontSize: 11, fontWeight: 700 }}>Name: {contactInfo.name}</div>
+            )}
+            <div style={{ fontSize: 9, marginTop: 4, color: '#555' }}>
+              {new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </div>
           </div>
+
           {/* Order ref */}
           <div style={{ textAlign: 'center', marginBottom: 8 }}>
             <div style={{ fontSize: 9, color: '#555' }}>ORDER REFERENCE</div>
             <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: 2 }}>{orderRef}</div>
           </div>
-          {/* Items */}
-          <div style={{ borderTop: '1px dashed #000', paddingTop: 6, marginBottom: 6 }}>
-            {items.map((item, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
-                <span>{item.name} x{item.quantity}</span>
-                <span style={{ fontWeight: 700 }}>£{item.totalPrice.toFixed(2)}</span>
-              </div>
-            ))}
-          </div>
-          {/* Total */}
+
+          {/* Items grouped by type/category, with per-group subtotal */}
+          {itemGroups.map((g, gi) => (
+            <div key={gi} style={{ borderTop: '1px dashed #000', paddingTop: 6, marginBottom: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 900, marginBottom: 3, letterSpacing: 1 }}>{g.label}</div>
+              {g.items.map((item, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
+                  <span>{item.name} x{item.quantity}</span>
+                  <span style={{ fontWeight: 700 }}>£{item.totalPrice.toFixed(2)}</span>
+                </div>
+              ))}
+              {g.items.length > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginTop: 2, color: '#555' }}>
+                  <span>Subtotal</span>
+                  <span style={{ fontWeight: 700 }}>£{g.subtotal.toFixed(2)}</span>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Grand total */}
           <div style={{ borderTop: '2px solid #000', paddingTop: 5, marginBottom: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 900 }}>
               <span>TOTAL</span>
@@ -205,10 +246,7 @@ export function ConfirmationScreen() {
             </div>
             <div style={{ fontSize: 9, textAlign: 'right', color: '#555' }}>CARD PAYMENT</div>
           </div>
-          {/* Donor */}
-          {contactInfo?.name && !contactInfo.anonymous && (
-            <div style={{ fontSize: 9, marginBottom: 6 }}>Donor: <strong>{contactInfo.name}</strong></div>
-          )}
+
           {/* Footer */}
           <div style={{ borderTop: '1px dashed #000', paddingTop: 8, textAlign: 'center', fontSize: 9, color: '#444' }}>
             <div style={{ fontWeight: 900, marginBottom: 2 }}>Thank you for your generous donation 🙏</div>
@@ -216,6 +254,11 @@ export function ConfirmationScreen() {
             <div style={{ marginTop: 4, color: '#777' }}>This receipt is your donation record.</div>
             <div style={{ marginTop: 4 }}>kiosk.shital.org.uk</div>
           </div>
+
+          {/* Trailing feed lines so the printer cuts AFTER the text, not through it.
+              Most thermal printer drivers cut at the end of the print job; the
+              extra height advances paper past the cutter blade. */}
+          <div style={{ height: 36 }}>&nbsp;</div>
         </div>
 
         {/* ── Star rating ── */}
