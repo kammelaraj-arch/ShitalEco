@@ -57,8 +57,25 @@ jobs:
           timeout: 600s
           envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,DEPLOY_SECRET,DEPLOY_REF
           script: |
-            set -e
+            set -eu
             echo "=== Deploy to Dev — branch=${DEPLOY_REF} ==="
+
+            # ── Pre-flight: every required secret must be present.
+            # Fail loudly here instead of letting the dev stack come up with
+            # silent placeholders (the recurring trap behind DEPLOY_SECRET 403,
+            # GITHUB_TOKEN auth failure, etc).
+            require() {
+              local var=$1
+              if [ -z "${!var:-}" ]; then
+                echo "!!! Required secret '$var' is empty. Add it to GitHub Actions repo secrets." >&2
+                exit 1
+              fi
+            }
+            require GH_PAT
+            require DEPLOY_SECRET
+            require MS_CLIENT_ID
+            require MS_CLIENT_SECRET
+            require MS_TENANT_ID
 
             # ── Ensure repo exists on VPS (we only need docker-compose.dev.yml) ─
             if [ -d /opt/shitaleco-dev/.git ]; then
@@ -133,6 +150,23 @@ jobs:
 
             # Seed dev catalog (idempotent)
             curl -sf -X POST http://localhost:8001/api/v1/admin/seed-catalog || true
+
+            # ── Post-deploy sanity: assert backend can reach + authorize with
+            # the deployer. This catches the exact bug class we keep hitting:
+            # docker says everything is fine but env-var mismatches cause runtime
+            # failures (deployer 403, GHCR auth failure, etc).
+            echo "=== Sanity: probe deployer from inside backend-dev ==="
+            DEPLOYER_PROBE=$(docker exec shitaleco-dev-backend-dev-1 \
+              curl -s -o /dev/null -w "%{http_code}" \
+                -H "X-Deploy-Secret: $DEPLOY_SECRET" \
+                http://deployer:9000/status 2>&1 || echo 000)
+            echo "deployer /status from backend-dev → HTTP $DEPLOYER_PROBE"
+            if [ "$DEPLOYER_PROBE" != "200" ]; then
+              echo "!!! Deployer probe failed (expected 200, got $DEPLOYER_PROBE) !!!" >&2
+              echo "    Either the dev backend can't resolve 'deployer' (network)" >&2
+              echo "    or DEPLOY_SECRET in .env.dev doesn't match the prod value." >&2
+              exit 1
+            fi
 
             echo ""
             echo "=== DEV deploy complete — branch ${DEPLOY_REF} ==="
