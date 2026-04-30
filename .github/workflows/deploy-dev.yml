@@ -47,6 +47,7 @@ jobs:
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
           DEPLOY_REF: ${{ github.ref_name }}
         with:
           host: 192.248.147.205
@@ -54,7 +55,7 @@ jobs:
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
           timeout: 600s
-          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,DEPLOY_REF
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,DEPLOY_SECRET,DEPLOY_REF
           script: |
             set -e
             echo "=== Deploy to Dev — branch=${DEPLOY_REF} ==="
@@ -96,6 +97,9 @@ jobs:
             inject .env.dev MS_CLIENT_SECRET       "$MS_CLIENT_SECRET"
             # Token so docker compose pull can fetch from private GHCR packages
             inject .env.dev GITHUB_TOKEN           "$GH_PAT"
+            # Same secret the prod deployer expects — without this, dev backend
+            # gets HTTP 403 when querying http://deployer:9000/status.
+            inject .env.dev DEPLOY_SECRET          "$DEPLOY_SECRET"
 
             set -a; source .env.dev; set +a
             ufw allow 8080/tcp 2>/dev/null || true
