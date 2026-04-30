@@ -110,14 +110,16 @@ jobs:
             docker compose -f docker-compose.dev.yml up -d --force-recreate --remove-orphans
 
             # ── Backend health check ────────────────────────────────────────────
+            # 48 × 5s = 240s. The backend's startup syncs ~30 function_registry
+            # rows synchronously, so cold start is ~90-150s. 120s was too tight.
             echo "=== Waiting for backend-dev health ==="
             DEV_OK=0
-            for i in $(seq 1 24); do
+            for i in $(seq 1 48); do
               sleep 5
               if curl -sf http://localhost:8001/health > /dev/null 2>&1; then
                 DEV_OK=1; break
               fi
-              echo "  attempt $i/24..."
+              echo "  attempt $i/48..."
             done
             if [ "$DEV_OK" -eq 0 ]; then
               echo "!!! Dev backend failed health check !!!"
