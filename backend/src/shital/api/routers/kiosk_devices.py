@@ -233,7 +233,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  device_username, device_password_hash,
                  show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
                  monthly_giving_text, monthly_giving_amount, confirmation_text,
-                 menu_options,
+                 bg_color, menu_options,
                  created_at, updated_at)
             VALUES
                 (:id, :name, :desc, :dtype, :bid, :loc, :status,
@@ -242,8 +242,8 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  :token, :notes, :ktheme, :oname, :ologo,
                  :dev_user, :dev_pw_hash,
                  :show_monthly, :gift_aid, :tap_go, :donate_title,
-                 :mg_text, :mg_amount, :confirm_text, :bg_color,
-                 CAST(:menu_opts AS JSONB),
+                 :mg_text, :mg_amount, :confirm_text,
+                 :bg_color, CAST(:menu_opts AS JSONB),
                  :now, :now)
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
