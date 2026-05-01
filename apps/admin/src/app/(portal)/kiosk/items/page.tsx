@@ -43,6 +43,8 @@ interface Item {
   available_until: string | null
   display_channel: string
   branch_stock: Record<string, number>
+  send_email_on_payment: boolean
+  email_template_key: string
 }
 
 type FormState = Omit<Item, 'id' | 'price'> & { price: string }
@@ -56,6 +58,8 @@ const EMPTY_FORM: FormState = {
   available_from: '', available_until: '',
   display_channel: 'both',
   branch_stock: {},
+  send_email_on_payment: false,
+  email_template_key: '',
 }
 
 export default function CatalogItemsPage() {
@@ -550,6 +554,36 @@ export default function CatalogItemsPage() {
                       <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${form.gift_aid_eligible ? 'left-5' : 'left-0.5'}`} />
                     </button>
                   </div>
+                </div>
+
+                {/* Per-item post-payment email — e.g. brick-donor instructions */}
+                <div className="bg-white/5 rounded-xl px-4 py-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-white text-sm font-bold">📧 Send email on payment</p>
+                      <p className="text-white/30 text-xs">Additional product-specific email after the standard receipt</p>
+                    </div>
+                    <button onClick={() => setForm(p => ({ ...p, send_email_on_payment: !p.send_email_on_payment }))}
+                      className={`w-11 h-6 rounded-full transition-all relative ${form.send_email_on_payment ? 'bg-green-500' : 'bg-white/10'}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${form.send_email_on_payment ? 'left-5' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+                  {form.send_email_on_payment && (
+                    <div>
+                      <label className="text-white/60 text-xs uppercase tracking-wider mb-1 block">Email template key</label>
+                      <input
+                        type="text"
+                        value={form.email_template_key}
+                        onChange={e => setForm(p => ({ ...p, email_template_key: e.target.value }))}
+                        placeholder="e.g. brick_donation_thanks"
+                        className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 text-sm focus:outline-none focus:border-saffron-500/60"
+                      />
+                      <p className="text-white/30 text-xs mt-1">
+                        Must match a row in <code className="bg-white/5 px-1 rounded">email_templates.template_key</code>.
+                        Create the template at <a href="/settings/email-templates" className="text-saffron-400 underline">Settings → Email Templates</a>.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Branch */}

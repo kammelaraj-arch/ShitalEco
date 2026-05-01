@@ -500,7 +500,59 @@ async def confirm_order(body: OrderConfirmInput):
         except Exception:
             email_sent = False
 
-    return {"confirmed": True, "reference": body.order_ref, "email_sent": email_sent}
+    # ── Per-item post-payment emails (e.g. brick-donor instructions) ──────────
+    # If any item in this order has catalog_items.send_email_on_payment=true
+    # with an email_template_key set, send that template to the customer.
+    # One email per item per order — quantities don't multiply emails (per
+    # the user's spec: 5 bricks → 1 email, not 5).
+    per_item_emails: list[dict[str, Any]] = []
+    if order and order["customer_email"]:
+        try:
+            from shital.api.routers.email_templates import send_template
+
+            async with SessionLocal() as db:
+                item_rows = await db.execute(text("""
+                    SELECT bi.name AS item_name, bi.quantity, bi.unit_price,
+                           ci.email_template_key
+                    FROM basket_items bi
+                    JOIN catalog_items ci
+                      ON ci.id::text = bi.reference_id
+                    WHERE bi.basket_id = :bid
+                      AND ci.send_email_on_payment = true
+                      AND COALESCE(ci.email_template_key, '') != ''
+                """), {"bid": order["basket_id"]})
+                rows = item_rows.mappings().all()
+
+            for r in rows:
+                qty = int(r["quantity"])
+                unit = float(str(r["unit_price"]))
+                send_result = await send_template(
+                    template_key=r["email_template_key"],
+                    to_email=order["customer_email"],
+                    variables={
+                        "customer_name":     order["customer_name"] or "",
+                        "customer_email":    order["customer_email"],
+                        "order_ref":         body.order_ref,
+                        "payment_id":        body.payment_ref,
+                        "payment_provider":  "",  # filled by caller if needed
+                        "transaction_date":  now.strftime("%-d %B %Y %H:%M UTC"),
+                        "item_name":         r["item_name"],
+                        "item_quantity":     qty,
+                        "item_unit_price":   unit,
+                        "item_total":        round(qty * unit, 2),
+                        "branch_name":       f"Shital {branch_label}",
+                    },
+                )
+                per_item_emails.append({"item": r["item_name"], **send_result})
+        except Exception as e:
+            per_item_emails.append({"error": str(e)})
+
+    return {
+        "confirmed": True,
+        "reference": body.order_ref,
+        "email_sent": email_sent,
+        "per_item_emails": per_item_emails,
+    }
 
 
 @router.post("/terminal/connection-token")

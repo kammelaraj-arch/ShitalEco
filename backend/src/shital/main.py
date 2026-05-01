@@ -468,6 +468,10 @@ async def _patch_schema() -> None:
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS monthly_giving_amount  NUMERIC(8,2) NOT NULL DEFAULT 5.00",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS confirmation_text      TEXT         NOT NULL DEFAULT ''",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS bg_color              VARCHAR(20)  NOT NULL DEFAULT ''",
+        # Per-device staff-menu visibility — JSON of { test_print, theme_cycle,
+        # refresh, admin } booleans. Loaded by the kiosk on login; the gear
+        # menu hides items where the value is false.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS menu_options JSONB NOT NULL DEFAULT '{\"test_print\": true, \"theme_cycle\": true, \"refresh\": true, \"admin\": true}'::jsonb",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_username ON kiosk_devices(device_username) WHERE device_username IS NOT NULL",
         # ── Quick-donation kiosk profiles ─────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS kiosk_profiles (
@@ -592,6 +596,12 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON catalog_items(category)",
         "CREATE INDEX IF NOT EXISTS idx_catalog_items_branch   ON catalog_items(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_catalog_items_scope    ON catalog_items(scope)",
+        # Per-item post-payment email (e.g. brick donor instructions).
+        # When toggled on with a template_key, the backend sends one email
+        # per item-line per order on payment success — additional to the
+        # standard receipt.
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS send_email_on_payment BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS email_template_key VARCHAR(100) NOT NULL DEFAULT ''",
         # ── Kiosk: Baskets, Basket Items, Orders ──────────────────────────────
         """CREATE TABLE IF NOT EXISTS baskets (
             id         VARCHAR(36) PRIMARY KEY,
