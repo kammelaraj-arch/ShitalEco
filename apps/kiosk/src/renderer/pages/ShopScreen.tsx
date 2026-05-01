@@ -123,9 +123,10 @@ export function ShopScreen() {
         <StaffMenu
           iconBg="white"
           items={[
-            { emoji: '🖨️', label: 'Test print receipt',  onClick: testPrintReceipt },
+            { emoji: '🖨️', label: 'Test print receipt',    onClick: testPrintReceipt },
             { emoji: '🎨', label: `Cycle theme (${theme})`, onClick: cycleTheme },
-            { emoji: '🔧', label: 'Admin settings',       onClick: () => setScreen('admin') },
+            { emoji: '🔄', label: 'Refresh site',           onClick: () => window.location.reload() },
+            { emoji: '🔧', label: 'Admin settings',         onClick: () => setScreen('admin') },
           ]}
         />
         <button onClick={() => setScreen('basket')} className="relative text-white font-bold px-3 py-2 rounded-xl active:scale-95"

@@ -412,8 +412,9 @@ export function HomeScreen() {
 
         {/* Single gear icon — staff menu (theme, admin, etc) */}
         <StaffMenu items={[
-          { emoji: '🎨', label: 'Change theme',   onClick: () => setShowThemePicker(true) },
-          { emoji: '🔧', label: 'Admin settings', onClick: () => setScreen('admin') },
+          { emoji: '🎨', label: 'Change theme',    onClick: () => setShowThemePicker(true) },
+          { emoji: '🔄', label: 'Refresh site',    onClick: () => window.location.reload() },
+          { emoji: '🔧', label: 'Admin settings',  onClick: () => setScreen('admin') },
         ]} />
 
         {/* Hidden staff tap zone — 3 taps within 3 s → admin */}
