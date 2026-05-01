@@ -119,6 +119,8 @@ export default function CatalogItemsPage() {
       available_until: item.available_until ? item.available_until.slice(0, 10) : '',
       display_channel: item.display_channel || 'both',
       branch_stock: item.branch_stock || {},
+      send_email_on_payment: item.send_email_on_payment ?? false,
+      email_template_key:    item.email_template_key ?? '',
     })
     setShowForm(true)
   }

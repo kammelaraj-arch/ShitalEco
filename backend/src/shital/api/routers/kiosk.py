@@ -1610,8 +1610,8 @@ async def render_print_template(body: PrintReceiptVars):
     Settings → Email Templates) with the supplied variables. Used by the
     kiosk Confirmation screen to build the printable HTML and by the
     Shop screen's 'Test Print' button to verify the printer."""
-    from sqlalchemy import text as sql_text
     from jinja2 import Environment
+    from sqlalchemy import text as sql_text
 
     from shital.core.fabrics.database import SessionLocal
 
