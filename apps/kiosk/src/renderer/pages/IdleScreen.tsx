@@ -153,6 +153,17 @@ export function IdleScreen() {
         English · ગુજરાતી · हिंदी
       </motion.p>
 
+      {/* Walk-by hint — visitors who don't tap can donate from their phone */}
+      <motion.p
+        className="mt-3 text-sm select-none relative z-10"
+        style={{ color: `${th.headerSub}70`, letterSpacing: '0.5px' }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 1.2, duration: 0.8 }}
+      >
+        Or visit <span style={{ color: th.langActive, fontWeight: 700 }}>kiosk.shop</span>
+      </motion.p>
+
       {/* Scrolling ticker — available services */}
       <div className="absolute bottom-0 left-0 right-0 z-10 overflow-hidden" style={{ borderTop: `1px solid ${ringColor}20`, background: 'rgba(0,0,0,0.28)', backdropFilter: 'blur(8px)' }}>
         <motion.div
