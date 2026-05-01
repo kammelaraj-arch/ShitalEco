@@ -1,5 +1,7 @@
 name: Deploy to Dev
 
+# v2: polls GHCR for an image whose GIT_SHA matches this commit before
+# pulling (no more stale-image race).
 # Lightweight image-pull deploy. CI builds & pushes :dev images to GHCR;
 # this workflow waits until the :dev image labeled with the *current commit
 # SHA* is in the registry, then pulls + restarts on the VPS.
