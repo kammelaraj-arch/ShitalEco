@@ -17,7 +17,7 @@ interface AzureConfig { client_id: string; authority: string }
 
 export function SetupScreen() {
   const {
-    setBranchId, setTheme, setOrgName, setOrgLogoUrl,
+    setBranchId, setTheme, setMenuOptions, setOrgName, setOrgLogoUrl,
     setCardDevice, setDeviceConfigured, setLoggedInUser, setKioskDevice, setScreen,
   } = useKioskStore()
 
@@ -43,6 +43,10 @@ export function SetupScreen() {
     // for backward compat with older API shape.
     const themeFromApi = (data as { kiosk_theme?: string }).kiosk_theme || data.profile?.theme
     if (themeFromApi) setTheme(themeFromApi as KioskTheme)
+    // Per-device staff-menu options — controls which actions appear under
+    // the kiosk gear icon (test print, theme cycle, refresh, admin).
+    const apiMenu = (data as { menu_options?: Record<string, boolean> }).menu_options
+    if (apiMenu) setMenuOptions(apiMenu)
     if (data.stripe_reader_id) setCardDevice('stripe_terminal', data.stripe_reader_id, data.reader_label || data.stripe_reader_id)
     setKioskDevice(data.user.id || '', data.user.name || '')
     setLoggedInUser({ name: data.user.name, email: data.user.email, branch: data.branch.name })

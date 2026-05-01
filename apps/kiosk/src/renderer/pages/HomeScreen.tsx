@@ -203,7 +203,7 @@ function LanguagePicker({ onClose }: { onClose: () => void }) {
 
 // ─── Main HomeScreen ──────────────────────────────────────────────────────────
 export function HomeScreen() {
-  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl, menuOptions } = useKioskStore()
   const th = THEMES[theme]
   const [activeNav, setActiveNav] = useState(() => homeActiveNav || 'donations')
 
@@ -410,11 +410,12 @@ export function HomeScreen() {
           )}
         </button>
 
-        {/* Single gear icon — staff menu (theme, admin, etc) */}
+        {/* Single gear icon — staff menu. Items are filtered per-device via
+            kiosk_devices.menu_options (admin → Devices → ⚙️ Staff Menu). */}
         <StaffMenu items={[
-          { emoji: '🎨', label: 'Change theme',    onClick: () => setShowThemePicker(true) },
-          { emoji: '🔄', label: 'Refresh site',    onClick: () => window.location.reload() },
-          { emoji: '🔧', label: 'Admin settings',  onClick: () => setScreen('admin') },
+          ...(menuOptions.theme_cycle ? [{ emoji: '🎨', label: 'Change theme',    onClick: () => setShowThemePicker(true) }] : []),
+          ...(menuOptions.refresh     ? [{ emoji: '🔄', label: 'Refresh site',    onClick: () => window.location.reload() }] : []),
+          ...(menuOptions.admin       ? [{ emoji: '🔧', label: 'Admin settings',  onClick: () => setScreen('admin') }] : []),
         ]} />
 
         {/* Hidden staff tap zone — 3 taps within 3 s → admin */}

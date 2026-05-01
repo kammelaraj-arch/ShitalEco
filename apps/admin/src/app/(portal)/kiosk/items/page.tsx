@@ -66,6 +66,7 @@ export default function CatalogItemsPage() {
   const [items, setItems] = useState<Item[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [projects, setProjects] = useState<Project[]>([])
+  const [emailTemplates, setEmailTemplates] = useState<{ template_key: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
@@ -89,14 +90,16 @@ export default function CatalogItemsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [itemData, brData, prData] = await Promise.all([
+      const [itemData, brData, prData, etData] = await Promise.all([
         apiFetch<{ items: Item[] }>('/items/?active_only=false'),
         apiFetch<{ branches: Branch[] }>('/branches'),
         apiFetch<{ projects: Project[] }>('/projects?include_inactive=true').catch(() => ({ projects: [] })),
+        apiFetch<{ templates: { template_key: string; name: string }[] }>('/admin/email-templates').catch(() => ({ templates: [] })),
       ])
       setItems(itemData.items || [])
       setBranches(brData.branches || [])
       setProjects(prData.projects || [])
+      setEmailTemplates(etData.templates || [])
     } catch { setError('Failed to load items') }
     finally { setLoading(false) }
   }, [])
@@ -572,17 +575,22 @@ export default function CatalogItemsPage() {
                   </div>
                   {form.send_email_on_payment && (
                     <div>
-                      <label className="text-white/60 text-xs uppercase tracking-wider mb-1 block">Email template key</label>
-                      <input
-                        type="text"
+                      <label className="text-white/60 text-xs uppercase tracking-wider mb-1 block">Email template</label>
+                      <SearchSelect
+                        options={[
+                          { value: '', label: '— select a template —' },
+                          ...emailTemplates.map(t => ({
+                            value: t.template_key,
+                            label: `${t.name || t.template_key}  ·  ${t.template_key}`,
+                          })),
+                        ]}
                         value={form.email_template_key}
-                        onChange={e => setForm(p => ({ ...p, email_template_key: e.target.value }))}
-                        placeholder="e.g. brick_donation_thanks"
-                        className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 text-sm focus:outline-none focus:border-saffron-500/60"
+                        onChange={v => setForm(p => ({ ...p, email_template_key: v }))}
+                        placeholder="Search and select an email template…"
                       />
                       <p className="text-white/30 text-xs mt-1">
-                        Must match a row in <code className="bg-white/5 px-1 rounded">email_templates.template_key</code>.
-                        Create the template at <a href="/settings/email-templates" className="text-saffron-400 underline">Settings → Email Templates</a>.
+                        Lists rows from <code className="bg-white/5 px-1 rounded">email_templates</code>.
+                        Need a new one? Create it at <a href="/settings/email-templates" className="text-saffron-400 underline">Settings → Email Templates</a>, then come back.
                       </p>
                     </div>
                   )}

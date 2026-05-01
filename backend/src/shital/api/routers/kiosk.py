@@ -2175,6 +2175,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(kd.bg_color, '') AS bg_color,
                        kd.card_reader_id,
                        COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.menu_options, '{"test_print": true, "theme_cycle": true, "refresh": true, "admin": true}'::jsonb) AS menu_options,
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
                        td.stripe_reader_id, td.label AS reader_label,
@@ -2216,6 +2217,8 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "confirmation_text": device["confirmation_text"] or "",
             "bg_color": device["bg_color"] or "",
             "kiosk_theme": device["kiosk_theme"] or "saffron",
+        "menu_options": device.get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
+            "menu_options": device.get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
             "org_logo_url": device["org_logo_url"] or "",
             "org_name": device["org_name"] or "",
         }
@@ -2289,6 +2292,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(kd.confirmation_text, '') AS confirmation_text,
                        COALESCE(kd.bg_color, '') AS bg_color,
                        COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.menu_options, '{"test_print": true, "theme_cycle": true, "refresh": true, "admin": true}'::jsonb) AS menu_options,
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
                        td.stripe_reader_id, td.label AS reader_label,
@@ -2323,6 +2327,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 "confirmation_text": dev_row["confirmation_text"] or "",
                 "bg_color": dev_row["bg_color"] or "",
                 "kiosk_theme": dev_row["kiosk_theme"] or "saffron",
+                "menu_options": dev_row.get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
                 "org_logo_url": dev_row["org_logo_url"] or "",
                 "org_name": dev_row["org_name"] or "",
             }
@@ -2382,6 +2387,7 @@ async def quick_kiosk_refresh_config(username: str):
                        COALESCE(kd.confirmation_text, '') AS confirmation_text,
                        COALESCE(kd.bg_color, '') AS bg_color,
                        COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.menu_options, '{"test_print": true, "theme_cycle": true, "refresh": true, "admin": true}'::jsonb) AS menu_options,
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
                        kd.card_reader_id,
@@ -2422,6 +2428,7 @@ async def quick_kiosk_refresh_config(username: str):
         "confirmation_text": device["confirmation_text"] or "",
         "bg_color": device["bg_color"] or "",
         "kiosk_theme": device["kiosk_theme"] or "saffron",
+        "menu_options": device.get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
         "org_logo_url": device["org_logo_url"] or "",
         "org_name": device["org_name"] or "",
     }

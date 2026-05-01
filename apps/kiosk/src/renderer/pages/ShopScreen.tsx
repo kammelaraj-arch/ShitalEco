@@ -77,7 +77,7 @@ function filterItems(items: typeof SHOP_ITEMS, f: string) {
 }
 
 export function ShopScreen() {
-  const { language, setScreen, addItem, items, theme, setTheme } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, setTheme, menuOptions } = useKioskStore()
   const th = THEMES[theme]
   // Theme cycler from the gear menu — quick way for staff to flip themes
   // without leaving the Shop screen.
@@ -123,10 +123,10 @@ export function ShopScreen() {
         <StaffMenu
           iconBg="white"
           items={[
-            { emoji: '🖨️', label: 'Test print receipt',    onClick: testPrintReceipt },
-            { emoji: '🎨', label: `Cycle theme (${theme})`, onClick: cycleTheme },
-            { emoji: '🔄', label: 'Refresh site',           onClick: () => window.location.reload() },
-            { emoji: '🔧', label: 'Admin settings',         onClick: () => setScreen('admin') },
+            ...(menuOptions.test_print  ? [{ emoji: '🖨️', label: 'Test print receipt',    onClick: testPrintReceipt }] : []),
+            ...(menuOptions.theme_cycle ? [{ emoji: '🎨', label: `Cycle theme (${theme})`, onClick: cycleTheme }] : []),
+            ...(menuOptions.refresh     ? [{ emoji: '🔄', label: 'Refresh site',           onClick: () => window.location.reload() }] : []),
+            ...(menuOptions.admin       ? [{ emoji: '🔧', label: 'Admin settings',         onClick: () => setScreen('admin') }] : []),
           ]}
         />
         <button onClick={() => setScreen('basket')} className="relative text-white font-bold px-3 py-2 rounded-xl active:scale-95"

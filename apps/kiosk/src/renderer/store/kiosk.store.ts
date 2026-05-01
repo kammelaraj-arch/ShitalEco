@@ -216,6 +216,7 @@ interface KioskState {
   theme: KioskTheme
   orgName: string
   orgLogoUrl: string
+  menuOptions: { test_print: boolean; theme_cycle: boolean; refresh: boolean; admin: boolean }
   cardProvider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash'
   stripeReaderId: string
   stripeReaderLabel: string
@@ -251,6 +252,7 @@ interface KioskState {
   setHomeActiveNav: (nav: string) => void
   setLanguage: (lang: Language) => void
   setTheme: (theme: KioskTheme) => void
+  setMenuOptions: (opts: Partial<{ test_print: boolean; theme_cycle: boolean; refresh: boolean; admin: boolean }>) => void
   setBranchId: (id: string) => void
   setDeviceConfigured: (v: boolean) => void
   setLoggedInUser: (u: { name: string; email: string; branch: string } | null) => void
@@ -284,6 +286,7 @@ export const useKioskStore = create<KioskState>()(
   deviceConfigured: false,
   loggedInUser: null,
   theme: 'lotus',
+  menuOptions: { test_print: true, theme_cycle: true, refresh: true, admin: true },
   orgName: 'Shital',
   orgLogoUrl: '',
   giftAidDeclaration: null,
@@ -314,6 +317,7 @@ export const useKioskStore = create<KioskState>()(
   setHomeActiveNav: (homeActiveNav) => set({ homeActiveNav }),
   setLanguage: (language) => set({ language }),
   setTheme: (theme) => set({ theme }),
+  setMenuOptions: (opts) => set(state => ({ menuOptions: { ...state.menuOptions, ...opts } })),
   setBranchId: (branchId) => set({ branchId }),
   setDeviceConfigured: (deviceConfigured) => set({ deviceConfigured }),
   setLoggedInUser: (loggedInUser) => set({ loggedInUser }),

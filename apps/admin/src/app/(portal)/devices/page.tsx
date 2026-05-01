@@ -38,6 +38,7 @@ interface KioskDevice {
   show_monthly_giving: boolean
   enable_gift_aid: boolean
   tap_and_go: boolean
+  menu_options?: { test_print?: boolean; theme_cycle?: boolean; refresh?: boolean; admin?: boolean }
   created_at: string
   updated_at: string
 }
@@ -83,6 +84,7 @@ const EMPTY_FORM = {
   monthly_giving_amount: 5,
   confirmation_text: '',
   bg_color: '',
+  menu_options: { test_print: true, theme_cycle: true, refresh: true, admin: true },
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -183,6 +185,12 @@ export default function DevicesPage() {
       monthly_giving_amount: d.monthly_giving_amount ?? 5,
       confirmation_text: d.confirmation_text || '',
       bg_color: d.bg_color || '',
+      menu_options: {
+        test_print:  d.menu_options?.test_print  ?? true,
+        theme_cycle: d.menu_options?.theme_cycle ?? true,
+        refresh:     d.menu_options?.refresh     ?? true,
+        admin:       d.menu_options?.admin       ?? true,
+      },
     })
     setError('')
     setDrawerOpen(true)
@@ -760,6 +768,46 @@ export default function DevicesPage() {
                         })}
                       </div>
                       <p className="text-white/30 text-[10px] mt-1">Theme applied when device loads via token URL</p>
+                    </div>
+
+                    {/* Per-device staff-menu options — gear icon ⚙️ on the kiosk */}
+                    <div>
+                      <p className={lbl}>⚙️ Staff Menu (gear icon)</p>
+                      <p className="text-white/30 text-[10px] mb-2">
+                        Tick the actions you want visible in the kiosk gear menu on this device.
+                        Hide an option if a particular kiosk shouldn't expose it (e.g. no admin link
+                        on customer-facing displays).
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { key: 'test_print',  label: '🖨️ Test print receipt' },
+                          { key: 'theme_cycle', label: '🎨 Cycle theme' },
+                          { key: 'refresh',     label: '🔄 Refresh site' },
+                          { key: 'admin',       label: '🔧 Admin settings' },
+                        ].map(opt => {
+                          const checked = form.menu_options?.[opt.key as keyof typeof form.menu_options] ?? true
+                          return (
+                            <label
+                              key={opt.key}
+                              className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition"
+                              style={{
+                                background: checked ? 'rgba(255,153,51,0.12)' : 'rgba(255,255,255,0.04)',
+                                border: checked ? '1px solid rgba(255,153,51,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                              }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={e => setForm(f => ({
+                                  ...f,
+                                  menu_options: { ...(f.menu_options || {}), [opt.key]: e.target.checked },
+                                }))}
+                                className="accent-amber-500"
+                              />
+                              <span className="text-white/80 text-xs">{opt.label}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
                     </div>
 
                     <div>
