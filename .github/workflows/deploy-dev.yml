@@ -1,21 +1,22 @@
 name: Deploy to Dev
 
 # Lightweight image-pull deploy. CI builds & pushes :dev images to GHCR;
-# this workflow only updates the compose file on the VPS and tells docker
-# to pull + restart. Takes ~1 minute, never builds anything on the server.
+# this workflow waits for CI to finish, then pulls + restarts on the VPS.
+# Takes ~1 minute, never builds anything on the server.
 #
-# Triggers on every push to main, develop, or any claude/* working branch
-# so contributors can ship by simply running `git push`.
+# Triggered by the 'Shital ERP CI/CD' workflow completing successfully on
+# main / develop / claude/** branches — so we never try to pull a :dev
+# image that hasn't been built yet (the recurring stale-image trap).
+# workflow_dispatch is kept so you can re-run manually.
 
 on:
-  push:
+  workflow_run:
+    workflows: ['Shital ERP CI/CD']
+    types: [completed]
     branches:
       - main
       - develop
       - 'claude/**'
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
   workflow_dispatch:
 
 concurrency:
@@ -26,16 +27,13 @@ jobs:
   deploy-dev:
     name: Pull :dev images & restart dev stack
     runs-on: ubuntu-latest
-    # Wait for CI to finish pushing the :dev images before we try to pull them.
-    # (CI runs in parallel; we don't gate on it directly because GitHub Actions
-    # doesn't natively support cross-workflow waits — instead we sleep briefly
-    # and the docker pull will simply fetch whatever's tagged :dev right now.)
+    # Skip if the CI workflow that triggered us didn't succeed — no point
+    # pulling :dev when CI failed and didn't push a new image. Allow manual
+    # workflow_dispatch through unconditionally.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     steps:
-      - name: Wait for CI :dev images
-        run: |
-          echo "Sleeping 20s to let CI's docker-build job get a head start…"
-          sleep 20
-
       - name: Pull :dev + restart dev stack on VPS
         uses: appleboy/ssh-action@v1.0.3
         env:
