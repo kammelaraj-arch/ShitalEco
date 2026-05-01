@@ -1,22 +1,25 @@
 name: Deploy to Dev
 
 # Lightweight image-pull deploy. CI builds & pushes :dev images to GHCR;
-# this workflow waits for CI to finish, then pulls + restarts on the VPS.
-# Takes ~1 minute, never builds anything on the server.
+# this workflow waits until the :dev image labeled with the *current commit
+# SHA* is in the registry, then pulls + restarts on the VPS.
 #
-# Triggered by the 'Shital ERP CI/CD' workflow completing successfully on
-# main / develop / claude/** branches — so we never try to pull a :dev
-# image that hasn't been built yet (the recurring stale-image trap).
-# workflow_dispatch is kept so you can re-run manually.
+# We use `on: push` (works on any branch — workflow_run requires the file
+# to be on the default branch). The wait-for-image step makes it safe to
+# fire immediately on push, even before CI finishes building: it polls
+# until the registry has a :dev image whose git.sha label matches this
+# commit. If CI fails, the polling times out and the deploy fails loudly
+# instead of pulling a stale image.
 
 on:
-  workflow_run:
-    workflows: ['Shital ERP CI/CD']
-    types: [completed]
+  push:
     branches:
       - main
       - develop
       - 'claude/**'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch:
 
 concurrency:
@@ -27,13 +30,28 @@ jobs:
   deploy-dev:
     name: Pull :dev images & restart dev stack
     runs-on: ubuntu-latest
-    # Skip if the CI workflow that triggered us didn't succeed — no point
-    # pulling :dev when CI failed and didn't push a new image. Allow manual
-    # workflow_dispatch through unconditionally.
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     steps:
+      - name: Wait for :dev image with this commit SHA
+        env:
+          GH_PAT:    ${{ secrets.GH_PAT }}
+          TARGET:    ${{ github.sha }}
+        run: |
+          set -eu
+          echo "$GH_PAT" | docker login ghcr.io -u kammelaraj-arch --password-stdin >/dev/null
+          IMG=ghcr.io/kammelaraj-arch/shitaleco-backend:dev
+          for i in $(seq 1 60); do
+            docker pull "$IMG" >/dev/null 2>&1 || true
+            CUR=$(docker inspect "$IMG" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '/^GIT_SHA=/{print $2; exit}')
+            echo "  attempt $i/60 — :dev tag has GIT_SHA=$CUR (waiting for $TARGET)"
+            if [ "$CUR" = "$TARGET" ]; then
+              echo "OK — :dev image matches this commit"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for :dev image with GIT_SHA=$TARGET — likely CI failed. Skipping deploy."
+          exit 1
+
       - name: Pull :dev + restart dev stack on VPS
         uses: appleboy/ssh-action@v1.0.3
         env:
