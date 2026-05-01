@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useKioskStore, THEMES } from '../store/kiosk.store'
+import { useKioskStore, THEMES, KioskTheme } from '../store/kiosk.store'
 import { SHOP_ITEMS } from '../data/catalog'
+import { StaffMenu } from '../components/StaffMenu'
 
 const FILTERS = ['All', 'Puja', 'Books', 'Murtis', 'Malas', 'Prasad']
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
@@ -76,8 +77,15 @@ function filterItems(items: typeof SHOP_ITEMS, f: string) {
 }
 
 export function ShopScreen() {
-  const { language, setScreen, addItem, items, theme } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, setTheme } = useKioskStore()
   const th = THEMES[theme]
+  // Theme cycler from the gear menu — quick way for staff to flip themes
+  // without leaving the Shop screen.
+  const themeKeys: KioskTheme[] = ['lotus', 'saffron', 'royal', 'peacock', 'jasmine', 'crimson']
+  const cycleTheme = () => {
+    const next = themeKeys[(themeKeys.indexOf(theme) + 1) % themeKeys.length]
+    setTheme(next)
+  }
   const [filter, setFilter] = useState('All')
   const [added, setAdded] = useState<string | null>(null)
 
@@ -112,7 +120,14 @@ export function ShopScreen() {
           <span className="text-gray-500 text-sm">✗</span>
           <span className="text-gray-600 font-bold text-xs">Not Gift Aid</span>
         </div>
-        <StaffMenu onTestPrint={testPrintReceipt} />
+        <StaffMenu
+          iconBg="white"
+          items={[
+            { emoji: '🖨️', label: 'Test print receipt',  onClick: testPrintReceipt },
+            { emoji: '🎨', label: `Cycle theme (${theme})`, onClick: cycleTheme },
+            { emoji: '🔧', label: 'Admin settings',       onClick: () => setScreen('admin') },
+          ]}
+        />
         <button onClick={() => setScreen('basket')} className="relative text-white font-bold px-3 py-2 rounded-xl active:scale-95"
           style={{ background: th.basketBtn }}>
           🛒
@@ -181,34 +196,5 @@ export function ShopScreen() {
   )
 }
 
-// ─── Staff menu (gear icon, top-right) ────────────────────────────────────
-// Discreet menu for staff-only actions during the day. Triple-tap protection
-// would be overkill here — opening the menu is safe, only the actions inside
-// (test print, etc) actually do anything.
-function StaffMenu({ onTestPrint }: { onTestPrint: () => void }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        title="Staff menu"
-        className="px-2.5 py-2 rounded-xl text-sm active:scale-95 border border-gray-200 bg-white text-gray-700 hover:bg-gray-50">
-        ⚙️
-      </button>
-      {open && (
-        <>
-          {/* Click-outside catcher */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-50 min-w-[200px] rounded-xl bg-white border border-gray-200 shadow-lg overflow-hidden">
-            <button
-              onClick={() => { setOpen(false); onTestPrint() }}
-              className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-              🖨️ Test print receipt
-            </button>
-            {/* Future staff options go here */}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
+// (Shared StaffMenu lives in ../components/StaffMenu.tsx — used on
+// both HomeScreen and here so all staff actions live under one ⚙️ icon.)

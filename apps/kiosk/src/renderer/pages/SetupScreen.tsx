@@ -39,7 +39,10 @@ export function SetupScreen() {
     if (!data.branch || !data.user) return
     setBranchId(data.branch.id)
     setOrgName(data.branch.name)
-    if (data.profile?.theme) setTheme(data.profile.theme as KioskTheme)
+    // Backend returns kiosk_theme at root (preferred); also accept profile.theme
+    // for backward compat with older API shape.
+    const themeFromApi = (data as { kiosk_theme?: string }).kiosk_theme || data.profile?.theme
+    if (themeFromApi) setTheme(themeFromApi as KioskTheme)
     if (data.stripe_reader_id) setCardDevice('stripe_terminal', data.stripe_reader_id, data.reader_label || data.stripe_reader_id)
     setKioskDevice(data.user.id || '', data.user.name || '')
     setLoggedInUser({ name: data.user.name, email: data.user.email, branch: data.branch.name })
