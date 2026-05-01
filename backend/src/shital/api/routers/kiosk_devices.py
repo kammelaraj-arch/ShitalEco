@@ -11,6 +11,7 @@ device to fetch its config without a user session.
 """
 from __future__ import annotations
 
+import json
 import secrets
 import uuid
 from datetime import datetime
@@ -265,7 +266,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "mg_amount": body.monthly_giving_amount or 5.0,
             "confirm_text": body.confirmation_text or "",
             "bg_color": body.bg_color or "",
-            "menu_opts": __import__("json").dumps(body.menu_options or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}),
+            "menu_opts": json.dumps(body.menu_options or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}),
             "now": now,
         })
         await db.commit()
@@ -334,7 +335,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "mg_amount": body.monthly_giving_amount or 5.0,
             "confirm_text": body.confirmation_text or "",
             "bg_color": body.bg_color or "",
-            "menu_opts": __import__("json").dumps(body.menu_options or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}),
+            "menu_opts": json.dumps(body.menu_options or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}),
             "now": now,
         })
         await db.commit()

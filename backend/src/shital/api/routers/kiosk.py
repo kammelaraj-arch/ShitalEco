@@ -2217,8 +2217,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "confirmation_text": device["confirmation_text"] or "",
             "bg_color": device["bg_color"] or "",
             "kiosk_theme": device["kiosk_theme"] or "saffron",
-        "menu_options": device.get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
-            "menu_options": device.get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
+            "menu_options": dict(device).get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
             "org_logo_url": device["org_logo_url"] or "",
             "org_name": device["org_name"] or "",
         }
@@ -2327,7 +2326,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 "confirmation_text": dev_row["confirmation_text"] or "",
                 "bg_color": dev_row["bg_color"] or "",
                 "kiosk_theme": dev_row["kiosk_theme"] or "saffron",
-                "menu_options": dev_row.get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
+                "menu_options": dict(dev_row).get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
                 "org_logo_url": dev_row["org_logo_url"] or "",
                 "org_name": dev_row["org_name"] or "",
             }
@@ -2428,7 +2427,7 @@ async def quick_kiosk_refresh_config(username: str):
         "confirmation_text": device["confirmation_text"] or "",
         "bg_color": device["bg_color"] or "",
         "kiosk_theme": device["kiosk_theme"] or "saffron",
-        "menu_options": device.get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
+        "menu_options": dict(device).get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
         "org_logo_url": device["org_logo_url"] or "",
         "org_name": device["org_name"] or "",
     }
