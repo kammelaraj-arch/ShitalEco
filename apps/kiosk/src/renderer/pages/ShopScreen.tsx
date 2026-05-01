@@ -4,6 +4,66 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 import { SHOP_ITEMS } from '../data/catalog'
 
 const FILTERS = ['All', 'Puja', 'Books', 'Murtis', 'Malas', 'Prasad']
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
+
+// Print a sample receipt — fires the kiosk_print_receipt template (admin-
+// editable in Settings → Email Templates) with placeholder data so staff
+// can verify the printer + cut position without doing a real transaction.
+async function testPrintReceipt() {
+  const sampleItems = [
+    { name: 'General Donation', qty: 1, total: 11.00 },
+    { name: 'Prasad',           qty: 2, total: 5.00 },
+    { name: 'Mandir Seva',      qty: 1, total: 21.00 },
+  ]
+  const itemsHtml = `
+    <div style="border-top:1px dashed #000;padding-top:6px;margin-bottom:6px;">
+      ${sampleItems.map(i => `
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
+          <span>${i.name} x${i.qty}</span><span style="font-weight:700;">£${i.total.toFixed(2)}</span>
+        </div>`).join('')}
+    </div>`
+  const total = sampleItems.reduce((s, i) => s + i.total, 0).toFixed(2)
+  try {
+    const res = await fetch(`${API_BASE}/kiosk/print-template`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        branch_name: 'Shital Wembley',
+        donor_name:  'Test Print',
+        order_ref:   'TEST-' + Date.now().toString().slice(-6),
+        items_html:  itemsHtml,
+        total,
+        payment_method: 'TEST RECEIPT',
+      }),
+    })
+    if (!res.ok) throw new Error(`render ${res.status}`)
+    const { html } = await res.json()
+
+    // Open a hidden iframe with just the rendered receipt and print it.
+    // Avoids dragging the whole kiosk page into the print preview.
+    const f = document.createElement('iframe')
+    f.style.position = 'fixed'
+    f.style.right = '-9999px'
+    f.style.bottom = '-9999px'
+    f.style.width  = '80mm'
+    f.style.height = '0'
+    document.body.appendChild(f)
+    const doc = f.contentWindow?.document
+    if (!doc) return
+    doc.open()
+    doc.write(`<!doctype html><html><head><style>@page{size:80mm auto;margin:0}body{margin:0}</style></head><body>${html}</body></html>`)
+    doc.close()
+    setTimeout(() => {
+      const win = f.contentWindow
+      if (win) {
+        try { win.focus(); win.print() } catch { /* ignore */ }
+      }
+      setTimeout(() => f.remove(), 2000)
+    }, 200)
+  } catch (e) {
+    alert(`Test print failed: ${e instanceof Error ? e.message : 'unknown'}`)
+  }
+}
 
 function filterItems(items: typeof SHOP_ITEMS, f: string) {
   if (f === 'All') return items
@@ -52,6 +112,7 @@ export function ShopScreen() {
           <span className="text-gray-500 text-sm">✗</span>
           <span className="text-gray-600 font-bold text-xs">Not Gift Aid</span>
         </div>
+        <StaffMenu onTestPrint={testPrintReceipt} />
         <button onClick={() => setScreen('basket')} className="relative text-white font-bold px-3 py-2 rounded-xl active:scale-95"
           style={{ background: th.basketBtn }}>
           🛒
@@ -116,6 +177,38 @@ export function ShopScreen() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+// ─── Staff menu (gear icon, top-right) ────────────────────────────────────
+// Discreet menu for staff-only actions during the day. Triple-tap protection
+// would be overkill here — opening the menu is safe, only the actions inside
+// (test print, etc) actually do anything.
+function StaffMenu({ onTestPrint }: { onTestPrint: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="Staff menu"
+        className="px-2.5 py-2 rounded-xl text-sm active:scale-95 border border-gray-200 bg-white text-gray-700 hover:bg-gray-50">
+        ⚙️
+      </button>
+      {open && (
+        <>
+          {/* Click-outside catcher */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-50 min-w-[200px] rounded-xl bg-white border border-gray-200 shadow-lg overflow-hidden">
+            <button
+              onClick={() => { setOpen(false); onTestPrint() }}
+              className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              🖨️ Test print receipt
+            </button>
+            {/* Future staff options go here */}
+          </div>
+        </>
+      )}
     </div>
   )
 }

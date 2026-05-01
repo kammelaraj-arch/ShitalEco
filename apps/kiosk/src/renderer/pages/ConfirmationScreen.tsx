@@ -246,11 +246,11 @@ export function ConfirmationScreen() {
             <div style={{ marginTop: 4 }}>kiosk.shital.org.uk</div>
           </div>
 
-          {/* Tiny trailing margin (~3mm) so the cut doesn't slice the last
-              text line. Most printer drivers already feed the paper past the
-              cutter blade themselves — this just guarantees a clean edge
-              without wasting roll. Increase if your driver cuts too high. */}
-          <div style={{ height: 12 }}>&nbsp;</div>
+          {/* No fixed trailing margin — the printer driver's feed-before-cut
+              advances paper past the cutter blade content-aware (same fixed
+              mm past the print head no matter how long the receipt is).
+              The editable kiosk_print_receipt template can set cut_margin_px
+              if a specific printer needs extra padding. */}
         </div>
 
         {/* ── Star rating ── */}

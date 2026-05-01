@@ -1534,6 +1534,57 @@ async def list_branches():
     return {"branches": BRANCHES}
 
 
+# ─── Kiosk Print Receipt Template ─────────────────────────────────────────────
+
+class PrintReceiptVars(BaseModel):
+    branch_name: str = "Shital"
+    donor_name: str = ""
+    order_ref: str = "TEST-0000"
+    date: str = ""
+    items_html: str = ""
+    total: str = "0.00"
+    payment_method: str = "CARD PAYMENT"
+    gift_aid_block: str = ""
+    # Default 0 — printer driver's built-in feed-before-cut is already
+    # content-length aware (it feeds a fixed mm past the print head no
+    # matter how long the receipt is). Bump only if your printer cuts
+    # through the last text line.
+    cut_margin_px: int = 0
+
+
+@router.post("/print-template")
+async def render_print_template(body: PrintReceiptVars):
+    """Render the kiosk_print_receipt template (editable in admin →
+    Settings → Email Templates) with the supplied variables. Used by the
+    kiosk Confirmation screen to build the printable HTML and by the
+    Shop screen's 'Test Print' button to verify the printer."""
+    from sqlalchemy import text as sql_text
+    from jinja2 import Environment
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        r = await db.execute(
+            sql_text("SELECT html_body FROM email_templates WHERE template_key = 'kiosk_print_receipt' AND is_active LIMIT 1")
+        )
+        row = r.mappings().first()
+
+    html_template = row["html_body"] if row else (
+        # Fallback if the seed didn't run yet — minimal template
+        '<div style="font-family:monospace;width:80mm;padding:6mm;">'
+        '<h2>{{ branch_name }}</h2><p>{{ order_ref }} — £{{ total }}</p>'
+        '{{ items_html | safe }}'
+        '<div style="height:{{ cut_margin_px }}px;">&nbsp;</div></div>'
+    )
+
+    if not body.date:
+        body.date = datetime.utcnow().strftime("%d/%m/%Y %H:%M")
+
+    env = Environment(autoescape=False)
+    rendered = env.from_string(html_template).render(**body.model_dump())
+    return {"html": rendered}
+
+
 # ─── QuickDonation Kiosk Accounts ────────────────────────────────────────────
 
 QUICK_KIOSK_ACCOUNTS = [

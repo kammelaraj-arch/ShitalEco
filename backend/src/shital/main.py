@@ -1319,6 +1319,42 @@ _{{ branch_name }} — Registered UK Charity_"""
             "text_body": whatsapp_receipt_text,
             "variables": '["order_ref","customer_name","total","items","branch_name","date"]',
         },
+        {
+            "key": "kiosk_print_receipt",
+            "name": "Kiosk Thermal Print Receipt",
+            "subject": "",
+            "html_body": (
+                '<div style="font-family:\'Courier New\',monospace;font-size:11pt;width:80mm;padding:6mm;background:white;color:black;">'
+                '  <div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:8px;margin-bottom:8px;">'
+                '    <div style="font-size:16px;font-weight:900;letter-spacing:1px;">🕉 Shital Temple</div>'
+                '    <div style="font-size:11px;font-weight:700;margin-top:2px;">Branch: {{ branch_name }}</div>'
+                '    {% if donor_name %}<div style="font-size:11px;font-weight:700;">Name: {{ donor_name }}</div>{% endif %}'
+                '    <div style="font-size:9px;margin-top:4px;color:#555;">{{ date }}</div>'
+                '  </div>'
+                '  <div style="text-align:center;margin-bottom:8px;">'
+                '    <div style="font-size:9px;color:#555;">ORDER REFERENCE</div>'
+                '    <div style="font-size:13px;font-weight:900;letter-spacing:2px;">{{ order_ref }}</div>'
+                '  </div>'
+                '  {{ items_html | safe }}'
+                '  <div style="border-top:2px solid #000;padding-top:5px;margin-bottom:6px;">'
+                '    <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:900;">'
+                '      <span>TOTAL</span><span>£{{ total }}</span>'
+                '    </div>'
+                '    <div style="font-size:9px;text-align:right;color:#555;">{{ payment_method }}</div>'
+                '  </div>'
+                '  {{ gift_aid_block | safe }}'
+                '  <div style="border-top:1px dashed #000;padding-top:8px;text-align:center;font-size:9px;color:#444;">'
+                '    <div style="font-weight:900;margin-bottom:2px;">Thank you for your generous donation 🙏</div>'
+                '    <div>Jay Shri Krishna</div>'
+                '    <div style="margin-top:4px;color:#777;">This receipt is your donation record.</div>'
+                '    <div style="margin-top:4px;">kiosk.shital.org.uk</div>'
+                '  </div>'
+                '  <div style="height:{{ cut_margin_px }}px;">&nbsp;</div>'
+                '</div>'
+            ),
+            "text_body": "",
+            "variables": '["branch_name","donor_name","order_ref","date","items_html","total","payment_method","gift_aid_block","cut_margin_px"]',
+        },
     ]
 
     async with SessionLocal() as db:
