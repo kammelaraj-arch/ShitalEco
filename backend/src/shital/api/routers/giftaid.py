@@ -258,7 +258,7 @@ async def list_declarations(
                         gad.hmrc_submission_ref, gad.created_at
                     FROM gift_aid_declarations gad
                     LEFT JOIN contacts  c ON c.id = gad.contact_id
-                    LEFT JOIN orders    o ON o.order_ref = gad.order_ref
+                    LEFT JOIN orders    o ON o.reference = gad.order_ref
                     LEFT JOIN LATERAL (
                         SELECT formatted, postcode, house_number
                         FROM addresses
@@ -643,7 +643,7 @@ async def gift_aid_per_branch(ctx: CurrentSpace, year: int | None = None):
                     COALESCE(SUM(gad.donation_amount)
                              FILTER (WHERE gad.hmrc_submitted = true), 0)   AS donations_claimed
                 FROM gift_aid_declarations gad
-                LEFT JOIN orders o ON o.order_ref = gad.order_ref
+                LEFT JOIN orders o ON o.reference = gad.order_ref
                 WHERE gad.deleted_at IS NULL
                   AND EXTRACT(year FROM gad.donation_date) = :y
                 GROUP BY COALESCE(o.branch_id, 'main')
