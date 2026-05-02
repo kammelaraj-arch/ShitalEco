@@ -12,7 +12,11 @@ RUN pnpm install --no-frozen-lockfile --ignore-scripts
 COPY apps/service/ ./
 
 ARG VITE_API_URL=/api/v1
-ARG VITE_BASE=/service/
+# Default to root '/' — the service app is served at its own subdomain
+# (service.shital.org.uk). CI's docker-build step still passes VITE_BASE=/
+# explicitly, but having the default match avoids surprise breaks if CI
+# ever forgets to set the build-arg.
+ARG VITE_BASE=/
 ARG VITE_PAYPAL_CLIENT_ID=
 ARG GIT_SHA=dev
 ENV VITE_API_URL=${VITE_API_URL}
