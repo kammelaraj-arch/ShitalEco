@@ -1,7 +1,12 @@
 name: Deploy to Vultr
 
 on:
-  push:
+  # Run AFTER ci.yml finishes so :dev images are guaranteed fresh before we
+  # auto-promote them to :latest. Previously this was `push: branches: [main]`,
+  # which raced the build and could promote stale :dev.
+  workflow_run:
+    workflows: ["Shital ERP CI/CD"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -12,6 +17,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Trigger webhook deployer (preferred — bypasses fail2ban)
         run: |
@@ -132,6 +138,21 @@ jobs:
             echo "$GH_PAT" | docker login ghcr.io -u kammelaraj-arch --password-stdin
             echo "Logged in to GHCR"
 
+            # ── Auto-promote :dev → :latest in GHCR ──────────────────────────
+            # CI pushes fresh :dev images on every main merge; this step copies
+            # them to :latest in the registry so prod's pull below picks them up.
+            # Falls back gracefully when :dev is missing for a service.
+            echo "=== Auto-promoting :dev → :latest in GHCR ==="
+            for svc in backend admin quick-donation kiosk screen service; do
+              img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+              if docker pull "${img}:dev" >/dev/null 2>&1; then
+                docker tag "${img}:dev" "${img}:latest"
+                docker push "${img}:latest" >/dev/null 2>&1 && echo "  ✓ ${svc}" || echo "  ~ ${svc} push failed"
+              else
+                echo "  ~ ${svc}:dev not in registry — skipping"
+              fi
+            done
+
             # ── Checkpoint: tag :latest as :previous ─────────────────────────
             for svc in backend admin quick-donation kiosk screen service; do
               img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
@@ -221,17 +242,16 @@ jobs:
               -m admin@shirdisai.org.uk \
               2>&1 | tail -5 || true
 
-            # ── Tag :latest as :dev for dev stack ─────────────────────────────
-            for svc in backend admin quick-donation kiosk screen service; do
-              docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
-                         ghcr.io/kammelaraj-arch/shitaleco-${svc}:dev 2>/dev/null || true
-            done
-
+            # ── Refresh dev stack with the just-pushed :dev images ───────────
+            # NOTE: removed the previous "tag :latest as :dev" retag — it wiped
+            # the fresh :dev images CI had just pushed to GHCR, leaving dev
+            # permanently mirroring prod. Now we pull :dev directly.
             DEV_DIR=/opt/shitaleco-dev
             if [ -d "$DEV_DIR/.git" ]; then
               cd "$DEV_DIR"
               git fetch origin
-              git reset --hard origin/claude/shital-erp-platform-iR2UF
+              git reset --hard origin/main
+              docker compose -f docker-compose.dev.yml pull 2>/dev/null || true
               docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
             fi
 
