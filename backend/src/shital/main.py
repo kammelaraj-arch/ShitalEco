@@ -1198,76 +1198,167 @@ async def _seed_email_templates() -> None:
 
     donation_receipt_html = """<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Donation Receipt — Shital Temple</title>
+</head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:24px 0;">
 <tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.10);">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
   <!-- Header -->
   <tr>
-    <td style="background:linear-gradient(135deg,#FF9933 0%,#FF6600 100%);padding:32px 40px;text-align:center;">
-      <div style="font-size:36px;margin-bottom:8px;">🕉</div>
-      <div style="color:#ffffff;font-size:26px;font-weight:900;letter-spacing:1px;">Shital Temple</div>
-      <div style="color:rgba(255,255,255,0.85);font-size:14px;margin-top:4px;">{{ branch_name }}</div>
+    <td style="background:linear-gradient(135deg,#FF9933 0%,#E65100 100%);padding:40px 40px 32px;text-align:center;">
+      <div style="font-size:42px;line-height:1;margin-bottom:10px;">🕉</div>
+      <div style="color:#ffffff;font-size:28px;font-weight:900;letter-spacing:1px;">Shital Temple</div>
+      <div style="color:rgba(255,255,255,0.92);font-size:15px;margin-top:6px;font-weight:500;">{{ branch_name }}</div>
     </td>
   </tr>
+
   <!-- Confirmed bar -->
   <tr>
-    <td style="background:#22C55E;padding:10px 40px;text-align:center;">
-      <span style="color:#ffffff;font-weight:700;font-size:14px;letter-spacing:0.5px;">✓ Donation Confirmed — Thank You!</span>
+    <td style="background:#16A34A;padding:12px 40px;text-align:center;">
+      <span style="color:#ffffff;font-weight:700;font-size:14px;letter-spacing:0.4px;">✓ Donation Confirmed — Thank You</span>
     </td>
   </tr>
-  <!-- Body -->
+
+  <!-- Greeting -->
   <tr>
-    <td style="padding:36px 40px;">
-      {% if customer_name %}<p style="font-size:18px;font-weight:700;color:#1a1a1a;margin:0 0 8px 0;">Dear {{ customer_name }},</p>{% endif %}
-      <p style="color:#555555;font-size:15px;line-height:1.6;margin:0 0 28px 0;">Thank you for your generous donation to <strong>{{ branch_name }}</strong>. Your contribution directly supports our temple community, seva programmes, and charitable activities.</p>
-      <!-- Order reference box -->
-      <div style="background:#FFF8F0;border-left:5px solid #FF9933;padding:18px 22px;border-radius:8px;margin-bottom:28px;">
-        <div style="font-size:11px;color:#999999;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Order Reference</div>
-        <div style="font-size:22px;font-weight:900;color:#1a1a1a;letter-spacing:3px;font-family:'Courier New',monospace;">{{ order_ref }}</div>
-        <div style="font-size:12px;color:#999999;margin-top:6px;">{{ date }}</div>
-      </div>
-      <!-- Items table -->
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;border-collapse:collapse;">
+    <td style="padding:36px 40px 8px;">
+      {% if customer_name %}<p style="font-size:20px;font-weight:700;color:#111827;margin:0 0 12px 0;">Dear {{ customer_name }},</p>{% endif %}
+      <p style="color:#4B5563;font-size:15px;line-height:1.7;margin:0;">
+        Thank you for your generous donation to <strong style="color:#111827;">{{ branch_name }}</strong>.
+        Every contribution directly supports our daily seva, prasad, festivals, and the
+        community programmes that make this temple a home for our devotees.
+      </p>
+    </td>
+  </tr>
+
+  <!-- Order reference card -->
+  <tr>
+    <td style="padding:24px 40px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#FFF7ED 0%,#FFEDD5 100%);border:1px solid #FDBA74;border-radius:12px;">
+        <tr><td style="padding:18px 22px;">
+          <div style="font-size:11px;color:#9A3412;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;font-weight:700;">Order Reference</div>
+          <div style="font-size:22px;font-weight:900;color:#7C2D12;letter-spacing:3px;font-family:'SF Mono','Courier New',monospace;">{{ order_ref }}</div>
+          <div style="font-size:12px;color:#9A3412;margin-top:6px;">{{ date }}{% if payment_provider %} · {{ payment_provider|upper }}{% endif %}{% if payment_ref %} · ref {{ payment_ref }}{% endif %}</div>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Items table -->
+  <tr>
+    <td style="padding:24px 40px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>
-          <th align="left" style="font-size:11px;text-transform:uppercase;color:#999999;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #f0f0f0;">Donation</th>
-          <th align="center" style="font-size:11px;text-transform:uppercase;color:#999999;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #f0f0f0;">Qty</th>
-          <th align="right" style="font-size:11px;text-transform:uppercase;color:#999999;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #f0f0f0;">Amount</th>
+          <th align="left"  style="font-size:11px;text-transform:uppercase;color:#9CA3AF;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #F3F4F6;">Donation</th>
+          <th align="center" style="font-size:11px;text-transform:uppercase;color:#9CA3AF;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #F3F4F6;">Qty</th>
+          <th align="right" style="font-size:11px;text-transform:uppercase;color:#9CA3AF;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #F3F4F6;">Amount</th>
         </tr>
         {% for item in items %}
         <tr>
-          <td style="padding:12px 0;font-size:14px;color:#1a1a1a;border-bottom:1px solid #f5f5f5;">{{ item.name }}</td>
-          <td align="center" style="padding:12px 0;font-size:14px;color:#666666;border-bottom:1px solid #f5f5f5;">{{ item.quantity }}</td>
-          <td align="right" style="padding:12px 0;font-size:14px;color:#1a1a1a;font-weight:600;border-bottom:1px solid #f5f5f5;">£{{ "%.2f"|format((item.unitPrice or 0)|float * (item.quantity or 1)|int) }}</td>
+          <td             style="padding:14px 0;font-size:14px;color:#111827;border-bottom:1px solid #F9FAFB;">{{ item.name }}</td>
+          <td align="center" style="padding:14px 0;font-size:14px;color:#6B7280;border-bottom:1px solid #F9FAFB;">{{ item.quantity }}</td>
+          <td align="right" style="padding:14px 0;font-size:14px;color:#111827;font-weight:600;border-bottom:1px solid #F9FAFB;">£{{ "%.2f"|format((item.unitPrice or 0)|float * (item.quantity or 1)|int) }}</td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="3" style="padding:12px 0;font-size:14px;color:#555555;border-bottom:1px solid #f5f5f5;">Temple Donation</td>
+          <td colspan="3" style="padding:14px 0;font-size:14px;color:#4B5563;border-bottom:1px solid #F9FAFB;">Temple Donation</td>
         </tr>
         {% endfor %}
         <tr>
-          <td colspan="2" style="padding:16px 0 0 0;font-size:16px;font-weight:900;color:#1a1a1a;">Total Donated</td>
-          <td align="right" style="padding:16px 0 0 0;font-size:22px;font-weight:900;color:#FF6600;">£{{ "%.2f"|format(total|float) }}</td>
+          <td colspan="2" style="padding:18px 0 0;font-size:16px;font-weight:900;color:#111827;">Total Donated</td>
+          <td align="right" style="padding:18px 0 0;font-size:24px;font-weight:900;color:#E65100;">£{{ "%.2f"|format(total|float) }}</td>
         </tr>
       </table>
-      <hr style="border:none;border-top:1px solid #f0f0f0;margin:24px 0;">
-      <!-- Gift Aid notice -->
-      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:18px 22px;margin-bottom:28px;">
-        <div style="font-size:13px;font-weight:700;color:#15803d;margin-bottom:6px;">🎁 Gift Aid — Boost Your Donation by 25%</div>
-        <div style="font-size:13px;color:#166534;line-height:1.6;">If you are a UK taxpayer, the temple can claim Gift Aid on your donation at no extra cost to you. Please speak to a temple administrator or visit our website to add Gift Aid to this donation.</div>
-      </div>
-      <p style="color:#888888;font-size:13px;line-height:1.7;margin:0 0 24px 0;">Please retain this email as confirmation of your donation. This receipt is for your records only and is not a Gift Aid declaration.</p>
-      <p style="color:#FF9933;font-size:20px;font-weight:900;text-align:center;margin:0;">🙏 Jay Shri Krishna</p>
     </td>
   </tr>
+
+  <!-- What your donation supports -->
+  <tr>
+    <td style="padding:32px 40px 0;">
+      <p style="font-size:13px;text-transform:uppercase;letter-spacing:1.5px;color:#9CA3AF;font-weight:700;margin:0 0 14px 0;">Your donation supports</p>
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="25%" align="center" style="padding:8px 4px;">
+            <div style="font-size:24px;line-height:1;">🪔</div>
+            <div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Daily Aarti</div>
+          </td>
+          <td width="25%" align="center" style="padding:8px 4px;">
+            <div style="font-size:24px;line-height:1;">🍛</div>
+            <div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Prasad</div>
+          </td>
+          <td width="25%" align="center" style="padding:8px 4px;">
+            <div style="font-size:24px;line-height:1;">🛕</div>
+            <div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Maintenance</div>
+          </td>
+          <td width="25%" align="center" style="padding:8px 4px;">
+            <div style="font-size:24px;line-height:1;">📚</div>
+            <div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Education</div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Gift Aid CTA -->
+  <tr>
+    <td style="padding:24px 40px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:12px;">
+        <tr><td style="padding:18px 22px;">
+          <div style="font-size:14px;font-weight:800;color:#15803D;margin-bottom:6px;">🎁 Boost this donation by 25% with Gift Aid</div>
+          <div style="font-size:13px;color:#166534;line-height:1.65;">
+            If you're a UK taxpayer, we can claim an extra <strong>25p for every £1</strong> you give —
+            at no cost to you. Add Gift Aid to this donation by speaking to a temple administrator
+            or by replying to this email with your full name, address and postcode.
+          </div>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Become a monthly supporter -->
+  <tr>
+    <td style="padding:18px 40px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFF7ED;border:1px dashed #FDBA74;border-radius:12px;">
+        <tr><td style="padding:18px 22px;text-align:center;">
+          <div style="font-size:14px;font-weight:800;color:#9A3412;margin-bottom:4px;">🪔 Become a monthly supporter</div>
+          <div style="font-size:13px;color:#9A3412;line-height:1.6;margin-bottom:12px;">
+            Just <strong>£11/month</strong> covers daily lamp lighting and prasad sponsorship.
+          </div>
+          <a href="https://shital.org.uk/donate?monthly=1" style="display:inline-block;background:#E65100;color:#ffffff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:13px;font-weight:700;letter-spacing:0.3px;">Set up monthly giving →</a>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Sign-off -->
+  <tr>
+    <td style="padding:32px 40px 8px;text-align:center;">
+      <p style="color:#E65100;font-size:22px;font-weight:900;margin:0;">🙏 Jay Shri Krishna</p>
+      <p style="color:#9CA3AF;font-size:12px;margin:8px 0 0 0;">Please retain this email as confirmation of your donation. This is not a Gift Aid declaration.</p>
+    </td>
+  </tr>
+
   <!-- Footer -->
   <tr>
-    <td style="background:#f9f9f9;border-top:1px solid #eeeeee;padding:22px 40px;text-align:center;">
-      <p style="color:#999999;font-size:12px;margin:0 0 4px 0;font-weight:600;">{{ branch_name }} · Registered UK Charity</p>
-      <p style="color:#bbbbbb;font-size:11px;margin:0;">You received this email because you donated at our kiosk terminal. This is not a tax document.</p>
+    <td style="background:#FAFAFA;border-top:1px solid #F3F4F6;padding:24px 40px;text-align:center;">
+      <p style="color:#6B7280;font-size:13px;font-weight:700;margin:0 0 4px 0;">{{ branch_name }} · Registered UK Charity</p>
+      <p style="color:#9CA3AF;font-size:11px;margin:0 0 12px 0;line-height:1.6;">
+        You received this email because you donated at our kiosk terminal.<br>
+        This receipt is for your records only.
+      </p>
+      <p style="margin:0;">
+        <a href="https://shital.org.uk" style="color:#E65100;text-decoration:none;font-size:11px;font-weight:600;margin:0 8px;">Visit website</a>
+        <span style="color:#D1D5DB;">·</span>
+        <a href="mailto:info@shital.org.uk" style="color:#E65100;text-decoration:none;font-size:11px;font-weight:600;margin:0 8px;">Contact us</a>
+      </p>
     </td>
   </tr>
+
 </table>
 </td></tr>
 </table>
