@@ -225,7 +225,7 @@ export default function DonationsPage() {
   const sortedDonations = [...donations].sort((a, b) => {
     const getVal = (d: Donation): string | number => {
       switch (sortBy) {
-        case 'date':             return new Date(d.donation_date).getTime()
+        case 'date':             return new Date(d.created_at).getTime()
         case 'amount':           return Number(d.amount)
         case 'purpose':          return (d.purpose || '').toLowerCase()
         case 'branch_id':        return (d.branch_id || '').toLowerCase()
