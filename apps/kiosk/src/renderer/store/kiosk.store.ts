@@ -216,6 +216,7 @@ interface KioskState {
   theme: KioskTheme
   orgName: string
   orgLogoUrl: string
+  menuCodes: string[]
   cardProvider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash'
   stripeReaderId: string
   stripeReaderLabel: string
@@ -256,6 +257,7 @@ interface KioskState {
   setLoggedInUser: (u: { name: string; email: string; branch: string } | null) => void
   setOrgName: (name: string) => void
   setOrgLogoUrl: (url: string) => void
+  setMenuCodes: (codes: string[]) => void
   setCardDevice: (provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash', deviceId: string, deviceLabel: string) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
@@ -286,6 +288,7 @@ export const useKioskStore = create<KioskState>()(
   theme: 'lotus',
   orgName: 'Shital',
   orgLogoUrl: '',
+  menuCodes: [],
   giftAidDeclaration: null,
   contactInfo: null,
   kioskDeviceId: '',
@@ -319,6 +322,7 @@ export const useKioskStore = create<KioskState>()(
   setLoggedInUser: (loggedInUser) => set({ loggedInUser }),
   setOrgName: (orgName) => set({ orgName }),
   setOrgLogoUrl: (orgLogoUrl) => set({ orgLogoUrl }),
+  setMenuCodes: (menuCodes) => set({ menuCodes }),
   setCardDevice: (provider, deviceId, deviceLabel) => set(
     provider === 'stripe_terminal'
       ? { cardProvider: provider, stripeReaderId: deviceId, stripeReaderLabel: deviceLabel }
@@ -355,6 +359,7 @@ export const useKioskStore = create<KioskState>()(
         theme: state.theme,
         orgName: state.orgName,
         orgLogoUrl: state.orgLogoUrl,
+        menuCodes: state.menuCodes,
         language: state.language,
         cardProvider: state.cardProvider,
         stripeReaderId: state.stripeReaderId,

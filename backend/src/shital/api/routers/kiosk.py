@@ -2064,7 +2064,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        kd.donate_title, kd.monthly_giving_text, kd.monthly_giving_amount,
                        COALESCE(kd.confirmation_text, '') AS confirmation_text,
                        COALESCE(kd.bg_color, '') AS bg_color,
-                       kd.card_reader_id,
+                       kd.card_reader_id, kd.menu_profile_id,
                        COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
@@ -2088,6 +2088,32 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     if device and device["device_password_hash"]:
         if not bcrypt.checkpw(body.password.encode(), device["device_password_hash"].encode()):
             return {"authenticated": False, "error": "Invalid username or password"}
+
+        # Resolve menu codes from this device's menu_profile_id (or default kiosk profile)
+        menu_codes: list[str] = []
+        async with SessionLocal() as db:
+            pid = device["menu_profile_id"]
+            if not pid:
+                fb = await db.execute(text(
+                    "SELECT id FROM menu_profiles WHERE app_id='kiosk' AND is_default=true LIMIT 1"
+                ))
+                row_fb = fb.first()
+                if row_fb:
+                    pid = row_fb[0]
+            if pid:
+                mrows = await db.execute(text("""
+                    SELECT m.code FROM menu_profile_items i
+                    JOIN   menus m ON m.id = i.menu_id AND m.is_active = true
+                    WHERE  i.profile_id = :pid
+                    ORDER  BY m.display_order, m.label
+                """), {"pid": str(pid)})
+                menu_codes = [r[0] for r in mrows]
+            else:
+                mrows = await db.execute(text(
+                    "SELECT code FROM menus WHERE app_id='kiosk' AND is_active=true ORDER BY display_order, label"
+                ))
+                menu_codes = [r[0] for r in mrows]
+
         return {
             "authenticated": True,
             "user": {"id": str(device["id"]), "email": login_input, "name": device["name"], "role": "KIOSK"},
@@ -2109,6 +2135,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "kiosk_theme": device["kiosk_theme"] or "saffron",
             "org_logo_url": device["org_logo_url"] or "",
             "org_name": device["org_name"] or "",
+            "menu_codes": menu_codes,
         }
 
     # ── Path 2: Legacy user-table login (quickkiosk-* accounts) ──────────────

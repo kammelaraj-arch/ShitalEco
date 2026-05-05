@@ -71,6 +71,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/kiosk/order-items',  icon: '🛒', label: 'Order Items' },
       { href: '/kiosk/receipt-test', icon: '🖨️', label: 'Receipt Printer Test' },
       { href: '/devices',            icon: '🖥️', label: 'Devices' },
+      { href: '/menu-profiles',      icon: '🗂️', label: 'Menu Profiles' },
       { href: '/terminal-devices',   icon: '💳', label: 'Card Readers' },
     ],
   },

@@ -469,6 +469,87 @@ async def _patch_schema() -> None:
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS confirmation_text      TEXT         NOT NULL DEFAULT ''",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS bg_color              VARCHAR(20)  NOT NULL DEFAULT ''",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_username ON kiosk_devices(device_username) WHERE device_username IS NOT NULL",
+        # ── Menu / menu-profile system (per-app, parent/child) ────────────────
+        """CREATE TABLE IF NOT EXISTS menus (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            app_id        VARCHAR(64)  NOT NULL,
+            code          VARCHAR(64)  NOT NULL,
+            label         VARCHAR(200) NOT NULL,
+            parent_id     UUID         REFERENCES menus(id) ON DELETE CASCADE,
+            icon          VARCHAR(64)  NOT NULL DEFAULT '',
+            display_order INTEGER      NOT NULL DEFAULT 0,
+            is_active     BOOLEAN      NOT NULL DEFAULT true,
+            created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            UNIQUE (app_id, code)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_menus_app    ON menus(app_id)",
+        "CREATE INDEX IF NOT EXISTS idx_menus_parent ON menus(parent_id)",
+        """CREATE TABLE IF NOT EXISTS menu_profiles (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            app_id      VARCHAR(64)  NOT NULL,
+            name        VARCHAR(120) NOT NULL,
+            description TEXT         NOT NULL DEFAULT '',
+            is_default  BOOLEAN      NOT NULL DEFAULT false,
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            UNIQUE (app_id, name)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_menu_profiles_app ON menu_profiles(app_id)",
+        """CREATE TABLE IF NOT EXISTS menu_profile_items (
+            profile_id UUID NOT NULL REFERENCES menu_profiles(id) ON DELETE CASCADE,
+            menu_id    UUID NOT NULL REFERENCES menus(id)         ON DELETE CASCADE,
+            PRIMARY KEY (profile_id, menu_id)
+        )""",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS menu_profile_id UUID REFERENCES menu_profiles(id) ON DELETE SET NULL",
+        # Seed kiosk menus (idempotent — guarded by NOT EXISTS)
+        """INSERT INTO menus (app_id, code, label, icon, display_order)
+        SELECT * FROM (VALUES
+            ('kiosk','donations',        'Donations',         '🪔', 10),
+            ('kiosk','soft_donation',    'Soft Item Donation','🎁', 20),
+            ('kiosk','sponsorship',      'Sponsorship',       '📖', 30),
+            ('kiosk','project_donation', 'Project Donation',  '🏗️', 40),
+            ('kiosk','services',         'Services',          '✨', 50),
+            ('kiosk','shop',             'Shop',              '🛍️', 60),
+            ('kiosk','information',      'Information',       'ℹ️', 70),
+            ('kiosk','registration',     'Registration',      '📝', 80)
+        ) AS v(app_id, code, label, icon, display_order)
+        WHERE NOT EXISTS (SELECT 1 FROM menus WHERE menus.app_id = v.app_id AND menus.code = v.code)""",
+        # Seed default profile linked to all kiosk menus
+        """INSERT INTO menu_profiles (app_id, name, description, is_default)
+        SELECT 'kiosk', 'Default — All Menus', 'Shows every menu (Donations, Soft Items, Sponsorship, Project Donations, Services, Shop, Information, Registration).', true
+        WHERE NOT EXISTS (SELECT 1 FROM menu_profiles WHERE app_id = 'kiosk' AND name = 'Default — All Menus')""",
+        """INSERT INTO menu_profile_items (profile_id, menu_id)
+        SELECT p.id, m.id
+        FROM   menu_profiles p, menus m
+        WHERE  p.app_id = 'kiosk' AND p.name = 'Default — All Menus'
+          AND  m.app_id = 'kiosk'
+          AND  NOT EXISTS (
+                SELECT 1 FROM menu_profile_items i WHERE i.profile_id = p.id AND i.menu_id = m.id
+          )""",
+        # Seed two example narrow profiles (idempotent)
+        """INSERT INTO menu_profiles (app_id, name, description, is_default)
+        SELECT 'kiosk', 'Donation-Only', 'Only the donation menus — for tap-and-go donation kiosks.', false
+        WHERE NOT EXISTS (SELECT 1 FROM menu_profiles WHERE app_id = 'kiosk' AND name = 'Donation-Only')""",
+        """INSERT INTO menu_profile_items (profile_id, menu_id)
+        SELECT p.id, m.id
+        FROM   menu_profiles p, menus m
+        WHERE  p.app_id = 'kiosk' AND p.name = 'Donation-Only'
+          AND  m.app_id = 'kiosk' AND m.code IN ('donations','sponsorship','project_donation')
+          AND  NOT EXISTS (
+                SELECT 1 FROM menu_profile_items i WHERE i.profile_id = p.id AND i.menu_id = m.id
+          )""",
+        """INSERT INTO menu_profiles (app_id, name, description, is_default)
+        SELECT 'kiosk', 'Shop & Info', 'Shop and information only — reception kiosks.', false
+        WHERE NOT EXISTS (SELECT 1 FROM menu_profiles WHERE app_id = 'kiosk' AND name = 'Shop & Info')""",
+        """INSERT INTO menu_profile_items (profile_id, menu_id)
+        SELECT p.id, m.id
+        FROM   menu_profiles p, menus m
+        WHERE  p.app_id = 'kiosk' AND p.name = 'Shop & Info'
+          AND  m.app_id = 'kiosk' AND m.code IN ('shop','information','registration')
+          AND  NOT EXISTS (
+                SELECT 1 FROM menu_profile_items i WHERE i.profile_id = p.id AND i.menu_id = m.id
+          )""",
         # ── Quick-donation kiosk profiles ─────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS kiosk_profiles (
             id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1378,6 +1459,7 @@ _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
+_mount("shital.api.routers.menus",                 "router")
 _mount("shital.api.routers.system",                "router")
 
 

@@ -77,6 +77,8 @@ class DeviceIn(BaseModel):
     monthly_giving_amount: float = 5.0
     confirmation_text: str = ""
     bg_color: str = ""
+    # Menu profile (controls which kiosk menus are shown — see menus router)
+    menu_profile_id: str | None = None
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -172,7 +174,7 @@ async def get_device_by_token(token: str, ctx: OptionalSpace) -> dict[str, Any]:
                 RETURNING id, name, device_type, branch_id, location, status,
                           screen_profile_id, peak_start, peak_end,
                           off_peak_playlist_id, default_donate_amount, card_reader_id,
-                          kiosk_theme, org_name, org_logo_url
+                          kiosk_theme, org_name, org_logo_url, menu_profile_id
             """),
             {"token": token},
         )
@@ -194,12 +196,38 @@ async def get_device_by_token(token: str, ctx: OptionalSpace) -> dict[str, Any]:
                 stripe_reader_id = rd_row["stripe_reader_id"]
                 reader_label = rd_row["label"]
 
+        # Resolve menu codes from the device's profile, or fall back to the
+        # default profile for the kiosk app, or finally to all active menus.
+        menu_codes: list[str] = []
+        profile_id = row["menu_profile_id"]
+        if not profile_id:
+            fallback = await db.execute(text(
+                "SELECT id FROM menu_profiles WHERE app_id='kiosk' AND is_default=true LIMIT 1"
+            ))
+            fb = fallback.first()
+            if fb:
+                profile_id = fb[0]
+        if profile_id:
+            mrows = await db.execute(text("""
+                SELECT m.code FROM menu_profile_items i
+                JOIN   menus m ON m.id = i.menu_id AND m.is_active = true
+                WHERE  i.profile_id = :pid
+                ORDER  BY m.display_order, m.label
+            """), {"pid": str(profile_id)})
+            menu_codes = [r[0] for r in mrows]
+        else:
+            mrows = await db.execute(text(
+                "SELECT code FROM menus WHERE app_id='kiosk' AND is_active=true ORDER BY display_order, label"
+            ))
+            menu_codes = [r[0] for r in mrows]
+
         await db.commit()
 
     return {
         **dict(row),
         "stripe_reader_id": stripe_reader_id,
         "reader_label": reader_label,
+        "menu_codes": menu_codes,
     }
 
 
@@ -303,6 +331,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 monthly_giving_amount = :mg_amount,
                 confirmation_text = :confirm_text,
                 bg_color = :bg_color,
+                menu_profile_id = :menu_profile_id,
                 updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
         """), {
@@ -326,6 +355,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "mg_amount": body.monthly_giving_amount or 5.0,
             "confirm_text": body.confirmation_text or "",
             "bg_color": body.bg_color or "",
+            "menu_profile_id": body.menu_profile_id,
             "now": now,
         })
         await db.commit()

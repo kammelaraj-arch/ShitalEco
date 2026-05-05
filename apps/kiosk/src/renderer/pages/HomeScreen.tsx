@@ -202,9 +202,25 @@ function LanguagePicker({ onClose }: { onClose: () => void }) {
 
 // ─── Main HomeScreen ──────────────────────────────────────────────────────────
 export function HomeScreen() {
-  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl, menuCodes } = useKioskStore()
   const th = THEMES[theme]
-  const [activeNav, setActiveNav] = useState(() => homeActiveNav || 'donations')
+
+  // Filter NAV_SECTIONS by the device's menu profile (menuCodes from login).
+  // Empty list → show everything (back-compat for devices without a profile).
+  const visibleNavSections = React.useMemo(() => {
+    if (!menuCodes || menuCodes.length === 0) return NAV_SECTIONS
+    const allowed = new Set(menuCodes)
+    return NAV_SECTIONS
+      .map(sec => ({ ...sec, items: sec.items.filter(i => allowed.has(i.id)) }))
+      .filter(sec => sec.items.length > 0)
+  }, [menuCodes])
+
+  const firstAllowed = visibleNavSections[0]?.items[0]?.id || 'donations'
+  const [activeNav, setActiveNav] = useState(() => {
+    const initial = homeActiveNav || firstAllowed
+    if (menuCodes && menuCodes.length > 0 && !menuCodes.includes(initial)) return firstAllowed
+    return initial
+  })
 
   // Hidden staff access: tap top-right corner 3× within 3 s → admin screen
   const cornerTaps = React.useRef(0)
@@ -442,7 +458,7 @@ export function HomeScreen() {
         className="sm:hidden flex-shrink-0 flex overflow-x-auto bg-white"
         style={{ borderBottom: '2px solid #e5e7eb', WebkitOverflowScrolling: 'touch' }}
       >
-        {NAV_SECTIONS.flatMap(s => s.items).map(item => {
+        {visibleNavSections.flatMap(s => s.items).map(item => {
           const isActive = activeNav === item.id
           return (
             <button
@@ -483,7 +499,7 @@ export function HomeScreen() {
             borderRight: `1px solid ${th.sidebarBorder.replace('/30', '').replace('/40', '')}30`,
           }}
         >
-          {NAV_SECTIONS.map((section, si) => (
+          {visibleNavSections.map((section, si) => (
             <nav key={si} className={si > 0 ? 'mt-auto' : ''}>
               {si > 0 && <div className="mx-3 my-1" style={{ height: 1, background: `${th.sidebarText}20` }} />}
               {section.items.map(item => {
