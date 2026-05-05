@@ -147,15 +147,8 @@ export default function DonationsPage() {
     } finally { setSaving(false) }
   }
 
-  const remove = async (d: Donation) => {
-    if (!confirm(`Delete this £${Number(d.amount).toFixed(2)} donation? Cannot be undone.`)) return
-    try {
-      await apiFetch(`/finance/donations/${d.id}`, { method: 'DELETE' })
-      setDonations(prev => prev.filter(x => x.id !== d.id))
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Delete failed')
-    }
-  }
+  // Delete is intentionally not exposed in the UI — donations are an audit
+  // trail. Voids/refunds should be tracked as separate records, not removed.
 
   async function downloadCsv() {
     setCsvDownloading(true)
@@ -201,8 +194,50 @@ export default function DonationsPage() {
     }
   }
 
-  const totalAmount = donations.reduce((s, d) => s + Number(d.amount), 0)
+  const totalAmount  = donations.reduce((s, d) => s + Number(d.amount), 0)
   const totalGiftAid = donations.reduce((s, d) => s + Number(d.gift_aid_amount || 0), 0)
+  // Per-status breakdown (count + sum) so the summary cards reflect the
+  // health of the cashflow, not just the total.
+  const byStatus = donations.reduce<Record<string, { count: number; sum: number }>>((acc, d) => {
+    const k = d.status || 'UNKNOWN'
+    if (!acc[k]) acc[k] = { count: 0, sum: 0 }
+    acc[k].count += 1
+    acc[k].sum   += Number(d.amount)
+    return acc
+  }, {})
+
+  // Edit/delete RBAC — only SUPER_ADMIN can edit; deletion is disabled for
+  // everyone (records are auditable; refunds/voids are tracked separately).
+  const userRole = (() => {
+    if (typeof window === 'undefined') return ''
+    try { return (JSON.parse(localStorage.getItem('shital_user') || '{}')?.role || '') } catch { return '' }
+  })()
+  const canEdit = userRole === 'SUPER_ADMIN'
+
+  // Column sort. Click a header to toggle asc/desc. Persists only in component state.
+  type SortKey = 'date' | 'amount' | 'purpose' | 'branch_id' | 'payment_provider' | 'status'
+  const [sortBy, setSortBy] = useState<SortKey>('date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const toggleSort = (k: SortKey) => {
+    if (sortBy === k) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortBy(k); setSortDir(k === 'amount' || k === 'date' ? 'desc' : 'asc') }
+  }
+  const sortedDonations = [...donations].sort((a, b) => {
+    const getVal = (d: Donation): string | number => {
+      switch (sortBy) {
+        case 'date':             return new Date(d.donation_date).getTime()
+        case 'amount':           return Number(d.amount)
+        case 'purpose':          return (d.purpose || '').toLowerCase()
+        case 'branch_id':        return (d.branch_id || '').toLowerCase()
+        case 'payment_provider': return (d.payment_provider || '').toLowerCase()
+        case 'status':           return d.status || ''
+      }
+    }
+    const av = getVal(a); const bv = getVal(b)
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0
+    return sortDir === 'asc' ? cmp : -cmp
+  })
+
   const branchName = (bid: string) => branches.find(b => b.branch_id === bid)?.name || bid
 
   return (
@@ -280,12 +315,34 @@ export default function DonationsPage() {
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {/* Summary cards — per-status breakdown + grand totals */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: 'Count', value: donations.length.toString(), icon: '🙏', color: 'from-amber-600 to-orange-500' },
-          { label: 'Total', value: `£${totalAmount.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`, icon: '💰', color: 'from-green-600 to-emerald-500' },
-          { label: 'Gift Aid', value: `£${totalGiftAid.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`, icon: '🇬🇧', color: 'from-blue-600 to-indigo-500' },
+          { label: 'Completed',
+            value: `£${(byStatus.COMPLETED?.sum ?? 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+            sub:   `${byStatus.COMPLETED?.count ?? 0} donation${(byStatus.COMPLETED?.count ?? 0) === 1 ? '' : 's'}`,
+            icon: '✅', color: 'from-green-600 to-emerald-500' },
+          { label: 'Pending',
+            value: `£${(byStatus.PENDING?.sum ?? 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+            sub:   `${byStatus.PENDING?.count ?? 0} donation${(byStatus.PENDING?.count ?? 0) === 1 ? '' : 's'}`,
+            icon: '⏳', color: 'from-amber-500 to-orange-500' },
+          { label: 'Failed / Other',
+            value: `£${(donations.length - (byStatus.COMPLETED?.count ?? 0) - (byStatus.PENDING?.count ?? 0)) === 0
+                       ? '0.00'
+                       : Object.entries(byStatus)
+                           .filter(([k]) => !['COMPLETED','PENDING'].includes(k))
+                           .reduce((s, [, v]) => s + v.sum, 0)
+                           .toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+            sub:   `${donations.length - (byStatus.COMPLETED?.count ?? 0) - (byStatus.PENDING?.count ?? 0)} record${donations.length - (byStatus.COMPLETED?.count ?? 0) - (byStatus.PENDING?.count ?? 0) === 1 ? '' : 's'}`,
+            icon: '⚠️', color: 'from-red-600 to-rose-500' },
+          { label: 'Total (all)',
+            value: `£${totalAmount.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+            sub:   `${donations.length} donation${donations.length === 1 ? '' : 's'}`,
+            icon: '💰', color: 'from-saffron-600 to-orange-600' },
+          { label: 'Gift Aid',
+            value: `£${totalGiftAid.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+            sub:   '25% reclaim',
+            icon: '🇬🇧', color: 'from-blue-600 to-indigo-500' },
         ].map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
             className="glass rounded-2xl p-4 relative overflow-hidden">
@@ -293,6 +350,7 @@ export default function DonationsPage() {
             <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${s.color} flex items-center justify-center text-base mb-2`}>{s.icon}</div>
             <p className="text-white/50 text-xs font-medium mb-0.5">{s.label}</p>
             <p className="text-2xl font-black text-white">{loading ? '—' : s.value}</p>
+            {'sub' in s && s.sub && <p className="text-white/30 text-xs mt-0.5">{s.sub}</p>}
           </motion.div>
         ))}
       </div>
@@ -313,17 +371,28 @@ export default function DonationsPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
-                  <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Date</th>
-                  <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Amount</th>
-                  <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase hidden sm:table-cell">Purpose</th>
-                  <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase hidden md:table-cell">Branch</th>
-                  <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase hidden lg:table-cell">Method</th>
-                  <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Status</th>
-                  <th className="px-4 py-3" />
+                  {([
+                    { k: 'date',             label: 'Date',    cls: '' },
+                    { k: 'amount',           label: 'Amount',  cls: '' },
+                    { k: 'purpose',          label: 'Purpose', cls: 'hidden sm:table-cell' },
+                    { k: 'branch_id',        label: 'Branch',  cls: 'hidden md:table-cell' },
+                    { k: 'payment_provider', label: 'Method',  cls: 'hidden lg:table-cell' },
+                    { k: 'status',           label: 'Status',  cls: '' },
+                  ] as const).map(({ k, label, cls }) => (
+                    <th key={k}
+                      onClick={() => toggleSort(k as SortKey)}
+                      className={`text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase cursor-pointer select-none hover:text-white/70 ${cls}`}>
+                      {label}
+                      {sortBy === k && (
+                        <span className="ml-1 text-saffron-400">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </th>
+                  ))}
+                  {canEdit && <th className="px-4 py-3" />}
                 </tr>
               </thead>
               <tbody>
-                {donations.map((d, i) => (
+                {sortedDonations.map((d, i) => (
                   <motion.tr key={d.id}
                     initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.01 }}
                     className="border-b border-white/5 hover:bg-white/3 transition-colors">
@@ -343,12 +412,12 @@ export default function DonationsPage() {
                                                    'bg-red-500/20 text-red-400 border-red-500/30'
                       }`}>{d.status}</span>
                     </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button onClick={() => openEdit(d)}
-                        className="text-white/40 hover:text-saffron-400 text-sm font-medium px-2 py-1 mr-1">Edit</button>
-                      <button onClick={() => remove(d)}
-                        className="text-red-400/50 hover:text-red-400 text-sm px-2 py-1">Del</button>
-                    </td>
+                    {canEdit && (
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <button onClick={() => openEdit(d)}
+                          className="text-white/40 hover:text-saffron-400 text-sm font-medium px-2 py-1">Edit</button>
+                      </td>
+                    )}
                   </motion.tr>
                 ))}
               </tbody>
