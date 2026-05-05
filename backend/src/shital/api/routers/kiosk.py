@@ -1340,6 +1340,8 @@ class ReceiptInput(BaseModel):
     items: list[dict[str, Any]] = []
     branch_name: str = "Shital Temple"
     customer_name: str = ""
+    payment_provider: str = ""
+    payment_ref: str = ""
 
 
 @router.post("/receipt")
@@ -1363,12 +1365,21 @@ async def send_receipt(body: ReceiptInput):
         return {"sent": False, "error": "No destination provided"}
 
     variables = {
-        "order_ref":     body.order_ref,
-        "customer_name": body.customer_name or "",
-        "total":         body.total,
-        "items":         body.items,
-        "branch_name":   body.branch_name,
-        "date":          _date.today().strftime("%-d %B %Y"),
+        "order_ref":         body.order_ref,
+        "customer_name":     body.customer_name or "",
+        "total":             body.total,
+        "items":             body.items,
+        "branch_name":       body.branch_name,
+        "date":              _date.today().strftime("%-d %B %Y"),
+        # Richer template variables — available in the donation_receipt
+        # email template via {{ charity_number }}, {{ logo_url }}, etc.
+        "charity_number":    settings.CHARITY_NUMBER or "1138530",
+        "logo_url":          "https://shital.org.uk/logo.png",
+        "website_url":       "https://shital.org.uk",
+        "monthly_url":       "https://shital.org.uk/donate?monthly=1",
+        "account_url":       "https://shital.org.uk/account",
+        "payment_provider":  body.payment_provider or "",
+        "payment_ref":       body.payment_ref or "",
     }
 
     # ── Helper: load donation_receipt template from DB ────────────────────────

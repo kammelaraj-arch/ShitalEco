@@ -1203,17 +1203,28 @@ async def _seed_email_templates() -> None:
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Donation Receipt — Shital Temple</title>
 </head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:24px 0;">
+<body style="margin:0;padding:0;background:#F5F5F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F5F5;padding:24px 0;">
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
-  <!-- Header -->
+  <!-- Header — logo + brand + charity number -->
   <tr>
-    <td style="background:linear-gradient(135deg,#FF9933 0%,#E65100 100%);padding:40px 40px 32px;text-align:center;">
-      <div style="font-size:42px;line-height:1;margin-bottom:10px;">🕉</div>
+    <td style="background:linear-gradient(135deg,#FF9933 0%,#E65100 100%);padding:36px 40px 28px;text-align:center;">
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="Shital Temple"
+             width="76" height="76"
+             style="display:block;margin:0 auto 12px;border:0;outline:none;border-radius:14px;background:rgba(255,255,255,0.18);padding:8px;" />
+      {% else %}
+        <div style="font-size:42px;line-height:1;margin-bottom:10px;">🕉</div>
+      {% endif %}
       <div style="color:#ffffff;font-size:28px;font-weight:900;letter-spacing:1px;">Shital Temple</div>
       <div style="color:rgba(255,255,255,0.92);font-size:15px;margin-top:6px;font-weight:500;">{{ branch_name }}</div>
+      {% if charity_number %}
+        <div style="color:rgba(255,255,255,0.85);font-size:11px;margin-top:8px;letter-spacing:0.6px;">
+          Registered UK Charity No. <strong>{{ charity_number }}</strong>
+        </div>
+      {% endif %}
     </td>
   </tr>
 
@@ -1243,7 +1254,9 @@ async def _seed_email_templates() -> None:
         <tr><td style="padding:18px 22px;">
           <div style="font-size:11px;color:#9A3412;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;font-weight:700;">Order Reference</div>
           <div style="font-size:22px;font-weight:900;color:#7C2D12;letter-spacing:3px;font-family:'SF Mono','Courier New',monospace;">{{ order_ref }}</div>
-          <div style="font-size:12px;color:#9A3412;margin-top:6px;">{{ date }}{% if payment_provider %} · {{ payment_provider|upper }}{% endif %}{% if payment_ref %} · ref {{ payment_ref }}{% endif %}</div>
+          <div style="font-size:12px;color:#9A3412;margin-top:6px;">
+            {{ date }}{% if payment_provider %} · {{ payment_provider|upper }}{% endif %}{% if payment_ref %} · ref {{ payment_ref }}{% endif %}
+          </div>
         </td></tr>
       </table>
     </td>
@@ -1277,28 +1290,16 @@ async def _seed_email_templates() -> None:
     </td>
   </tr>
 
-  <!-- What your donation supports -->
+  <!-- Impact strip -->
   <tr>
     <td style="padding:32px 40px 0;">
-      <p style="font-size:13px;text-transform:uppercase;letter-spacing:1.5px;color:#9CA3AF;font-weight:700;margin:0 0 14px 0;">Your donation supports</p>
+      <p style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#9CA3AF;font-weight:700;margin:0 0 14px 0;text-align:center;">Your donation supports</p>
       <table width="100%" cellpadding="0" cellspacing="0">
         <tr>
-          <td width="25%" align="center" style="padding:8px 4px;">
-            <div style="font-size:24px;line-height:1;">🪔</div>
-            <div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Daily Aarti</div>
-          </td>
-          <td width="25%" align="center" style="padding:8px 4px;">
-            <div style="font-size:24px;line-height:1;">🍛</div>
-            <div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Prasad</div>
-          </td>
-          <td width="25%" align="center" style="padding:8px 4px;">
-            <div style="font-size:24px;line-height:1;">🛕</div>
-            <div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Maintenance</div>
-          </td>
-          <td width="25%" align="center" style="padding:8px 4px;">
-            <div style="font-size:24px;line-height:1;">📚</div>
-            <div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Education</div>
-          </td>
+          <td width="25%" align="center" style="padding:6px 4px;"><div style="font-size:24px;line-height:1;">🪔</div><div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Daily Aarti</div></td>
+          <td width="25%" align="center" style="padding:6px 4px;"><div style="font-size:24px;line-height:1;">🍛</div><div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Prasad</div></td>
+          <td width="25%" align="center" style="padding:6px 4px;"><div style="font-size:24px;line-height:1;">🛕</div><div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Maintenance</div></td>
+          <td width="25%" align="center" style="padding:6px 4px;"><div style="font-size:24px;line-height:1;">📚</div><div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Education</div></td>
         </tr>
       </table>
     </td>
@@ -1312,24 +1313,25 @@ async def _seed_email_templates() -> None:
           <div style="font-size:14px;font-weight:800;color:#15803D;margin-bottom:6px;">🎁 Boost this donation by 25% with Gift Aid</div>
           <div style="font-size:13px;color:#166534;line-height:1.65;">
             If you're a UK taxpayer, we can claim an extra <strong>25p for every £1</strong> you give —
-            at no cost to you. Add Gift Aid to this donation by speaking to a temple administrator
-            or by replying to this email with your full name, address and postcode.
+            at no cost to you. Add Gift Aid by speaking to a temple administrator or replying to this
+            email with your full name, address and postcode.
           </div>
         </td></tr>
       </table>
     </td>
   </tr>
 
-  <!-- Become a monthly supporter -->
+  <!-- Monthly supporter CTA — prominent -->
   <tr>
     <td style="padding:18px 40px 0;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFF7ED;border:1px dashed #FDBA74;border-radius:12px;">
-        <tr><td style="padding:18px 22px;text-align:center;">
-          <div style="font-size:14px;font-weight:800;color:#9A3412;margin-bottom:4px;">🪔 Become a monthly supporter</div>
-          <div style="font-size:13px;color:#9A3412;line-height:1.6;margin-bottom:12px;">
-            Just <strong>£11/month</strong> covers daily lamp lighting and prasad sponsorship.
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#FFF7ED 0%,#FFEDD5 100%);border:1px dashed #FDBA74;border-radius:12px;">
+        <tr><td style="padding:24px 22px;text-align:center;">
+          <div style="font-size:16px;font-weight:800;color:#9A3412;margin-bottom:6px;">🪔 Become a monthly supporter</div>
+          <div style="font-size:13px;color:#9A3412;line-height:1.65;margin-bottom:14px;">
+            Recurring giving is the steadiest way to keep daily seva running.<br>
+            Even <strong>£5/month</strong> sponsors morning aarti for the whole community.
           </div>
-          <a href="https://shital.org.uk/donate?monthly=1" style="display:inline-block;background:#E65100;color:#ffffff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:13px;font-weight:700;letter-spacing:0.3px;">Set up monthly giving →</a>
+          <a href="{{ monthly_url }}" style="display:inline-block;background:#E65100;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:700;letter-spacing:0.3px;">Set up monthly giving →</a>
         </td></tr>
       </table>
     </td>
@@ -1339,22 +1341,28 @@ async def _seed_email_templates() -> None:
   <tr>
     <td style="padding:32px 40px 8px;text-align:center;">
       <p style="color:#E65100;font-size:22px;font-weight:900;margin:0;">🙏 Jay Shri Krishna</p>
-      <p style="color:#9CA3AF;font-size:12px;margin:8px 0 0 0;">Please retain this email as confirmation of your donation. This is not a Gift Aid declaration.</p>
+      <p style="color:#9CA3AF;font-size:12px;margin:8px 0 0 0;">Please retain this email as confirmation. This is not a Gift Aid declaration.</p>
     </td>
   </tr>
 
-  <!-- Footer -->
+  <!-- Footer — links + charity info -->
   <tr>
-    <td style="background:#FAFAFA;border-top:1px solid #F3F4F6;padding:24px 40px;text-align:center;">
-      <p style="color:#6B7280;font-size:13px;font-weight:700;margin:0 0 4px 0;">{{ branch_name }} · Registered UK Charity</p>
-      <p style="color:#9CA3AF;font-size:11px;margin:0 0 12px 0;line-height:1.6;">
+    <td style="background:#FAFAFA;border-top:1px solid #F3F4F6;padding:28px 40px;text-align:center;">
+      <p style="margin:0 0 14px 0;">
+        <a href="{{ website_url }}"        style="color:#E65100;text-decoration:none;font-size:12px;font-weight:700;margin:0 10px;">🌐 Website</a>
+        <span style="color:#D1D5DB;">·</span>
+        <a href="{{ account_url }}"        style="color:#E65100;text-decoration:none;font-size:12px;font-weight:700;margin:0 10px;">👤 My Account</a>
+        <span style="color:#D1D5DB;">·</span>
+        <a href="{{ monthly_url }}"        style="color:#E65100;text-decoration:none;font-size:12px;font-weight:700;margin:0 10px;">🔄 Monthly Giving</a>
+        <span style="color:#D1D5DB;">·</span>
+        <a href="mailto:info@shital.org.uk" style="color:#E65100;text-decoration:none;font-size:12px;font-weight:700;margin:0 10px;">✉ Contact</a>
+      </p>
+      <p style="color:#6B7280;font-size:12px;font-weight:700;margin:0 0 4px 0;">
+        {{ branch_name }}{% if charity_number %} · Registered UK Charity No. {{ charity_number }}{% endif %}
+      </p>
+      <p style="color:#9CA3AF;font-size:11px;margin:0;line-height:1.6;">
         You received this email because you donated at our kiosk terminal.<br>
         This receipt is for your records only.
-      </p>
-      <p style="margin:0;">
-        <a href="https://shital.org.uk" style="color:#E65100;text-decoration:none;font-size:11px;font-weight:600;margin:0 8px;">Visit website</a>
-        <span style="color:#D1D5DB;">·</span>
-        <a href="mailto:info@shital.org.uk" style="color:#E65100;text-decoration:none;font-size:11px;font-weight:600;margin:0 8px;">Contact us</a>
       </p>
     </td>
   </tr>
