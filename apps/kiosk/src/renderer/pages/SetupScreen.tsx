@@ -11,13 +11,14 @@ interface LoginResponse {
   profile?: { theme?: string; idle_timeout_secs?: number; preset_amounts?: number[] } | null
   stripe_reader_id?: string | null
   reader_label?: string | null
+  menu_codes?: string[]
 }
 
 interface AzureConfig { client_id: string; authority: string }
 
 export function SetupScreen() {
   const {
-    setBranchId, setTheme, setOrgName, setOrgLogoUrl,
+    setBranchId, setTheme, setOrgName, setOrgLogoUrl, setMenuCodes,
     setCardDevice, setDeviceConfigured, setLoggedInUser, setKioskDevice, setScreen,
   } = useKioskStore()
 
@@ -41,6 +42,7 @@ export function SetupScreen() {
     setOrgName(data.branch.name)
     if (data.profile?.theme) setTheme(data.profile.theme as KioskTheme)
     if (data.stripe_reader_id) setCardDevice('stripe_terminal', data.stripe_reader_id, data.reader_label || data.stripe_reader_id)
+    if (Array.isArray(data.menu_codes)) setMenuCodes(data.menu_codes)
     setKioskDevice(data.user.id || '', data.user.name || '')
     setLoggedInUser({ name: data.user.name, email: data.user.email, branch: data.branch.name })
     setDeviceConfigured(true)

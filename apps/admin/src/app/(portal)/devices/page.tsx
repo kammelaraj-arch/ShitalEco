@@ -38,8 +38,18 @@ interface KioskDevice {
   show_monthly_giving: boolean
   enable_gift_aid: boolean
   tap_and_go: boolean
+  menu_profile_id: string | null
   created_at: string
   updated_at: string
+}
+
+interface MenuProfile {
+  id: string
+  app_id: string
+  name: string
+  description: string
+  is_default: boolean
+  item_count: number
 }
 
 const KIOSK_THEMES: { id: KioskThemeId; name: string; emoji: string; bg: string; accent: string }[] = [
@@ -83,6 +93,7 @@ const EMPTY_FORM = {
   monthly_giving_amount: 5,
   confirmation_text: '',
   bg_color: '',
+  menu_profile_id: '',
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -109,6 +120,7 @@ export default function DevicesPage() {
   const [profiles, setProfiles]         = useState<ScreenProfile[]>([])
   const [playlists, setPlaylists]       = useState<Playlist[]>([])
   const [cardReaders, setCardReaders]   = useState<CardReader[]>([])
+  const [menuProfiles, setMenuProfiles] = useState<MenuProfile[]>([])
   const [loading, setLoading]           = useState(true)
   const [drawerOpen, setDrawerOpen]     = useState(false)
   const [editing, setEditing]           = useState<KioskDevice | null>(null)
@@ -127,18 +139,20 @@ export default function DevicesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [devData, brData, profData, plData, crData] = await Promise.all([
+      const [devData, brData, profData, plData, crData, mpData] = await Promise.all([
         apiFetch<{ devices: KioskDevice[] }>('/kiosk-devices'),
         apiFetch<{ branches: Branch[] }>('/branches').catch(() => ({ branches: [] })),
         apiFetch<{ profiles: ScreenProfile[] }>('/screen/profiles').catch(() => ({ profiles: [] })),
         apiFetch<{ playlists: Playlist[] }>('/screen/playlists').catch(() => ({ playlists: [] })),
         apiFetch<{ devices: CardReader[] }>('/terminal-devices/?active_only=true').catch(() => ({ devices: [] })),
+        apiFetch<{ profiles: MenuProfile[] }>('/admin/menu-profiles?app_id=kiosk').catch(() => ({ profiles: [] })),
       ])
       setDevices(devData.devices || [])
       setBranches(brData.branches || [])
       setProfiles(profData.profiles || [])
       setPlaylists(plData.playlists || [])
       setCardReaders(crData.devices || [])
+      setMenuProfiles(mpData.profiles || [])
     } catch (e: unknown) {
       setError(String(e))
     }
@@ -183,6 +197,7 @@ export default function DevicesPage() {
       monthly_giving_amount: d.monthly_giving_amount ?? 5,
       confirmation_text: d.confirmation_text || '',
       bg_color: d.bg_color || '',
+      menu_profile_id: d.menu_profile_id || '',
     })
     setError('')
     setDrawerOpen(true)
@@ -200,7 +215,11 @@ export default function DevicesPage() {
         device_username: form.device_username.trim() || null,
         device_password: form.device_password.trim() || null,
       }
-      const bodyWithReader = { ...body, card_reader_id: form.card_reader_id || null }
+      const bodyWithReader = {
+        ...body,
+        card_reader_id: form.card_reader_id || null,
+        menu_profile_id: form.menu_profile_id || null,
+      }
       if (editing) {
         await apiFetch<{ ok: boolean }>(`/kiosk-devices/${editing.id}`, { method: 'PUT', body: JSON.stringify(bodyWithReader) })
       } else {
@@ -544,6 +563,29 @@ export default function DevicesPage() {
                     {cardReaderOptions.length <= 1 && (
                       <p className="text-white/30 text-[10px] mt-1">No active card readers for this branch. Register one in Card Readers first.</p>
                     )}
+                  </div>
+                )}
+
+                {form.device_type === 'KIOSK' && (
+                  <div>
+                    <p className={lbl}>Menu Profile</p>
+                    <select
+                      className={inp}
+                      value={form.menu_profile_id}
+                      onChange={e => setForm(f => ({ ...f, menu_profile_id: e.target.value }))}
+                    >
+                      <option value="">— Default (all menus) —</option>
+                      {menuProfiles.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.item_count} item{p.item_count === 1 ? '' : 's'})
+                          {p.is_default ? ' · default' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-white/30 text-[10px] mt-1">
+                      Controls which menus (Donations, Shop, Services, etc.) appear in the kiosk bottom nav.
+                      Manage profiles at <a href="/menu-profiles" className="underline text-amber-400/70 hover:text-amber-400">Menu Profiles</a>.
+                    </p>
                   </div>
                 )}
 
