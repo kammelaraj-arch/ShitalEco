@@ -217,7 +217,7 @@ jobs:
         run: echo "ts=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
 
       - name: Build & push backend
-        if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
+        if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
         with:
           context: ./backend
@@ -230,7 +230,7 @@ jobs:
           cache-to: type=gha,scope=backend,mode=max
 
       - name: Build & push admin
-        if: needs.changes.outputs.admin == 'true' || github.event_name == 'workflow_dispatch'
+        if: needs.changes.outputs.admin == 'true' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -244,7 +244,7 @@ jobs:
           cache-to: type=gha,scope=admin,mode=max
 
       - name: Build & push quick-donation
-        if: needs.changes.outputs.quick-donation == 'true' || github.event_name == 'workflow_dispatch'
+        if: needs.changes.outputs.quick-donation == 'true' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -258,7 +258,7 @@ jobs:
           cache-to: type=gha,scope=quick-donation,mode=max
 
       - name: Build & push kiosk
-        if: needs.changes.outputs.kiosk == 'true'
+        if: needs.changes.outputs.kiosk == 'true' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
         with:
           context: ./apps/kiosk
@@ -272,7 +272,7 @@ jobs:
           cache-to: type=gha,scope=kiosk,mode=max
 
       - name: Build & push screen
-        if: needs.changes.outputs.screen == 'true'
+        if: needs.changes.outputs.screen == 'true' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
         with:
           context: ./apps/screen
@@ -283,7 +283,7 @@ jobs:
           cache-to: type=gha,scope=screen,mode=max
 
       - name: Build & push service
-        if: needs.changes.outputs.service == 'true'
+        if: needs.changes.outputs.service == 'true' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
         with:
           context: .
