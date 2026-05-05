@@ -945,6 +945,19 @@ async def _patch_schema() -> None:
             (51.00::DECIMAL, 'Festival Friend', 'Helps cover special festival and event costs',  true, false, 4)
         ) AS v(amount, label, description, is_active, is_default, display_order)
         WHERE NOT EXISTS (SELECT 1 FROM recurring_giving_tiers LIMIT 1)""",
+        # Dedupe accidental duplicate tiers by (amount, label) — keep the
+        # earliest id; protect any tier already linked to a subscription.
+        """DELETE FROM recurring_giving_tiers t
+        USING recurring_giving_tiers k
+        WHERE  t.amount = k.amount
+          AND  t.label  = k.label
+          AND  t.id    > k.id
+          AND  NOT EXISTS (
+                SELECT 1 FROM recurring_giving_subscriptions s WHERE s.tier_id = t.id
+          )""",
+        # Prevent future duplicates at the database level.
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_recurring_giving_tiers_amount_label "
+        "ON recurring_giving_tiers (amount, label)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't

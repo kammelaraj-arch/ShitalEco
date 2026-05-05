@@ -129,16 +129,25 @@ async def _ensure_plan(tier_id: str, amount: float, label: str, frequency: str) 
 
 @router.get("/service/giving/tiers")
 async def list_giving_tiers() -> dict[str, Any]:
-    """Return active giving tiers for the donation portal."""
+    """Return active giving tiers for the donation portal.
+
+    Deduplicated by (amount, label) — the table has historically accumulated
+    duplicate rows from re-seeds, and the public flow must show each tier once.
+    """
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         rows = await db.execute(text("""
             SELECT id, amount, label, description, frequency, is_default, display_order
-            FROM   recurring_giving_tiers
-            WHERE  is_active = true
-            ORDER  BY display_order, amount
+            FROM (
+                SELECT DISTINCT ON (amount, label)
+                       id, amount, label, description, frequency, is_default, display_order
+                FROM   recurring_giving_tiers
+                WHERE  is_active = true
+                ORDER  BY amount, label, is_default DESC, display_order, id
+            ) t
+            ORDER BY display_order, amount
         """))
         tiers = [dict(r._mapping) for r in rows]
     return {"tiers": tiers}

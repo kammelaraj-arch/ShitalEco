@@ -60,6 +60,7 @@ export default function App() {
   const deviceToken = useStore((s) => s.deviceToken)
   const setBranch = useStore((s) => s.setBranch)
   const setDeviceToken = useStore((s) => s.setDeviceToken)
+  const setScreen = useStore((s) => s.setScreen)
   const themeId = useStore((s) => s.themeId)
 
   useEffect(() => {
@@ -67,12 +68,26 @@ export default function App() {
   }, [themeId])
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+
+    // Deep-link screen param (e.g. ?screen=monthly-giving from kiosk)
+    const urlScreen = params.get('screen')
+    if (urlScreen === 'monthly-giving' || urlScreen === 'browse') {
+      setScreen(urlScreen)
+    }
+
     // 1. Hostname subdomain takes highest priority
     const sub = detectBranchFromHostname()
     if (sub) { setBranch(sub, sub, true); return }
 
-    // 2. URL token param — store it for this device permanently
-    const params = new URLSearchParams(window.location.search)
+    // 2. Explicit branch query param (used when kiosk launches us with a pre-selected branch)
+    const urlBranch = params.get('branch')
+    if (urlBranch) {
+      setBranch(urlBranch, urlBranch, true)
+      return
+    }
+
+    // 3. URL token param — store it for this device permanently
     const urlToken = params.get('token')
     const token = urlToken || deviceToken
     if (!token) return
