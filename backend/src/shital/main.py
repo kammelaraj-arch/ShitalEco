@@ -936,6 +936,11 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_addresses_postcode ON addresses(postcode)",
         "CREATE INDEX IF NOT EXISTS idx_addresses_uprn     ON addresses(uprn) WHERE uprn != ''",
         "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS house_number VARCHAR(50) NOT NULL DEFAULT ''",
+        # Dedup + unique index — prevents addresses table accumulating
+        # duplicates per (contact_id, postcode, house_number). Partial
+        # so anonymous (contact_id IS NULL) rows aren't constrained.
+        "CREATE UNIQUE INDEX IF NOT EXISTS addresses_unique_contact_pc_house "
+        "ON addresses (contact_id, postcode, house_number) WHERE contact_id IS NOT NULL",
         # ── CRM: Accounts (companies/organisations).
         # NB. table is named crm_accounts because there is already a Finance
         # `accounts` table (chart of accounts: code, name, type, balance).

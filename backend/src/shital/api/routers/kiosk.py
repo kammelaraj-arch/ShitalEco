@@ -198,6 +198,8 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
                         (id, contact_id, formatted, postcode, house_number, uprn,
                          is_primary, lookup_source, created_at)
                     VALUES (:id, :cid, :fmt, :pc, :house, :uprn, true, 'kiosk', :now)
+                    ON CONFLICT (contact_id, postcode, house_number)
+                        WHERE contact_id IS NOT NULL DO NOTHING
                 """), {
                     "id": str(uuid.uuid4()), "cid": contact_id,
                     "fmt": body.customer_address or "", "pc": body.customer_postcode.upper().strip(),
@@ -385,7 +387,8 @@ async def create_pending_order(body: OrderPendingInput):
                     INSERT INTO addresses (id, contact_id, formatted, postcode, house_number, uprn,
                                           is_primary, lookup_source, created_at)
                     VALUES (:id, :cid, :fmt, :pc, :house, '', true, 'kiosk', :now)
-                    ON CONFLICT DO NOTHING
+                    ON CONFLICT (contact_id, postcode, house_number)
+                        WHERE contact_id IS NOT NULL DO NOTHING
                 """), {
                     "id": str(uuid.uuid4()), "cid": ga_contact_id,
                     "fmt": body.ga_address or body.ga_postcode,
@@ -1260,6 +1263,8 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                                 (id, contact_id, formatted, postcode, house_number, uprn,
                                  is_primary, lookup_source, created_at)
                             VALUES (:id, :cid, :fmt, :pc, :house, '', true, 'quick-donation', :now)
+                            ON CONFLICT (contact_id, postcode, house_number)
+                                WHERE contact_id IS NOT NULL DO NOTHING
                         """), {
                             "id": str(uuid.uuid4()), "cid": contact_id,
                             "fmt": body.ga_house_number or "", "pc": body.ga_postcode.upper().strip(),

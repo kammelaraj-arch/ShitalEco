@@ -170,6 +170,8 @@ async def store_declaration(ctx: CurrentSpace, body: StoreDeclarationInput):
                         (id, contact_id, formatted, postcode, house_number, uprn,
                          is_primary, lookup_source, created_at)
                     VALUES (:id, :cid, :fmt, :pc, :house, :uprn, true, 'kiosk', :now)
+                    ON CONFLICT (contact_id, postcode, house_number)
+                        WHERE contact_id IS NOT NULL DO NOTHING
                 """), {
                     "id": str(uuid.uuid4()), "cid": contact_id,
                     "fmt": body.address or "", "pc": body.postcode.upper().strip(),
