@@ -37,11 +37,19 @@ function writeCache<T>(url: string, data: T): void {
   }
 }
 
+function abortAfter(ms: number): { signal: AbortSignal; cancel: () => void } {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  return { signal: ctrl.signal, cancel: () => clearTimeout(t) }
+}
+
 function silentRefresh(url: string, init: RequestInit | undefined, timeout: number): void {
-  fetch(url, { ...init, signal: AbortSignal.timeout(timeout) })
+  const a = abortAfter(timeout)
+  fetch(url, { ...init, signal: a.signal })
     .then(r => r.ok ? r.json() : null)
     .then(data => { if (data !== null) writeCache(url, data) })
     .catch(() => { /* keep stale */ })
+    .finally(a.cancel)
 }
 
 export async function cachedFetch<T>(
@@ -61,8 +69,9 @@ export async function cachedFetch<T>(
     }
   }
 
+  const a = abortAfter(timeout)
   try {
-    const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeout) })
+    const res = await fetch(url, { ...init, signal: a.signal })
     if (!res.ok) return cached?.data ?? null
     const data = (await res.json()) as T
     writeCache(url, data)
@@ -70,6 +79,8 @@ export async function cachedFetch<T>(
   } catch (err) {
     if (cached) return cached.data  // stale is better than nothing
     throw err
+  } finally {
+    a.cancel()
   }
 }
 

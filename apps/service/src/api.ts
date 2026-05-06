@@ -7,37 +7,37 @@ export const api = {
     const q = new URLSearchParams({ branch_id: branchId, active_only: 'true' })
     if (category) q.set('category', category)
     const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items?${q}`)
-    return d?.items ?? []
+    return ((d?.items ?? []) as any[])
   },
 
   async getSoftDonations(branchId = 'main') {
     const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items/kiosk/soft-donations?branch_id=${branchId}`)
-    return d?.items ?? []
+    return ((d?.items ?? []) as any[])
   },
 
   async getProjects(branchId = 'main') {
     const d = await cachedFetch<{ items?: unknown[]; projects?: unknown[] }>(`${API}/items/kiosk/projects?branch_id=${branchId}`)
-    return d ?? { items: [], projects: [] }
+    return ({ items: d?.items ?? [], projects: d?.projects ?? [] } as { items: any[]; projects: any[] })
   },
 
   async getShop(branchId = 'main') {
     const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items/kiosk/shop?branch_id=${branchId}`)
-    return d?.items ?? []
+    return ((d?.items ?? []) as any[])
   },
 
   async getSponsorship(branchId = 'main') {
     const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items/kiosk/sponsorship?branch_id=${branchId}`)
-    return d?.items ?? []
+    return ((d?.items ?? []) as any[])
   },
 
   async getGeneralDonations() {
     const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items/kiosk/general-donations`)
-    return d?.items ?? []
+    return ((d?.items ?? []) as any[])
   },
 
   async getServices(branchId = 'main') {
     const d = await cachedFetch<{ services?: unknown[] }>(`${API}/kiosk/services?branch_id=${branchId}`)
-    return d?.services ?? []
+    return ((d?.services ?? []) as any[])
   },
 
   async createBasket(branchId = 'main') {
