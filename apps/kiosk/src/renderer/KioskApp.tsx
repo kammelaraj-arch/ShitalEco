@@ -1,6 +1,7 @@
 import React, { useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useKioskStore } from './store/kiosk.store'
+import { scheduleDailyCatalogRefresh } from './utils/cachedFetch'
 import { SetupScreen } from './pages/SetupScreen'
 import { IdleScreen } from './pages/IdleScreen'
 import { HomeScreen } from './pages/HomeScreen'
@@ -27,6 +28,12 @@ export function KioskApp() {
   useEffect(() => {
     if (!deviceConfigured) setScreen('setup')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Daily catalog cache invalidation at local midnight — even if no one
+  // touches the kiosk overnight, the next morning's first read gets fresh data.
+  useEffect(() => {
+    return scheduleDailyCatalogRefresh()
+  }, [])
 
   const resetIdle = useCallback(() => {
     clearTimeout(idleTimeout)

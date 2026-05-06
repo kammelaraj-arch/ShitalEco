@@ -74,3 +74,33 @@ export function clearKioskCache(): void {
     .filter(k => k.startsWith(CACHE_PREFIX))
     .forEach(k => localStorage.removeItem(k))
 }
+
+/**
+ * Schedule a daily catalog cache invalidation at local midnight.
+ *
+ * Long-running kiosks may never re-fetch the catalog because the TTL-based
+ * refresh only fires when something *reads* the cache. Call this once on app
+ * startup to guarantee the first read after midnight gets fresh data.
+ *
+ * Returns a teardown function (clears the timers).
+ */
+export function scheduleDailyCatalogRefresh(): () => void {
+  let dailyTimer: ReturnType<typeof setInterval> | null = null
+
+  const msUntilNextLocalMidnight = (): number => {
+    const now = new Date()
+    const next = new Date(now)
+    next.setHours(24, 0, 0, 0)  // tomorrow 00:00:00.000 local
+    return next.getTime() - now.getTime()
+  }
+
+  const firstTimer = setTimeout(() => {
+    clearKioskCache()
+    dailyTimer = setInterval(clearKioskCache, 24 * 60 * 60 * 1000)
+  }, msUntilNextLocalMidnight())
+
+  return () => {
+    clearTimeout(firstTimer)
+    if (dailyTimer) clearInterval(dailyTimer)
+  }
+}
