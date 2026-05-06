@@ -314,6 +314,33 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def do_GET(self):
+        if self.path == "/snapshots":
+            if not self._check_secret():
+                self.send_response(403); self.end_headers(); return
+            # List promote-time DB dumps. Each is named promote-<ts>-<sha>.sql.gz.
+            import glob
+            import re as _re
+            entries = []
+            for path in sorted(glob.glob("/workspace/backups/promote-*.sql.gz"), reverse=True):
+                name = os.path.basename(path)
+                m = _re.match(r"^promote-(\d{8}T\d{6}Z)-([0-9a-f]{7,})\.sql\.gz$", name)
+                if not m:
+                    continue
+                ts, sha = m.group(1), m.group(2)
+                try:
+                    size = os.path.getsize(path)
+                except OSError:
+                    size = 0
+                entries.append({
+                    "id":         ts,
+                    "git_sha":    sha,
+                    "db_dump":    name,
+                    "size_bytes": size,
+                    "created_at": ts,
+                })
+            self._send_json(200, {"snapshots": entries[:20]})
+            return
+
         if self.path == "/status":
             if not self._check_secret():
                 self.send_response(403); self.end_headers(); return
@@ -366,6 +393,24 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/promote-prod":
             run_script(["--promote-prod"])
+            self.send_response(202); self.end_headers()
+            return
+
+        if self.path == "/restore":
+            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                body = json.loads(self.rfile.read(length).decode() or "{}")
+            except json.JSONDecodeError:
+                self.send_response(400); self.end_headers()
+                self.wfile.write(b"invalid JSON body"); return
+            sid = (body.get("snapshot_id") or "").strip()
+            # Format guard — must look like 20260506T070000Z
+            import re as _re
+            if not _re.match(r"^\d{8}T\d{6}Z$", sid):
+                self.send_response(400); self.end_headers()
+                self.wfile.write(b"snapshot_id must be timestamp like 20260506T070000Z")
+                return
+            run_script(["--restore", sid])
             self.send_response(202); self.end_headers()
             return
 

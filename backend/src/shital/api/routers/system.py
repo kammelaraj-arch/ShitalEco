@@ -179,6 +179,90 @@ async def trigger_deploy(
     }
 
 
+# ─── Snapshots / restore (deploy-time DB + image snapshots) ───────────────────
+
+@router.get("/snapshots")
+async def list_snapshots(ctx: CurrentSpace) -> dict[str, Any]:
+    """List promote-time snapshots (DB dump + image tags) available for restore."""
+    _require_admin(ctx)
+    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000")
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "")
+    if not deploy_secret:
+        return {"snapshots": [], "error": "DEPLOY_SECRET not configured"}
+    req = urllib.request.Request(
+        f"{deployer_url}/snapshots",
+        headers={"X-Deploy-Secret": deploy_secret},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        return {"snapshots": [], "error": f"Deployer unreachable: {e}"}
+
+
+@router.post("/restore/{snapshot_id}")
+async def restore_snapshot(
+    snapshot_id: str,
+    ctx: CurrentSpace,
+    x_admin_pin: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """
+    Restore prod from a previous promote snapshot (DB + images). PIN-gated.
+    snapshot_id is the timestamp portion, e.g. 20260506T070000Z.
+    """
+    _require_admin(ctx)
+    if not x_admin_pin:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin PIN required (X-Admin-Pin header)",
+        )
+    from shital.core.fabrics.secrets import SecretsManager
+    if not await SecretsManager.verify_pin(x_admin_pin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Incorrect admin PIN",
+        )
+
+    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000")
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "")
+    if not deploy_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="DEPLOY_SECRET not configured",
+        )
+    payload = json.dumps({"snapshot_id": snapshot_id}).encode()
+    req = urllib.request.Request(
+        f"{deployer_url}/restore",
+        method="POST",
+        headers={"X-Deploy-Secret": deploy_secret, "Content-Type": "application/json"},
+        data=payload,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            code = r.status
+    except urllib.error.HTTPError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Deployer rejected: HTTP {e.code}",
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not reach deployer: {e}",
+        ) from e
+    return {
+        "ok": True,
+        "snapshot_id": snapshot_id,
+        "deployer_status": code,
+        "triggered_at": datetime.now(UTC).isoformat(),
+        "triggered_by": ctx.user_email,
+        "message": (
+            "Restore started. Containers will restart in 1-2 min. "
+            "Current state was snapshotted as :pre-restore-* before changing."
+        ),
+    }
+
+
 # Backwards-compat: keep the old name (= deploy to dev)
 @router.post("/trigger-deploy")
 async def trigger_deploy_legacy(
