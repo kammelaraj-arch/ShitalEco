@@ -18,16 +18,25 @@ exec >> "$LOG" 2>&1
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 TARGET="dev"
 PROMOTE=0
+RESTORE_ID=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --target) TARGET="$2"; shift 2 ;;
     --promote-prod) PROMOTE=1; TARGET="prod"; shift ;;
+    --restore) RESTORE_ID="$2"; TARGET="prod"; shift 2 ;;
     *) echo "Unknown arg: $1"; shift ;;
   esac
 done
 
-echo "=== Deploy started $(date) — target=${TARGET} promote=${PROMOTE} ==="
+# Where snapshots live. Each promote/restore creates one entry.
+#   promote-<ts>-<sha>.sql.gz  — DB dump taken just before promote
+#   :promote-<ts>              — image tag pointing at the about-to-be-replaced :latest
+SNAP_DIR=/workspace/backups
+SNAP_GC_KEEP=10
+mkdir -p "$SNAP_DIR"
+
+echo "=== Deploy started $(date) — target=${TARGET} promote=${PROMOTE} restore=${RESTORE_ID:-none} ==="
 cd /workspace
 
 git fetch origin
@@ -41,13 +50,96 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
     && echo "Logged in to GHCR" || echo "GHCR login failed — images may already be cached"
 fi
 
+# ── Snapshot before promote: DB dump + timestamped image tag ────────────────
+take_snapshot() {
+  local ts="$1" reason="$2"
+  local out="${SNAP_DIR}/${reason}-${ts}-${GIT_SHA:0:7}.sql.gz"
+  echo "=== Taking ${reason} snapshot ${ts} ==="
+  # DB dump (best-effort — don't fail the deploy if pg_dump misbehaves)
+  if docker compose -f docker-compose.prod.yml exec -T db \
+       pg_dump -U "${POSTGRES_USER:-shitaleco_db_user}" \
+               -d "${POSTGRES_DB:-shitaleco_db}" 2>/dev/null \
+       | gzip > "$out" ; then
+    echo "  ✓ DB dump → ${out} ($(du -h "$out" | cut -f1))"
+  else
+    rm -f "$out"
+    echo "  ✗ DB dump failed (continuing — image snapshot still useful)"
+  fi
+  # Image-tag snapshot of current :latest, before any retag
+  for svc in backend admin quick-donation kiosk screen service; do
+    local img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+    if docker tag "${img}:latest" "${img}:${reason}-${ts}" 2>/dev/null; then
+      echo "  ✓ tagged ${svc}:${reason}-${ts}"
+    fi
+  done
+}
+
+# Garbage-collect: keep latest N promote snapshots (db dump files + image tags)
+gc_snapshots() {
+  echo "=== GC: keeping last ${SNAP_GC_KEEP} promote snapshots ==="
+  # Files
+  ls -1t "${SNAP_DIR}"/promote-*.sql.gz 2>/dev/null \
+    | tail -n +"$((SNAP_GC_KEEP + 1))" \
+    | while read -r f ; do echo "  rm $f"; rm -f "$f"; done
+  # Image tags (parse promote-<ts> tags, keep last N)
+  for svc in backend admin quick-donation kiosk screen service; do
+    local img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+    docker images "${img}" --format '{{.Tag}}' 2>/dev/null \
+      | grep '^promote-' | sort -r | tail -n +"$((SNAP_GC_KEEP + 1))" \
+      | while read -r tag ; do
+          docker rmi "${img}:${tag}" >/dev/null 2>&1 \
+            && echo "  untagged ${svc}:${tag}" || true
+        done
+  done
+}
+
+# ── Restore mode: rollback to a specific snapshot ────────────────────────────
+if [ -n "$RESTORE_ID" ]; then
+  echo "=== Restore mode — snapshot id=${RESTORE_ID} ==="
+  DB_DUMP="${SNAP_DIR}/promote-${RESTORE_ID}-"*".sql.gz"
+  DB_DUMP_FILE=$(ls $DB_DUMP 2>/dev/null | head -1 || true)
+  if [ -z "$DB_DUMP_FILE" ] || [ ! -f "$DB_DUMP_FILE" ]; then
+    echo "!!! No DB dump found matching ${RESTORE_ID} — aborting"
+    exit 1
+  fi
+  # Snapshot the CURRENT state first so we can rollback the rollback
+  PRE_RESTORE_TS=$(date -u +'%Y%m%dT%H%M%SZ')
+  take_snapshot "$PRE_RESTORE_TS" "pre-restore"
+
+  echo "=== Restoring images from :promote-${RESTORE_ID} → :latest ==="
+  for svc in backend admin quick-donation kiosk screen service; do
+    img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+    if docker tag "${img}:promote-${RESTORE_ID}" "${img}:latest" 2>/dev/null; then
+      echo "  ✓ restored ${svc} → :latest"
+    else
+      echo "  ~ no :promote-${RESTORE_ID} for ${svc} (skipping)"
+    fi
+  done
+
+  echo "=== Restoring DB from ${DB_DUMP_FILE} ==="
+  if zcat "$DB_DUMP_FILE" | docker compose -f docker-compose.prod.yml exec -T db \
+       psql -U "${POSTGRES_USER:-shitaleco_db_user}" \
+            -d "${POSTGRES_DB:-shitaleco_db}" >/dev/null 2>&1 ; then
+    echo "  ✓ DB restored"
+  else
+    echo "!!! DB restore failed — images already retagged. Manual intervention required."
+    exit 1
+  fi
+  # Skip the promote retag step below — restore IS the retag for this run.
+  PROMOTE=0
+fi
+
 # ── Promote: retag :dev → :latest BEFORE pulling/restarting prod ────────────
 if [ "$PROMOTE" -eq 1 ]; then
+  PROMOTE_TS=$(date -u +'%Y%m%dT%H%M%SZ')
+  take_snapshot "$PROMOTE_TS" "promote"
+
   echo "=== Promoting :dev → :latest ==="
   docker pull "ghcr.io/kammelaraj-arch/shitaleco-backend:dev"
   for svc in backend admin quick-donation kiosk screen service; do
     img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
-    # Snapshot current :latest as :previous (rollback target)
+    # Snapshot current :latest as :previous (rollback target — kept for compat
+    # with existing one-step rollback logic below).
     docker tag "${img}:latest" "${img}:previous" 2>/dev/null || true
     # Promote :dev → :latest
     if docker pull "${img}:dev" 2>/dev/null; then
@@ -57,6 +149,7 @@ if [ "$PROMOTE" -eq 1 ]; then
       echo "  - skipped ${svc} (no :dev image)"
     fi
   done
+  gc_snapshots
 fi
 
 # ── Branch on target ────────────────────────────────────────────────────────
