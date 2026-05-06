@@ -43,6 +43,8 @@ interface Item {
   available_until: string | null
   display_channel: string
   branch_stock: Record<string, number>
+  send_email_on_payment: boolean
+  email_template_key: string
 }
 
 type FormState = Omit<Item, 'id' | 'price'> & { price: string }
@@ -56,12 +58,15 @@ const EMPTY_FORM: FormState = {
   available_from: '', available_until: '',
   display_channel: 'both',
   branch_stock: {},
+  send_email_on_payment: false,
+  email_template_key: '',
 }
 
 export default function CatalogItemsPage() {
   const [items, setItems] = useState<Item[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [projects, setProjects] = useState<Project[]>([])
+  const [emailTemplates, setEmailTemplates] = useState<{ template_key: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
@@ -85,14 +90,16 @@ export default function CatalogItemsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [itemData, brData, prData] = await Promise.all([
+      const [itemData, brData, prData, etData] = await Promise.all([
         apiFetch<{ items: Item[] }>('/items/?active_only=false'),
         apiFetch<{ branches: Branch[] }>('/branches'),
         apiFetch<{ projects: Project[] }>('/projects?include_inactive=true').catch(() => ({ projects: [] })),
+        apiFetch<{ templates: { template_key: string; name: string }[] }>('/admin/email-templates').catch(() => ({ templates: [] })),
       ])
       setItems(itemData.items || [])
       setBranches(brData.branches || [])
       setProjects(prData.projects || [])
+      setEmailTemplates(etData.templates || [])
     } catch { setError('Failed to load items') }
     finally { setLoading(false) }
   }, [])
@@ -115,6 +122,8 @@ export default function CatalogItemsPage() {
       available_until: item.available_until ? item.available_until.slice(0, 10) : '',
       display_channel: item.display_channel || 'both',
       branch_stock: item.branch_stock || {},
+      send_email_on_payment: item.send_email_on_payment ?? false,
+      email_template_key:    item.email_template_key ?? '',
     })
     setShowForm(true)
   }
@@ -550,6 +559,41 @@ export default function CatalogItemsPage() {
                       <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${form.gift_aid_eligible ? 'left-5' : 'left-0.5'}`} />
                     </button>
                   </div>
+                </div>
+
+                {/* Per-item post-payment email — e.g. brick-donor instructions */}
+                <div className="bg-white/5 rounded-xl px-4 py-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-white text-sm font-bold">📧 Send email on payment</p>
+                      <p className="text-white/30 text-xs">Additional product-specific email after the standard receipt</p>
+                    </div>
+                    <button onClick={() => setForm(p => ({ ...p, send_email_on_payment: !p.send_email_on_payment }))}
+                      className={`w-11 h-6 rounded-full transition-all relative ${form.send_email_on_payment ? 'bg-green-500' : 'bg-white/10'}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${form.send_email_on_payment ? 'left-5' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+                  {form.send_email_on_payment && (
+                    <div>
+                      <label className="text-white/60 text-xs uppercase tracking-wider mb-1 block">Email template</label>
+                      <SearchSelect
+                        options={[
+                          { value: '', label: '— select a template —' },
+                          ...emailTemplates.map(t => ({
+                            value: t.template_key,
+                            label: `${t.name || t.template_key}  ·  ${t.template_key}`,
+                          })),
+                        ]}
+                        value={form.email_template_key}
+                        onChange={v => setForm(p => ({ ...p, email_template_key: v }))}
+                        placeholder="Search and select an email template…"
+                      />
+                      <p className="text-white/30 text-xs mt-1">
+                        Lists rows from <code className="bg-white/5 px-1 rounded">email_templates</code>.
+                        Need a new one? Create it at <a href="/settings/email-templates" className="text-saffron-400 underline">Settings → Email Templates</a>, then come back.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Branch */}

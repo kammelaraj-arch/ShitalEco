@@ -69,6 +69,27 @@ export default function OrderItemsPage() {
 
   const totalRevenue = items.reduce((s, i) => s + Number(i.total_price), 0)
 
+  // Per-status breakdown (count + sum) for the cards + pie chart.
+  const byStatus = items.reduce<Record<string, { count: number; sum: number }>>((acc, it) => {
+    const k = it.order_status || 'UNKNOWN'
+    if (!acc[k]) acc[k] = { count: 0, sum: 0 }
+    acc[k].count += 1
+    acc[k].sum   += Number(it.total_price)
+    return acc
+  }, {})
+  // Slice colours for the pie — match the badge colours in the table.
+  const STATUS_PIE: Record<string, string> = {
+    COMPLETED: '#22C55E', // green-500
+    PENDING:   '#EAB308', // yellow-500
+    FAILED:    '#EF4444', // red-500
+    CANCELLED: '#9CA3AF', // gray-400
+    UNKNOWN:   '#6366F1', // indigo-500
+  }
+  const slices = Object.entries(byStatus)
+    .map(([status, v]) => ({ status, ...v, color: STATUS_PIE[status] || '#6366F1' }))
+    .filter(s => s.sum > 0)
+    .sort((a, b) => b.sum - a.sum)
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -102,19 +123,64 @@ export default function OrderItemsPage() {
         </button>
       </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: 'Total Items', value: total.toLocaleString(), icon: '🛒' },
-          { label: 'Showing', value: items.length.toString(), icon: '📋' },
-          { label: 'Revenue (shown)', value: `£${totalRevenue.toFixed(2)}`, icon: '💷' },
-        ].map(c => (
-          <div key={c.label} className="glass rounded-2xl p-4 border border-temple-border">
-            <p className="text-2xl mb-1">{c.icon}</p>
-            <p className="text-2xl font-black text-white">{c.value}</p>
-            <p className="text-white/40 text-xs mt-0.5">{c.label}</p>
+      {/* Summary — per-status totals + pie chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Status breakdown cards (left two columns) */}
+        <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {(['COMPLETED', 'PENDING', 'FAILED', 'CANCELLED'] as const).map(s => (
+            <div key={s} className="glass rounded-2xl p-4 border border-temple-border">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: STATUS_PIE[s] }} />
+                <p className="text-white/40 text-xs uppercase tracking-wider font-semibold">{s}</p>
+              </div>
+              <p className="text-2xl font-black text-white">£{(byStatus[s]?.sum ?? 0).toFixed(2)}</p>
+              <p className="text-white/30 text-xs mt-0.5">
+                {byStatus[s]?.count ?? 0} item{(byStatus[s]?.count ?? 0) === 1 ? '' : 's'}
+              </p>
+            </div>
+          ))}
+          <div className="glass rounded-2xl p-4 border border-temple-border bg-saffron-500/5">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-base">💷</span>
+              <p className="text-saffron-300 text-xs uppercase tracking-wider font-semibold">Total (shown)</p>
+            </div>
+            <p className="text-2xl font-black text-white">£{totalRevenue.toFixed(2)}</p>
+            <p className="text-white/30 text-xs mt-0.5">{items.length} of {total} items</p>
           </div>
-        ))}
+          <div className="glass rounded-2xl p-4 border border-temple-border">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-base">🛒</span>
+              <p className="text-white/40 text-xs uppercase tracking-wider font-semibold">All Items</p>
+            </div>
+            <p className="text-2xl font-black text-white">{total.toLocaleString()}</p>
+            <p className="text-white/30 text-xs mt-0.5">across all kiosk orders</p>
+          </div>
+        </div>
+
+        {/* Pie chart (right column) */}
+        <div className="glass rounded-2xl p-4 border border-temple-border flex flex-col items-center justify-center">
+          <p className="text-white/40 text-xs uppercase tracking-wider font-semibold mb-3 self-start">By status (£)</p>
+          {slices.length === 0 ? (
+            <p className="text-white/30 text-sm py-8">No data</p>
+          ) : (
+            <>
+              <StatusPie slices={slices} totalRevenue={totalRevenue} />
+              <div className="mt-3 w-full space-y-1">
+                {slices.map(s => (
+                  <div key={s.status} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full" style={{ background: s.color }} />
+                      <span className="text-white/70 font-medium">{s.status}</span>
+                    </div>
+                    <span className="text-white/50 font-mono">
+                      £{s.sum.toFixed(2)} · {((s.sum / totalRevenue) * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {error && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
@@ -189,5 +255,66 @@ export default function OrderItemsPage() {
         </div>
       )}
     </div>
+  )
+}
+
+// ─── Inline SVG pie (no chart library — keeps the bundle slim) ──────────────
+// Renders one path per slice. For a single 100%-slice we draw a full circle
+// since SVG arc paths can't represent a 360° arc cleanly.
+function StatusPie({
+  slices,
+  totalRevenue,
+}: {
+  slices: { status: string; sum: number; color: string }[]
+  totalRevenue: number
+}) {
+  const size = 160
+  const r = 70
+  const cx = size / 2
+  const cy = size / 2
+
+  if (slices.length === 1) {
+    return (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={cx} cy={cy} r={r} fill={slices[0].color} />
+        <circle cx={cx} cy={cy} r={r * 0.5} fill="rgba(20,20,20,0.92)" />
+        <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+          fill="white" fontSize="14" fontWeight="900">
+          £{Math.round(totalRevenue)}
+        </text>
+      </svg>
+    )
+  }
+
+  let cum = 0
+  const paths = slices.map(s => {
+    const start = cum
+    const slice = s.sum / totalRevenue
+    cum += slice
+    const a0 = start * Math.PI * 2 - Math.PI / 2
+    const a1 = cum   * Math.PI * 2 - Math.PI / 2
+    const x0 = cx + r * Math.cos(a0)
+    const y0 = cy + r * Math.sin(a0)
+    const x1 = cx + r * Math.cos(a1)
+    const y1 = cy + r * Math.sin(a1)
+    const largeArc = slice > 0.5 ? 1 : 0
+    return {
+      d: `M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${largeArc} 1 ${x1} ${y1} Z`,
+      color: s.color,
+    }
+  })
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {paths.map((p, i) => (
+        <path key={i} d={p.d} fill={p.color} stroke="rgba(20,20,20,0.92)" strokeWidth="1" />
+      ))}
+      {/* Donut hole + total in centre */}
+      <circle cx={cx} cy={cy} r={r * 0.5} fill="rgba(20,20,20,0.92)" />
+      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+        fill="white" fontSize="14" fontWeight="900">
+        £{Math.round(totalRevenue)}
+      </text>
+    </svg>
   )
 }
