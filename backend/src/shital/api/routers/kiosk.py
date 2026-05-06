@@ -192,15 +192,18 @@ async def checkout(body: CheckoutInput, ctx: OptionalSpace):
             contact_id = str(row["id"]) if row else contact_uuid
 
             if body.customer_postcode or body.customer_address:
+                _house = (body.customer_address or "").split(",")[0].strip()[:50]
                 await db.execute(text("""
                     INSERT INTO addresses
-                        (id, contact_id, formatted, postcode, uprn,
+                        (id, contact_id, formatted, postcode, house_number, uprn,
                          is_primary, lookup_source, created_at)
-                    VALUES (:id, :cid, :fmt, :pc, :uprn, true, 'kiosk', :now)
+                    VALUES (:id, :cid, :fmt, :pc, :house, :uprn, true, 'kiosk', :now)
+                    ON CONFLICT (contact_id, postcode, house_number)
+                        WHERE contact_id IS NOT NULL DO NOTHING
                 """), {
                     "id": str(uuid.uuid4()), "cid": contact_id,
                     "fmt": body.customer_address or "", "pc": body.customer_postcode.upper().strip(),
-                    "uprn": body.customer_uprn or "", "now": now,
+                    "house": _house, "uprn": body.customer_uprn or "", "now": now,
                 })
 
         await db.execute(
@@ -379,15 +382,17 @@ async def create_pending_order(body: OrderPendingInput):
                 ga_contact_id = str(r2["id"]) if r2 else ga_uuid
 
             if ga_contact_id and body.ga_postcode:
+                _ga_house = (body.ga_address or "").split(",")[0].strip()[:50]
                 await db.execute(text("""
-                    INSERT INTO addresses (id, contact_id, formatted, postcode, uprn,
+                    INSERT INTO addresses (id, contact_id, formatted, postcode, house_number, uprn,
                                           is_primary, lookup_source, created_at)
-                    VALUES (:id, :cid, :fmt, :pc, '', true, 'kiosk', :now)
-                    ON CONFLICT DO NOTHING
+                    VALUES (:id, :cid, :fmt, :pc, :house, '', true, 'kiosk', :now)
+                    ON CONFLICT (contact_id, postcode, house_number)
+                        WHERE contact_id IS NOT NULL DO NOTHING
                 """), {
                     "id": str(uuid.uuid4()), "cid": ga_contact_id,
                     "fmt": body.ga_address or body.ga_postcode,
-                    "pc": body.ga_postcode.upper().strip(), "now": now,
+                    "pc": body.ga_postcode.upper().strip(), "house": _ga_house, "now": now,
                 })
 
             await db.execute(text("""
@@ -498,7 +503,59 @@ async def confirm_order(body: OrderConfirmInput):
         except Exception:
             email_sent = False
 
-    return {"confirmed": True, "reference": body.order_ref, "email_sent": email_sent}
+    # ── Per-item post-payment emails (e.g. brick-donor instructions) ──────────
+    # If any item in this order has catalog_items.send_email_on_payment=true
+    # with an email_template_key set, send that template to the customer.
+    # One email per item per order — quantities don't multiply emails (per
+    # the user's spec: 5 bricks → 1 email, not 5).
+    per_item_emails: list[dict[str, Any]] = []
+    if order and order["customer_email"]:
+        try:
+            from shital.api.routers.email_templates import send_template
+
+            async with SessionLocal() as db:
+                item_rows = await db.execute(text("""
+                    SELECT bi.name AS item_name, bi.quantity, bi.unit_price,
+                           ci.email_template_key
+                    FROM basket_items bi
+                    JOIN catalog_items ci
+                      ON ci.id::text = bi.reference_id
+                    WHERE bi.basket_id = :bid
+                      AND ci.send_email_on_payment = true
+                      AND COALESCE(ci.email_template_key, '') != ''
+                """), {"bid": order["basket_id"]})
+                rows = item_rows.mappings().all()
+
+            for r in rows:
+                qty = int(r["quantity"])
+                unit = float(str(r["unit_price"]))
+                send_result = await send_template(
+                    template_key=r["email_template_key"],
+                    to_email=order["customer_email"],
+                    variables={
+                        "customer_name":     order["customer_name"] or "",
+                        "customer_email":    order["customer_email"],
+                        "order_ref":         body.order_ref,
+                        "payment_id":        body.payment_ref,
+                        "payment_provider":  "",  # filled by caller if needed
+                        "transaction_date":  now.strftime("%-d %B %Y %H:%M UTC"),
+                        "item_name":         r["item_name"],
+                        "item_quantity":     qty,
+                        "item_unit_price":   unit,
+                        "item_total":        round(qty * unit, 2),
+                        "branch_name":       f"Shital {branch_label}",
+                    },
+                )
+                per_item_emails.append({"item": r["item_name"], **send_result})
+        except Exception as e:
+            per_item_emails.append({"error": str(e)})
+
+    return {
+        "confirmed": True,
+        "reference": body.order_ref,
+        "email_sent": email_sent,
+        "per_item_emails": per_item_emails,
+    }
 
 
 @router.post("/terminal/connection-token")
@@ -1203,22 +1260,27 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                     if body.ga_postcode:
                         await db.execute(text("""
                             INSERT INTO addresses
-                                (id, contact_id, formatted, postcode, uprn,
+                                (id, contact_id, formatted, postcode, house_number, uprn,
                                  is_primary, lookup_source, created_at)
-                            VALUES (:id, :cid, :fmt, :pc, '', true, 'quick-donation', :now)
+                            VALUES (:id, :cid, :fmt, :pc, :house, '', true, 'quick-donation', :now)
+                            ON CONFLICT (contact_id, postcode, house_number)
+                                WHERE contact_id IS NOT NULL DO NOTHING
                         """), {
                             "id": str(uuid.uuid4()), "cid": contact_id,
-                            "fmt": body.ga_house_number or "", "pc": body.ga_postcode.upper().strip(), "now": now,
+                            "fmt": body.ga_house_number or "", "pc": body.ga_postcode.upper().strip(),
+                            "house": (body.ga_house_number or "")[:50], "now": now,
                         })
 
                 declaration_id = str(uuid.uuid4())
                 await db.execute(text("""
                     INSERT INTO gift_aid_declarations
-                        (id, order_ref, full_name, first_name, surname, postcode, address, uprn,
+                        (id, order_ref, full_name, first_name, surname,
+                         postcode, address, house_number, uprn,
                          contact_email, contact_phone, donation_amount, donation_date,
                          gift_aid_agreed, contact_id, source, hmrc_submitted, created_at)
                     VALUES
-                        (:id, :ref, :name, :first, :surname, :pc, :addr, '',
+                        (:id, :ref, :name, :first, :surname,
+                         :pc, :addr, :house, '',
                          :email, '', :amount, :ddate,
                          true, :cid, 'quick-donation', false, :now)
                 """), {
@@ -1226,6 +1288,7 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                     "name": full_name, "first": body.ga_first_name, "surname": body.ga_surname,
                     "pc": body.ga_postcode.upper().strip() if body.ga_postcode else "",
                     "addr": body.ga_house_number or "",
+                    "house": (body.ga_house_number or "")[:50],
                     "email": body.ga_email.strip().lower() if body.ga_email else "",
                     "amount": str(total), "ddate": now.date(),
                     "cid": contact_id, "now": now,
@@ -1277,6 +1340,8 @@ class ReceiptInput(BaseModel):
     items: list[dict[str, Any]] = []
     branch_name: str = "Shital Temple"
     customer_name: str = ""
+    payment_provider: str = ""
+    payment_ref: str = ""
 
 
 @router.post("/receipt")
@@ -1300,12 +1365,21 @@ async def send_receipt(body: ReceiptInput):
         return {"sent": False, "error": "No destination provided"}
 
     variables = {
-        "order_ref":     body.order_ref,
-        "customer_name": body.customer_name or "",
-        "total":         body.total,
-        "items":         body.items,
-        "branch_name":   body.branch_name,
-        "date":          _date.today().strftime("%-d %B %Y"),
+        "order_ref":         body.order_ref,
+        "customer_name":     body.customer_name or "",
+        "total":             body.total,
+        "items":             body.items,
+        "branch_name":       body.branch_name,
+        "date":              _date.today().strftime("%-d %B %Y"),
+        # Richer template variables — available in the donation_receipt
+        # email template via {{ charity_number }}, {{ logo_url }}, etc.
+        "charity_number":    settings.CHARITY_NUMBER or "1138530",
+        "logo_url":          "https://shital.org.uk/logo.png",
+        "website_url":       "https://shital.org.uk",
+        "monthly_url":       "https://shital.org.uk/donate?monthly=1",
+        "account_url":       "https://shital.org.uk/account",
+        "payment_provider":  body.payment_provider or "",
+        "payment_ref":       body.payment_ref or "",
     }
 
     # ── Helper: load donation_receipt template from DB ────────────────────────
@@ -1526,6 +1600,57 @@ BRANCHES = [
 async def list_branches():
     """List all Shital Temple branches for kiosk branch selection."""
     return {"branches": BRANCHES}
+
+
+# ─── Kiosk Print Receipt Template ─────────────────────────────────────────────
+
+class PrintReceiptVars(BaseModel):
+    branch_name: str = "Shital"
+    donor_name: str = ""
+    order_ref: str = "TEST-0000"
+    date: str = ""
+    items_html: str = ""
+    total: str = "0.00"
+    payment_method: str = "CARD PAYMENT"
+    gift_aid_block: str = ""
+    # Default 0 — printer driver's built-in feed-before-cut is already
+    # content-length aware (it feeds a fixed mm past the print head no
+    # matter how long the receipt is). Bump only if your printer cuts
+    # through the last text line.
+    cut_margin_px: int = 0
+
+
+@router.post("/print-template")
+async def render_print_template(body: PrintReceiptVars):
+    """Render the kiosk_print_receipt template (editable in admin →
+    Settings → Email Templates) with the supplied variables. Used by the
+    kiosk Confirmation screen to build the printable HTML and by the
+    Shop screen's 'Test Print' button to verify the printer."""
+    from jinja2 import Environment
+    from sqlalchemy import text as sql_text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        r = await db.execute(
+            sql_text("SELECT html_body FROM email_templates WHERE template_key = 'kiosk_print_receipt' AND is_active LIMIT 1")
+        )
+        row = r.mappings().first()
+
+    html_template = row["html_body"] if row else (
+        # Fallback if the seed didn't run yet — minimal template
+        '<div style="font-family:monospace;width:80mm;padding:6mm;">'
+        '<h2>{{ branch_name }}</h2><p>{{ order_ref }} — £{{ total }}</p>'
+        '{{ items_html | safe }}'
+        '<div style="height:{{ cut_margin_px }}px;">&nbsp;</div></div>'
+    )
+
+    if not body.date:
+        body.date = datetime.utcnow().strftime("%d/%m/%Y %H:%M")
+
+    env = Environment(autoescape=False)
+    rendered = env.from_string(html_template).render(**body.model_dump())
+    return {"html": rendered}
 
 
 # ─── QuickDonation Kiosk Accounts ────────────────────────────────────────────
@@ -2066,6 +2191,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(kd.bg_color, '') AS bg_color,
                        kd.card_reader_id, kd.menu_profile_id,
                        COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.menu_options, '{"test_print": true, "theme_cycle": true, "refresh": true, "admin": true}'::jsonb) AS menu_options,
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
                        td.stripe_reader_id, td.label AS reader_label,
@@ -2133,6 +2259,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "confirmation_text": device["confirmation_text"] or "",
             "bg_color": device["bg_color"] or "",
             "kiosk_theme": device["kiosk_theme"] or "saffron",
+            "menu_options": dict(device).get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
             "org_logo_url": device["org_logo_url"] or "",
             "org_name": device["org_name"] or "",
             "menu_codes": menu_codes,
@@ -2207,6 +2334,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(kd.confirmation_text, '') AS confirmation_text,
                        COALESCE(kd.bg_color, '') AS bg_color,
                        COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.menu_options, '{"test_print": true, "theme_cycle": true, "refresh": true, "admin": true}'::jsonb) AS menu_options,
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
                        td.stripe_reader_id, td.label AS reader_label,
@@ -2241,6 +2369,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 "confirmation_text": dev_row["confirmation_text"] or "",
                 "bg_color": dev_row["bg_color"] or "",
                 "kiosk_theme": dev_row["kiosk_theme"] or "saffron",
+                "menu_options": dict(dev_row).get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
                 "org_logo_url": dev_row["org_logo_url"] or "",
                 "org_name": dev_row["org_name"] or "",
             }
@@ -2300,6 +2429,7 @@ async def quick_kiosk_refresh_config(username: str):
                        COALESCE(kd.confirmation_text, '') AS confirmation_text,
                        COALESCE(kd.bg_color, '') AS bg_color,
                        COALESCE(kd.kiosk_theme, 'saffron') AS kiosk_theme,
+                       COALESCE(kd.menu_options, '{"test_print": true, "theme_cycle": true, "refresh": true, "admin": true}'::jsonb) AS menu_options,
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
                        kd.card_reader_id,
@@ -2340,6 +2470,7 @@ async def quick_kiosk_refresh_config(username: str):
         "confirmation_text": device["confirmation_text"] or "",
         "bg_color": device["bg_color"] or "",
         "kiosk_theme": device["kiosk_theme"] or "saffron",
+        "menu_options": dict(device).get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
         "org_logo_url": device["org_logo_url"] or "",
         "org_name": device["org_name"] or "",
     }

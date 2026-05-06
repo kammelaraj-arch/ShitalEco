@@ -170,3 +170,61 @@ def _default_vars() -> dict[str, Any]:
         "branch_name": "Shital Temple",
         "date": date.today().strftime("%-d %B %Y"),
     }
+
+
+async def send_template(template_key: str, to_email: str, variables: dict[str, Any]) -> dict[str, Any]:
+    """Render and send an email_templates row to a recipient.
+
+    Used by the kiosk record-order flow for per-item post-payment emails
+    (e.g. brick-donor instructions). Returns {sent: bool, ...} — never raises;
+    callers can fire-and-forget without breaking the order flow.
+    """
+    import asyncio
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
+
+    if not template_key or not to_email:
+        return {"sent": False, "reason": "missing template_key or to_email"}
+
+    try:
+        async with SessionLocal() as db:
+            r = await db.execute(
+                text("SELECT subject, html_body, text_body FROM email_templates WHERE template_key = :key AND is_active LIMIT 1"),
+                {"key": template_key},
+            )
+            row = r.mappings().first()
+        if not row:
+            return {"sent": False, "reason": f"template '{template_key}' not found or inactive"}
+
+        merged = {**_default_vars(), **variables}
+        subject, html_body, text_body = render_template(dict(row), merged)
+
+        from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
+        password   = settings.OFFICE365_PASSWORD
+        if not password:
+            return {"sent": False, "reason": "OFFICE365_PASSWORD not set"}
+
+        def _send() -> None:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"]    = from_email
+            msg["To"]      = to_email
+            if text_body:
+                msg.attach(MIMEText(text_body, "plain"))
+            msg.attach(MIMEText(html_body, "html"))
+            with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
+                srv.ehlo()
+                srv.starttls()
+                srv.login(from_email, password)
+                srv.sendmail(from_email, to_email, msg.as_string())
+
+        await asyncio.get_event_loop().run_in_executor(None, _send)
+        return {"sent": True, "to": to_email, "template": template_key}
+    except Exception as exc:
+        return {"sent": False, "error": str(exc), "template": template_key}

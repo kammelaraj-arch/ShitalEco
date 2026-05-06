@@ -11,6 +11,7 @@ device to fetch its config without a user session.
 """
 from __future__ import annotations
 
+import json
 import secrets
 import uuid
 from datetime import datetime
@@ -79,6 +80,8 @@ class DeviceIn(BaseModel):
     bg_color: str = ""
     # Menu profile (controls which kiosk menus are shown — see menus router)
     menu_profile_id: str | None = None
+    # Per-device staff-menu options — controls what appears in the kiosk gear icon
+    menu_options: dict = {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -258,6 +261,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  device_username, device_password_hash,
                  show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
                  monthly_giving_text, monthly_giving_amount, confirmation_text,
+                 bg_color, menu_options,
                  created_at, updated_at)
             VALUES
                 (:id, :name, :desc, :dtype, :bid, :loc, :status,
@@ -266,7 +270,8 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  :token, :notes, :ktheme, :oname, :ologo,
                  :dev_user, :dev_pw_hash,
                  :show_monthly, :gift_aid, :tap_go, :donate_title,
-                 :mg_text, :mg_amount, :confirm_text, :bg_color,
+                 :mg_text, :mg_amount, :confirm_text,
+                 :bg_color, CAST(:menu_opts AS JSONB),
                  :now, :now)
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
@@ -287,6 +292,9 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "donate_title": body.donate_title or "Tap & Donate",
             "mg_text": body.monthly_giving_text or "Make a big impact from just £5/month",
             "mg_amount": body.monthly_giving_amount or 5.0,
+            "confirm_text": body.confirmation_text or "",
+            "bg_color": body.bg_color or "",
+            "menu_opts": json.dumps(body.menu_options or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}),
             "now": now,
         })
         await db.commit()
@@ -332,6 +340,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 confirmation_text = :confirm_text,
                 bg_color = :bg_color,
                 menu_profile_id = :menu_profile_id,
+                menu_options = CAST(:menu_opts AS JSONB),
                 updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
         """), {
@@ -356,6 +365,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "confirm_text": body.confirmation_text or "",
             "bg_color": body.bg_color or "",
             "menu_profile_id": body.menu_profile_id,
+            "menu_opts": json.dumps(body.menu_options or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}),
             "now": now,
         })
         await db.commit()

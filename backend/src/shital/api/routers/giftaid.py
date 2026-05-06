@@ -99,6 +99,7 @@ class StoreDeclarationInput(BaseModel):
     full_name: str
     first_name: str = ""
     surname: str = ""
+    house_number: str = ""
     postcode: str
     address: str
     uprn: str = ""
@@ -157,32 +158,42 @@ async def store_declaration(ctx: CurrentSpace, body: StoreDeclarationInput):
                 row = c_result.mappings().first()
                 contact_id = str(row["id"]) if row else contact_uuid
 
-                if body.postcode or body.address:
-                    await db.execute(text("""
-                        INSERT INTO addresses
-                            (id, contact_id, formatted, postcode, uprn,
-                             is_primary, lookup_source, created_at)
-                        VALUES (:id, :cid, :fmt, :pc, :uprn, true, 'kiosk', :now)
-                    """), {
-                        "id": str(uuid.uuid4()), "cid": contact_id,
-                        "fmt": body.address or "", "pc": body.postcode.upper().strip(),
-                        "uprn": body.uprn or "", "now": now,
-                    })
+            # Derive house_number if the kiosk didn't send it explicitly
+            house_number = body.house_number or ""
+            if not house_number and body.address:
+                # First comma-separated segment is conventionally the house num/name
+                house_number = body.address.split(",")[0].strip()[:50]
+
+            if contact_id and (body.postcode or body.address):
+                await db.execute(text("""
+                    INSERT INTO addresses
+                        (id, contact_id, formatted, postcode, house_number, uprn,
+                         is_primary, lookup_source, created_at)
+                    VALUES (:id, :cid, :fmt, :pc, :house, :uprn, true, 'kiosk', :now)
+                    ON CONFLICT (contact_id, postcode, house_number)
+                        WHERE contact_id IS NOT NULL DO NOTHING
+                """), {
+                    "id": str(uuid.uuid4()), "cid": contact_id,
+                    "fmt": body.address or "", "pc": body.postcode.upper().strip(),
+                    "house": house_number, "uprn": body.uprn or "", "now": now,
+                })
 
             await db.execute(
                 text("""
                     INSERT INTO gift_aid_declarations
-                    (id, order_ref, full_name, first_name, surname, postcode, address, uprn,
+                    (id, order_ref, full_name, first_name, surname,
+                     postcode, address, house_number, uprn,
                      contact_email, contact_phone, donation_amount, donation_date,
                      gift_aid_agreed, contact_id, hmrc_submitted, created_at)
-                    VALUES (:id, :ref, :name, :first, :surname, :pc, :addr, :uprn,
+                    VALUES (:id, :ref, :name, :first, :surname,
+                            :pc, :addr, :house, :uprn,
                             :email, :phone, :amount, :ddate, :agreed, :cid, false, :now)
                 """),
                 {
                     "id": declaration_id, "ref": body.order_ref,
                     "name": body.full_name, "first": first_name, "surname": surname,
                     "pc": body.postcode.upper().strip(),
-                    "addr": body.address, "uprn": body.uprn or "",
+                    "addr": body.address, "house": house_number, "uprn": body.uprn or "",
                     "email": body.contact_email, "phone": body.contact_phone,
                     "amount": str(body.donation_amount),
                     "ddate": decl_date, "agreed": body.gift_aid_agreed,
@@ -201,6 +212,7 @@ async def list_declarations(
     submitted: bool | None = None,
     from_date: str = "",
     to_date: str = "",
+    branch_id: str = "",
     limit: int = 100,
 ):
     """List Gift Aid declarations (unsubmitted ones ready for HMRC batch)."""
@@ -208,30 +220,56 @@ async def list_declarations(
 
     from shital.core.fabrics.database import SessionLocal
 
-    conditions = ["deleted_at IS NULL"]
+    conditions = ["gad.deleted_at IS NULL"]
     params: dict[str, Any] = {"limit": limit}
 
     if submitted is not None:
-        conditions.append("hmrc_submitted = :submitted")
+        conditions.append("gad.hmrc_submitted = :submitted")
         params["submitted"] = submitted
     if from_date:
-        conditions.append("donation_date >= :from_date")
+        conditions.append("gad.donation_date >= :from_date")
         params["from_date"] = from_date
     if to_date:
-        conditions.append("donation_date <= :to_date")
+        conditions.append("gad.donation_date <= :to_date")
         params["to_date"] = to_date
+    if branch_id:
+        conditions.append("o.branch_id = :branch_id")
+        params["branch_id"] = branch_id
 
     where = " AND ".join(conditions)
+    # LEFT JOIN to live CRM (contacts + their primary address) so the admin
+    # table shows the donor's *current* details. The snapshot columns on
+    # gift_aid_declarations remain the immutable HMRC compliance record and
+    # are returned as fallbacks via COALESCE for rows without contact_id.
     try:
         async with SessionLocal() as db:
             result = await db.execute(
                 text(f"""
-                    SELECT id, order_ref, full_name, postcode, address,
-                           contact_email, contact_phone, donation_amount, donation_date,
-                           gift_aid_agreed, hmrc_submitted, hmrc_submission_ref, created_at
-                    FROM gift_aid_declarations
+                    SELECT
+                        gad.id, gad.order_ref,
+                        COALESCE(NULLIF(c.first_name, ''),  gad.first_name)   AS first_name,
+                        COALESCE(NULLIF(c.surname, ''),     gad.surname)      AS surname,
+                        COALESCE(NULLIF(c.full_name, ''),   gad.full_name)    AS full_name,
+                        COALESCE(NULLIF(a.postcode, ''),    gad.postcode)     AS postcode,
+                        COALESCE(NULLIF(a.formatted, ''),   gad.address)      AS address,
+                        COALESCE(NULLIF(a.house_number,''), gad.house_number) AS house_number,
+                        COALESCE(NULLIF(c.email, ''),       gad.contact_email) AS contact_email,
+                        COALESCE(NULLIF(c.phone, ''),       gad.contact_phone) AS contact_phone,
+                        gad.donation_amount, gad.donation_date,
+                        gad.gift_aid_agreed, gad.hmrc_submitted,
+                        gad.hmrc_submission_ref, gad.created_at
+                    FROM gift_aid_declarations gad
+                    LEFT JOIN contacts  c ON c.id = gad.contact_id
+                    LEFT JOIN orders    o ON o.reference = gad.order_ref
+                    LEFT JOIN LATERAL (
+                        SELECT formatted, postcode, house_number
+                        FROM addresses
+                        WHERE contact_id = gad.contact_id
+                        ORDER BY is_primary DESC, created_at DESC
+                        LIMIT 1
+                    ) a ON true
                     WHERE {where}
-                    ORDER BY created_at DESC
+                    ORDER BY gad.created_at DESC
                     LIMIT :limit
                 """),
                 params,
@@ -576,6 +614,124 @@ async def gift_aid_summary(ctx: CurrentSpace, year: int | None = None):
         }
     except Exception as e:
         return {"year": year, "error": str(e)}
+
+
+@router.get("/per-branch")
+async def gift_aid_per_branch(ctx: CurrentSpace, year: int | None = None):
+    """Per-branch Gift Aid + GASDS progress for the org dashboard.
+
+    Branch is derived through orders.order_ref → orders.branch_id →
+    branches (no duplicate column on gift_aid_declarations).
+    GASDS aggregates use gasds_collections.branch_id directly.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    if year is None:
+        year = datetime.utcnow().year
+
+    try:
+        async with SessionLocal() as db:
+            # Per-branch GA totals — derive branch via orders join
+            ga = await db.execute(text("""
+                SELECT
+                    COALESCE(o.branch_id, 'main') AS branch_id,
+                    COUNT(*)                                                AS declarations_total,
+                    COUNT(*) FILTER (WHERE gad.hmrc_submitted = false)      AS declarations_pending,
+                    COALESCE(SUM(gad.donation_amount), 0)                   AS donations_total,
+                    COALESCE(SUM(gad.donation_amount)
+                             FILTER (WHERE gad.hmrc_submitted = false), 0)  AS donations_pending,
+                    COALESCE(SUM(gad.donation_amount)
+                             FILTER (WHERE gad.hmrc_submitted = true), 0)   AS donations_claimed
+                FROM gift_aid_declarations gad
+                LEFT JOIN orders o ON o.reference = gad.order_ref
+                WHERE gad.deleted_at IS NULL
+                  AND EXTRACT(year FROM gad.donation_date) = :y
+                GROUP BY COALESCE(o.branch_id, 'main')
+            """), {"y": year})
+            ga_rows: dict[str, dict[str, Any]] = {
+                str(r["branch_id"] or "main"): dict(r) for r in ga.mappings().all()
+            }
+
+            # Per-branch GASDS — branch_id stored directly on gasds_collections
+            gd = await db.execute(text("""
+                SELECT
+                    COALESCE(branch_id, '') AS branch_id,
+                    COALESCE(SUM(amount), 0)                                AS gasds_total,
+                    COALESCE(SUM(amount) FILTER (WHERE claimed_at IS NULL), 0) AS gasds_unclaimed,
+                    COUNT(*)                                                AS gasds_records
+                FROM gasds_collections
+                WHERE deleted_at IS NULL
+                  AND EXTRACT(year FROM collection_date) = :y
+                GROUP BY COALESCE(branch_id, '')
+            """), {"y": year})
+            gasds_rows: dict[str, dict[str, Any]] = {
+                str(r["branch_id"] or ""): dict(r) for r in gd.mappings().all()
+            }
+
+            # All active branches (ensures every card appears even with 0 totals)
+            br = await db.execute(text(
+                "SELECT branch_id, name, city FROM branches WHERE is_active = true ORDER BY name"
+            ))
+            branches = [dict(r) for r in br.mappings().all()]
+
+        cards: list[dict[str, Any]] = []
+        seen_codes: set[str] = set()
+        for b in branches:
+            code = str(b.get("branch_id") or "")
+            seen_codes.add(code)
+            ga_r = ga_rows.get(code, {})
+            gd_r = gasds_rows.get(code, {})
+            donations_pending = float(ga_r.get("donations_pending") or 0)
+            gasds_total = float(gd_r.get("gasds_total") or 0)
+            cards.append({
+                "branch_id":            code,
+                "name":                 b.get("name") or code,
+                "city":                 b.get("city") or "",
+                "declarations_total":   int(ga_r.get("declarations_total") or 0),
+                "declarations_pending": int(ga_r.get("declarations_pending") or 0),
+                "donations_total":      float(ga_r.get("donations_total") or 0),
+                "donations_pending":    donations_pending,
+                "donations_claimed":    float(ga_r.get("donations_claimed") or 0),
+                "potential_claim":      round(donations_pending * 0.25, 2),
+                "gasds_total":          gasds_total,
+                "gasds_unclaimed":      float(gd_r.get("gasds_unclaimed") or 0),
+                "gasds_records":        int(gd_r.get("gasds_records") or 0),
+                "gasds_cap":            8000.0,
+                "gasds_remaining":      max(0.0, round(8000.0 - gasds_total, 2)),
+                "gasds_pct":            min(100.0, round((gasds_total / 8000.0) * 100, 1)),
+            })
+
+        # Orphans — declarations / GASDS rows whose branch code isn't in the
+        # branches table (legacy data). Surface them so totals match.
+        for code in (set(ga_rows.keys()) | set(gasds_rows.keys())) - seen_codes:
+            ga_r = ga_rows.get(code, {})
+            gd_r = gasds_rows.get(code, {})
+            donations_pending = float(ga_r.get("donations_pending") or 0)
+            gasds_total = float(gd_r.get("gasds_total") or 0)
+            cards.append({
+                "branch_id":            code,
+                "name":                 code or "(unassigned)",
+                "city":                 "",
+                "declarations_total":   int(ga_r.get("declarations_total") or 0),
+                "declarations_pending": int(ga_r.get("declarations_pending") or 0),
+                "donations_total":      float(ga_r.get("donations_total") or 0),
+                "donations_pending":    donations_pending,
+                "donations_claimed":    float(ga_r.get("donations_claimed") or 0),
+                "potential_claim":      round(donations_pending * 0.25, 2),
+                "gasds_total":          gasds_total,
+                "gasds_unclaimed":      float(gd_r.get("gasds_unclaimed") or 0),
+                "gasds_records":        int(gd_r.get("gasds_records") or 0),
+                "gasds_cap":            8000.0,
+                "gasds_remaining":      max(0.0, round(8000.0 - gasds_total, 2)),
+                "gasds_pct":            min(100.0, round((gasds_total / 8000.0) * 100, 1)),
+            })
+
+        return {"year": year, "branches": cards}
+    except Exception as e:
+        return {"year": year, "branches": [], "error": str(e)}
+
 
 
 # ─── CSV exports ──────────────────────────────────────────────────────────────

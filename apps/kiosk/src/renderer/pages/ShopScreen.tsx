@@ -1,9 +1,70 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useKioskStore, THEMES } from '../store/kiosk.store'
+import { useKioskStore, THEMES, KioskTheme } from '../store/kiosk.store'
 import { SHOP_ITEMS } from '../data/catalog'
+import { StaffMenu } from '../components/StaffMenu'
 
 const FILTERS = ['All', 'Puja', 'Books', 'Murtis', 'Malas', 'Prasad']
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
+
+// Print a sample receipt — fires the kiosk_print_receipt template (admin-
+// editable in Settings → Email Templates) with placeholder data so staff
+// can verify the printer + cut position without doing a real transaction.
+async function testPrintReceipt() {
+  const sampleItems = [
+    { name: 'General Donation', qty: 1, total: 11.00 },
+    { name: 'Prasad',           qty: 2, total: 5.00 },
+    { name: 'Mandir Seva',      qty: 1, total: 21.00 },
+  ]
+  const itemsHtml = `
+    <div style="border-top:1px dashed #000;padding-top:6px;margin-bottom:6px;">
+      ${sampleItems.map(i => `
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
+          <span>${i.name} x${i.qty}</span><span style="font-weight:700;">£${i.total.toFixed(2)}</span>
+        </div>`).join('')}
+    </div>`
+  const total = sampleItems.reduce((s, i) => s + i.total, 0).toFixed(2)
+  try {
+    const res = await fetch(`${API_BASE}/kiosk/print-template`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        branch_name: 'Shital Wembley',
+        donor_name:  'Test Print',
+        order_ref:   'TEST-' + Date.now().toString().slice(-6),
+        items_html:  itemsHtml,
+        total,
+        payment_method: 'TEST RECEIPT',
+      }),
+    })
+    if (!res.ok) throw new Error(`render ${res.status}`)
+    const { html } = await res.json()
+
+    // Open a hidden iframe with just the rendered receipt and print it.
+    // Avoids dragging the whole kiosk page into the print preview.
+    const f = document.createElement('iframe')
+    f.style.position = 'fixed'
+    f.style.right = '-9999px'
+    f.style.bottom = '-9999px'
+    f.style.width  = '80mm'
+    f.style.height = '0'
+    document.body.appendChild(f)
+    const doc = f.contentWindow?.document
+    if (!doc) return
+    doc.open()
+    doc.write(`<!doctype html><html><head><style>@page{size:80mm auto;margin:0}body{margin:0}</style></head><body>${html}</body></html>`)
+    doc.close()
+    setTimeout(() => {
+      const win = f.contentWindow
+      if (win) {
+        try { win.focus(); win.print() } catch { /* ignore */ }
+      }
+      setTimeout(() => f.remove(), 2000)
+    }, 200)
+  } catch (e) {
+    alert(`Test print failed: ${e instanceof Error ? e.message : 'unknown'}`)
+  }
+}
 
 function filterItems(items: typeof SHOP_ITEMS, f: string) {
   if (f === 'All') return items
@@ -16,8 +77,15 @@ function filterItems(items: typeof SHOP_ITEMS, f: string) {
 }
 
 export function ShopScreen() {
-  const { language, setScreen, addItem, items, theme } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, setTheme, menuOptions } = useKioskStore()
   const th = THEMES[theme]
+  // Theme cycler from the gear menu — quick way for staff to flip themes
+  // without leaving the Shop screen.
+  const themeKeys: KioskTheme[] = ['lotus', 'saffron', 'royal', 'peacock', 'jasmine', 'crimson']
+  const cycleTheme = () => {
+    const next = themeKeys[(themeKeys.indexOf(theme) + 1) % themeKeys.length]
+    setTheme(next)
+  }
   const [filter, setFilter] = useState('All')
   const [added, setAdded] = useState<string | null>(null)
 
@@ -52,6 +120,15 @@ export function ShopScreen() {
           <span className="text-gray-500 text-sm">✗</span>
           <span className="text-gray-600 font-bold text-xs">Not Gift Aid</span>
         </div>
+        <StaffMenu
+          iconBg="white"
+          items={[
+            ...(menuOptions.test_print  ? [{ emoji: '🖨️', label: 'Test print receipt',    onClick: testPrintReceipt }] : []),
+            ...(menuOptions.theme_cycle ? [{ emoji: '🎨', label: `Cycle theme (${theme})`, onClick: cycleTheme }] : []),
+            ...(menuOptions.refresh     ? [{ emoji: '🔄', label: 'Refresh site',           onClick: () => window.location.reload() }] : []),
+            ...(menuOptions.admin       ? [{ emoji: '🔧', label: 'Admin settings',         onClick: () => setScreen('admin') }] : []),
+          ]}
+        />
         <button onClick={() => setScreen('basket')} className="relative text-white font-bold px-3 py-2 rounded-xl active:scale-95"
           style={{ background: th.basketBtn }}>
           🛒
@@ -119,3 +196,6 @@ export function ShopScreen() {
     </div>
   )
 }
+
+// (Shared StaffMenu lives in ../components/StaffMenu.tsx — used on
+// both HomeScreen and here so all staff actions live under one ⚙️ icon.)

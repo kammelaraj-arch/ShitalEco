@@ -43,7 +43,18 @@ export default function ContactsPage() {
   const [source, setSource] = useState('')
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Contact | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<Contact | null>(null)
+  const [form, setForm] = useState({ first_name: '', surname: '', email: '', phone: '' })
+  const [saving, setSaving] = useState(false)
   const PER_PAGE = 50
+
+  function authHeaders() {
+    return {
+      Authorization: `Bearer ${localStorage.getItem('shital_access_token') || ''}`,
+      'Content-Type': 'application/json',
+    }
+  }
 
   const load = useCallback(async (search = q, src = source, pg = page) => {
     setLoading(true); setError('')
@@ -67,6 +78,62 @@ export default function ContactsPage() {
 
   function search() { setPage(1); load(q, source, 1) }
 
+  function openCreate() {
+    setEditing(null)
+    setForm({ first_name: '', surname: '', email: '', phone: '' })
+    setShowForm(true)
+  }
+
+  function openEdit(c: Contact) {
+    setEditing(c)
+    setForm({
+      first_name: c.first_name || '',
+      surname:    c.surname || '',
+      email:      c.email || '',
+      phone:      c.phone || '',
+    })
+    setShowForm(true)
+  }
+
+  async function saveForm() {
+    if (!form.first_name && !form.surname && !form.email) {
+      setError('Provide at least a name or email')
+      return
+    }
+    setSaving(true); setError('')
+    try {
+      const url = editing ? `${API}/admin/contacts/${editing.id}` : `${API}/admin/contacts`
+      const method = editing ? 'PATCH' : 'POST'
+      const res = await fetch(url, {
+        method, headers: authHeaders(),
+        body: JSON.stringify({
+          first_name: form.first_name,
+          surname:    form.surname,
+          full_name:  `${form.first_name} ${form.surname}`.trim(),
+          email:      form.email,
+          phone:      form.phone,
+          first_source: 'admin',
+        }),
+      })
+      if (!res.ok) throw new Error(`${res.status}`)
+      setShowForm(false); setEditing(null)
+      await load()
+    } catch (e: unknown) {
+      setError(`Save failed: ${e instanceof Error ? e.message : 'unknown'}`)
+    } finally { setSaving(false) }
+  }
+
+  async function deleteContact(c: Contact) {
+    if (!confirm(`Delete ${c.full_name || c.email}? This cascades — addresses + account links removed too.`)) return
+    try {
+      const res = await fetch(`${API}/admin/contacts/${c.id}`, { method: 'DELETE', headers: authHeaders() })
+      if (!res.ok) throw new Error(`${res.status}`)
+      await load()
+    } catch (e: unknown) {
+      setError(`Delete failed: ${e instanceof Error ? e.message : 'unknown'}`)
+    }
+  }
+
   const fmt = (dt: string) => new Date(dt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
   const totalPages = Math.ceil(total / PER_PAGE)
 
@@ -78,10 +145,46 @@ export default function ContactsPage() {
           <h1 className="text-3xl font-black text-white">Contacts</h1>
           <p className="text-white/40 mt-1">{total.toLocaleString()} donor contacts in CRM</p>
         </div>
-        <button onClick={() => load()} className="px-4 py-2 rounded-xl border border-white/10 text-white/60 text-sm font-medium hover:bg-white/5 transition-all">
-          ↻ Refresh
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={openCreate} className="px-4 py-2 rounded-xl bg-saffron-gradient text-white text-sm font-bold shadow-saffron hover:opacity-90 transition-all">
+            + New Contact
+          </button>
+          <button onClick={() => load()} className="px-4 py-2 rounded-xl border border-white/10 text-white/60 text-sm font-medium hover:bg-white/5 transition-all">
+            ↻ Refresh
+          </button>
+        </div>
       </div>
+
+      {/* Create / Edit form */}
+      {showForm && (
+        <div className="rounded-2xl p-5 space-y-3 border border-saffron-500/30 bg-saffron-500/5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-saffron-300 font-bold">{editing ? `Edit ${editing.full_name || editing.email || 'contact'}` : 'New contact'}</h3>
+            <button onClick={() => { setShowForm(false); setEditing(null) }}
+              className="text-white/40 hover:text-white/80 text-xs">Cancel</button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))}
+              placeholder="First name"
+              className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-saffron-500/60" />
+            <input value={form.surname} onChange={e => setForm(f => ({ ...f, surname: e.target.value }))}
+              placeholder="Surname"
+              className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-saffron-500/60" />
+            <input value={form.email} type="email" onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+              placeholder="Email"
+              className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-saffron-500/60" />
+            <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+              placeholder="Phone"
+              className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-saffron-500/60" />
+          </div>
+          <div className="flex justify-end">
+            <button onClick={saveForm} disabled={saving}
+              className="px-5 py-2 rounded-lg bg-saffron-gradient text-white font-bold shadow-saffron hover:opacity-90 disabled:opacity-40 transition-all">
+              {saving ? 'Saving…' : editing ? 'Save changes' : 'Create contact'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="glass rounded-2xl p-4 border border-temple-border flex flex-wrap gap-3">
@@ -135,7 +238,7 @@ export default function ContactsPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
-                  {['Contact', 'Email / Phone', 'Source', 'Branch', 'Orders', 'Total Donated', 'GDPR', 'Joined'].map(h => (
+                  {['Contact', 'Email / Phone', 'Source', 'Branch', 'Orders', 'Total Donated', 'GDPR', 'Joined', ''].map(h => (
                     <th key={h} className="text-left px-5 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
@@ -172,6 +275,12 @@ export default function ContactsPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3.5 text-white/50 text-sm">{fmt(c.created_at)}</td>
+                    <td className="px-5 py-3.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                      <button onClick={() => openEdit(c)}
+                        className="text-saffron-400/80 hover:text-saffron-300 text-xs font-bold mr-3">Edit</button>
+                      <button onClick={() => deleteContact(c)}
+                        className="text-red-400/70 hover:text-red-400 text-xs font-bold">Delete</button>
+                    </td>
                   </motion.tr>
                 ))}
               </tbody>

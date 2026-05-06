@@ -186,3 +186,70 @@ async def trigger_deploy_legacy(
     x_admin_pin: str | None = Header(default=None),
 ) -> dict[str, Any]:
     return await trigger_deploy("dev", ctx, x_admin_pin)
+
+
+# ─── Ops / diagnostics ────────────────────────────────────────────────────────
+# Thin proxy to the deployer's /ops/run. SUPER_ADMIN required. Allowlist is
+# enforced *both* here and in the deployer (defense in depth).
+_OPS_ALLOWED = {
+    "list_containers", "container_logs", "container_inspect",
+    "restart_container", "disk_usage",
+    "pull_images", "recreate_stack",
+    "psql_select", "ghcr_login_test",
+}
+
+
+@router.post("/ops/run")
+async def ops_run(
+    ctx: CurrentSpace,
+    body: dict,
+) -> dict[str, Any]:
+    """Run an allowlisted ops action via the deployer. SUPER_ADMIN only."""
+    _require_admin(ctx)
+
+    action = body.get("action", "")
+    args   = body.get("args", {}) or {}
+    if action not in _OPS_ALLOWED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown or not-allowed action '{action}'. "
+                   f"Allowed: {sorted(_OPS_ALLOWED)}",
+        )
+
+    deployer_url  = os.environ.get("DEPLOYER_URL", "http://deployer:9000")
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "")
+    if not deploy_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="DEPLOY_SECRET not configured",
+        )
+
+    payload = json.dumps({"action": action, "args": args}).encode()
+    req = urllib.request.Request(
+        f"{deployer_url}/ops/run", method="POST",
+        headers={
+            "X-Deploy-Secret": deploy_secret,
+            "Content-Type":    "application/json",
+        },
+        data=payload,
+    )
+    # Long timeout — pull_images / recreate_stack can take minutes.
+    try:
+        with urllib.request.urlopen(req, timeout=600) as r:
+            result = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise HTTPException(status_code=e.code, detail=f"Deployer HTTP {e.code}: {e.reason}") from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not reach deployer: {e}",
+        ) from e
+
+    return {
+        "ok": True,
+        "action": action,
+        "args": args,
+        "triggered_by": ctx.user_email,
+        "triggered_at": datetime.now(UTC).isoformat(),
+        **result,  # stdout, stderr, exit_code, duration_ms
+    }
