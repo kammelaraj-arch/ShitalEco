@@ -11,6 +11,7 @@ import { GiftAidPage } from './pages/GiftAidPage'
 import { PaymentPage } from './pages/PaymentPage'
 import { ConfirmationPage } from './pages/ConfirmationPage'
 import { MonthlyGivingPage } from './pages/MonthlyGivingPage'
+import { scheduleDailyCatalogRefresh, clearServiceCache } from './utils/cachedFetch'
 
 const CHECKOUT_STEPS = ['basket', 'contact', 'gift-aid', 'payment', 'confirmation']
 
@@ -66,6 +67,22 @@ export default function App() {
   useEffect(() => {
     applyTheme(getTheme(themeId))
   }, [themeId])
+
+  // Daily catalog cache invalidation at local midnight. Also bust the cache
+  // immediately if the server-side catalog version is newer than what we've
+  // seen (admin can bump it via Force Refresh from the admin panel).
+  useEffect(() => {
+    const teardown = scheduleDailyCatalogRefresh()
+    fetch(`${API}/items/catalog/version`).then(r => r.ok ? r.json() : null).then(d => {
+      if (!d?.version) return
+      const seen = localStorage.getItem('service:catalog-version-seen')
+      if (seen !== String(d.version)) {
+        clearServiceCache()
+        localStorage.setItem('service:catalog-version-seen', String(d.version))
+      }
+    }).catch(() => {})
+    return teardown
+  }, [])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)

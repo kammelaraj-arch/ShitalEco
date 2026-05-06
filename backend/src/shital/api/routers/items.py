@@ -150,6 +150,49 @@ async def ping_items():
     return {"ok": True, "msg": "items router alive"}
 
 
+@router.get("/catalog/version")
+async def catalog_version() -> dict[str, str]:
+    """
+    Public — returns the current catalog cache-bust version. Service portal
+    + kiosk apps poll this on load; if it differs from their last-seen value
+    they invalidate their local catalog cache.
+
+    Backed by app_settings.catalog_version (an ISO timestamp). Falls back to
+    a constant when the row is missing so the call never fails.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        row = (await db.execute(text(
+            "SELECT value FROM app_settings WHERE key = 'catalog_version' LIMIT 1"
+        ))).first()
+    return {"version": row[0] if row else "v0"}
+
+
+@router.post("/catalog/refresh")
+async def force_catalog_refresh(ctx: CurrentSpace) -> dict[str, str]:
+    """
+    Admin-only — bump the catalog version so all clients invalidate their
+    local catalog caches on next load.
+    """
+    from sqlalchemy import text
+
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="Requires SUPER_ADMIN or ADMIN role")
+
+    from shital.core.fabrics.database import SessionLocal
+    new_version = datetime.utcnow().isoformat() + "Z"
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES ('catalog_version', :v, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        """), {"v": new_version})
+        await db.commit()
+    return {"version": new_version}
+
+
 @router.get("/schema-check")
 async def schema_check():
     """Return catalog_items column list from information_schema."""

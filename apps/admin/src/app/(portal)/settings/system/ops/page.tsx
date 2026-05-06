@@ -307,6 +307,18 @@ export default function OpsPage() {
           (the recurring &quot;container up X days ago&quot; bug).
         </p>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <ActionBtn label="🔄 Force catalog refresh"
+            onClick={async () => {
+              if (busy) return
+              setBusy(true); setRunning('force_catalog_refresh'); setResult(null)
+              try {
+                const data = await apiFetch<{ version: string }>('/items/catalog/refresh', { method: 'POST' })
+                setResult({ ok: true, stdout: `Catalog version bumped to ${data.version}\nAll service-portal + kiosk clients will reload catalog on next page-load.` })
+              } catch (e: unknown) {
+                setResult({ ok: false, detail: e instanceof Error ? e.message : 'Failed' })
+              } finally { setBusy(false); setRunning('') }
+            }}
+            running={running === 'force_catalog_refresh'} />
           <ActionBtn label="📋 List containers"
             onClick={() => run('list_containers')}
             running={running === 'list_containers'} />

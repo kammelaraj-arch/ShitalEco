@@ -1,49 +1,43 @@
+import { cachedFetch } from './utils/cachedFetch'
+
 const API = (import.meta.env.VITE_API_URL as string) || '/api/v1'
 
 export const api = {
   async getItems(category?: string, branchId = 'main') {
     const q = new URLSearchParams({ branch_id: branchId, active_only: 'true' })
     if (category) q.set('category', category)
-    const r = await fetch(`${API}/items?${q}`)
-    if (!r.ok) return []
-    const d = await r.json()
-    return d.items ?? []
+    const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items?${q}`)
+    return d?.items ?? []
   },
 
   async getSoftDonations(branchId = 'main') {
-    const r = await fetch(`${API}/items/kiosk/soft-donations?branch_id=${branchId}`)
-    if (!r.ok) return []
-    return (await r.json()).items ?? []
+    const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items/kiosk/soft-donations?branch_id=${branchId}`)
+    return d?.items ?? []
   },
 
   async getProjects(branchId = 'main') {
-    const r = await fetch(`${API}/items/kiosk/projects?branch_id=${branchId}`)
-    if (!r.ok) return { items: [], projects: [] }
-    return await r.json()
+    const d = await cachedFetch<{ items?: unknown[]; projects?: unknown[] }>(`${API}/items/kiosk/projects?branch_id=${branchId}`)
+    return d ?? { items: [], projects: [] }
   },
 
   async getShop(branchId = 'main') {
-    const r = await fetch(`${API}/items/kiosk/shop?branch_id=${branchId}`)
-    if (!r.ok) return []
-    return (await r.json()).items ?? []
+    const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items/kiosk/shop?branch_id=${branchId}`)
+    return d?.items ?? []
   },
 
   async getSponsorship(branchId = 'main') {
-    const r = await fetch(`${API}/items/kiosk/sponsorship?branch_id=${branchId}`)
-    if (!r.ok) return []
-    return (await r.json()).items ?? []
+    const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items/kiosk/sponsorship?branch_id=${branchId}`)
+    return d?.items ?? []
   },
 
   async getGeneralDonations() {
-    const r = await fetch(`${API}/items/kiosk/general-donations`)
-    if (!r.ok) return []
-    return (await r.json()).items ?? []
+    const d = await cachedFetch<{ items?: unknown[] }>(`${API}/items/kiosk/general-donations`)
+    return d?.items ?? []
   },
 
   async getServices(branchId = 'main') {
-    const r = await fetch(`${API}/kiosk/services?branch_id=${branchId}`)
-    if (!r.ok) return []
-    return (await r.json()).services ?? []
+    const d = await cachedFetch<{ services?: unknown[] }>(`${API}/kiosk/services?branch_id=${branchId}`)
+    return d?.services ?? []
   },
 
   async createBasket(branchId = 'main') {
