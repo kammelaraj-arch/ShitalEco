@@ -1,10 +1,23 @@
+import hmac
 import json
 import os
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "")
+# Strip whitespace + surrounding quotes — .env files commonly leave these on
+# values, and a stray newline here vs. on the backend side produces a silent
+# 403 on every deployer call (Promote, Snapshots list, Restore, Status).
+def _normalize_secret(s: str) -> str:
+    return (s or "").strip().strip('"').strip("'")
+
+
+# Loaded once at startup as a baseline. _read_secret_from_env_file() below
+# re-reads /workspace/.env on each request so secret rotations take effect
+# without needing to recreate the deployer container — same philosophy as
+# bind-mounting deploy.sh / server.py (anything frozen at container build
+# time goes stale).
+DEPLOY_SECRET = _normalize_secret(os.environ.get("DEPLOY_SECRET", ""))
 _PLACEHOLDER_SECRETS = {"", "shital-deploy-secret-change-me", "change-me"}
 if DEPLOY_SECRET in _PLACEHOLDER_SECRETS:
     print(
@@ -14,6 +27,20 @@ if DEPLOY_SECRET in _PLACEHOLDER_SECRETS:
         file=sys.stderr,
     )
     sys.exit(2)
+
+
+def _read_secret_from_env_file() -> str:
+    """Read the current DEPLOY_SECRET from /workspace/.env (bind-mounted from
+    /opt/shitaleco/.env on the host). Returns "" if file missing or key absent.
+    Cheap (small file) and only runs on auth checks."""
+    try:
+        with open("/workspace/.env") as f:
+            for line in f:
+                if line.startswith("DEPLOY_SECRET="):
+                    return _normalize_secret(line.split("=", 1)[1].rstrip("\n"))
+    except OSError:
+        pass
+    return ""
 
 ENV_CONTAINERS = {
     "prod": "shitaleco-backend-1",
@@ -303,7 +330,14 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _check_secret(self) -> bool:
-        return self.headers.get("X-Deploy-Secret") == DEPLOY_SECRET
+        sent = _normalize_secret(self.headers.get("X-Deploy-Secret") or "")
+        if not sent:
+            return False
+        # Compare against startup value AND the current /workspace/.env value,
+        # so rotating the secret in /opt/shitaleco/.env takes effect without
+        # recreating this container. Both compares are constant-time.
+        candidates = [s for s in (DEPLOY_SECRET, _read_secret_from_env_file()) if s]
+        return any(hmac.compare_digest(sent, c) for c in candidates)
 
     def _send_json(self, code: int, body: dict):
         payload = json.dumps(body).encode()
