@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, t, THEMES, KioskTheme, Language, LANGUAGE_META } from '../store/kiosk.store'
 import { KioskKeyboard } from '../components/KioskKeyboard'
+import { StaffMenu } from '../components/StaffMenu'
 import { cachedFetch } from '../utils/cachedFetch'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
@@ -202,7 +203,7 @@ function LanguagePicker({ onClose }: { onClose: () => void }) {
 
 // ─── Main HomeScreen ──────────────────────────────────────────────────────────
 export function HomeScreen() {
-  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl, menuCodes } = useKioskStore()
+  const { language, setScreen, addItem, items, theme, resetKiosk, branchId, homeActiveNav, setHomeActiveNav, orgName, orgLogoUrl, menuCodes, menuOptions } = useKioskStore()
   const th = THEMES[theme]
 
   // Filter NAV_SECTIONS by the device's menu profile (menuCodes from login).
@@ -425,25 +426,13 @@ export function HomeScreen() {
           )}
         </button>
 
-        {/* Theme picker button */}
-        <button
-          onClick={() => setShowThemePicker(true)}
-          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95"
-          style={{ background: 'rgba(255,255,255,0.15)' }}
-          title="Change theme"
-        >
-          <span className="text-base">🎨</span>
-        </button>
-
-        {/* Admin settings button */}
-        <button
-          onClick={() => setScreen('admin')}
-          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95"
-          style={{ background: 'rgba(255,255,255,0.15)' }}
-          title="Admin settings"
-        >
-          <span className="text-base">⚙️</span>
-        </button>
+        {/* Single gear icon — staff menu. Items are filtered per-device via
+            kiosk_devices.menu_options (admin → Devices → ⚙️ Staff Menu). */}
+        <StaffMenu items={[
+          ...(menuOptions.theme_cycle ? [{ emoji: '🎨', label: 'Change theme',    onClick: () => setShowThemePicker(true) }] : []),
+          ...(menuOptions.refresh     ? [{ emoji: '🔄', label: 'Refresh site',    onClick: () => window.location.reload() }] : []),
+          ...(menuOptions.admin       ? [{ emoji: '🔧', label: 'Admin settings',  onClick: () => setScreen('admin') }] : []),
+        ]} />
 
         {/* Hidden staff tap zone — 3 taps within 3 s → admin */}
         <div
@@ -661,7 +650,8 @@ export function HomeScreen() {
                                 <img
                                   src={item.image_url || getCategoryImage(item.category)}
                                   alt=""
-                                  className="absolute inset-0 w-full h-full object-cover"
+                                  // object-contain shows the full picture without cropping or stretching
+                                  className="absolute inset-0 w-full h-full object-contain p-2"
                                   onError={e => (e.currentTarget.style.display = 'none')}
                                   loading="lazy"
                                 />
@@ -789,19 +779,19 @@ export function HomeScreen() {
         </main>
       </div>
 
-      {/* ══ CUSTOM DONATION STRIP — always visible ═════════════════════════════ */}
+      {/* ══ CUSTOM DONATION STRIP — themed via langActive accent ═══════════════ */}
       <div
         className="flex-shrink-0 px-3 py-2 flex items-center gap-2"
-        style={{ background: '#FFF3E0', borderTop: '2px solid #FF9933' }}
+        style={{ background: `${th.langActive}18`, borderTop: `2px solid ${th.langActive}` }}
       >
-        <span className="text-xs font-bold text-amber-700 flex-shrink-0 hidden sm:inline">🙏 Custom:</span>
-        <span className="text-xs font-bold text-amber-700 flex-shrink-0 sm:hidden">🙏</span>
+        <span className="text-xs font-bold flex-shrink-0 hidden sm:inline" style={{ color: th.langActive }}>🙏 Custom:</span>
+        <span className="text-xs font-bold flex-shrink-0 sm:hidden" style={{ color: th.langActive }}>🙏</span>
         <div
           className="flex items-center gap-1 flex-1 rounded-xl border-2 bg-white cursor-pointer"
-          style={{ borderColor: customAmount && parseFloat(customAmount) > 0 ? '#FF9933' : '#FDE68A' }}
+          style={{ borderColor: customAmount && parseFloat(customAmount) > 0 ? th.langActive : `${th.langActive}55` }}
           onClick={() => setKeyboardOpen(true)}
         >
-          <span className="text-base font-black text-amber-600 px-2">£</span>
+          <span className="text-base font-black px-2" style={{ color: th.langActive }}>£</span>
           <span className={`flex-1 py-2 pr-2 text-base font-black ${customAmount ? 'text-gray-800' : 'text-gray-400'}`}>
             {customAmount || 'Tap to enter'}
           </span>

@@ -209,7 +209,11 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
       - /opt/shitaleco:/workspace
+      # Read access to the dev stack files so /ops/run can pull/recreate dev too.
+      - /opt/shitaleco-dev:/workspace-dev
       - /var/run/docker.sock:/var/run/docker.sock
+      # Audit log for /ops/run
+      - /var/log:/var/log
       # Bind-mount BOTH deploy.sh AND server.py so updates to either take
       # effect on next webhook call without rebuilding the deployer image.
       # Lesson learned: anything baked into a container image goes stale.

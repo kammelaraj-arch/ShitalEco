@@ -17,6 +17,9 @@ interface GiftAidConfig {
 interface Declaration {
   id: string
   full_name: string
+  first_name?: string
+  surname?: string
+  house_number?: string
   contact_email: string
   postcode: string
   address: string
@@ -123,7 +126,29 @@ async function downloadCsv(path: string, filename: string) {
 }
 
 export default function GiftAidPage() {
-  const [tab, setTab] = useState<'config' | 'declarations' | 'submit' | 'history' | 'gasds'>('config')
+  const [tab, setTab] = useState<'dashboard' | 'declarations' | 'submit' | 'history' | 'gasds'>('dashboard')
+
+  // Per-branch dashboard
+  interface BranchCard {
+    branch_id: string
+    name: string
+    city: string
+    declarations_total: number
+    declarations_pending: number
+    donations_total: number
+    donations_pending: number
+    donations_claimed: number
+    potential_claim: number
+    gasds_total: number
+    gasds_unclaimed: number
+    gasds_records: number
+    gasds_cap: number
+    gasds_remaining: number
+    gasds_pct: number
+  }
+  const [branchCards, setBranchCards] = useState<BranchCard[]>([])
+  const [branchCardsLoading, setBranchCardsLoading] = useState(false)
+  const [branchFilter, setBranchFilter] = useState('')
 
   // Config
   const [config, setConfig] = useState<GiftAidConfig | null>(null)
@@ -221,6 +246,7 @@ export default function GiftAidPage() {
       if (!showSubmitted) qs.set('submitted', 'false')
       if (fromDate) qs.set('from_date', fromDate)
       if (toDate) qs.set('to_date', toDate)
+      if (branchFilter) qs.set('branch_id', branchFilter)
       qs.set('limit', '500')
       const data = await apiFetch<{ declarations: Declaration[] }>(`/gift-aid/declarations?${qs.toString()}`)
       setDeclarations(data.declarations || [])
@@ -229,7 +255,7 @@ export default function GiftAidPage() {
     } finally {
       setDeclLoading(false)
     }
-  }, [showSubmitted, fromDate, toDate])
+  }, [showSubmitted, fromDate, toDate, branchFilter])
 
   const loadHistory = useCallback(async () => {
     setHistLoading(true)
@@ -244,6 +270,18 @@ export default function GiftAidPage() {
       const data = await apiFetch<SummaryData>('/gift-aid/summary')
       setSummary(data)
     } catch { /* ignore — summary failure is non-critical */ }
+  }, [])
+
+  const loadBranchCards = useCallback(async () => {
+    setBranchCardsLoading(true)
+    try {
+      const data = await apiFetch<{ branches: BranchCard[] }>('/gift-aid/per-branch')
+      setBranchCards(data.branches || [])
+    } catch {
+      setBranchCards([])
+    } finally {
+      setBranchCardsLoading(false)
+    }
   }, [])
 
   const loadSubmissionDetail = async (id: string) => {
@@ -268,8 +306,10 @@ export default function GiftAidPage() {
     setGasdsLoading(true)
     try {
       const year = new Date().getFullYear()
+      const collQs = new URLSearchParams({ year: String(year) })
+      if (branchFilter) collQs.set('branch_id', branchFilter)
       const [list, buildings, brs] = await Promise.all([
-        apiFetch<{ collections: GASDSCollection[] }>(`/gift-aid/gasds/collections?year=${year}`),
+        apiFetch<{ collections: GASDSCollection[] }>(`/gift-aid/gasds/collections?${collQs.toString()}`),
         apiFetch<{ buildings: GASDSBuilding[] }>(`/gift-aid/gasds/buildings?year=${year}`),
         apiFetch<{ branches: Branch[] }>('/branches').catch(() => ({ branches: [] })),
       ])
@@ -277,7 +317,7 @@ export default function GiftAidPage() {
       setGasdsBuildings(buildings.buildings || [])
       setBranches(brs.branches || [])
     } catch { /* ignore */ } finally { setGasdsLoading(false) }
-  }, [])
+  }, [branchFilter])
 
   const addGasdsCollection = async () => {
     setGasdsError('')
@@ -334,11 +374,14 @@ export default function GiftAidPage() {
   }
 
   useEffect(() => {
-    if (tab === 'config') loadConfig()
+    // Config moved to Settings → Gift Aid (admin function, not daily ops).
+    // Always load config in the background so the env badge stays accurate.
+    loadConfig()
+    if (tab === 'dashboard') { loadBranchCards(); loadSummary() }
     else if (tab === 'declarations') { loadDeclarations(); loadSummary() }
     else if (tab === 'history') loadHistory()
     else if (tab === 'gasds') { loadGasds(); loadSummary() }
-  }, [tab, loadConfig, loadDeclarations, loadHistory, loadSummary, loadGasds])
+  }, [tab, loadConfig, loadDeclarations, loadHistory, loadSummary, loadGasds, loadBranchCards])
 
   useEffect(() => { loadSummary() }, [loadSummary])
 
@@ -453,99 +496,130 @@ export default function GiftAidPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 glass rounded-xl w-fit flex-wrap">
-        {(['config', 'declarations', 'submit', 'history', 'gasds'] as const).map(t => (
+        {(['dashboard', 'declarations', 'submit', 'history', 'gasds'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-all capitalize ${
               tab === t ? 'bg-saffron-gradient text-white shadow-saffron' : 'text-white/50 hover:text-white/80'
             }`}>
-            {t === 'submit' ? 'Submit to HMRC'
+            {t === 'dashboard' ? 'Dashboard'
+              : t === 'submit' ? 'Submit to HMRC'
               : t === 'history' ? 'History'
               : t === 'gasds' ? 'GASDS (Cash)'
               : t === 'declarations' ? `Declarations${pendingCount > 0 && !showSubmitted ? ` (${pendingCount})` : ''}`
               : t}
           </button>
         ))}
+        <a href="/settings/gift-aid"
+          className="px-4 py-2.5 rounded-lg text-sm font-medium text-white/40 hover:text-white/80 transition-all">
+          ⚙️ Config
+        </a>
       </div>
 
-      {/* Config tab */}
+      {/* Active branch filter pill — visible across non-dashboard tabs */}
+      {branchFilter && tab !== 'dashboard' && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-white/40">Filtered to branch:</span>
+          <span className="px-2.5 py-1 rounded-full bg-saffron-500/20 border border-saffron-500/40 text-saffron-300 font-bold">
+            {branchCards.find(b => b.branch_id === branchFilter)?.name || branchFilter}
+          </span>
+          <button onClick={() => setBranchFilter('')}
+            className="text-white/40 hover:text-white/80 text-xs underline">
+            clear
+          </button>
+        </div>
+      )}
+
       <AnimatePresence mode="wait">
-        {tab === 'config' && (
-          <motion.div key="config" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="glass rounded-2xl p-6 space-y-5 max-w-2xl">
-            {configLoading ? (
-              <div className="text-center py-10 text-white/30">Loading config…</div>
-            ) : config ? (
-              <>
-                <div className="flex items-center justify-between">
-                  <h2 className="text-white font-bold text-lg">HMRC Configuration</h2>
-                  <EnvBadge env={config.hmrc_environment || 'test'} />
-                </div>
+        {/* Dashboard tab — per-branch progress cards */}
+        {tab === 'dashboard' && (
+          <motion.div key="dash" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-white font-bold text-lg">Branches — {new Date().getFullYear()}</h2>
+              <button onClick={loadBranchCards}
+                className="text-xs text-white/40 hover:text-white/80 underline">Refresh</button>
+            </div>
 
-                <div className="space-y-3">
-                  <ConfigRow
-                    label="Government Gateway User ID"
-                    value={config.hmrc_user_id || '—'}
-                    set={!!config.hmrc_user_id}
-                  />
-                  <ConfigRow
-                    label="HMRC Password"
-                    value={config.hmrc_credentials_set ? '••••••••' : 'Not set'}
-                    set={config.hmrc_credentials_set}
-                  />
-                  <ConfigRow
-                    label="Charity HMRC Reference"
-                    value={config.hmrc_charity_ref || '—'}
-                    set={!!config.hmrc_charity_ref}
-                  />
-                  <ConfigRow
-                    label="Vendor ID"
-                    value={config.hmrc_vendor_id || '—'}
-                    set={!!config.hmrc_vendor_id}
-                  />
-                  <ConfigRow
-                    label="Charity Number"
-                    value={config.charity_number || '—'}
-                    set={!!config.charity_number}
-                  />
-                  <ConfigRow
-                    label="GetAddress.io API Key"
-                    value={config.getaddress_api_key_set ? config.getaddress_api_key_preview : 'Not set'}
-                    set={config.getaddress_api_key_set}
-                  />
-                  <ConfigRow
-                    label="Submission Environment"
-                    value={(config.hmrc_environment || 'test').toUpperCase()}
-                    set={true}
-                  />
-                </div>
-
-                <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-                  <p className="text-amber-300 text-sm font-semibold mb-2">How to update credentials</p>
-                  <p className="text-white/50 text-xs leading-relaxed">
-                    Set these environment variables on your backend server and restart:
-                  </p>
-                  <div className="mt-2 space-y-1 font-mono text-xs text-white/40">
-                    <div>HMRC_GIFT_AID_USER_ID=your-gateway-id</div>
-                    <div>HMRC_GIFT_AID_PASSWORD=your-gateway-password</div>
-                    <div>HMRC_GIFT_AID_CHARITY_HMO_REF=AB12345</div>
-                    <div>HMRC_GIFT_AID_VENDOR_ID=your-vendor-id</div>
-                    <div>HMRC_GIFT_AID_ENVIRONMENT=test  # or live</div>
-                  </div>
-                </div>
-
-                {!config.hmrc_credentials_set && (
-                  <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
-                    <p className="text-red-300 text-sm font-semibold">Credentials not configured</p>
-                    <p className="text-white/40 text-xs mt-1">
-                      HMRC submissions will fail until credentials are set. Register at{' '}
-                      <a href="https://www.gov.uk/guidance/charities-online" target="_blank" rel="noopener noreferrer"
-                        className="text-saffron-400 underline">gov.uk/guidance/charities-online</a>.
-                    </p>
-                  </div>
-                )}
-              </>
+            {branchCardsLoading ? (
+              <div className="text-center py-10 text-white/30">Loading branches…</div>
+            ) : branchCards.length === 0 ? (
+              <div className="text-center py-10 text-white/30">No branch data yet.</div>
             ) : (
-              <div className="text-center py-10 text-white/30">Failed to load config</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                {branchCards.map(b => (
+                  <div key={b.branch_id || 'unassigned'}
+                    className="glass rounded-2xl p-5 space-y-4 hover:ring-1 hover:ring-saffron-400/40 transition">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-white font-black text-lg leading-tight">{b.name}</p>
+                        {b.city && <p className="text-white/40 text-xs">{b.city}</p>}
+                      </div>
+                      <span className="text-[10px] uppercase tracking-wider text-white/30 font-mono">
+                        {b.branch_id || '—'}
+                      </span>
+                    </div>
+
+                    {/* Gift Aid block */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-white/40 uppercase tracking-wider">Gift Aid</span>
+                        <span className="text-white/40">{b.declarations_total} decl{b.declarations_total === 1 ? '' : 's'}</span>
+                      </div>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-white font-bold text-xl">{fmtGBP(b.donations_total)}</span>
+                        {b.declarations_pending > 0 && (
+                          <span className="text-amber-400 text-xs font-bold">
+                            {b.declarations_pending} pending
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-green-400/80">Claim potential <span className="font-bold">{fmtGBP(b.potential_claim)}</span></span>
+                        <span className="text-white/40">Claimed {fmtGBP(b.donations_claimed * 0.25)}</span>
+                      </div>
+                    </div>
+
+                    {/* GASDS block */}
+                    <div className="space-y-1.5 pt-3 border-t border-white/5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-white/40 uppercase tracking-wider">GASDS (Cash)</span>
+                        <span className="text-white/40">{fmtGBP(b.gasds_remaining)} left</span>
+                      </div>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-white font-bold text-xl">{fmtGBP(b.gasds_total)}</span>
+                        <span className="text-white/40 text-xs">/ {fmtGBP(b.gasds_cap)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className={`h-full transition-all ${
+                            b.gasds_pct >= 90 ? 'bg-red-400'
+                              : b.gasds_pct >= 70 ? 'bg-amber-400'
+                              : 'bg-green-400'
+                          }`}
+                          style={{ width: `${b.gasds_pct}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-white/30">
+                        {b.gasds_pct.toFixed(1)}% of £8,000 annual cap used
+                      </p>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 pt-3 border-t border-white/5">
+                      <button
+                        onClick={() => { setBranchFilter(b.branch_id); setTab('declarations') }}
+                        className="flex-1 text-xs font-bold text-saffron-300 bg-saffron-500/10 hover:bg-saffron-500/20 border border-saffron-500/30 rounded-lg px-3 py-2 transition">
+                        View declarations →
+                      </button>
+                      <button
+                        onClick={() => { setBranchFilter(b.branch_id); setTab('gasds') }}
+                        className="flex-1 text-xs font-bold text-white/60 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg px-3 py-2 transition">
+                        GASDS →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </motion.div>
         )}
@@ -664,7 +738,7 @@ export default function GiftAidPage() {
                     <thead>
                       <tr className="border-b border-white/5">
                         <th className="px-4 py-3 w-8"></th>
-                        {['Donor', 'Postcode', 'Donation', 'Date', 'Order Ref', 'Status'].map(h => (
+                        {['First name', 'Surname', 'House #', 'Postcode', 'Email', 'Donation', 'Date', 'Status'].map(h => (
                           <th key={h} className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
                         ))}
                       </tr>
@@ -689,15 +763,25 @@ export default function GiftAidPage() {
                                 className="w-4 h-4 rounded accent-amber-400 pointer-events-none" />
                             )}
                           </td>
-                          <td className="px-4 py-3 text-white font-medium text-sm">{d.full_name}</td>
-                          <td className="px-4 py-3 text-white/60 text-sm">{d.postcode}</td>
+                          <td className="px-4 py-3 text-white font-medium text-sm">
+                            {d.first_name || (d.full_name?.split(' ', 1)[0] || '—')}
+                          </td>
+                          <td className="px-4 py-3 text-white font-medium text-sm">
+                            {d.surname || (d.full_name?.includes(' ') ? d.full_name.split(' ').slice(1).join(' ') : '—')}
+                          </td>
+                          <td className="px-4 py-3 text-white/70 text-sm font-mono">
+                            {d.house_number || (d.address ? d.address.split(',')[0].trim() : '—')}
+                          </td>
+                          <td className="px-4 py-3 text-white/60 text-sm font-mono">{d.postcode}</td>
+                          <td className="px-4 py-3 text-white/50 text-xs truncate max-w-[180px]" title={d.contact_email}>
+                            {d.contact_email || '—'}
+                          </td>
                           <td className="px-4 py-3 font-mono font-bold text-white text-sm">
                             £{Number(d.donation_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                           </td>
                           <td className="px-4 py-3 text-white/50 text-sm">
                             {d.donation_date ? new Date(d.donation_date).toLocaleDateString('en-GB') : '—'}
                           </td>
-                          <td className="px-4 py-3 text-white/40 text-xs font-mono">{d.order_ref || '—'}</td>
                           <td className="px-4 py-3">
                             <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
                               d.hmrc_submitted

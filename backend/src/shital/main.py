@@ -468,6 +468,10 @@ async def _patch_schema() -> None:
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS monthly_giving_amount  NUMERIC(8,2) NOT NULL DEFAULT 5.00",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS confirmation_text      TEXT         NOT NULL DEFAULT ''",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS bg_color              VARCHAR(20)  NOT NULL DEFAULT ''",
+        # Per-device staff-menu visibility — JSON of { test_print, theme_cycle,
+        # refresh, admin } booleans. Loaded by the kiosk on login; the gear
+        # menu hides items where the value is false.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS menu_options JSONB NOT NULL DEFAULT '{\"test_print\": true, \"theme_cycle\": true, \"refresh\": true, \"admin\": true}'::jsonb",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_username ON kiosk_devices(device_username) WHERE device_username IS NOT NULL",
         # ── Menu / menu-profile system (per-app, parent/child) ────────────────
         """CREATE TABLE IF NOT EXISTS menus (
@@ -673,6 +677,12 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON catalog_items(category)",
         "CREATE INDEX IF NOT EXISTS idx_catalog_items_branch   ON catalog_items(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_catalog_items_scope    ON catalog_items(scope)",
+        # Per-item post-payment email (e.g. brick donor instructions).
+        # When toggled on with a template_key, the backend sends one email
+        # per item-line per order on payment success — additional to the
+        # standard receipt.
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS send_email_on_payment BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS email_template_key VARCHAR(100) NOT NULL DEFAULT ''",
         # ── Kiosk: Baskets, Basket Items, Orders ──────────────────────────────
         """CREATE TABLE IF NOT EXISTS baskets (
             id         VARCHAR(36) PRIMARY KEY,
@@ -1006,6 +1016,71 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_addresses_contact  ON addresses(contact_id)",
         "CREATE INDEX IF NOT EXISTS idx_addresses_postcode ON addresses(postcode)",
         "CREATE INDEX IF NOT EXISTS idx_addresses_uprn     ON addresses(uprn) WHERE uprn != ''",
+        "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS house_number VARCHAR(50) NOT NULL DEFAULT ''",
+        # Dedup + unique index — prevents addresses table accumulating
+        # duplicates per (contact_id, postcode, house_number). Partial
+        # so anonymous (contact_id IS NULL) rows aren't constrained.
+        "CREATE UNIQUE INDEX IF NOT EXISTS addresses_unique_contact_pc_house "
+        "ON addresses (contact_id, postcode, house_number) WHERE contact_id IS NOT NULL",
+        # ── CRM: Accounts (companies/organisations).
+        # NB. table is named crm_accounts because there is already a Finance
+        # `accounts` table (chart of accounts: code, name, type, balance).
+        # Self-heal: drop any half-applied state from the previous attempt that
+        # tried to use bare `accounts` and collided with the Finance table.
+        "ALTER TABLE addresses DROP CONSTRAINT IF EXISTS addresses_account_id_fkey",
+        "DROP INDEX  IF EXISTS idx_addresses_account",
+        "ALTER TABLE addresses DROP COLUMN IF EXISTS account_id",
+        "DROP TABLE IF EXISTS account_services",
+        "DROP TABLE IF EXISTS account_contacts",
+        """CREATE TABLE IF NOT EXISTS crm_accounts (
+            id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name                 VARCHAR(300) NOT NULL,
+            legal_name           VARCHAR(300) NOT NULL DEFAULT '',
+            account_type         VARCHAR(50)  NOT NULL DEFAULT 'customer',
+            status               VARCHAR(20)  NOT NULL DEFAULT 'active',
+            website              VARCHAR(300) NOT NULL DEFAULT '',
+            email                VARCHAR(254) NOT NULL DEFAULT '',
+            phone                VARCHAR(50)  NOT NULL DEFAULT '',
+            industry             VARCHAR(100) NOT NULL DEFAULT '',
+            registration_number  VARCHAR(100) NOT NULL DEFAULT '',
+            vat_number           VARCHAR(50)  NOT NULL DEFAULT '',
+            charity_number       VARCHAR(50)  NOT NULL DEFAULT '',
+            primary_contact_id   UUID REFERENCES contacts(id) ON DELETE SET NULL,
+            parent_account_id    UUID REFERENCES crm_accounts(id) ON DELETE SET NULL,
+            owner_user_id        UUID,
+            branch_id            VARCHAR(64) NOT NULL DEFAULT '',
+            notes                TEXT NOT NULL DEFAULT '',
+            created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at           TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_crm_accounts_name    ON crm_accounts(name)",
+        "CREATE INDEX IF NOT EXISTS idx_crm_accounts_type    ON crm_accounts(account_type)",
+        "CREATE INDEX IF NOT EXISTS idx_crm_accounts_status  ON crm_accounts(status) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_crm_accounts_primary ON crm_accounts(primary_contact_id)",
+        """CREATE TABLE IF NOT EXISTS crm_account_contacts (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            account_id  UUID NOT NULL REFERENCES crm_accounts(id) ON DELETE CASCADE,
+            contact_id  UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            role        VARCHAR(150) NOT NULL DEFAULT '',
+            is_primary  BOOLEAN NOT NULL DEFAULT false,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (account_id, contact_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_crm_account_contacts_acct ON crm_account_contacts(account_id)",
+        "CREATE INDEX IF NOT EXISTS idx_crm_account_contacts_cont ON crm_account_contacts(contact_id)",
+        """CREATE TABLE IF NOT EXISTS crm_account_services (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            account_id   UUID NOT NULL REFERENCES crm_accounts(id) ON DELETE CASCADE,
+            service_name VARCHAR(200) NOT NULL,
+            service_type VARCHAR(50)  NOT NULL DEFAULT '',
+            description  TEXT NOT NULL DEFAULT '',
+            is_active    BOOLEAN NOT NULL DEFAULT true,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_crm_account_services_acct ON crm_account_services(account_id)",
+        "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS crm_account_id UUID REFERENCES crm_accounts(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS idx_addresses_crm_account ON addresses(crm_account_id)",
         # ── CRM: Link contact_id into transaction tables ───────────────────────
         "ALTER TABLE orders                       ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
         "ALTER TABLE donations                    ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id)",
@@ -1217,76 +1292,175 @@ async def _seed_email_templates() -> None:
 
     donation_receipt_html = """<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:24px 0;">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Donation Receipt — Shital Temple</title>
+</head>
+<body style="margin:0;padding:0;background:#F5F5F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F5F5;padding:24px 0;">
 <tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.10);">
-  <!-- Header -->
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+  <!-- Header — logo + brand + charity number -->
   <tr>
-    <td style="background:linear-gradient(135deg,#FF9933 0%,#FF6600 100%);padding:32px 40px;text-align:center;">
-      <div style="font-size:36px;margin-bottom:8px;">🕉</div>
-      <div style="color:#ffffff;font-size:26px;font-weight:900;letter-spacing:1px;">Shital Temple</div>
-      <div style="color:rgba(255,255,255,0.85);font-size:14px;margin-top:4px;">{{ branch_name }}</div>
+    <td style="background:linear-gradient(135deg,#FF9933 0%,#E65100 100%);padding:36px 40px 28px;text-align:center;">
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="Shital Temple"
+             width="76" height="76"
+             style="display:block;margin:0 auto 12px;border:0;outline:none;border-radius:14px;background:rgba(255,255,255,0.18);padding:8px;" />
+      {% else %}
+        <div style="font-size:42px;line-height:1;margin-bottom:10px;">🕉</div>
+      {% endif %}
+      <div style="color:#ffffff;font-size:28px;font-weight:900;letter-spacing:1px;">Shital Temple</div>
+      <div style="color:rgba(255,255,255,0.92);font-size:15px;margin-top:6px;font-weight:500;">{{ branch_name }}</div>
+      {% if charity_number %}
+        <div style="color:rgba(255,255,255,0.85);font-size:11px;margin-top:8px;letter-spacing:0.6px;">
+          Registered UK Charity No. <strong>{{ charity_number }}</strong>
+        </div>
+      {% endif %}
     </td>
   </tr>
+
   <!-- Confirmed bar -->
   <tr>
-    <td style="background:#22C55E;padding:10px 40px;text-align:center;">
-      <span style="color:#ffffff;font-weight:700;font-size:14px;letter-spacing:0.5px;">✓ Donation Confirmed — Thank You!</span>
+    <td style="background:#16A34A;padding:12px 40px;text-align:center;">
+      <span style="color:#ffffff;font-weight:700;font-size:14px;letter-spacing:0.4px;">✓ Donation Confirmed — Thank You</span>
     </td>
   </tr>
-  <!-- Body -->
+
+  <!-- Greeting -->
   <tr>
-    <td style="padding:36px 40px;">
-      {% if customer_name %}<p style="font-size:18px;font-weight:700;color:#1a1a1a;margin:0 0 8px 0;">Dear {{ customer_name }},</p>{% endif %}
-      <p style="color:#555555;font-size:15px;line-height:1.6;margin:0 0 28px 0;">Thank you for your generous donation to <strong>{{ branch_name }}</strong>. Your contribution directly supports our temple community, seva programmes, and charitable activities.</p>
-      <!-- Order reference box -->
-      <div style="background:#FFF8F0;border-left:5px solid #FF9933;padding:18px 22px;border-radius:8px;margin-bottom:28px;">
-        <div style="font-size:11px;color:#999999;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Order Reference</div>
-        <div style="font-size:22px;font-weight:900;color:#1a1a1a;letter-spacing:3px;font-family:'Courier New',monospace;">{{ order_ref }}</div>
-        <div style="font-size:12px;color:#999999;margin-top:6px;">{{ date }}</div>
-      </div>
-      <!-- Items table -->
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;border-collapse:collapse;">
+    <td style="padding:36px 40px 8px;">
+      {% if customer_name %}<p style="font-size:20px;font-weight:700;color:#111827;margin:0 0 12px 0;">Dear {{ customer_name }},</p>{% endif %}
+      <p style="color:#4B5563;font-size:15px;line-height:1.7;margin:0;">
+        Thank you for your generous donation to <strong style="color:#111827;">{{ branch_name }}</strong>.
+        Every contribution directly supports our daily seva, prasad, festivals, and the
+        community programmes that make this temple a home for our devotees.
+      </p>
+    </td>
+  </tr>
+
+  <!-- Order reference card -->
+  <tr>
+    <td style="padding:24px 40px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#FFF7ED 0%,#FFEDD5 100%);border:1px solid #FDBA74;border-radius:12px;">
+        <tr><td style="padding:18px 22px;">
+          <div style="font-size:11px;color:#9A3412;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;font-weight:700;">Order Reference</div>
+          <div style="font-size:22px;font-weight:900;color:#7C2D12;letter-spacing:3px;font-family:'SF Mono','Courier New',monospace;">{{ order_ref }}</div>
+          <div style="font-size:12px;color:#9A3412;margin-top:6px;">
+            {{ date }}{% if payment_provider %} · {{ payment_provider|upper }}{% endif %}{% if payment_ref %} · ref {{ payment_ref }}{% endif %}
+          </div>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Items table -->
+  <tr>
+    <td style="padding:24px 40px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>
-          <th align="left" style="font-size:11px;text-transform:uppercase;color:#999999;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #f0f0f0;">Donation</th>
-          <th align="center" style="font-size:11px;text-transform:uppercase;color:#999999;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #f0f0f0;">Qty</th>
-          <th align="right" style="font-size:11px;text-transform:uppercase;color:#999999;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #f0f0f0;">Amount</th>
+          <th align="left"  style="font-size:11px;text-transform:uppercase;color:#9CA3AF;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #F3F4F6;">Donation</th>
+          <th align="center" style="font-size:11px;text-transform:uppercase;color:#9CA3AF;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #F3F4F6;">Qty</th>
+          <th align="right" style="font-size:11px;text-transform:uppercase;color:#9CA3AF;letter-spacing:1px;padding:0 0 10px 0;border-bottom:2px solid #F3F4F6;">Amount</th>
         </tr>
         {% for item in items %}
         <tr>
-          <td style="padding:12px 0;font-size:14px;color:#1a1a1a;border-bottom:1px solid #f5f5f5;">{{ item.name }}</td>
-          <td align="center" style="padding:12px 0;font-size:14px;color:#666666;border-bottom:1px solid #f5f5f5;">{{ item.quantity }}</td>
-          <td align="right" style="padding:12px 0;font-size:14px;color:#1a1a1a;font-weight:600;border-bottom:1px solid #f5f5f5;">£{{ "%.2f"|format((item.unitPrice or 0)|float * (item.quantity or 1)|int) }}</td>
+          <td             style="padding:14px 0;font-size:14px;color:#111827;border-bottom:1px solid #F9FAFB;">{{ item.name }}</td>
+          <td align="center" style="padding:14px 0;font-size:14px;color:#6B7280;border-bottom:1px solid #F9FAFB;">{{ item.quantity }}</td>
+          <td align="right" style="padding:14px 0;font-size:14px;color:#111827;font-weight:600;border-bottom:1px solid #F9FAFB;">£{{ "%.2f"|format((item.unitPrice or 0)|float * (item.quantity or 1)|int) }}</td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="3" style="padding:12px 0;font-size:14px;color:#555555;border-bottom:1px solid #f5f5f5;">Temple Donation</td>
+          <td colspan="3" style="padding:14px 0;font-size:14px;color:#4B5563;border-bottom:1px solid #F9FAFB;">Temple Donation</td>
         </tr>
         {% endfor %}
         <tr>
-          <td colspan="2" style="padding:16px 0 0 0;font-size:16px;font-weight:900;color:#1a1a1a;">Total Donated</td>
-          <td align="right" style="padding:16px 0 0 0;font-size:22px;font-weight:900;color:#FF6600;">£{{ "%.2f"|format(total|float) }}</td>
+          <td colspan="2" style="padding:18px 0 0;font-size:16px;font-weight:900;color:#111827;">Total Donated</td>
+          <td align="right" style="padding:18px 0 0;font-size:24px;font-weight:900;color:#E65100;">£{{ "%.2f"|format(total|float) }}</td>
         </tr>
       </table>
-      <hr style="border:none;border-top:1px solid #f0f0f0;margin:24px 0;">
-      <!-- Gift Aid notice -->
-      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:18px 22px;margin-bottom:28px;">
-        <div style="font-size:13px;font-weight:700;color:#15803d;margin-bottom:6px;">🎁 Gift Aid — Boost Your Donation by 25%</div>
-        <div style="font-size:13px;color:#166534;line-height:1.6;">If you are a UK taxpayer, the temple can claim Gift Aid on your donation at no extra cost to you. Please speak to a temple administrator or visit our website to add Gift Aid to this donation.</div>
-      </div>
-      <p style="color:#888888;font-size:13px;line-height:1.7;margin:0 0 24px 0;">Please retain this email as confirmation of your donation. This receipt is for your records only and is not a Gift Aid declaration.</p>
-      <p style="color:#FF9933;font-size:20px;font-weight:900;text-align:center;margin:0;">🙏 Jay Shri Krishna</p>
     </td>
   </tr>
-  <!-- Footer -->
+
+  <!-- Impact strip -->
   <tr>
-    <td style="background:#f9f9f9;border-top:1px solid #eeeeee;padding:22px 40px;text-align:center;">
-      <p style="color:#999999;font-size:12px;margin:0 0 4px 0;font-weight:600;">{{ branch_name }} · Registered UK Charity</p>
-      <p style="color:#bbbbbb;font-size:11px;margin:0;">You received this email because you donated at our kiosk terminal. This is not a tax document.</p>
+    <td style="padding:32px 40px 0;">
+      <p style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#9CA3AF;font-weight:700;margin:0 0 14px 0;text-align:center;">Your donation supports</p>
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="25%" align="center" style="padding:6px 4px;"><div style="font-size:24px;line-height:1;">🪔</div><div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Daily Aarti</div></td>
+          <td width="25%" align="center" style="padding:6px 4px;"><div style="font-size:24px;line-height:1;">🍛</div><div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Prasad</div></td>
+          <td width="25%" align="center" style="padding:6px 4px;"><div style="font-size:24px;line-height:1;">🛕</div><div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Maintenance</div></td>
+          <td width="25%" align="center" style="padding:6px 4px;"><div style="font-size:24px;line-height:1;">📚</div><div style="font-size:11px;color:#6B7280;margin-top:6px;font-weight:600;">Education</div></td>
+        </tr>
+      </table>
     </td>
   </tr>
+
+  <!-- Gift Aid CTA -->
+  <tr>
+    <td style="padding:24px 40px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:12px;">
+        <tr><td style="padding:18px 22px;">
+          <div style="font-size:14px;font-weight:800;color:#15803D;margin-bottom:6px;">🎁 Boost this donation by 25% with Gift Aid</div>
+          <div style="font-size:13px;color:#166534;line-height:1.65;">
+            If you're a UK taxpayer, we can claim an extra <strong>25p for every £1</strong> you give —
+            at no cost to you. Add Gift Aid by speaking to a temple administrator or replying to this
+            email with your full name, address and postcode.
+          </div>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Monthly supporter CTA — prominent -->
+  <tr>
+    <td style="padding:18px 40px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#FFF7ED 0%,#FFEDD5 100%);border:1px dashed #FDBA74;border-radius:12px;">
+        <tr><td style="padding:24px 22px;text-align:center;">
+          <div style="font-size:16px;font-weight:800;color:#9A3412;margin-bottom:6px;">🪔 Become a monthly supporter</div>
+          <div style="font-size:13px;color:#9A3412;line-height:1.65;margin-bottom:14px;">
+            Recurring giving is the steadiest way to keep daily seva running.<br>
+            Even <strong>£5/month</strong> sponsors morning aarti for the whole community.
+          </div>
+          <a href="{{ monthly_url }}" style="display:inline-block;background:#E65100;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:700;letter-spacing:0.3px;">Set up monthly giving →</a>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Sign-off -->
+  <tr>
+    <td style="padding:32px 40px 8px;text-align:center;">
+      <p style="color:#E65100;font-size:22px;font-weight:900;margin:0;">🙏 Jay Shri Krishna</p>
+      <p style="color:#9CA3AF;font-size:12px;margin:8px 0 0 0;">Please retain this email as confirmation. This is not a Gift Aid declaration.</p>
+    </td>
+  </tr>
+
+  <!-- Footer — links + charity info -->
+  <tr>
+    <td style="background:#FAFAFA;border-top:1px solid #F3F4F6;padding:28px 40px;text-align:center;">
+      <p style="margin:0 0 14px 0;">
+        <a href="{{ website_url }}"        style="color:#E65100;text-decoration:none;font-size:12px;font-weight:700;margin:0 10px;">🌐 Website</a>
+        <span style="color:#D1D5DB;">·</span>
+        <a href="{{ account_url }}"        style="color:#E65100;text-decoration:none;font-size:12px;font-weight:700;margin:0 10px;">👤 My Account</a>
+        <span style="color:#D1D5DB;">·</span>
+        <a href="{{ monthly_url }}"        style="color:#E65100;text-decoration:none;font-size:12px;font-weight:700;margin:0 10px;">🔄 Monthly Giving</a>
+        <span style="color:#D1D5DB;">·</span>
+        <a href="mailto:info@shital.org.uk" style="color:#E65100;text-decoration:none;font-size:12px;font-weight:700;margin:0 10px;">✉ Contact</a>
+      </p>
+      <p style="color:#6B7280;font-size:12px;font-weight:700;margin:0 0 4px 0;">
+        {{ branch_name }}{% if charity_number %} · Registered UK Charity No. {{ charity_number }}{% endif %}
+      </p>
+      <p style="color:#9CA3AF;font-size:11px;margin:0;line-height:1.6;">
+        You received this email because you donated at our kiosk terminal.<br>
+        This receipt is for your records only.
+      </p>
+    </td>
+  </tr>
+
 </table>
 </td></tr>
 </table>
@@ -1352,6 +1526,42 @@ _{{ branch_name }} — Registered UK Charity_"""
             "html_body": "",
             "text_body": whatsapp_receipt_text,
             "variables": '["order_ref","customer_name","total","items","branch_name","date"]',
+        },
+        {
+            "key": "kiosk_print_receipt",
+            "name": "Kiosk Thermal Print Receipt",
+            "subject": "",
+            "html_body": (
+                '<div style="font-family:\'Courier New\',monospace;font-size:11pt;width:80mm;padding:6mm;background:white;color:black;">'
+                '  <div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:8px;margin-bottom:8px;">'
+                '    <div style="font-size:16px;font-weight:900;letter-spacing:1px;">🕉 Shital Temple</div>'
+                '    <div style="font-size:11px;font-weight:700;margin-top:2px;">Branch: {{ branch_name }}</div>'
+                '    {% if donor_name %}<div style="font-size:11px;font-weight:700;">Name: {{ donor_name }}</div>{% endif %}'
+                '    <div style="font-size:9px;margin-top:4px;color:#555;">{{ date }}</div>'
+                '  </div>'
+                '  <div style="text-align:center;margin-bottom:8px;">'
+                '    <div style="font-size:9px;color:#555;">ORDER REFERENCE</div>'
+                '    <div style="font-size:13px;font-weight:900;letter-spacing:2px;">{{ order_ref }}</div>'
+                '  </div>'
+                '  {{ items_html | safe }}'
+                '  <div style="border-top:2px solid #000;padding-top:5px;margin-bottom:6px;">'
+                '    <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:900;">'
+                '      <span>TOTAL</span><span>£{{ total }}</span>'
+                '    </div>'
+                '    <div style="font-size:9px;text-align:right;color:#555;">{{ payment_method }}</div>'
+                '  </div>'
+                '  {{ gift_aid_block | safe }}'
+                '  <div style="border-top:1px dashed #000;padding-top:8px;text-align:center;font-size:9px;color:#444;">'
+                '    <div style="font-weight:900;margin-bottom:2px;">Thank you for your generous donation 🙏</div>'
+                '    <div>Jay Shri Krishna</div>'
+                '    <div style="margin-top:4px;color:#777;">This receipt is your donation record.</div>'
+                '    <div style="margin-top:4px;">kiosk.shital.org.uk</div>'
+                '  </div>'
+                '  <div style="height:{{ cut_margin_px }}px;">&nbsp;</div>'
+                '</div>'
+            ),
+            "text_body": "",
+            "variables": '["branch_name","donor_name","order_ref","date","items_html","total","payment_method","gift_aid_block","cut_margin_px"]',
         },
     ]
 
@@ -1458,6 +1668,7 @@ _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.contacts",             "router")
+_mount("shital.api.routers.accounts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
 _mount("shital.api.routers.menus",                 "router")
 _mount("shital.api.routers.system",                "router")

@@ -43,26 +43,38 @@ services:
     environment:
       DATABASE_URL: postgresql://shitaleco_dev_user:ShitalEcoDev2024!@db-dev:5432/shitaleco_dev_db
       APP_ENV: development
-      JWT_SECRET: ${JWT_SECRET:-shital-dev-jwt-secret-not-for-prod}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      CORS_ORIGINS: https://dev.shital.org.uk,http://192.248.147.205:8080,http://localhost:8080
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      # Required secrets. No silent fallbacks — if any is missing, `docker
+      # compose up` fails fast with a clear error naming the variable, instead
+      # of the dev stack quietly running with a placeholder that breaks later
+      # (e.g. DEPLOY_SECRET mismatch → deployer 403, GITHUB_TOKEN empty →
+      #  pull from private GHCR fails). The deploy-dev.yml workflow injects
+      # all of these into .env.dev before bringing the stack up.
+      JWT_SECRET:             ${JWT_SECRET:?must be set in .env.dev}
+      DEPLOY_SECRET:          ${DEPLOY_SECRET:?must be set in .env.dev — same value as the prod deployer}
+      GITHUB_TOKEN:           ${GITHUB_TOKEN:?must be set in .env.dev — needed to pull private GHCR images}
+      ANTHROPIC_API_KEY:      ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS:           https://dev.shital.org.uk,http://192.248.147.205:8080,http://localhost:8080
+      SENDGRID_API_KEY:       ${SENDGRID_API_KEY:-}
+      STRIPE_SECRET_KEY:      ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
-      MS_CLIENT_ID: ${MS_CLIENT_ID:-}
-      MS_TENANT_ID: ${MS_TENANT_ID:-}
-      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
-      MS_REDIRECT_URI: https://dev.shital.org.uk/auth-callback
-      # Dev admin doesn't promote to prod (different docker network from the
-      # deployer), but setting these stops the Environments card from showing
-      # "DEPLOY_SECRET not configured" errors. Promotion happens from prod admin.
-      DEPLOY_SECRET: ${DEPLOY_SECRET:-dev-only-placeholder-not-used}
-      DEPLOYER_URL: ${DEPLOYER_URL:-http://deployer:9000}
+      MS_CLIENT_ID:           ${MS_CLIENT_ID:-}
+      MS_TENANT_ID:           ${MS_TENANT_ID:-}
+      MS_CLIENT_SECRET:       ${MS_CLIENT_SECRET:-}
+      MS_REDIRECT_URI:        https://dev.shital.org.uk/auth-callback
+      DEPLOYER_URL:           ${DEPLOYER_URL:-http://deployer:9000}
     depends_on:
       db-dev:
         condition: service_healthy
     networks:
-      - dev-internal
+      dev-internal:
+        # screen-dev image hard-codes proxy_pass http://backend:8000 (works in
+        # the prod stack where the service is literally named "backend"). Alias
+        # backend-dev as "backend" on the dev network so screen-dev can resolve it.
+        aliases:
+          - backend
+      # Second NIC on the prod stack's network so we can reach the deployer
+      # container at http://deployer:9000 (deployer lives in the prod compose).
+      prod-bridge: {}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -153,3 +165,9 @@ volumes:
 networks:
   dev-internal:
     driver: bridge
+  # The deployer service runs in the prod compose stack on its own internal
+  # network. Reference it as external so backend-dev can resolve "deployer"
+  # and the dev admin Environments card stops showing "Deployer unreachable".
+  prod-bridge:
+    external: true
+    name: shitaleco_internal

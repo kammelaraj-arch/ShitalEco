@@ -72,6 +72,9 @@ class ItemBase(BaseModel):
     display_channel: DisplayChannel = DisplayChannel.BOTH
     branch_stock: dict = {}
     is_live: bool = True
+    # Per-item post-payment email — admin can enable + pick the template key
+    send_email_on_payment: bool = False
+    email_template_key: str = ""
 
 
 class ItemCreate(ItemBase):
@@ -103,6 +106,8 @@ class ItemUpdate(BaseModel):
     display_channel: DisplayChannel | None = None
     branch_stock: dict | None = None
     is_live: bool | None = None
+    send_email_on_payment: bool | None = None
+    email_template_key: str | None = None
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -417,6 +422,7 @@ async def list_items(
                            gift_aid_eligible, is_active, scope, branch_id, project_id,
                            stock_qty, sort_order, metadata_json,
                            available_from, available_until, display_channel, branch_stock, is_live,
+                           send_email_on_payment, email_template_key,
                            created_at, updated_at
                     FROM catalog_items
                     WHERE {where}
@@ -595,6 +601,7 @@ async def get_item(item_id: str, ctx: OptionalSpace):
                            gift_aid_eligible, is_active, scope, branch_id, project_id,
                            stock_qty, sort_order, metadata_json,
                            available_from, available_until, display_channel, branch_stock, is_live,
+                           send_email_on_payment, email_template_key,
                            created_at, updated_at
                     FROM catalog_items
                     WHERE id = :id AND deleted_at IS NULL
@@ -632,12 +639,14 @@ async def create_item(body: ItemCreate, ctx: OptionalSpace):
                      unit, emoji, image_url, gift_aid_eligible, is_active, scope, branch_id, project_id,
                      stock_qty, sort_order, metadata_json,
                      available_from, available_until, display_channel, branch_stock, is_live,
+                     send_email_on_payment, email_template_key,
                      created_at, updated_at)
                     VALUES
                     (:id, :name, :name_gu, :name_hi, :name_te, :desc, :category, :price, :currency,
                      :unit, :emoji, :image_url, :gift_aid, :is_active, :scope, :branch_id, :project_id,
                      :stock_qty, :sort_order, :metadata_json,
                      :available_from, :available_until, :display_channel, :branch_stock, :is_live,
+                     :send_email, :template_key,
                      :now, :now)
                 """),
                 {
@@ -666,6 +675,8 @@ async def create_item(body: ItemCreate, ctx: OptionalSpace):
                     "display_channel": body.display_channel.value,
                     "branch_stock": json.dumps(body.branch_stock),
                     "is_live": body.is_live,
+                    "send_email": body.send_email_on_payment,
+                    "template_key": body.email_template_key,
                     "now": now,
                 },
             )
