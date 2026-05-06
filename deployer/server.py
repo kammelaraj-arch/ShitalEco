@@ -1,10 +1,14 @@
+import hmac
 import json
 import os
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "")
+# Strip whitespace + surrounding quotes — .env files commonly leave these on
+# values, and a stray newline here vs. on the backend side produces a silent
+# 403 on every deployer call (Promote, Snapshots list, Restore, Status).
+DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
 _PLACEHOLDER_SECRETS = {"", "shital-deploy-secret-change-me", "change-me"}
 if DEPLOY_SECRET in _PLACEHOLDER_SECRETS:
     print(
@@ -303,7 +307,10 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _check_secret(self) -> bool:
-        return self.headers.get("X-Deploy-Secret") == DEPLOY_SECRET
+        sent = (self.headers.get("X-Deploy-Secret") or "").strip().strip('"').strip("'")
+        if not sent or not DEPLOY_SECRET:
+            return False
+        return hmac.compare_digest(sent, DEPLOY_SECRET)
 
     def _send_json(self, code: int, body: dict):
         payload = json.dumps(body).encode()

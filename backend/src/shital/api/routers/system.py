@@ -61,8 +61,8 @@ async def get_environments(ctx: CurrentSpace) -> dict[str, Any]:
     doesn't have docker CLI, so we proxy through.
     """
     _require_admin(ctx)
-    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000")
-    deploy_secret = os.environ.get("DEPLOY_SECRET", "")
+    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000").strip()
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
     if not deploy_secret:
         return {"environments": {}, "error": "DEPLOY_SECRET not configured"}
 
@@ -74,6 +74,11 @@ async def get_environments(ctx: CurrentSpace) -> dict[str, Any]:
         with urllib.request.urlopen(req, timeout=15) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
+        if e.code == 403:
+            return {"environments": {}, "error": (
+                "Deployer rejected request: DEPLOY_SECRET mismatch — "
+                "recreate the deployer container after rotating the secret."
+            )}
         return {"environments": {}, "error": f"Deployer HTTP {e.code}"}
     except Exception as e:
         return {"environments": {}, "error": f"Deployer unreachable: {e}"}
@@ -133,8 +138,8 @@ async def trigger_deploy(
             detail="Incorrect admin PIN",
         )
 
-    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000")
-    deploy_secret = os.environ.get("DEPLOY_SECRET", "")
+    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000").strip()
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
     if not deploy_secret:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -185,8 +190,10 @@ async def trigger_deploy(
 async def list_snapshots(ctx: CurrentSpace) -> dict[str, Any]:
     """List promote-time snapshots (DB dump + image tags) available for restore."""
     _require_admin(ctx)
-    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000")
-    deploy_secret = os.environ.get("DEPLOY_SECRET", "")
+    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000").strip()
+    # Strip whitespace/quotes that .env files commonly leave on values — a stray
+    # newline or quote here vs. on the deployer side produces a silent 403.
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
     if not deploy_secret:
         return {"snapshots": [], "error": "DEPLOY_SECRET not configured"}
     req = urllib.request.Request(
@@ -196,6 +203,15 @@ async def list_snapshots(ctx: CurrentSpace) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            return {"snapshots": [], "error": (
+                "Deployer rejected request: DEPLOY_SECRET mismatch. "
+                "Backend and deployer container must share the same value — "
+                "recreate the deployer container after rotating the secret "
+                "(`docker compose up -d --force-recreate deployer`)."
+            )}
+        return {"snapshots": [], "error": f"Deployer rejected: HTTP {e.code}"}
     except Exception as e:
         return {"snapshots": [], "error": f"Deployer unreachable: {e}"}
 
@@ -223,8 +239,8 @@ async def restore_snapshot(
             detail="Incorrect admin PIN",
         )
 
-    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000")
-    deploy_secret = os.environ.get("DEPLOY_SECRET", "")
+    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000").strip()
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
     if not deploy_secret:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
