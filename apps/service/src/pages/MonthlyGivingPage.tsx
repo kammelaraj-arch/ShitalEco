@@ -274,12 +274,28 @@ export function MonthlyGivingPage() {
               style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }}
               createSubscription={(_data, actions) => {
                 // Pre-fill PayPal checkout (debit/credit card form) with the
-                // donor details we already collected. Falls back gracefully if
-                // any field is empty.
+                // donor details we already collected.
+                //
+                // Pre-fill behavior of /v1/billing/subscriptions:
+                //   - subscriber.name → cardholder name on Guest Card form
+                //   - subscriber.email_address → email field
+                //   - subscriber.shipping_address → shipping AND billing
+                //     address (when SET_PROVIDED_ADDRESS); also drives the
+                //     country dial-code default on the phone field
+                //   - application_context.brand_name + locale → required for
+                //     reliable Guest Card pre-fill (without locale, PayPal
+                //     falls back to browser language and may suppress some
+                //     pre-fill paths)
+                // Note: subscriber.phone is NOT documented in the v1 subscriber
+                // schema (only name / email_address / shipping_address /
+                // payer_id are). PayPal silently drops unknown fields, which
+                // is why a previous attempt to pre-fill phone via that path
+                // had no effect — leaving it out keeps the payload clean.
                 const trimmedAddr = selectedAddress.trim()
                 const parts = trimmedAddr.split(',').map(p => p.trim()).filter(Boolean)
-                // Last comma-segment containing whitespace is the postcode line; the one
-                // before it is the city. Everything else is line 1.
+                // Last comma-segment matching a UK postcode pattern is the
+                // postcode line; the one before it is the city. Everything
+                // else collapses into address_line_1.
                 const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
                 const last      = parts[parts.length - 1] ?? ''
                 const isPost    = ukPostRe.test(last)
@@ -288,32 +304,23 @@ export function MonthlyGivingPage() {
                 const lineEnd   = isPost ? parts.length - 2 : parts.length - 1
                 const addressL1 = parts.slice(0, Math.max(1, lineEnd)).join(', ') || trimmedAddr || postcode.trim()
 
-                // PayPal phone format: country_code (+44) + national_number (digits only).
-                const phoneDigits = donorPhone.replace(/\D/g, '')
-                const phoneNational = phoneDigits.startsWith('44')
-                  ? phoneDigits.slice(2)
-                  : phoneDigits.replace(/^0/, '')
-
+                const fullName = `${firstName.trim()} ${surname.trim()}`.trim()
                 const subscriber: Record<string, unknown> = {
-                  name: {
-                    given_name: firstName.trim() || undefined,
-                    surname:    surname.trim()   || undefined,
-                  },
+                  // Always send a complete name object — `detailsValid` already
+                  // requires both fields to be non-empty before this runs, so
+                  // we can pass the trimmed values directly without the
+                  // undefined-collapse trick (which produced an empty `name: {}`
+                  // when both were missing).
+                  name: { given_name: firstName.trim(), surname: surname.trim() },
                   ...(donorEmail.trim() && { email_address: donorEmail.trim() }),
-                  ...(phoneNational.length >= 6 && {
-                    phone: {
-                      phone_type: 'MOBILE',
-                      phone_number: { national_number: phoneNational },
-                    },
-                  }),
                   ...((addressL1 || postcode.trim()) && {
                     shipping_address: {
-                      name: { full_name: `${firstName.trim()} ${surname.trim()}`.trim() || undefined },
+                      ...(fullName && { name: { full_name: fullName } }),
                       address: {
                         address_line_1: addressL1,
                         ...(city && { admin_area_2: city }),
-                        postal_code:    postcode.trim() || undefined,
-                        country_code:   'GB',
+                        ...(postcode.trim() && { postal_code: postcode.trim() }),
+                        country_code: 'GB',
                       },
                     },
                   }),
@@ -322,8 +329,16 @@ export function MonthlyGivingPage() {
                   plan_id: planId,
                   subscriber,
                   application_context: {
+                    brand_name:          'Shital Temple',
+                    locale:              'en-GB',
                     shipping_preference: 'SET_PROVIDED_ADDRESS',
                     user_action:         'SUBSCRIBE_NOW',
+                    payment_method: {
+                      payer_selected:  'PAYPAL',
+                      payee_preferred: 'UNRESTRICTED',
+                    },
+                    return_url: `${window.location.origin}/?screen=monthly-giving&status=approved`,
+                    cancel_url: `${window.location.origin}/?screen=monthly-giving&status=cancelled`,
                   },
                 } as Parameters<typeof actions.subscription.create>[0])
               }}
