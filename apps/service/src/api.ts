@@ -164,6 +164,7 @@ export const api = {
     tierId: string, branchId: string,
     donorFirstName: string, donorSurname: string, donorEmail: string,
     donorPostcode: string, donorAddress: string,
+    donorPhone: string = '',
   ): Promise<{ plan_id: string; amount: string; frequency: string }> {
     const r = await fetch(`${API}/service/giving/subscribe`, {
       method: 'POST',
@@ -172,6 +173,7 @@ export const api = {
         tier_id: tierId, branch_id: branchId,
         donor_first_name: donorFirstName, donor_surname: donorSurname,
         donor_email: donorEmail, donor_postcode: donorPostcode, donor_address: donorAddress,
+        donor_phone: donorPhone,
       }),
     })
     if (!r.ok) throw new Error(`Subscribe failed: ${r.status}`)
@@ -183,6 +185,7 @@ export const api = {
     amount: number; frequency: string; branch_id: string
     donor_first_name: string; donor_surname: string; donor_email: string
     donor_postcode: string; donor_address: string
+    donor_phone?: string
   }): Promise<{ success: boolean }> {
     const r = await fetch(`${API}/service/giving/subscription/approve`, {
       method: 'POST',

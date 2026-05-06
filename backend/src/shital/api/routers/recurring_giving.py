@@ -159,6 +159,7 @@ class SubscribeBody(BaseModel):
     donor_first_name: str = ""
     donor_surname: str = ""
     donor_email: str = ""
+    donor_phone: str = ""
     donor_postcode: str = ""
     donor_address: str = ""
 
@@ -192,6 +193,7 @@ class ApproveBody(BaseModel):
     donor_first_name: str = ""
     donor_surname: str = ""
     donor_email: str = ""
+    donor_phone: str = ""
     donor_postcode: str = ""
     donor_address: str = ""
 
@@ -217,13 +219,14 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                      gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
                      first_source, first_branch_id, created_at, updated_at)
                 VALUES
-                    (:id, :email, :first, :surname, :name, '',
+                    (:id, :email, :first, :surname, :name, :phone,
                      true, :now, true, :now,
                      'monthly-giving', :branch, :now, :now)
                 ON CONFLICT (email) DO UPDATE SET
                     first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
                     surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
                     full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                    phone             = COALESCE(NULLIF(EXCLUDED.phone,''),      contacts.phone),
                     gdpr_consent      = true,
                     gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
                     tac_consent       = true,
@@ -233,7 +236,8 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
             """), {
                 "id": contact_uuid, "email": email_key,
                 "first": body.donor_first_name or "", "surname": body.donor_surname or "",
-                "name": full_name, "branch": body.branch_id, "now": now,
+                "name": full_name, "phone": body.donor_phone or "",
+                "branch": body.branch_id, "now": now,
             })
             row = c_result.mappings().first()
             contact_id = str(row["id"]) if row else contact_uuid

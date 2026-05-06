@@ -31,6 +31,7 @@ export function MonthlyGivingPage() {
   const [firstName, setFirstName]   = useState('')
   const [surname, setSurname]       = useState('')
   const [donorEmail, setDonorEmail] = useState('')
+  const [donorPhone, setDonorPhone] = useState('')
   const [postcode, setPostcode]     = useState('')
   const [addresses, setAddresses]   = useState<Array<{ formatted: string; uprn: string }>>([])
   const [selectedAddress, setSelectedAddress] = useState('')
@@ -72,6 +73,7 @@ export function MonthlyGivingPage() {
         selected.id, branchId,
         firstName.trim(), surname.trim(), donorEmail.trim(),
         postcode.trim(), selectedAddress,
+        donorPhone.trim(),
       )
       setPlanId(res.plan_id)
       setStep('pay')
@@ -92,11 +94,12 @@ export function MonthlyGivingPage() {
       donor_first_name: firstName.trim(),
       donor_surname: surname.trim(),
       donor_email: donorEmail.trim(),
+      donor_phone: donorPhone.trim(),
       donor_postcode: postcode.trim(),
       donor_address: selectedAddress,
     }).catch(() => {})
     setStep('done')
-  }, [selected, planId, branchId, firstName, surname, donorEmail, postcode, selectedAddress])
+  }, [selected, planId, branchId, firstName, surname, donorEmail, donorPhone, postcode, selectedAddress])
 
   if (loading) {
     return (
@@ -195,6 +198,15 @@ export function MonthlyGivingPage() {
             {donorEmail && <p className="text-xs mt-1 ml-1" style={{ color: '#60a5fa' }}>📧 Subscription confirmation sent here</p>}
           </div>
 
+          {/* Phone */}
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Phone</label>
+            <input type="tel" value={donorPhone} onChange={e => setDonorPhone(e.target.value)}
+              placeholder="07123 456789" autoComplete="tel"
+              className="w-full px-4 py-3 rounded-xl text-sm" />
+            <p className="text-xs mt-1 ml-1" style={{ color: 'rgba(255,248,220,0.4)' }}>Optional — speeds up PayPal checkout</p>
+          </div>
+
           {/* Postcode lookup */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>UK Postcode *</label>
@@ -260,9 +272,61 @@ export function MonthlyGivingPage() {
           <PayPalScriptProvider options={{ clientId, vault: true, intent: 'subscription', currency: 'GBP' }}>
             <PayPalButtons
               style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }}
-              createSubscription={(_data, actions) =>
-                actions.subscription.create({ plan_id: planId })
-              }
+              createSubscription={(_data, actions) => {
+                // Pre-fill PayPal checkout (debit/credit card form) with the
+                // donor details we already collected. Falls back gracefully if
+                // any field is empty.
+                const trimmedAddr = selectedAddress.trim()
+                const parts = trimmedAddr.split(',').map(p => p.trim()).filter(Boolean)
+                // Last comma-segment containing whitespace is the postcode line; the one
+                // before it is the city. Everything else is line 1.
+                const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
+                const last      = parts[parts.length - 1] ?? ''
+                const isPost    = ukPostRe.test(last)
+                const cityIdx   = isPost ? parts.length - 2 : parts.length - 1
+                const city      = (cityIdx >= 0 ? parts[cityIdx] : '') || ''
+                const lineEnd   = isPost ? parts.length - 2 : parts.length - 1
+                const addressL1 = parts.slice(0, Math.max(1, lineEnd)).join(', ') || trimmedAddr || postcode.trim()
+
+                // PayPal phone format: country_code (+44) + national_number (digits only).
+                const phoneDigits = donorPhone.replace(/\D/g, '')
+                const phoneNational = phoneDigits.startsWith('44')
+                  ? phoneDigits.slice(2)
+                  : phoneDigits.replace(/^0/, '')
+
+                const subscriber: Record<string, unknown> = {
+                  name: {
+                    given_name: firstName.trim() || undefined,
+                    surname:    surname.trim()   || undefined,
+                  },
+                  ...(donorEmail.trim() && { email_address: donorEmail.trim() }),
+                  ...(phoneNational.length >= 6 && {
+                    phone: {
+                      phone_type: 'MOBILE',
+                      phone_number: { national_number: phoneNational },
+                    },
+                  }),
+                  ...((addressL1 || postcode.trim()) && {
+                    shipping_address: {
+                      name: { full_name: `${firstName.trim()} ${surname.trim()}`.trim() || undefined },
+                      address: {
+                        address_line_1: addressL1,
+                        ...(city && { admin_area_2: city }),
+                        postal_code:    postcode.trim() || undefined,
+                        country_code:   'GB',
+                      },
+                    },
+                  }),
+                }
+                return actions.subscription.create({
+                  plan_id: planId,
+                  subscriber,
+                  application_context: {
+                    shipping_preference: 'SET_PROVIDED_ADDRESS',
+                    user_action:         'SUBSCRIBE_NOW',
+                  },
+                } as Parameters<typeof actions.subscription.create>[0])
+              }}
               onApprove={(data) => handleApprove({ subscriptionID: (data as { subscriptionID?: string }).subscriptionID })}
               onError={() => setError('PayPal encountered an error. Please try again.')}
               onCancel={() => setStep('details')}
