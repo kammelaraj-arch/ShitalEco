@@ -1114,6 +1114,69 @@ async def _patch_schema() -> None:
         # Prevent future duplicates at the database level.
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_recurring_giving_tiers_amount_label "
         "ON recurring_giving_tiers (amount, label)",
+        # ── Bank / Cash / Payment Processor accounts + statement transactions ─
+        # Distinct from the chart-of-accounts `accounts` table (which is for
+        # double-entry bookkeeping / GL). This pair is for *real-world money
+        # locations* — the temple's HSBC current account, in-house petty cash
+        # tin, the locker safe, the PayPal balance, the SumUp / Stripe payouts
+        # account. Statement imports land in `bank_transactions` as raw rows;
+        # reconciliation against the GL is a later phase.
+        """CREATE TABLE IF NOT EXISTS bank_accounts (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            name                VARCHAR(200) NOT NULL,
+            account_type        VARCHAR(20)  NOT NULL DEFAULT 'BANK',
+                -- BANK | IN_HOUSE | LOCKER | PAYPAL | SUMUP | STRIPE
+            parent_account_id   UUID REFERENCES bank_accounts(id) ON DELETE SET NULL,
+            bank_name           VARCHAR(200) NOT NULL DEFAULT '',
+            account_number      VARCHAR(50)  NOT NULL DEFAULT '',
+            sort_code           VARCHAR(20)  NOT NULL DEFAULT '',
+            iban                VARCHAR(50)  NOT NULL DEFAULT '',
+            currency            VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            opening_balance     NUMERIC(14,2) NOT NULL DEFAULT 0,
+            current_balance     NUMERIC(14,2) NOT NULL DEFAULT 0,
+            location            VARCHAR(200) NOT NULL DEFAULT '',
+                -- e.g. "Wembley temple back office" for IN_HOUSE / LOCKER
+            holder_name         VARCHAR(200) NOT NULL DEFAULT '',
+            notes               TEXT NOT NULL DEFAULT '',
+            is_active           BOOLEAN NOT NULL DEFAULT true,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_bank_accounts_branch ON bank_accounts(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_accounts_type   ON bank_accounts(account_type)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_accounts_parent ON bank_accounts(parent_account_id)",
+        """CREATE TABLE IF NOT EXISTS bank_transactions (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            account_id          UUID NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+            txn_date            DATE NOT NULL,
+            value_date          DATE,
+            description         TEXT NOT NULL DEFAULT '',
+            counterparty        VARCHAR(255) NOT NULL DEFAULT '',
+            reference           VARCHAR(255) NOT NULL DEFAULT '',
+            amount              NUMERIC(14,2) NOT NULL,
+                -- signed: positive = credit (money in), negative = debit (out)
+            balance_after       NUMERIC(14,2),
+                -- if statement provides a running balance; nullable
+            currency            VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            txn_type            VARCHAR(20)  NOT NULL DEFAULT 'OTHER',
+                -- DEBIT | CREDIT | FEE | TRANSFER | INTEREST | REFUND | OTHER
+            source              VARCHAR(20)  NOT NULL DEFAULT 'MANUAL',
+                -- MANUAL | CSV_IMPORT | PDF_IMPORT | API
+            statement_id        UUID,
+                -- nullable; will FK to a bank_statement_imports row in PR 2
+            raw_data            JSONB NOT NULL DEFAULT '{}'::jsonb,
+                -- whatever extra fields the import format gave us
+            reconciled          BOOLEAN NOT NULL DEFAULT false,
+            reconciled_with_id  UUID,
+                -- nullable FK to GL transactions.id when reconciled (later)
+            notes               TEXT NOT NULL DEFAULT '',
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_bank_txn_account ON bank_transactions(account_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_txn_date    ON bank_transactions(txn_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_txn_recon   ON bank_transactions(reconciled)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -1667,6 +1730,7 @@ _mount("shital.api.routers.recurring_payments",   "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
+_mount("shital.api.routers.bank_accounts",         "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.accounts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
