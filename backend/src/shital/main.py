@@ -1126,7 +1126,6 @@ async def _patch_schema() -> None:
             branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
             name                VARCHAR(200) NOT NULL,
             account_type        VARCHAR(20)  NOT NULL DEFAULT 'BANK',
-                -- BANK | IN_HOUSE | LOCKER | PAYPAL | SUMUP | STRIPE
             parent_account_id   UUID REFERENCES bank_accounts(id) ON DELETE SET NULL,
             bank_name           VARCHAR(200) NOT NULL DEFAULT '',
             account_number      VARCHAR(50)  NOT NULL DEFAULT '',
@@ -1136,7 +1135,6 @@ async def _patch_schema() -> None:
             opening_balance     NUMERIC(14,2) NOT NULL DEFAULT 0,
             current_balance     NUMERIC(14,2) NOT NULL DEFAULT 0,
             location            VARCHAR(200) NOT NULL DEFAULT '',
-                -- e.g. "Wembley temple back office" for IN_HOUSE / LOCKER
             holder_name         VARCHAR(200) NOT NULL DEFAULT '',
             notes               TEXT NOT NULL DEFAULT '',
             is_active           BOOLEAN NOT NULL DEFAULT true,
@@ -1155,21 +1153,14 @@ async def _patch_schema() -> None:
             counterparty        VARCHAR(255) NOT NULL DEFAULT '',
             reference           VARCHAR(255) NOT NULL DEFAULT '',
             amount              NUMERIC(14,2) NOT NULL,
-                -- signed: positive = credit (money in), negative = debit (out)
             balance_after       NUMERIC(14,2),
-                -- if statement provides a running balance; nullable
             currency            VARCHAR(10)  NOT NULL DEFAULT 'GBP',
             txn_type            VARCHAR(20)  NOT NULL DEFAULT 'OTHER',
-                -- DEBIT | CREDIT | FEE | TRANSFER | INTEREST | REFUND | OTHER
             source              VARCHAR(20)  NOT NULL DEFAULT 'MANUAL',
-                -- MANUAL | CSV_IMPORT | PDF_IMPORT | API
             statement_id        UUID,
-                -- nullable; will FK to a bank_statement_imports row in PR 2
             raw_data            JSONB NOT NULL DEFAULT '{}'::jsonb,
-                -- whatever extra fields the import format gave us
             reconciled          BOOLEAN NOT NULL DEFAULT false,
             reconciled_with_id  UUID,
-                -- nullable FK to GL transactions.id when reconciled (later)
             notes               TEXT NOT NULL DEFAULT '',
             created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1177,6 +1168,79 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_bank_txn_account ON bank_transactions(account_id)",
         "CREATE INDEX IF NOT EXISTS idx_bank_txn_date    ON bank_transactions(txn_date DESC)",
         "CREATE INDEX IF NOT EXISTS idx_bank_txn_recon   ON bank_transactions(reconciled)",
+        # ── Volunteer Registration ────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS volunteers (
+            id                          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            reference_number            VARCHAR(40) UNIQUE NOT NULL,
+            -- Personal
+            title                       VARCHAR(20)         DEFAULT '',
+            first_names                 VARCHAR(255) NOT NULL,
+            last_name                   VARCHAR(255) NOT NULL,
+            address                     TEXT                DEFAULT '',
+            postcode                    VARCHAR(20)         DEFAULT '',
+            mobile                      VARCHAR(50)         DEFAULT '',
+            phone                       VARCHAR(50)         DEFAULT '',
+            email                       VARCHAR(255) NOT NULL,
+            age_range                   VARCHAR(20)         DEFAULT '',
+            -- Emergency contact
+            ec_title                    VARCHAR(20)         DEFAULT '',
+            ec_full_name                VARCHAR(255)        DEFAULT '',
+            ec_email                    VARCHAR(255)        DEFAULT '',
+            ec_mobile                   VARCHAR(50)         DEFAULT '',
+            ec_phone                    VARCHAR(50)         DEFAULT '',
+            ec_address                  TEXT                DEFAULT '',
+            ec_postcode                 VARCHAR(20)         DEFAULT '',
+            -- Health
+            has_health_restrictions     BOOLEAN             DEFAULT false,
+            health_notes                TEXT                DEFAULT '',
+            -- Police-check / criminal-record declaration
+            has_criminal_record         BOOLEAN             DEFAULT false,
+            criminal_record_details     TEXT                DEFAULT '',
+            -- Referee 1
+            ref1_title                  VARCHAR(20)         DEFAULT '',
+            ref1_first_names            VARCHAR(255)        DEFAULT '',
+            ref1_last_name              VARCHAR(255)        DEFAULT '',
+            ref1_address                TEXT                DEFAULT '',
+            ref1_postcode               VARCHAR(20)         DEFAULT '',
+            ref1_mobile                 VARCHAR(50)         DEFAULT '',
+            ref1_phone                  VARCHAR(50)         DEFAULT '',
+            ref1_email                  VARCHAR(255)        DEFAULT '',
+            -- Referee 2
+            ref2_title                  VARCHAR(20)         DEFAULT '',
+            ref2_first_names            VARCHAR(255)        DEFAULT '',
+            ref2_last_name              VARCHAR(255)        DEFAULT '',
+            ref2_address                TEXT                DEFAULT '',
+            ref2_postcode               VARCHAR(20)         DEFAULT '',
+            ref2_mobile                 VARCHAR(50)         DEFAULT '',
+            ref2_phone                  VARCHAR(50)         DEFAULT '',
+            ref2_email                  VARCHAR(255)        DEFAULT '',
+            -- Skills (JSONB; structure: { "category": ["skill1", ...] })
+            skills                      JSONB               DEFAULT '{}'::jsonb,
+            skills_other_text           TEXT                DEFAULT '',
+            -- Availability (JSONB; { weekday: { morning|afternoon|evening: "HH:MM-HH:MM" } })
+            availability                JSONB               DEFAULT '{}'::jsonb,
+            availability_pattern        VARCHAR(20)         DEFAULT '',
+            -- Consents (paper form has 3 separate signatures + declarations)
+            declaration_signed_at       TIMESTAMPTZ,
+            confidentiality_agreed      BOOLEAN             DEFAULT false,
+            marketing_consent           BOOLEAN             DEFAULT false,
+            -- Workflow
+            status                      VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+            branch_id                   VARCHAR(100)        DEFAULT 'main',
+            reviewed_by_user_id         UUID,
+            reviewed_at                 TIMESTAMPTZ,
+            rejection_reason            TEXT                DEFAULT '',
+            -- Spam / audit
+            submitted_ip                VARCHAR(45)         DEFAULT '',
+            user_agent                  VARCHAR(500)        DEFAULT '',
+            -- Timestamps
+            created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_status ON volunteers(status)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_email  ON volunteers(email)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_branch ON volunteers(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_created ON volunteers(created_at DESC)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -1731,6 +1795,7 @@ _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.bank_accounts",         "router")
+_mount("shital.api.routers.volunteers",            "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.accounts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
