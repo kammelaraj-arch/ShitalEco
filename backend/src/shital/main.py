@@ -1114,6 +1114,79 @@ async def _patch_schema() -> None:
         # Prevent future duplicates at the database level.
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_recurring_giving_tiers_amount_label "
         "ON recurring_giving_tiers (amount, label)",
+        # ── Volunteer Registration ────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS volunteers (
+            id                          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            reference_number            VARCHAR(40) UNIQUE NOT NULL,
+            -- Personal
+            title                       VARCHAR(20)         DEFAULT '',
+            first_names                 VARCHAR(255) NOT NULL,
+            last_name                   VARCHAR(255) NOT NULL,
+            address                     TEXT                DEFAULT '',
+            postcode                    VARCHAR(20)         DEFAULT '',
+            mobile                      VARCHAR(50)         DEFAULT '',
+            phone                       VARCHAR(50)         DEFAULT '',
+            email                       VARCHAR(255) NOT NULL,
+            age_range                   VARCHAR(20)         DEFAULT '',
+            -- Emergency contact
+            ec_title                    VARCHAR(20)         DEFAULT '',
+            ec_full_name                VARCHAR(255)        DEFAULT '',
+            ec_email                    VARCHAR(255)        DEFAULT '',
+            ec_mobile                   VARCHAR(50)         DEFAULT '',
+            ec_phone                    VARCHAR(50)         DEFAULT '',
+            ec_address                  TEXT                DEFAULT '',
+            ec_postcode                 VARCHAR(20)         DEFAULT '',
+            -- Health
+            has_health_restrictions     BOOLEAN             DEFAULT false,
+            health_notes                TEXT                DEFAULT '',
+            -- Police-check / criminal-record declaration
+            has_criminal_record         BOOLEAN             DEFAULT false,
+            criminal_record_details     TEXT                DEFAULT '',
+            -- Referee 1
+            ref1_title                  VARCHAR(20)         DEFAULT '',
+            ref1_first_names            VARCHAR(255)        DEFAULT '',
+            ref1_last_name              VARCHAR(255)        DEFAULT '',
+            ref1_address                TEXT                DEFAULT '',
+            ref1_postcode               VARCHAR(20)         DEFAULT '',
+            ref1_mobile                 VARCHAR(50)         DEFAULT '',
+            ref1_phone                  VARCHAR(50)         DEFAULT '',
+            ref1_email                  VARCHAR(255)        DEFAULT '',
+            -- Referee 2
+            ref2_title                  VARCHAR(20)         DEFAULT '',
+            ref2_first_names            VARCHAR(255)        DEFAULT '',
+            ref2_last_name              VARCHAR(255)        DEFAULT '',
+            ref2_address                TEXT                DEFAULT '',
+            ref2_postcode               VARCHAR(20)         DEFAULT '',
+            ref2_mobile                 VARCHAR(50)         DEFAULT '',
+            ref2_phone                  VARCHAR(50)         DEFAULT '',
+            ref2_email                  VARCHAR(255)        DEFAULT '',
+            -- Skills (JSONB; structure: { "category": ["skill1", ...] })
+            skills                      JSONB               DEFAULT '{}'::jsonb,
+            skills_other_text           TEXT                DEFAULT '',
+            -- Availability (JSONB; { weekday: { morning|afternoon|evening: "HH:MM-HH:MM" } })
+            availability                JSONB               DEFAULT '{}'::jsonb,
+            availability_pattern        VARCHAR(20)         DEFAULT '',
+            -- Consents (paper form has 3 separate signatures + declarations)
+            declaration_signed_at       TIMESTAMPTZ,
+            confidentiality_agreed      BOOLEAN             DEFAULT false,
+            marketing_consent           BOOLEAN             DEFAULT false,
+            -- Workflow
+            status                      VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+            branch_id                   VARCHAR(100)        DEFAULT 'main',
+            reviewed_by_user_id         UUID,
+            reviewed_at                 TIMESTAMPTZ,
+            rejection_reason            TEXT                DEFAULT '',
+            -- Spam / audit
+            submitted_ip                VARCHAR(45)         DEFAULT '',
+            user_agent                  VARCHAR(500)        DEFAULT '',
+            -- Timestamps
+            created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_status ON volunteers(status)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_email  ON volunteers(email)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_branch ON volunteers(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_created ON volunteers(created_at DESC)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -1667,6 +1740,7 @@ _mount("shital.api.routers.recurring_payments",   "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
+_mount("shital.api.routers.volunteers",            "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.accounts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
