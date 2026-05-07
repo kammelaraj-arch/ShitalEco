@@ -156,12 +156,13 @@ async def update_emp(employee_id: str, body: EmployeeUpdate, ctx: CurrentSpace) 
             raise HTTPException(status_code=404, detail="Employee not found")
 
         if needs_validation:
+            existing_start = existing.get("start_date")
             merged = {
                 "employment_type": body.employment_type if body.employment_type is not None else existing["employment_type"],
                 "full_name": body.full_name if body.full_name is not None else (existing.get("full_name") or ""),
                 "email": body.email if body.email is not None else (existing.get("email") or ""),
                 "ni_number": body.national_insurance if body.national_insurance is not None else (existing.get("national_insurance") or ""),
-                "start_date": body.start_date if body.start_date is not None else (existing.get("start_date").isoformat() if existing.get("start_date") else ""),
+                "start_date": body.start_date if body.start_date is not None else (existing_start.isoformat() if existing_start else ""),
                 "nationality": body.nationality if body.nationality is not None else (existing.get("nationality") or ""),
                 "next_of_kin_name": body.next_of_kin_name if body.next_of_kin_name is not None else (existing.get("next_of_kin_name") or ""),
                 "next_of_kin_relationship": body.next_of_kin_relationship if body.next_of_kin_relationship is not None else (existing.get("next_of_kin_relationship") or ""),
