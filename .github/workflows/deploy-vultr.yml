@@ -205,7 +205,16 @@ jobs:
             # ── Rolling restart: frontends ────────────────────────────────────
             echo "=== Rolling restart: frontends ==="
             docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
-            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate service 2>/dev/null || true
+            # service was previously wrapped in `2>/dev/null || true`, which
+            # silently masked recreate failures and left prod serving stale
+            # bundles. Now: if the service image exists in :latest, the
+            # restart MUST succeed; otherwise (very first deploy before the
+            # service image has ever been pushed) we tolerate the absence.
+            if docker image inspect ghcr.io/kammelaraj-arch/shitaleco-service:latest >/dev/null 2>&1; then
+              docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate service
+            else
+              echo "service:latest not yet in registry — skipping (first-deploy path)"
+            fi
 
             echo "Waiting for admin (nginx:alpine on :80)..."
             for i in $(seq 1 10); do
@@ -234,6 +243,37 @@ jobs:
             if [ "$SMOKE_FAIL" -ne 0 ]; then
               echo "!!! Smoke tests failed — check logs above !!!"
               docker compose -f docker-compose.prod.yml logs --tail=30 backend
+              exit 1
+            fi
+
+            # ── Version verification ──────────────────────────────────────────
+            # Stops the previous failure mode where the service container
+            # silently kept serving a stale bundle: we now read GIT_SHA from
+            # the freshly-deployed container's bind-mounted /version.txt and
+            # assert it matches the commit we just deployed.
+            echo "=== Version verification ==="
+            EXPECTED_SHA="${GITHUB_SHA}"
+            VERSION_FAIL=0
+            verify_version() {
+              local label=$1 path=$2
+              local got
+              got=$(curl -sf --max-time 5 "$path" 2>/dev/null | tr -d '[:space:]' || true)
+              if [ -z "$got" ]; then
+                echo "  ~ $label: /version.txt not yet exposed (older image — skipping)"
+              elif [ "$got" = "$EXPECTED_SHA" ]; then
+                echo "  ✓ $label: $got"
+              else
+                echo "  ✗ $label: got $got, expected $EXPECTED_SHA — STALE IMAGE"
+                VERSION_FAIL=1
+              fi
+            }
+            # service portal — fetch via nginx so we exercise the same path
+            # the kiosk iframe / browsers actually use.
+            verify_version "service portal" "http://localhost:80/service/version.txt"
+
+            if [ "$VERSION_FAIL" -ne 0 ]; then
+              echo "!!! Version mismatch — a container is running stale code !!!"
+              docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
               exit 1
             fi
 

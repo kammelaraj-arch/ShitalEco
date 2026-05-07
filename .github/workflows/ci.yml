@@ -295,6 +295,7 @@ jobs:
             VITE_BASE=/
             VITE_PAYPAL_CLIENT_ID=${{ secrets.PAYPAL_CLIENT_ID }}
             GIT_SHA=${{ github.sha }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha,scope=service
           cache-to: type=gha,scope=service,mode=max
 

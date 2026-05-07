@@ -28,9 +28,20 @@ RUN echo "Built commit ${GIT_SHA}"
 # ─── Stage 2: Serve with nginx ────────────────────────────────────────────────
 FROM nginx:alpine AS production
 
+# Bake the git SHA into the image so deployers / admins can verify which
+# commit is actually serving without docker-exec'ing into the container.
+# Exposed via /version.txt (no-cache so it's never served stale).
+ARG GIT_SHA=dev
+ARG BUILD_TIME=
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_TIME=${BUILD_TIME}
+
 RUN rm /etc/nginx/conf.d/default.conf
 
 COPY --from=builder /app/dist /usr/share/nginx/html
+RUN printf '%s\n' "${GIT_SHA}" > /usr/share/nginx/html/version.txt \
+ && printf '{"git_sha":"%s","build_time":"%s"}\n' "${GIT_SHA}" "${BUILD_TIME}" \
+      > /usr/share/nginx/html/version.json
 
 RUN printf 'server {\n\
     listen 80;\n\
@@ -40,6 +51,16 @@ RUN printf 'server {\n\
 \n\
     gzip on;\n\
     gzip_types text/plain text/css application/json application/javascript text/javascript image/svg+xml;\n\
+\n\
+    # Version probes — never cached, so deploy verification always reads fresh.\n\
+    location = /version.txt {\n\
+        add_header Cache-Control "no-store" always;\n\
+        default_type text/plain;\n\
+    }\n\
+    location = /version.json {\n\
+        add_header Cache-Control "no-store" always;\n\
+        default_type application/json;\n\
+    }\n\
 \n\
     location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {\n\
         expires 1y;\n\
