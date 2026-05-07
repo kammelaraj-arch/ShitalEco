@@ -28,6 +28,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/donations',         icon: '🙏', label: 'Donations' },
       { href: '/gift-aid',          icon: '🇬🇧', label: 'Gift Aid' },
       { href: '/budgets',           icon: '📊', label: 'Budgets' },
+      { href: '/bank-accounts',     icon: '🏦', label: 'Bank & Cash' },
     ],
   },
   {
