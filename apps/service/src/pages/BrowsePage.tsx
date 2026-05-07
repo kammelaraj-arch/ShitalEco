@@ -129,6 +129,32 @@ export function BrowsePage() {
         </button>
       </div>
 
+      {/* ── Volunteer Registration Banner ───────────────────────────── */}
+      <div className="max-w-5xl mx-auto px-4 mt-3">
+        <button
+          onClick={() => setScreen('volunteer')}
+          className="w-full rounded-2xl p-4 flex items-center gap-4 transition-all active:scale-[0.99]"
+          style={{
+            background: 'linear-gradient(135deg,rgba(212,175,55,0.18),rgba(212,175,55,0.10))',
+            border: '1.5px solid rgba(212,175,55,0.35)',
+            boxShadow: '0 4px 20px rgba(212,175,55,0.12)',
+          }}
+        >
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
+            style={{ background: 'rgba(212,175,55,0.18)', border: '1px solid rgba(212,175,55,0.30)' }}>
+            🤝
+          </div>
+          <div className="flex-1 text-left">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,217,128,0.85)' }}>Volunteer with us</p>
+            <p className="font-black text-base text-ivory-200">Join the SHITAL volunteering family</p>
+            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>Register online · Trustee review · References taken</p>
+          </div>
+          <svg className="w-5 h-5 flex-shrink-0" style={{ color: 'rgba(255,217,128,0.6)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+
       {/* Category Tabs */}
       <div className="sticky top-16 z-30"
         style={{ background: 'var(--bg-sticky)', borderBottom: '1px solid rgba(212,175,55,0.18)' }}>
