@@ -282,11 +282,14 @@ jobs:
             VERSION_FAIL=0
             verify_version() {
               # Reads /version.txt by docker-exec'ing into the named container
-              # and hitting its own localhost. Bypasses nginx + SNI so the
-              # check is independent of any reverse-proxy misconfiguration.
+              # and hitting 127.0.0.1 directly. We skip 'localhost' because
+              # alpine resolves it to ::1 first, and our nginx config only
+              # has `listen 80;` (IPv4) — wget on localhost gets ECONNREFUSED.
+              # Bypasses nginx + SNI so the check is independent of any
+              # reverse-proxy misconfiguration.
               local label=$1 container=$2
               local body
-              body=$(docker exec "$container" wget -qO- http://localhost/version.txt 2>/dev/null | tr -d '[:space:]' || true)
+              body=$(docker exec "$container" wget -qO- http://127.0.0.1/version.txt 2>/dev/null | tr -d '[:space:]' || true)
               if [ -z "$body" ]; then
                 echo "  ✗ $label: container $container did not serve /version.txt (image missing the verification probe — needs rebuild)"
                 VERSION_FAIL=1
