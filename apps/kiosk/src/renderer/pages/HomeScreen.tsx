@@ -283,16 +283,27 @@ export function HomeScreen() {
     }).finally(() => setLoading(false))
   }, [branchId])
 
-  // Fetch projects when on project_donation tab
+  // Fetch projects when on project_donation tab.
+  // Two-stage lookup so kiosks on a sub-branch (e.g. "wembley_main") still
+  // see the temple's global projects when no branch-specific row exists —
+  // matches how catalog_items work (scope GLOBAL is visible everywhere).
   useEffect(() => {
     if (activeNav !== 'project_donation') return
-    cachedFetch<{ projects: ApiProject[] }>(`${API_BASE}/projects?branch_id=${branchId || 'main'}`)
-      .catch(() => ({ projects: [] }))
-      .then(data => {
-        const projs: ApiProject[] = data.projects ?? []
-        setProjects(projs)
-        if (projs.length > 0 && !selectedProjectId) setSelectedProjectId(projs[0].project_id)
-      })
+    const bid = branchId || 'main'
+    const fetchScoped  = cachedFetch<{ projects: ApiProject[] }>(`${API_BASE}/projects?branch_id=${bid}`)
+      .catch(() => ({ projects: [] as ApiProject[] }))
+    const fetchGlobal  = cachedFetch<{ projects: ApiProject[] }>(`${API_BASE}/projects`)
+      .catch(() => ({ projects: [] as ApiProject[] }))
+    Promise.all([fetchScoped, fetchGlobal]).then(([scoped, global]) => {
+      const scopedList = scoped.projects ?? []
+      const globalList = global.projects ?? []
+      // Prefer branch-specific rows; fall back to the full set if none exist
+      // for this branch yet (lets a fresh kiosk show projects without
+      // requiring an admin to re-tag them per-branch first).
+      const projs = scopedList.length > 0 ? scopedList : globalList
+      setProjects(projs)
+      if (projs.length > 0 && !selectedProjectId) setSelectedProjectId(projs[0].project_id)
+    })
   }, [activeNav, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch items for selected project
