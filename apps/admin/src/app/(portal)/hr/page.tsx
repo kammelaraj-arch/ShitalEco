@@ -9,6 +9,7 @@ interface Employee {
   email: string
   phone: string
   role: string
+  branch_id?: string
   department: string
   employment_type: string
   is_active: boolean
@@ -19,11 +20,54 @@ interface Employee {
   right_to_work_type: string
   visa_expiry: string | null
   reporting_manager_id?: string | null
+  // Phase 1 fields — populated from list response (server may redact for non-privileged callers)
+  national_insurance?: string
+  address?: string
+  visa_number?: string
+  visa_type?: string
+  visa_issue_date?: string | null
+  visa_sponsor_license?: string
+  share_code?: string
+  share_code_expiry?: string | null
+  date_of_birth?: string | null
+  gender?: string
+  personal_email?: string
+  emergency_phone?: string
+  next_of_kin_name?: string
+  next_of_kin_relationship?: string
+  next_of_kin_phone?: string
+  next_of_kin_email?: string
+  next_of_kin_address?: string
+  bank_sort_code?: string
+  bank_account_number?: string
+  bank_account_name?: string
+  pension_enrolled?: boolean
+  pension_provider?: string
+  pension_employee_pct?: number
+  pension_employer_pct?: number
+  benefits_notes?: string
+  dbs_check_status?: string
+  dbs_check_date?: string | null
+  dbs_check_expiry?: string | null
+  dbs_certificate_number?: string
+  rtw_check_date?: string | null
+  rtw_check_reference?: string
+  p45_received?: boolean
+  starter_declaration?: string
+  hours_per_week?: number
+  holiday_entitlement_days?: number
+  probation_end_date?: string | null
+  end_date?: string | null
+  leaving_reason?: string
+  qualifications_notes?: string
+  documents_held_notes?: string
+  _sensitive_redacted?: boolean
 }
 
 interface EmployeeForm {
   full_name: string
   role: string
+  branch_id: string
   department: string
   employment_type: string
   email: string
@@ -39,20 +83,83 @@ interface EmployeeForm {
   visa_expiry: string
   reporting_manager_id: string
   reporting_manager_name: string
+  // Phase 1 — visa expansion
+  visa_type: string
+  visa_issue_date: string
+  visa_sponsor_license: string
+  share_code: string
+  share_code_expiry: string
+  // Personal
+  date_of_birth: string
+  gender: string
+  personal_email: string
+  emergency_phone: string
+  // Next of kin
+  next_of_kin_name: string
+  next_of_kin_relationship: string
+  next_of_kin_phone: string
+  next_of_kin_email: string
+  next_of_kin_address: string
+  // Banking
+  bank_sort_code: string
+  bank_account_number: string
+  bank_account_name: string
+  // Pension / benefits
+  pension_enrolled: boolean
+  pension_provider: string
+  pension_employee_pct: string
+  pension_employer_pct: string
+  benefits_notes: string
+  // UK compliance
+  dbs_check_status: string
+  dbs_check_date: string
+  dbs_check_expiry: string
+  dbs_certificate_number: string
+  rtw_check_date: string
+  rtw_check_reference: string
+  p45_received: boolean
+  starter_declaration: string
+  // Working terms
+  hours_per_week: string
+  holiday_entitlement_days: string
+  probation_end_date: string
+  end_date: string
+  leaving_reason: string
+  // Stopgap free-text
+  qualifications_notes: string
+  documents_held_notes: string
 }
 
 const EMPTY_FORM: EmployeeForm = {
-  full_name: '', role: '', department: 'Admin', employment_type: 'FULL_TIME',
+  full_name: '', role: '', branch_id: 'main', department: 'Admin', employment_type: 'FULL_TIME',
   email: '', phone: '', start_date: '', gross_salary: '', national_insurance: '', address: '',
   photo_url: '', nationality: 'British', right_to_work_type: 'British Citizen',
   visa_number: '', visa_expiry: '',
   reporting_manager_id: '', reporting_manager_name: '',
+  visa_type: '', visa_issue_date: '', visa_sponsor_license: '',
+  share_code: '', share_code_expiry: '',
+  date_of_birth: '', gender: '', personal_email: '', emergency_phone: '',
+  next_of_kin_name: '', next_of_kin_relationship: '',
+  next_of_kin_phone: '', next_of_kin_email: '', next_of_kin_address: '',
+  bank_sort_code: '', bank_account_number: '', bank_account_name: '',
+  pension_enrolled: false, pension_provider: '',
+  pension_employee_pct: '', pension_employer_pct: '', benefits_notes: '',
+  dbs_check_status: '', dbs_check_date: '', dbs_check_expiry: '', dbs_certificate_number: '',
+  rtw_check_date: '', rtw_check_reference: '',
+  p45_received: false, starter_declaration: '',
+  hours_per_week: '', holiday_entitlement_days: '',
+  probation_end_date: '', end_date: '', leaving_reason: '',
+  qualifications_notes: '', documents_held_notes: '',
 }
 
 const RTW_TYPES = ['British Citizen', 'ILR / Settled Status', 'Pre-Settled Status', 'Skilled Worker Visa', 'Student Visa', 'Graduate Visa', 'Spouse Visa', 'Other']
-
+const BRANCHES = ['main', 'wembley', 'wembley_main']  // TODO: wire to /branches API once exposed publicly
 const DEPARTMENTS = ['Admin', 'Finance', 'Religious', 'Operations', 'Community', 'IT', 'HR']
 const EMP_TYPES = ['FULL_TIME', 'PART_TIME', 'CONTRACTOR', 'VOLUNTEER']
+const GENDERS = ['', 'M', 'F', 'X', 'PREFER_NOT_SAY']
+const DBS_STATUSES = ['', 'NOT_CHECKED', 'IN_PROGRESS', 'CLEAR', 'FLAGGED']
+const STARTER_DECL = ['', 'A', 'B', 'C']
+const LEAVING_REASONS = ['', 'RESIGNED', 'REDUNDANCY', 'DISMISSED', 'RETIRED', 'CONTRACT_ENDED', 'OTHER']
 
 const TYPE_COLORS: Record<string, string> = {
   FULL_TIME: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -122,18 +229,67 @@ export default function HRPage() {
   const openEdit = async (emp: Employee) => {
     setEditing(emp)
     setMgrSearch('')
+    const dt = (s?: string | null) => (s ? s.slice(0, 10) : '')
     const f: EmployeeForm = {
       full_name: emp.full_name || '', role: emp.role || '',
+      branch_id: emp.branch_id || 'main',
       department: emp.department || 'Admin', employment_type: emp.employment_type || 'FULL_TIME',
       email: emp.email || '', phone: emp.phone || '',
-      start_date: emp.start_date ? emp.start_date.slice(0, 10) : '',
+      start_date: dt(emp.start_date),
       gross_salary: String(emp.gross_salary || ''),
-      national_insurance: '', address: '',
+      national_insurance: emp.national_insurance || '',
+      address: emp.address || '',
       photo_url: emp.photo_url || '', nationality: emp.nationality || '',
-      right_to_work_type: emp.right_to_work_type || '', visa_number: '',
-      visa_expiry: emp.visa_expiry ? emp.visa_expiry.slice(0, 10) : '',
+      right_to_work_type: emp.right_to_work_type || '',
+      visa_number: emp.visa_number || '',
+      visa_expiry: dt(emp.visa_expiry),
       reporting_manager_id: emp.reporting_manager_id || '',
       reporting_manager_name: '',
+      // Phase 1 — visa expansion
+      visa_type: emp.visa_type || '',
+      visa_issue_date: dt(emp.visa_issue_date),
+      visa_sponsor_license: emp.visa_sponsor_license || '',
+      share_code: emp.share_code || '',
+      share_code_expiry: dt(emp.share_code_expiry),
+      // Personal
+      date_of_birth: dt(emp.date_of_birth),
+      gender: emp.gender || '',
+      personal_email: emp.personal_email || '',
+      emergency_phone: emp.emergency_phone || '',
+      // NoK
+      next_of_kin_name: emp.next_of_kin_name || '',
+      next_of_kin_relationship: emp.next_of_kin_relationship || '',
+      next_of_kin_phone: emp.next_of_kin_phone || '',
+      next_of_kin_email: emp.next_of_kin_email || '',
+      next_of_kin_address: emp.next_of_kin_address || '',
+      // Banking
+      bank_sort_code: emp.bank_sort_code || '',
+      bank_account_number: emp.bank_account_number || '',
+      bank_account_name: emp.bank_account_name || '',
+      // Pension / benefits
+      pension_enrolled: !!emp.pension_enrolled,
+      pension_provider: emp.pension_provider || '',
+      pension_employee_pct: String(emp.pension_employee_pct ?? ''),
+      pension_employer_pct: String(emp.pension_employer_pct ?? ''),
+      benefits_notes: emp.benefits_notes || '',
+      // UK compliance
+      dbs_check_status: emp.dbs_check_status || '',
+      dbs_check_date: dt(emp.dbs_check_date),
+      dbs_check_expiry: dt(emp.dbs_check_expiry),
+      dbs_certificate_number: emp.dbs_certificate_number || '',
+      rtw_check_date: dt(emp.rtw_check_date),
+      rtw_check_reference: emp.rtw_check_reference || '',
+      p45_received: !!emp.p45_received,
+      starter_declaration: emp.starter_declaration || '',
+      // Working terms
+      hours_per_week: String(emp.hours_per_week ?? ''),
+      holiday_entitlement_days: String(emp.holiday_entitlement_days ?? ''),
+      probation_end_date: dt(emp.probation_end_date),
+      end_date: dt(emp.end_date),
+      leaving_reason: emp.leaving_reason || '',
+      // Stopgap
+      qualifications_notes: emp.qualifications_notes || '',
+      documents_held_notes: emp.documents_held_notes || '',
     }
     // Resolve manager name if we have an id
     if (emp.reporting_manager_id) {
@@ -160,7 +316,17 @@ export default function HRPage() {
     if (!form.full_name.trim() || !form.role.trim()) return
     setSaving(true)
     try {
-      const body = { ...form, gross_salary: parseFloat(form.gross_salary) || 0 }
+      const isVolunteer = form.employment_type === 'VOLUNTEER'
+      // Coerce numeric strings → numbers; volunteer salary forced to 0 client-
+      // side AND server-side. Empty strings → 0 for numeric fields.
+      const body = {
+        ...form,
+        gross_salary: isVolunteer ? 0 : (parseFloat(form.gross_salary) || 0),
+        pension_employee_pct: parseFloat(form.pension_employee_pct) || 0,
+        pension_employer_pct: parseFloat(form.pension_employer_pct) || 0,
+        hours_per_week: parseFloat(form.hours_per_week) || 0,
+        holiday_entitlement_days: parseFloat(form.holiday_entitlement_days) || 0,
+      }
       if (editing) {
         await apiFetch(`/hr/employees/${editing.id}`, { method: 'PUT', body: JSON.stringify(body) })
       } else {
@@ -170,7 +336,15 @@ export default function HRPage() {
       setForm(EMPTY_FORM)
       await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save employee')
+      // Backend returns { detail: { errors: [...] } } for required-field
+      // validation; surface each error on its own line.
+      let msg = e instanceof Error ? e.message : 'Failed to save employee'
+      try {
+        const parsed = JSON.parse(msg)
+        if (parsed?.errors) msg = parsed.errors.join(' · ')
+        else if (parsed?.detail?.errors) msg = parsed.detail.errors.join(' · ')
+      } catch { /* not JSON, leave as-is */ }
+      setError(msg)
     } finally { setSaving(false) }
   }
 
@@ -418,19 +592,25 @@ export default function HRPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
+                    <label className={lbl}>Branch *</label>
+                    <select value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))} className={inp}>
+                      {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+                  <div>
                     <label className={lbl}>Employment Type</label>
                     <select value={form.employment_type} onChange={e => setForm(p => ({ ...p, employment_type: e.target.value }))} className={inp}>
                       {EMP_TYPES.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
                     </select>
                   </div>
-                  <div>
-                    <label className={lbl}>Start Date</label>
-                    <input type="date" value={form.start_date} onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))} className={inp} />
-                  </div>
+                </div>
+                <div>
+                  <label className={lbl}>Start Date *</label>
+                  <input type="date" value={form.start_date} onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))} className={inp} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={lbl}>Email</label>
+                    <label className={lbl}>Email {form.employment_type !== 'VOLUNTEER' && '*'}</label>
                     <input type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} className={inp} placeholder="arjun@shital.org" />
                   </div>
                   <div>
@@ -440,11 +620,18 @@ export default function HRPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={lbl}>Gross Salary (£/yr)</label>
-                    <input type="number" min="0" step="100" value={form.gross_salary} onChange={e => setForm(p => ({ ...p, gross_salary: e.target.value }))} className={inp} placeholder="32000" />
+                    <label className={lbl}>Gross Salary (£/yr){form.employment_type === 'VOLUNTEER' && ' — volunteers always 0'}</label>
+                    <input
+                      type="number" min="0" step="100"
+                      value={form.employment_type === 'VOLUNTEER' ? '0' : form.gross_salary}
+                      onChange={e => setForm(p => ({ ...p, gross_salary: e.target.value }))}
+                      disabled={form.employment_type === 'VOLUNTEER'}
+                      className={inp + (form.employment_type === 'VOLUNTEER' ? ' opacity-50 cursor-not-allowed' : '')}
+                      placeholder="32000"
+                    />
                   </div>
                   <div>
-                    <label className={lbl}>NI Number</label>
+                    <label className={lbl}>NI Number {form.employment_type !== 'VOLUNTEER' && '*'}</label>
                     <input value={form.national_insurance} onChange={e => setForm(p => ({ ...p, national_insurance: e.target.value }))} className={inp} placeholder="AB123456C" />
                   </div>
                 </div>
