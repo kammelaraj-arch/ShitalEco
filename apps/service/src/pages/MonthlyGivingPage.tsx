@@ -333,10 +333,15 @@ export function MonthlyGivingPage() {
                     locale:              'en-GB',
                     shipping_preference: 'SET_PROVIDED_ADDRESS',
                     user_action:         'SUBSCRIBE_NOW',
-                    payment_method: {
-                      payer_selected:  'PAYPAL',
-                      payee_preferred: 'UNRESTRICTED',
-                    },
+                    // Intentionally NOT setting application_context.payment_method.
+                    // The previous payer_selected:'PAYPAL' value told PayPal the
+                    // donor had pre-chosen the PayPal-account flow; that biased
+                    // PayPal Live's internal routing such that when the donor
+                    // actually picked "Pay with debit or credit card", the Guest
+                    // Card form rendered with EMPTY name/address fields despite
+                    // a fully populated subscriber payload. Removing the hint
+                    // lets PayPal route on the user's actual button click and
+                    // honour the subscriber object on whichever path they take.
                     return_url: `${window.location.origin}/?screen=monthly-giving&status=approved`,
                     cancel_url: `${window.location.origin}/?screen=monthly-giving&status=cancelled`,
                   },

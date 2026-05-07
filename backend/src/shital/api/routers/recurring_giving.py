@@ -166,7 +166,14 @@ class SubscribeBody(BaseModel):
 
 @router.post("/service/giving/subscribe")
 async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
-    """Return the PayPal plan_id for a tier so the frontend can create a subscription."""
+    """Return the PayPal plan_id for a tier so the frontend can create a subscription.
+
+    Also persists the donor's contact details before the PayPal popup opens, so
+    abandoned subscriptions (donor closes PayPal without paying) leave a usable
+    CRM record we can email a recovery link to. The subsequent
+    `/subscription/approve` call upgrades `first_source` from
+    `monthly-giving-pending` to `monthly-giving` to mark it complete.
+    """
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
@@ -180,6 +187,57 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
         raise HTTPException(404, detail="Giving tier not found")
 
     plan_id = await _ensure_plan(str(tier["id"]), float(tier["amount"]), tier["label"], tier["frequency"])
+
+    # Persist donor info now (pre-PayPal) so we don't lose abandons. Email is
+    # the dedup key — without it we have no recovery channel anyway, so skip
+    # the upsert. Wrapped in its own try so a CRM hiccup never blocks the
+    # plan_id response (PayPal flow must continue regardless).
+    email_key = body.donor_email.strip().lower() if body.donor_email.strip() else None
+    if email_key:
+        try:
+            full_name = f"{body.donor_first_name} {body.donor_surname}".strip()
+            now = datetime.utcnow()
+            async with SessionLocal() as db:
+                c_result = await db.execute(text("""
+                    INSERT INTO contacts
+                        (id, email, first_name, surname, full_name, phone,
+                         gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                         first_source, first_branch_id, created_at, updated_at)
+                    VALUES
+                        (:id, :email, :first, :surname, :name, :phone,
+                         true, :now, true, :now,
+                         'monthly-giving-pending', :branch, :now, :now)
+                    ON CONFLICT (email) DO UPDATE SET
+                        first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                        surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                        full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                        phone             = COALESCE(NULLIF(EXCLUDED.phone,''),      contacts.phone),
+                        updated_at        = EXCLUDED.updated_at
+                    RETURNING id
+                """), {
+                    "id": str(uuid.uuid4()), "email": email_key,
+                    "first": body.donor_first_name or "", "surname": body.donor_surname or "",
+                    "name": full_name, "phone": body.donor_phone or "",
+                    "branch": body.branch_id, "now": now,
+                })
+                c_row = c_result.mappings().first()
+                contact_id = str(c_row["id"]) if c_row else None
+
+                if contact_id and body.donor_postcode:
+                    await db.execute(text("""
+                        INSERT INTO addresses
+                            (id, contact_id, formatted, postcode, uprn,
+                             is_primary, lookup_source, created_at)
+                        VALUES (:id, :cid, :fmt, :pc, '', true, 'monthly-giving-pending', :now)
+                        ON CONFLICT DO NOTHING
+                    """), {
+                        "id": str(uuid.uuid4()), "cid": contact_id,
+                        "fmt": body.donor_address or "", "pc": body.donor_postcode, "now": now,
+                    })
+                await db.commit()
+        except Exception:
+            pass  # CRM upsert must never block the PayPal plan response
+
     return {"plan_id": plan_id, "amount": f"{tier['amount']:.2f}", "frequency": tier["frequency"]}
 
 
