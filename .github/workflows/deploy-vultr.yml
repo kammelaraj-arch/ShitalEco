@@ -150,17 +150,39 @@ jobs:
             # ── Auto-promote :dev → :latest in GHCR ──────────────────────────
             # CI pushes fresh :dev images on every main merge; this step copies
             # them to :latest in the registry so prod's pull below picks them up.
-            # Falls back gracefully when :dev is missing for a service.
+            #
+            # No silent failure: a push that fails (e.g. GH_PAT missing
+            # write:packages, network error, or registry-side 5xx) MUST fail
+            # the deploy. The previous `>/dev/null 2>&1 || echo` pattern was
+            # the root cause of "deploy succeeded but prod is on stale code".
             echo "=== Auto-promoting :dev → :latest in GHCR ==="
+            PROMOTE_FAIL=0
             for svc in backend admin quick-donation kiosk screen service; do
               img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
               if docker pull "${img}:dev" >/dev/null 2>&1; then
                 docker tag "${img}:dev" "${img}:latest"
-                docker push "${img}:latest" >/dev/null 2>&1 && echo "  ✓ ${svc}" || echo "  ~ ${svc} push failed"
+                if docker push "${img}:latest"; then
+                  echo "  ✓ ${svc}"
+                else
+                  echo "  ✗ ${svc}: push to GHCR failed"
+                  PROMOTE_FAIL=1
+                fi
               else
-                echo "  ~ ${svc}:dev not in registry — skipping"
+                # service is the only one we tolerate missing — only because
+                # this branch may be the very first push that introduces it.
+                # Once it's in the registry we expect it on every deploy.
+                if [ "$svc" = "service" ]; then
+                  echo "  ~ ${svc}:dev not in registry — first-deploy path"
+                else
+                  echo "  ✗ ${svc}:dev not in registry — CI didn't build it"
+                  PROMOTE_FAIL=1
+                fi
               fi
             done
+            if [ "$PROMOTE_FAIL" -ne 0 ]; then
+              echo "!!! Auto-promote failed — refusing to continue with stale :latest in registry !!!"
+              exit 1
+            fi
 
             # ── Checkpoint: tag :latest as :previous ─────────────────────────
             for svc in backend admin quick-donation kiosk screen service; do
@@ -247,33 +269,40 @@ jobs:
             fi
 
             # ── Version verification ──────────────────────────────────────────
-            # Stops the previous failure mode where the service container
-            # silently kept serving a stale bundle: we now read GIT_SHA from
-            # the freshly-deployed container's bind-mounted /version.txt and
-            # assert it matches the commit we just deployed.
+            # Strict: every container we asserted should be on this commit
+            # MUST serve /version.txt with the exact GIT_SHA. Anything else
+            # (404, 503, mismatched SHA, empty body) fails the deploy.
+            #
+            # The previous "older image — skipping" leniency was the second
+            # silent-failure path that let stale prod containers slip
+            # through deploys. If the verification can't read the SHA we
+            # consider the deploy unverified, period.
             echo "=== Version verification ==="
             EXPECTED_SHA="${GITHUB_SHA}"
             VERSION_FAIL=0
             verify_version() {
-              local label=$1 path=$2
-              local got
-              got=$(curl -sf --max-time 5 "$path" 2>/dev/null | tr -d '[:space:]' || true)
-              if [ -z "$got" ]; then
-                echo "  ~ $label: /version.txt not yet exposed (older image — skipping)"
-              elif [ "$got" = "$EXPECTED_SHA" ]; then
-                echo "  ✓ $label: $got"
+              # Reads /version.txt by docker-exec'ing into the named container
+              # and hitting its own localhost. Bypasses nginx + SNI so the
+              # check is independent of any reverse-proxy misconfiguration.
+              local label=$1 container=$2
+              local body
+              body=$(docker exec "$container" wget -qO- http://localhost/version.txt 2>/dev/null | tr -d '[:space:]' || true)
+              if [ -z "$body" ]; then
+                echo "  ✗ $label: container $container did not serve /version.txt (image missing the verification probe — needs rebuild)"
+                VERSION_FAIL=1
+              elif [ "$body" = "$EXPECTED_SHA" ]; then
+                echo "  ✓ $label: $body"
               else
-                echo "  ✗ $label: got $got, expected $EXPECTED_SHA — STALE IMAGE"
+                echo "  ✗ $label: got '$body', expected '$EXPECTED_SHA' — STALE IMAGE"
                 VERSION_FAIL=1
               fi
             }
-            # service portal — fetch via nginx so we exercise the same path
-            # the kiosk iframe / browsers actually use.
-            verify_version "service portal" "http://localhost:80/service/version.txt"
+            verify_version "service portal" "shitaleco-service-1"
 
             if [ "$VERSION_FAIL" -ne 0 ]; then
-              echo "!!! Version mismatch — a container is running stale code !!!"
+              echo "!!! Version mismatch — refusing to claim a successful deploy !!!"
               docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+              docker compose -f docker-compose.prod.yml logs --tail=30 service 2>/dev/null || true
               exit 1
             fi
 
