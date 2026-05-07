@@ -220,8 +220,8 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
                     "name": full_name, "phone": body.donor_phone or "",
                     "branch": body.branch_id, "now": now,
                 })
-                row = c_result.mappings().first()
-                contact_id = str(row["id"]) if row else None
+                c_row = c_result.mappings().first()
+                contact_id = str(c_row["id"]) if c_row else None
 
                 if contact_id and body.donor_postcode:
                     await db.execute(text("""
