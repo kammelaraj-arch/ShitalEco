@@ -1241,6 +1241,117 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_volunteers_email  ON volunteers(email)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_branch ON volunteers(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_created ON volunteers(created_at DESC)",
+        # ── Board of Trustees Resolutions & Voting ────────────────────────────
+        # Distinct sub-system: governance records (resolutions, votes, minutes,
+        # conflicts, audit). PR 1 of 6 introduces the foundation tables only —
+        # trustees, meetings, governing rules, plus skeletons for resolutions
+        # and audit_log so subsequent PRs add columns / behaviours via
+        # idempotent ALTERs without renaming.
+        """CREATE TABLE IF NOT EXISTS trustees (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id         UUID,
+            full_name       VARCHAR(255) NOT NULL,
+            email           VARCHAR(255) NOT NULL,
+            role            VARCHAR(40)  NOT NULL DEFAULT 'TRUSTEE',
+            phone           VARCHAR(50)  NOT NULL DEFAULT '',
+            address         TEXT         NOT NULL DEFAULT '',
+            postcode        VARCHAR(20)  NOT NULL DEFAULT '',
+            term_start      DATE,
+            term_end        DATE,
+            notes           TEXT NOT NULL DEFAULT '',
+            is_active       BOOLEAN NOT NULL DEFAULT true,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_trustees_email  ON trustees(email)",
+        "CREATE INDEX IF NOT EXISTS idx_trustees_role   ON trustees(role)",
+        "CREATE INDEX IF NOT EXISTS idx_trustees_active ON trustees(is_active)",
+        # Singleton row keyed on a constant scope value — the charity has one
+        # set of rules. Stored as a row (not env vars) so admins can edit
+        # from UI without redeploying.
+        """CREATE TABLE IF NOT EXISTS governing_rules (
+            id                                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            scope                                  VARCHAR(40) NOT NULL DEFAULT 'DEFAULT',
+            quorum_min                             INT NOT NULL DEFAULT 3,
+            quorum_fraction_numerator              INT NOT NULL DEFAULT 1,
+            quorum_fraction_denominator            INT NOT NULL DEFAULT 3,
+            chair_casting_vote_enabled             BOOLEAN NOT NULL DEFAULT true,
+            written_resolution_requires_unanimous  BOOLEAN NOT NULL DEFAULT true,
+            anonymous_ballot_for_officer_elections BOOLEAN NOT NULL DEFAULT true,
+            notice_period_days                     INT NOT NULL DEFAULT 7,
+            data_retention_years                   INT NOT NULL DEFAULT 6,
+            created_at                             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at                             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (scope)
+        )""",
+        # Seed the singleton DEFAULT row. Idempotent on re-run.
+        """INSERT INTO governing_rules (scope) VALUES ('DEFAULT')
+            ON CONFLICT (scope) DO NOTHING""",
+        """CREATE TABLE IF NOT EXISTS board_meetings (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            meeting_type    VARCHAR(40) NOT NULL DEFAULT 'TRUSTEE_MEETING',
+            mode            VARCHAR(20) NOT NULL DEFAULT 'IN_PERSON',
+            title           VARCHAR(300) NOT NULL DEFAULT '',
+            scheduled_at    TIMESTAMPTZ NOT NULL,
+            location        VARCHAR(500) NOT NULL DEFAULT '',
+            video_link      VARCHAR(500) NOT NULL DEFAULT '',
+            organiser_id    UUID,
+            agenda          TEXT NOT NULL DEFAULT '',
+            attendance      JSONB NOT NULL DEFAULT '[]'::jsonb,
+            quorum_at_open  INT,
+            status          VARCHAR(30) NOT NULL DEFAULT 'SCHEDULED',
+            opened_at       TIMESTAMPTZ,
+            closed_at       TIMESTAMPTZ,
+            minutes_status  VARCHAR(30) NOT NULL DEFAULT 'NOT_STARTED',
+            minutes_text    TEXT NOT NULL DEFAULT '',
+            minutes_approved_at TIMESTAMPTZ,
+            notes           TEXT NOT NULL DEFAULT '',
+            created_by      UUID,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_board_meetings_status   ON board_meetings(status)",
+        "CREATE INDEX IF NOT EXISTS idx_board_meetings_type     ON board_meetings(meeting_type)",
+        "CREATE INDEX IF NOT EXISTS idx_board_meetings_when     ON board_meetings(scheduled_at DESC)",
+        # Skeleton — populated in PR 2 (resolutions builder + amendments).
+        """CREATE TABLE IF NOT EXISTS resolutions (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            meeting_id      UUID REFERENCES board_meetings(id) ON DELETE SET NULL,
+            title           VARCHAR(500) NOT NULL,
+            background      TEXT NOT NULL DEFAULT '',
+            recommendation  TEXT NOT NULL DEFAULT '',
+            risk_impact     TEXT NOT NULL DEFAULT '',
+            budget_impact   TEXT NOT NULL DEFAULT '',
+            category        VARCHAR(60) NOT NULL DEFAULT 'OPERATIONAL',
+            decision_type   VARCHAR(30) NOT NULL DEFAULT 'BOARD_MEETING',
+            status          VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+            decision_date   DATE,
+            is_retrospective       BOOLEAN NOT NULL DEFAULT false,
+            retrospective_reason   TEXT NOT NULL DEFAULT '',
+            outcome         VARCHAR(30) NOT NULL DEFAULT '',
+            outcome_summary TEXT NOT NULL DEFAULT '',
+            created_by      UUID,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_resolutions_status      ON resolutions(status)",
+        "CREATE INDEX IF NOT EXISTS idx_resolutions_meeting     ON resolutions(meeting_id)",
+        "CREATE INDEX IF NOT EXISTS idx_resolutions_decision_dt ON resolutions(decision_date DESC)",
+        """CREATE TABLE IF NOT EXISTS board_audit_log (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            actor_user_id   UUID,
+            actor_name      VARCHAR(255) NOT NULL DEFAULT '',
+            action          VARCHAR(80)  NOT NULL,
+            entity_type     VARCHAR(60)  NOT NULL DEFAULT '',
+            entity_id       UUID,
+            metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+            ip_address      VARCHAR(45)  NOT NULL DEFAULT '',
+            user_agent      VARCHAR(500) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_board_audit_action ON board_audit_log(action)",
+        "CREATE INDEX IF NOT EXISTS idx_board_audit_entity ON board_audit_log(entity_type, entity_id)",
+        "CREATE INDEX IF NOT EXISTS idx_board_audit_when   ON board_audit_log(created_at DESC)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -1795,6 +1906,7 @@ _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.bank_accounts",         "router")
+_mount("shital.api.routers.board",                 "router")
 _mount("shital.api.routers.volunteers",            "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.accounts",             "router")
