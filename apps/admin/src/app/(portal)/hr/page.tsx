@@ -690,7 +690,7 @@ export default function HRPage() {
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className={lbl}>Nationality</label>
+                        <label className={lbl}>Nationality *</label>
                         <input value={form.nationality} onChange={e => setForm(p => ({ ...p, nationality: e.target.value }))} className={inp} placeholder="British" />
                       </div>
                       <div>
@@ -702,17 +702,274 @@ export default function HRPage() {
                       </div>
                     </div>
                     {form.right_to_work_type && !['British Citizen', 'ILR / Settled Status'].includes(form.right_to_work_type) && (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className={lbl}>Visa / BRP Number</label>
+                            <input value={form.visa_number} onChange={e => setForm(p => ({ ...p, visa_number: e.target.value }))} className={inp} placeholder="BRP No." />
+                          </div>
+                          <div>
+                            <label className={lbl}>Visa Type</label>
+                            <input value={form.visa_type} onChange={e => setForm(p => ({ ...p, visa_type: e.target.value }))} className={inp} placeholder="Skilled Worker / Student / etc." />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className={lbl}>Visa Issue Date</label>
+                            <input type="date" value={form.visa_issue_date} onChange={e => setForm(p => ({ ...p, visa_issue_date: e.target.value }))} className={inp} />
+                          </div>
+                          <div>
+                            <label className={lbl}>Visa Expiry Date</label>
+                            <input type="date" value={form.visa_expiry} onChange={e => setForm(p => ({ ...p, visa_expiry: e.target.value }))} className={inp} />
+                          </div>
+                        </div>
+                        <div>
+                          <label className={lbl}>Sponsor Licence Number</label>
+                          <input value={form.visa_sponsor_license} onChange={e => setForm(p => ({ ...p, visa_sponsor_license: e.target.value }))} className={inp} placeholder="Sponsor licence ref (if applicable)" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className={lbl}>Share Code</label>
+                            <input value={form.share_code} onChange={e => setForm(p => ({ ...p, share_code: e.target.value }))} className={inp} placeholder="9-char gov.uk share code" />
+                          </div>
+                          <div>
+                            <label className={lbl}>Share Code Expiry</label>
+                            <input type="date" value={form.share_code_expiry} onChange={e => setForm(p => ({ ...p, share_code_expiry: e.target.value }))} className={inp} />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Personal */}
+                <div className="border-t border-white/5 pt-4">
+                  <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-3">Personal</p>
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>Date of Birth</label>
+                        <input type="date" value={form.date_of_birth} onChange={e => setForm(p => ({ ...p, date_of_birth: e.target.value }))} className={inp} />
+                      </div>
+                      <div>
+                        <label className={lbl}>Gender</label>
+                        <select value={form.gender} onChange={e => setForm(p => ({ ...p, gender: e.target.value }))} className={inp}>
+                          {GENDERS.map(g => <option key={g} value={g}>{g === '' ? '— Select —' : g === 'M' ? 'Male' : g === 'F' ? 'Female' : g === 'X' ? 'Non-binary' : 'Prefer not to say'}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>Personal Email</label>
+                        <input type="email" value={form.personal_email} onChange={e => setForm(p => ({ ...p, personal_email: e.target.value }))} className={inp} placeholder="personal@example.com" />
+                      </div>
+                      <div>
+                        <label className={lbl}>Emergency Phone</label>
+                        <input value={form.emergency_phone} onChange={e => setForm(p => ({ ...p, emergency_phone: e.target.value }))} className={inp} placeholder="+44 7700 000000" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Next of Kin */}
+                <div className="border-t border-white/5 pt-4">
+                  <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-3">Next of Kin <span className="text-saffron-400/70 normal-case font-normal">(required)</span></p>
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>Name *</label>
+                        <input value={form.next_of_kin_name} onChange={e => setForm(p => ({ ...p, next_of_kin_name: e.target.value }))} className={inp} placeholder="Jane Patel" />
+                      </div>
+                      <div>
+                        <label className={lbl}>Relationship *</label>
+                        <input value={form.next_of_kin_relationship} onChange={e => setForm(p => ({ ...p, next_of_kin_relationship: e.target.value }))} className={inp} placeholder="Spouse / Parent / Sibling" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>Phone *</label>
+                        <input value={form.next_of_kin_phone} onChange={e => setForm(p => ({ ...p, next_of_kin_phone: e.target.value }))} className={inp} placeholder="+44 7700 000000" />
+                      </div>
+                      <div>
+                        <label className={lbl}>Email</label>
+                        <input type="email" value={form.next_of_kin_email} onChange={e => setForm(p => ({ ...p, next_of_kin_email: e.target.value }))} className={inp} placeholder="jane@example.com" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={lbl}>Address</label>
+                      <textarea value={form.next_of_kin_address} onChange={e => setForm(p => ({ ...p, next_of_kin_address: e.target.value }))} rows={2} className={inp + ' resize-none'} placeholder="Same as employee address if blank" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Banking — only when not volunteer (volunteers are unpaid) */}
+                {form.employment_type !== 'VOLUNTEER' && (
+                  <div className="border-t border-white/5 pt-4">
+                    <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-3">Banking</p>
+                    <div className="space-y-3">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className={lbl}>Visa / BRP Number</label>
-                          <input value={form.visa_number} onChange={e => setForm(p => ({ ...p, visa_number: e.target.value }))} className={inp} placeholder="BRP No." />
+                          <label className={lbl}>Sort Code</label>
+                          <input value={form.bank_sort_code} onChange={e => setForm(p => ({ ...p, bank_sort_code: e.target.value }))} className={inp} placeholder="12-34-56" />
                         </div>
                         <div>
-                          <label className={lbl}>Visa Expiry Date</label>
-                          <input type="date" value={form.visa_expiry} onChange={e => setForm(p => ({ ...p, visa_expiry: e.target.value }))} className={inp} />
+                          <label className={lbl}>Account Number</label>
+                          <input value={form.bank_account_number} onChange={e => setForm(p => ({ ...p, bank_account_number: e.target.value }))} className={inp} placeholder="12345678" />
                         </div>
                       </div>
+                      <div>
+                        <label className={lbl}>Account Name</label>
+                        <input value={form.bank_account_name} onChange={e => setForm(p => ({ ...p, bank_account_name: e.target.value }))} className={inp} placeholder="A Patel" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pension / Benefits — only when not volunteer */}
+                {form.employment_type !== 'VOLUNTEER' && (
+                  <div className="border-t border-white/5 pt-4">
+                    <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-3">Pension &amp; Benefits</p>
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" checked={form.pension_enrolled} onChange={e => setForm(p => ({ ...p, pension_enrolled: e.target.checked }))}
+                          className="w-4 h-4 rounded accent-saffron-400" />
+                        <span className="text-white/70 text-sm">Enrolled in workplace pension</span>
+                      </label>
+                      {form.pension_enrolled && (
+                        <>
+                          <div>
+                            <label className={lbl}>Pension Provider</label>
+                            <input value={form.pension_provider} onChange={e => setForm(p => ({ ...p, pension_provider: e.target.value }))} className={inp} placeholder="NEST / Aviva / etc." />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className={lbl}>Employee Contribution (%)</label>
+                              <input type="number" min="0" max="100" step="0.1"
+                                value={form.pension_employee_pct} onChange={e => setForm(p => ({ ...p, pension_employee_pct: e.target.value }))} className={inp} placeholder="5" />
+                            </div>
+                            <div>
+                              <label className={lbl}>Employer Contribution (%)</label>
+                              <input type="number" min="0" max="100" step="0.1"
+                                value={form.pension_employer_pct} onChange={e => setForm(p => ({ ...p, pension_employer_pct: e.target.value }))} className={inp} placeholder="3" />
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      <div>
+                        <label className={lbl}>Benefits Notes</label>
+                        <textarea value={form.benefits_notes} onChange={e => setForm(p => ({ ...p, benefits_notes: e.target.value }))} rows={2} className={inp + ' resize-none'}
+                          placeholder="Health insurance, season-ticket loan, cycle-to-work, etc." />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* UK Compliance — DBS + RTW + P45 */}
+                <div className="border-t border-white/5 pt-4">
+                  <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-3">UK Compliance</p>
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>DBS Check Status</label>
+                        <select value={form.dbs_check_status} onChange={e => setForm(p => ({ ...p, dbs_check_status: e.target.value }))} className={inp}>
+                          {DBS_STATUSES.map(s => <option key={s} value={s}>{s === '' ? '— Select —' : s.replace(/_/g, ' ')}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={lbl}>DBS Certificate Number</label>
+                        <input value={form.dbs_certificate_number} onChange={e => setForm(p => ({ ...p, dbs_certificate_number: e.target.value }))} className={inp} placeholder="Cert ref" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>DBS Check Date</label>
+                        <input type="date" value={form.dbs_check_date} onChange={e => setForm(p => ({ ...p, dbs_check_date: e.target.value }))} className={inp} />
+                      </div>
+                      <div>
+                        <label className={lbl}>DBS Expiry</label>
+                        <input type="date" value={form.dbs_check_expiry} onChange={e => setForm(p => ({ ...p, dbs_check_expiry: e.target.value }))} className={inp} />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>RTW Check Date</label>
+                        <input type="date" value={form.rtw_check_date} onChange={e => setForm(p => ({ ...p, rtw_check_date: e.target.value }))} className={inp} />
+                      </div>
+                      <div>
+                        <label className={lbl}>RTW Reference</label>
+                        <input value={form.rtw_check_reference} onChange={e => setForm(p => ({ ...p, rtw_check_reference: e.target.value }))} className={inp} placeholder="Internal ref / share-code used" />
+                      </div>
+                    </div>
+                    {form.employment_type !== 'VOLUNTEER' && (
+                      <div className="grid grid-cols-2 gap-3 items-end">
+                        <label className="flex items-center gap-3 cursor-pointer h-12">
+                          <input type="checkbox" checked={form.p45_received} onChange={e => setForm(p => ({ ...p, p45_received: e.target.checked }))}
+                            className="w-4 h-4 rounded accent-saffron-400" />
+                          <span className="text-white/70 text-sm">P45 received</span>
+                        </label>
+                        {!form.p45_received && (
+                          <div>
+                            <label className={lbl}>Starter Declaration</label>
+                            <select value={form.starter_declaration} onChange={e => setForm(p => ({ ...p, starter_declaration: e.target.value }))} className={inp}>
+                              {STARTER_DECL.map(d => <option key={d} value={d}>{d === '' ? '— Select —' : `Statement ${d}`}</option>)}
+                            </select>
+                          </div>
+                        )}
+                      </div>
                     )}
+                  </div>
+                </div>
+
+                {/* Working Terms */}
+                <div className="border-t border-white/5 pt-4">
+                  <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-3">Working Terms</p>
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>Hours / Week</label>
+                        <input type="number" min="0" max="80" step="0.5"
+                          value={form.hours_per_week} onChange={e => setForm(p => ({ ...p, hours_per_week: e.target.value }))} className={inp} placeholder="37.5" />
+                      </div>
+                      <div>
+                        <label className={lbl}>Holiday Entitlement (days/yr)</label>
+                        <input type="number" min="0" max="60" step="0.5"
+                          value={form.holiday_entitlement_days} onChange={e => setForm(p => ({ ...p, holiday_entitlement_days: e.target.value }))} className={inp} placeholder="28" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={lbl}>Probation End Date</label>
+                      <input type="date" value={form.probation_end_date} onChange={e => setForm(p => ({ ...p, probation_end_date: e.target.value }))} className={inp} />
+                    </div>
+                    {/* End-date + leaving reason are only meaningful when editing — for a new hire they'd be left blank. Show always; backend keeps them nullable. */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>End Date</label>
+                        <input type="date" value={form.end_date} onChange={e => setForm(p => ({ ...p, end_date: e.target.value }))} className={inp} />
+                      </div>
+                      <div>
+                        <label className={lbl}>Leaving Reason</label>
+                        <select value={form.leaving_reason} onChange={e => setForm(p => ({ ...p, leaving_reason: e.target.value }))} className={inp}>
+                          {LEAVING_REASONS.map(r => <option key={r} value={r}>{r === '' ? '— Not applicable —' : r.replace(/_/g, ' ')}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stopgap free-text */}
+                <div className="border-t border-white/5 pt-4">
+                  <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-3">Notes</p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className={lbl}>Qualifications</label>
+                      <textarea value={form.qualifications_notes} onChange={e => setForm(p => ({ ...p, qualifications_notes: e.target.value }))} rows={3} className={inp + ' resize-none'}
+                        placeholder="Degrees, certifications, training. Free-text for now — structured table coming in a later phase." />
+                    </div>
+                    <div>
+                      <label className={lbl}>Documents Held</label>
+                      <textarea value={form.documents_held_notes} onChange={e => setForm(p => ({ ...p, documents_held_notes: e.target.value }))} rows={3} className={inp + ' resize-none'}
+                        placeholder="Passport, visa, bank statement, contract signed, etc. — what we've received and stored." />
+                    </div>
                   </div>
                 </div>
 
