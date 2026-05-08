@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useStore } from '../store'
 import { api, type VolunteerRegistrationPayload } from '../api'
+import { AddressLookup } from '../components/AddressLookup'
 
 const TITLES = ['', 'Dr', 'Mr', 'Mrs', 'Ms', 'Master', 'Other']
 const AGE_RANGES = ['18-25', '26-35', '36-45', '46-55', '55+']
@@ -43,6 +44,7 @@ interface Form {
   last_name: string
   address: string
   postcode: string
+  uprn: string
   mobile: string
   phone: string
   email: string
@@ -55,6 +57,7 @@ interface Form {
   ec_phone: string
   ec_address: string
   ec_postcode: string
+  ec_uprn: string
 
   has_health_restrictions: boolean
   health_notes: string
@@ -63,10 +66,10 @@ interface Form {
   criminal_record_details: string
 
   ref1_title: string; ref1_first_names: string; ref1_last_name: string
-  ref1_address: string; ref1_postcode: string
+  ref1_address: string; ref1_postcode: string; ref1_uprn: string
   ref1_mobile: string; ref1_phone: string; ref1_email: string
   ref2_title: string; ref2_first_names: string; ref2_last_name: string
-  ref2_address: string; ref2_postcode: string
+  ref2_address: string; ref2_postcode: string; ref2_uprn: string
   ref2_mobile: string; ref2_phone: string; ref2_email: string
 
   skills: Record<string, string[]>
@@ -83,15 +86,17 @@ interface Form {
 
 const EMPTY: Form = {
   title: '', first_names: '', last_name: '',
-  address: '', postcode: '', mobile: '', phone: '', email: '', age_range: '',
+  address: '', postcode: '', uprn: '', mobile: '', phone: '', email: '', age_range: '',
   ec_title: '', ec_full_name: '', ec_email: '', ec_mobile: '', ec_phone: '',
-  ec_address: '', ec_postcode: '',
+  ec_address: '', ec_postcode: '', ec_uprn: '',
   has_health_restrictions: false, health_notes: '',
   has_criminal_record: false, criminal_record_details: '',
   ref1_title: '', ref1_first_names: '', ref1_last_name: '',
-  ref1_address: '', ref1_postcode: '', ref1_mobile: '', ref1_phone: '', ref1_email: '',
+  ref1_address: '', ref1_postcode: '', ref1_uprn: '',
+  ref1_mobile: '', ref1_phone: '', ref1_email: '',
   ref2_title: '', ref2_first_names: '', ref2_last_name: '',
-  ref2_address: '', ref2_postcode: '', ref2_mobile: '', ref2_phone: '', ref2_email: '',
+  ref2_address: '', ref2_postcode: '', ref2_uprn: '',
+  ref2_mobile: '', ref2_phone: '', ref2_email: '',
   skills: {}, skills_other_text: '',
   availability: {}, availability_pattern: '',
   declaration_agreed: false, confidentiality_agreed: false, marketing_consent: false,
@@ -257,15 +262,16 @@ export function VolunteerRegistrationPage() {
           </div>
         </div>
         <div className="mb-3">
-          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Address *</label>
-          <textarea value={form.address} onChange={e => update('address', e.target.value)} rows={2} className={inp + ' resize-none'} />
+          <AddressLookup
+            postcode={form.postcode} address={form.address} uprn={form.uprn}
+            required postcodeLabel="Postcode" addressLabel="Your address"
+            onChange={({ postcode, address, uprn }) =>
+              setForm(p => ({ ...p, postcode, address, uprn }))
+            }
+          />
         </div>
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Postcode *</label>
-            <input value={form.postcode} onChange={e => update('postcode', e.target.value.toUpperCase())} className={inp + ' uppercase'} placeholder="HA9 0BB" />
-          </div>
-          <div>
+          <div className="col-span-2">
             <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Email *</label>
             <input type="email" value={form.email} onChange={e => update('email', e.target.value)} className={inp} />
           </div>
@@ -354,16 +360,13 @@ export function VolunteerRegistrationPage() {
           <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Email</label>
           <input type="email" value={form.ec_email} onChange={e => update('ec_email', e.target.value)} className={inp} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Address</label>
-            <textarea value={form.ec_address} onChange={e => update('ec_address', e.target.value)} rows={2} className={inp + ' resize-none'} />
-          </div>
-          <div>
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Postcode</label>
-            <input value={form.ec_postcode} onChange={e => update('ec_postcode', e.target.value.toUpperCase())} className={inp + ' uppercase'} />
-          </div>
-        </div>
+        <AddressLookup
+          postcode={form.ec_postcode} address={form.ec_address} uprn={form.ec_uprn}
+          postcodeLabel="Their postcode" addressLabel="Their address"
+          onChange={({ postcode, address, uprn }) =>
+            setForm(p => ({ ...p, ec_postcode: postcode, ec_address: address, ec_uprn: uprn }))
+          }
+        />
       </Section>
 
       {/* Health */}
@@ -431,16 +434,13 @@ export function VolunteerRegistrationPage() {
             <input type="email" value={form.ref1_email} onChange={e => update('ref1_email', e.target.value)} className={inp} />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Address</label>
-            <textarea value={form.ref1_address} onChange={e => update('ref1_address', e.target.value)} rows={2} className={inp + ' resize-none'} />
-          </div>
-          <div>
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Postcode</label>
-            <input value={form.ref1_postcode} onChange={e => update('ref1_postcode', e.target.value.toUpperCase())} className={inp + ' uppercase'} />
-          </div>
-        </div>
+        <AddressLookup
+          postcode={form.ref1_postcode} address={form.ref1_address} uprn={form.ref1_uprn}
+          postcodeLabel="Their postcode" addressLabel="Their address"
+          onChange={({ postcode, address, uprn }) =>
+            setForm(p => ({ ...p, ref1_postcode: postcode, ref1_address: address, ref1_uprn: uprn }))
+          }
+        />
       </Section>
 
       <Section title={t('section.referee2.title', 'Character Referee 2')}>
@@ -473,16 +473,13 @@ export function VolunteerRegistrationPage() {
             <input type="email" value={form.ref2_email} onChange={e => update('ref2_email', e.target.value)} className={inp} />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Address</label>
-            <textarea value={form.ref2_address} onChange={e => update('ref2_address', e.target.value)} rows={2} className={inp + ' resize-none'} />
-          </div>
-          <div>
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Postcode</label>
-            <input value={form.ref2_postcode} onChange={e => update('ref2_postcode', e.target.value.toUpperCase())} className={inp + ' uppercase'} />
-          </div>
-        </div>
+        <AddressLookup
+          postcode={form.ref2_postcode} address={form.ref2_address} uprn={form.ref2_uprn}
+          postcodeLabel="Their postcode" addressLabel="Their address"
+          onChange={({ postcode, address, uprn }) =>
+            setForm(p => ({ ...p, ref2_postcode: postcode, ref2_address: address, ref2_uprn: uprn }))
+          }
+        />
       </Section>
 
       {/* Skills */}
