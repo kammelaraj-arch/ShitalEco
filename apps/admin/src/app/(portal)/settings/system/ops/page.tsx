@@ -22,6 +22,46 @@ interface Snapshot {
   created_at: string
 }
 
+interface EnvSummary {
+  running?: boolean
+  status?: string
+  url?: string
+  git_sha?: string
+  git_sha_short?: string
+  build_time?: string
+  started_at?: string
+}
+
+interface EnvironmentsResponse {
+  environments: { dev?: EnvSummary; prod?: EnvSummary }
+  error?: string
+}
+
+interface VersionInfo {
+  git_sha?: string
+  git_sha_short?: string
+}
+
+interface DeployEvent {
+  env?: string
+  sha?: string
+  short?: string
+  status?: string
+  message?: string
+  at?: string
+}
+
+function fmtAge(iso?: string) {
+  if (!iso) return ''
+  const t = new Date(iso).getTime()
+  if (!t) return iso
+  const s = Math.max(0, (Date.now() - t) / 1000)
+  if (s < 60) return `${Math.floor(s)}s ago`
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  return `${Math.floor(s / 86400)}d ago`
+}
+
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
@@ -60,6 +100,11 @@ export default function OpsPage() {
   const [sqlStack, setSqlStack] = useState<'prod' | 'dev'>('prod')
   const [sqlQuery, setSqlQuery] = useState('SELECT COUNT(*) FROM users;')
 
+  // ── Environments (status + deploy actions) ──────────────────────────────
+  const [version, setVersion] = useState<VersionInfo | null>(null)
+  const [environments, setEnvironments] = useState<EnvironmentsResponse | null>(null)
+  const [deploys, setDeploys] = useState<DeployEvent[] | null>(null)
+
   // ── Promote / Snapshots / Restore ────────────────────────────────────────
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [snapshotsErr, setSnapshotsErr] = useState('')
@@ -87,6 +132,45 @@ export default function OpsPage() {
 
   useEffect(() => { loadSnapshots() }, [loadSnapshots])
 
+  const loadEnvs = useCallback(async () => {
+    try {
+      const [vRes, eRes, dRes] = await Promise.all([
+        fetch(`${API_BASE}/admin/system/version`, { headers: { Authorization: `Bearer ${getToken()}` } }),
+        fetch(`${API_BASE}/admin/system/environments`, { headers: { Authorization: `Bearer ${getToken()}` } }),
+        fetch(`${API_BASE}/admin/system/deploys?limit=10`, { headers: { Authorization: `Bearer ${getToken()}` } }),
+      ])
+      if (vRes.ok) setVersion(await vRes.json())
+      if (eRes.ok) setEnvironments(await eRes.json())
+      if (dRes.ok) {
+        const d = await dRes.json()
+        setDeploys(d.deploys || [])
+      }
+    } catch {
+      // ignore — page still useful without env panel
+    }
+  }, [])
+
+  useEffect(() => { loadEnvs() }, [loadEnvs])
+
+  function openRedeployDevDialog() {
+    setActionMsg(null); setPinValue(''); setConfirmInput('')
+    setPinDialog({
+      title: '🔄 Re-deploy Dev',
+      description:
+        'Re-deploy the latest :dev image to dev.shital.org.uk. No DB snapshot is taken (dev only). PIN required.',
+      onConfirm: async (pin) => {
+        const res = await fetch(`${API_BASE}/admin/system/deploy/dev`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${getToken()}`, 'X-Admin-Pin': pin },
+        })
+        const d = await res.json()
+        if (!res.ok || !d.ok) throw new Error(d.detail || `Failed (HTTP ${res.status})`)
+        setActionMsg({ text: 'Dev deploy triggered. Containers will restart in 1–2 min.', ok: true })
+        setTimeout(loadEnvs, 60_000)
+      },
+    })
+  }
+
   function openPromoteDialog() {
     setActionMsg(null); setPinValue(''); setConfirmInput('')
     setPinDialog({
@@ -103,7 +187,7 @@ export default function OpsPage() {
         const d = await res.json()
         if (!res.ok || !d.ok) throw new Error(d.detail || `Failed (HTTP ${res.status})`)
         setActionMsg({ text: 'Promote triggered. Containers will restart in 1–2 min.', ok: true })
-        setTimeout(loadSnapshots, 60_000)
+        setTimeout(() => { loadSnapshots(); loadEnvs() }, 60_000)
       },
     })
   }
@@ -180,27 +264,134 @@ export default function OpsPage() {
         </p>
       </div>
 
-      {/* ── Promote DEV → PROD (PIN-gated, snapshots before) ───────────── */}
-      <div className="glass rounded-2xl p-6 space-y-3" style={{ border: '1.5px solid rgba(34,197,94,0.3)' }}>
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h2 className="text-white font-bold text-lg">🚀 Promote DEV → PROD</h2>
-            <p className="text-white/40 text-xs mt-1">
-              Retags the current <code className="bg-white/5 px-1 rounded">:dev</code> image as <code className="bg-white/5 px-1 rounded">:latest</code>,
-              takes a DB + image snapshot first (auto-restorable), then restarts prod.
-              PIN required.
-            </p>
+      {/* ── Environments (Dev & Prod status + deploy actions) ──────────── */}
+      <div className="glass rounded-2xl p-6 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🚀</span>
+            <div>
+              <h2 className="text-white font-bold text-lg">Environments</h2>
+              <p className="text-white/40 text-xs">
+                Push to <span className="font-mono">main</span> auto-deploys to Dev. Click "Promote to Prod" to release.
+                Promote takes a DB snapshot first (see panel below); Re-deploy Dev does not.
+              </p>
+            </div>
           </div>
-          <button onClick={openPromoteDialog}
-            className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all"
-            style={{ background: 'linear-gradient(135deg,#16A34A,#15803D)', color: '#fff' }}>
-            🚀 Promote to Prod
+          <button onClick={loadEnvs}
+            className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 text-xs hover:bg-white/10">
+            ↻ Refresh
           </button>
         </div>
+
         {actionMsg && (
           <p className={`text-sm rounded-lg px-3 py-2 ${actionMsg.ok ? 'bg-green-500/15 text-green-300 border border-green-500/30' : 'bg-red-500/15 text-red-300 border border-red-500/30'}`}>
             {actionMsg.text}
           </p>
+        )}
+
+        {environments?.error && (
+          <p className="text-red-400 text-xs">{environments.error}</p>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {(['dev', 'prod'] as const).map(env => {
+            const e = environments?.environments?.[env]
+            const isProd = env === 'prod'
+            const sha = e?.git_sha_short || (env === 'prod' ? version?.git_sha_short : '—')
+            const fullSha = e?.git_sha || (env === 'prod' ? version?.git_sha : '')
+            const built = e?.build_time
+            return (
+              <div
+                key={env}
+                className="rounded-xl px-4 py-3 flex flex-col gap-2"
+                style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${isProd ? 'rgba(34,197,94,0.25)' : 'rgba(251,146,60,0.25)'}` }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">{isProd ? '🟢' : '🟠'}</span>
+                    <span className="font-black text-white text-sm uppercase tracking-wider">{env}</span>
+                    {e?.running ? (
+                      <span className="text-[10px] uppercase text-green-400/80">running</span>
+                    ) : (
+                      <span className="text-[10px] uppercase text-red-400/80">{e?.status || 'down'}</span>
+                    )}
+                  </div>
+                  {e?.url && (
+                    <a href={e.url} target="_blank" rel="noreferrer" className="text-xs text-orange-400 hover:underline">
+                      {e.url.replace(/^https?:\/\//, '')} ↗
+                    </a>
+                  )}
+                </div>
+                <div className="text-xs text-white/60 font-mono space-y-0.5">
+                  <div>
+                    Commit:{' '}
+                    {fullSha ? (
+                      <a
+                        href={`https://github.com/kammelaraj-arch/ShitalEco/commit/${fullSha}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-orange-400 hover:underline"
+                      >
+                        {sha}
+                      </a>
+                    ) : (
+                      <span className="text-white/30">unknown</span>
+                    )}
+                  </div>
+                  {built && built !== 'unknown' && (
+                    <div className="text-white/40">Built {fmtAge(built)}</div>
+                  )}
+                  {e?.started_at && (
+                    <div className="text-white/40">Container up {fmtAge(e.started_at)}</div>
+                  )}
+                </div>
+                <button
+                  onClick={isProd ? openPromoteDialog : openRedeployDevDialog}
+                  className="mt-1 px-4 py-2 rounded-xl font-black text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  style={{
+                    background: isProd
+                      ? 'linear-gradient(135deg, #16a34a, #15803d)'
+                      : 'linear-gradient(135deg, #d97706, #ea580c)',
+                    boxShadow: isProd
+                      ? '0 4px 16px rgba(22,163,74,0.35)'
+                      : '0 4px 16px rgba(217,119,6,0.35)',
+                  }}
+                >
+                  {isProd ? '🚀 Promote to Prod' : '🔄 Re-deploy Dev'}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+
+        {deploys && deploys.length > 0 && (
+          <div className="mt-2">
+            <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Recent deploys</p>
+            <div className="space-y-1 text-xs font-mono">
+              {deploys.slice(0, 6).map((d, i) => (
+                <div key={i} className="flex items-center gap-3 py-1 px-2 rounded" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  <span className={d.status === 'success' ? 'text-green-400' : 'text-red-400'}>
+                    {d.status === 'success' ? '✓' : '↩'}
+                  </span>
+                  <span className={`text-[10px] uppercase tracking-wider ${d.env === 'prod' ? 'text-green-400/80' : 'text-orange-400/80'}`}>
+                    {d.env || '?'}
+                  </span>
+                  {d.sha && (
+                    <a
+                      href={`https://github.com/kammelaraj-arch/ShitalEco/commit/${d.sha}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-orange-400 hover:underline"
+                    >
+                      {d.short || d.sha.slice(0, 7)}
+                    </a>
+                  )}
+                  <span className="text-white/40 flex-shrink-0">{fmtAge(d.at)}</span>
+                  <span className="text-white/60 truncate">{d.message || ''}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
