@@ -12,6 +12,7 @@ import { PaymentPage } from './pages/PaymentPage'
 import { ConfirmationPage } from './pages/ConfirmationPage'
 import { MonthlyGivingPage } from './pages/MonthlyGivingPage'
 import { VolunteerRegistrationPage } from './pages/VolunteerRegistrationPage'
+import { ReferenceResponsePage } from './pages/ReferenceResponsePage'
 import { scheduleDailyCatalogRefresh, clearServiceCache } from './utils/cachedFetch'
 
 const CHECKOUT_STEPS = ['basket', 'contact', 'gift-aid', 'payment', 'confirmation']
@@ -90,7 +91,10 @@ export default function App() {
 
     // Deep-link screen param (e.g. ?screen=monthly-giving from kiosk)
     const urlScreen = params.get('screen')
-    if (urlScreen === 'monthly-giving' || urlScreen === 'browse' || urlScreen === 'volunteer') {
+    if (
+      urlScreen === 'monthly-giving' || urlScreen === 'browse' ||
+      urlScreen === 'volunteer'      || urlScreen === 'reference'
+    ) {
       setScreen(urlScreen)
     }
 
@@ -136,6 +140,7 @@ export default function App() {
       case 'confirmation':   return <ConfirmationPage />
       case 'monthly-giving': return <MonthlyGivingPage />
       case 'volunteer': return <VolunteerRegistrationPage />
+      case 'reference': return <ReferenceResponsePage />
       default:               return <BrowsePage />
     }
   }

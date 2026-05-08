@@ -1277,6 +1277,50 @@ async def _patch_schema() -> None:
         # literal 'remote' as a sentinel for online/remote-only. Distinct from
         # `branch_id` (which is the org branch that owns the application).
         "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_branches JSONB NOT NULL DEFAULT '[]'::jsonb",
+        # ── DBS / safeguarding ────────────────────────────────────────────────
+        # Volunteers without a current DBS certificate need one before they
+        # can be approved for any role. Three states the volunteer can be
+        # in (besides empty = not asked yet):
+        #   have_certificate — uploaded a copy (see documents table below)
+        #   apply_for_me     — wants SHITAL to apply on their behalf
+        #   not_required     — trustee marked as not needed for the role
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS dbs_status VARCHAR(30) NOT NULL DEFAULT ''",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS dbs_certificate_doc_id UUID",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS dbs_application_status VARCHAR(30) NOT NULL DEFAULT ''",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS dbs_notes TEXT NOT NULL DEFAULT ''",
+        # ── Reference workflow ────────────────────────────────────────────────
+        # Trustees click "Send reference requests" on the admin detail panel;
+        # backend generates per-referee tokens and emails ref1/ref2 a magic
+        # link. Each referee submits a reference response form, which lands
+        # in ref{N}_response JSONB (relationship, capacity, character, etc).
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS references_sent_at TIMESTAMPTZ",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ref1_request_token VARCHAR(64) NOT NULL DEFAULT ''",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ref2_request_token VARCHAR(64) NOT NULL DEFAULT ''",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ref1_response JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ref2_response JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ref1_response_received_at TIMESTAMPTZ",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ref2_response_received_at TIMESTAMPTZ",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_ref1_token ON volunteers(ref1_request_token) WHERE ref1_request_token != ''",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_ref2_token ON volunteers(ref2_request_token) WHERE ref2_request_token != ''",
+        # ── Generic documents/attachments ─────────────────────────────────────
+        # Owner-typed lookups (e.g. all docs for a volunteer, all DBS certs
+        # across the org). Files <5MB stored inline as BYTEA — keeps the
+        # storage layer simple. Larger files would need Azure Blob; not
+        # needed for DBS certificates which are typically <500KB PDFs.
+        """CREATE TABLE IF NOT EXISTS documents (
+            id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            owner_type  VARCHAR(50)  NOT NULL,
+            owner_id    UUID         NOT NULL,
+            filename    VARCHAR(255) NOT NULL,
+            mime_type   VARCHAR(100) NOT NULL DEFAULT 'application/octet-stream',
+            size_bytes  INTEGER      NOT NULL DEFAULT 0,
+            data        BYTEA        NOT NULL,
+            label       VARCHAR(100) NOT NULL DEFAULT '',
+            uploaded_by VARCHAR(200) NOT NULL DEFAULT '',
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_type, owner_id)",
+        "CREATE INDEX IF NOT EXISTS idx_documents_label ON documents(owner_type, owner_id, label)",
         # ── Volunteer drafts (cross-device partial save) ──────────────────────
         # The wizard auto-saves to localStorage on every change. For applicants
         # who want to resume on a different device — or who clear browser data
@@ -1963,6 +2007,64 @@ _{{ branch_name }} — Registered UK Charity_"""
             ),
             "text_body": "",
             "variables": '["branch_name","donor_name","order_ref","date","items_html","total","payment_method","gift_aid_block","cut_margin_px"]',
+        },
+        # ── Volunteer reference request ─────────────────────────────────────
+        # Sent to ref1_email and ref2_email when the trustee clicks
+        # "Send reference requests" on the volunteer detail panel. The
+        # token in {{ response_url }} authenticates the referee for the
+        # public response form (one-time per token, valid 30 days).
+        {
+            "key": "volunteer_reference_request",
+            "name": "Volunteer Reference Request",
+            "subject": "Reference request — {{ applicant_name }} (SHITAL Volunteer)",
+            "html_body": (
+                '<div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:auto;color:#222">'
+                '  <p>Dear {{ referee_name }},</p>'
+                '  <p><strong>{{ applicant_name }}</strong> has applied to volunteer with '
+                '     <a href="https://shital.org.uk">SHITAL — Shri Shirdi Saibaba Temple Association</a> '
+                '     (Registered UK Charity No. {{ charity_number }}) and given your name as a character referee.</p>'
+                '  <p>Please could you take 2&ndash;3 minutes to complete a short reference?'
+                '     The form asks how you know the applicant, how long you have known them, '
+                '     and a few questions about their suitability for volunteering with our community.</p>'
+                '  <p style="margin:24px 0">'
+                '    <a href="{{ response_url }}" '
+                '       style="display:inline-block;background:linear-gradient(135deg,#D4AF37,#C5A028);'
+                '              color:#3B0000;font-weight:700;text-decoration:none;'
+                '              padding:12px 24px;border-radius:12px">'
+                '      Provide Reference'
+                '    </a>'
+                '  </p>'
+                '  <p style="font-size:12px;color:#666;word-break:break-all">'
+                '    Or paste this URL into your browser:<br>{{ response_url }}'
+                '  </p>'
+                '  <p style="font-size:13px">Your response is confidential — only SHITAL trustees will see it. '
+                '     The link is valid for 30 days. If you would rather not provide a reference, '
+                '     you can reply to this email and we will remove your name from the application.</p>'
+                '  <p style="font-size:12px;color:#999;margin-top:24px">'
+                '    With thanks,<br>SHITAL Volunteer Coordinator<br>'
+                '    Registered UK Charity No. {{ charity_number }}'
+                '  </p>'
+                '</div>'
+            ),
+            "text_body": (
+                "Dear {{ referee_name }},\n\n"
+                "{{ applicant_name }} has applied to volunteer with SHITAL "
+                "(Shri Shirdi Saibaba Temple Association, Registered UK Charity "
+                "No. {{ charity_number }}) and given your name as a character "
+                "referee.\n\n"
+                "Please could you take 2-3 minutes to complete a short reference "
+                "at the link below. The form asks how you know the applicant, "
+                "how long you have known them, and a few questions about their "
+                "suitability for volunteering with our community.\n\n"
+                "{{ response_url }}\n\n"
+                "Your response is confidential — only SHITAL trustees will see "
+                "it. The link is valid for 30 days. If you would rather not "
+                "provide a reference, reply to this email and we will remove "
+                "your name from the application.\n\n"
+                "With thanks,\n"
+                "SHITAL Volunteer Coordinator"
+            ),
+            "variables": '["referee_name","applicant_name","response_url","charity_number"]',
         },
     ]
 
