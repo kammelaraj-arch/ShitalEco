@@ -1,0 +1,391 @@
+"""Volunteer registration — public registration form + admin review workflow.
+
+Mirrors the SHITAL paper Volunteer Registration Form V1.2: personal details,
+emergency contact, age range, health, criminal-record declaration (the role
+is exempt from Rehab-of-Offenders Act 1974), two character referees, skills
+checklist, availability matrix, and three separate declaration signatures
+(activity declaration, criminal-record declaration, confidentiality NDA).
+
+Submissions land as PENDING. Admins (acting as trustees per the process doc
+"Volunteer_registration_process_for_the_Staff_Trustees") list, view, and
+approve or reject — no public lookup of pending records.
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel, Field
+
+from shital.api.deps import CurrentSpace
+
+router = APIRouter(tags=["volunteers"])
+
+
+# ─── Models ───────────────────────────────────────────────────────────────────
+
+class VolunteerRegistration(BaseModel):
+    """Public registration payload — every field on the paper form."""
+
+    # Personal
+    title: str = ""
+    first_names: str
+    last_name: str
+    address: str = ""
+    postcode: str = ""
+    mobile: str = ""
+    phone: str = ""
+    email: str
+    age_range: str = ""
+
+    # Emergency contact
+    ec_title: str = ""
+    ec_full_name: str = ""
+    ec_email: str = ""
+    ec_mobile: str = ""
+    ec_phone: str = ""
+    ec_address: str = ""
+    ec_postcode: str = ""
+
+    # Health
+    has_health_restrictions: bool = False
+    health_notes: str = ""
+
+    # Police-check declaration
+    has_criminal_record: bool = False
+    criminal_record_details: str = ""
+
+    # Referee 1
+    ref1_title: str = ""
+    ref1_first_names: str = ""
+    ref1_last_name: str = ""
+    ref1_address: str = ""
+    ref1_postcode: str = ""
+    ref1_mobile: str = ""
+    ref1_phone: str = ""
+    ref1_email: str = ""
+
+    # Referee 2
+    ref2_title: str = ""
+    ref2_first_names: str = ""
+    ref2_last_name: str = ""
+    ref2_address: str = ""
+    ref2_postcode: str = ""
+    ref2_mobile: str = ""
+    ref2_phone: str = ""
+    ref2_email: str = ""
+
+    # Skills + availability — JSONB on the wire and at rest
+    skills: dict[str, list[str]] = Field(default_factory=dict)
+    skills_other_text: str = ""
+    availability: dict[str, Any] = Field(default_factory=dict)
+    availability_pattern: str = ""
+
+    # Consents — three separate declarations on the paper form, all required
+    declaration_agreed: bool = False
+    confidentiality_agreed: bool = False
+    marketing_consent: bool = False
+
+    # Branch the application is destined for (e.g. wembley, main)
+    branch_id: str = "main"
+
+
+def _validate(v: VolunteerRegistration) -> list[str]:
+    """Required-field validation matching the paper-form * markers + handbook
+    age policy. Return list of error messages (empty = ok)."""
+    errs: list[str] = []
+    if not v.first_names.strip():
+        errs.append("First name is required")
+    if not v.last_name.strip():
+        errs.append("Last name is required")
+    if not v.email.strip() or "@" not in v.email:
+        errs.append("A valid email is required")
+    if not v.address.strip():
+        errs.append("Address is required")
+    if not v.postcode.strip():
+        errs.append("Postcode is required")
+    if not (v.mobile.strip() or v.phone.strip()):
+        errs.append("At least one contact number (mobile or phone) is required")
+    if v.age_range not in {"18-25", "26-35", "36-45", "46-55", "55+"}:
+        errs.append("Age range is required (minimum age for volunteers is 18)")
+    if not v.ec_full_name.strip():
+        errs.append("Emergency contact full name is required")
+    if not (v.ec_mobile.strip() or v.ec_phone.strip()):
+        errs.append("Emergency contact phone is required")
+    # Referees — paper form requires "two independent" non-family referees
+    if not (v.ref1_first_names.strip() and v.ref1_last_name.strip()):
+        errs.append("Referee 1 name is required")
+    if not (v.ref2_first_names.strip() and v.ref2_last_name.strip()):
+        errs.append("Referee 2 name is required")
+    if not (v.ref1_email.strip() or v.ref1_mobile.strip() or v.ref1_phone.strip()):
+        errs.append("Referee 1 contact (email or phone) is required")
+    if not (v.ref2_email.strip() or v.ref2_mobile.strip() or v.ref2_phone.strip()):
+        errs.append("Referee 2 contact (email or phone) is required")
+    # Health declaration: if they ticked yes, we need to know what
+    if v.has_health_restrictions and not v.health_notes.strip():
+        errs.append("Please describe how we can help with your health restrictions")
+    # Criminal-record declaration: if yes, details are required
+    if v.has_criminal_record and not v.criminal_record_details.strip():
+        errs.append("Please provide the criminal-record details requested")
+    # Two declarations the paper form requires you to sign (the activity
+    # declaration in section 1, and the confidentiality NDA in section 4).
+    # The criminal-record declaration is implicit in answering the question.
+    if not v.declaration_agreed:
+        errs.append("You must agree to the volunteer activity declaration")
+    if not v.confidentiality_agreed:
+        errs.append("You must agree to the confidentiality undertaking")
+    return errs
+
+
+def _gen_reference() -> str:
+    """SHITAL-VOL-YYYYMMDD-<6 hex> — sortable, identifiable, unique enough."""
+    today = datetime.now(UTC).strftime("%Y%m%d")
+    return f"SHITAL-VOL-{today}-{uuid.uuid4().hex[:6].upper()}"
+
+
+def _require_admin(ctx: CurrentSpace) -> None:
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required",
+        )
+
+
+# ─── Public endpoint — registration ───────────────────────────────────────────
+
+@router.post("/service/volunteers/register")
+async def register_volunteer(
+    body: VolunteerRegistration, request: Request,
+) -> dict[str, Any]:
+    """Public volunteer registration. Creates a PENDING row and returns a
+    reference number the applicant can quote when chasing the application."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    errs = _validate(body)
+    if errs:
+        # Match the error envelope used by HR / projects routers so the admin
+        # form (and the public form) can surface each error individually.
+        raise HTTPException(status_code=400, detail={"errors": errs})
+
+    reference = _gen_reference()
+    now = datetime.now(UTC)
+    submitted_ip = (request.client.host if request.client else "")[:45]
+    user_agent = (request.headers.get("user-agent") or "")[:500]
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO volunteers (
+                id, reference_number,
+                title, first_names, last_name, address, postcode,
+                mobile, phone, email, age_range,
+                ec_title, ec_full_name, ec_email, ec_mobile, ec_phone,
+                ec_address, ec_postcode,
+                has_health_restrictions, health_notes,
+                has_criminal_record, criminal_record_details,
+                ref1_title, ref1_first_names, ref1_last_name,
+                ref1_address, ref1_postcode, ref1_mobile, ref1_phone, ref1_email,
+                ref2_title, ref2_first_names, ref2_last_name,
+                ref2_address, ref2_postcode, ref2_mobile, ref2_phone, ref2_email,
+                skills, skills_other_text, availability, availability_pattern,
+                declaration_signed_at, confidentiality_agreed, marketing_consent,
+                status, branch_id,
+                submitted_ip, user_agent,
+                created_at, updated_at
+            ) VALUES (
+                :id, :reference,
+                :title, :first_names, :last_name, :address, :postcode,
+                :mobile, :phone, :email, :age_range,
+                :ec_title, :ec_full_name, :ec_email, :ec_mobile, :ec_phone,
+                :ec_address, :ec_postcode,
+                :has_health_restrictions, :health_notes,
+                :has_criminal_record, :criminal_record_details,
+                :ref1_title, :ref1_first_names, :ref1_last_name,
+                :ref1_address, :ref1_postcode, :ref1_mobile, :ref1_phone, :ref1_email,
+                :ref2_title, :ref2_first_names, :ref2_last_name,
+                :ref2_address, :ref2_postcode, :ref2_mobile, :ref2_phone, :ref2_email,
+                CAST(:skills AS jsonb), :skills_other_text,
+                CAST(:availability AS jsonb), :availability_pattern,
+                :declaration_signed_at, :confidentiality_agreed, :marketing_consent,
+                'PENDING', :branch_id,
+                :submitted_ip, :user_agent,
+                :now, :now
+            )
+        """), {
+            "id": str(uuid.uuid4()), "reference": reference,
+            "title": body.title, "first_names": body.first_names.strip(),
+            "last_name": body.last_name.strip(), "address": body.address,
+            "postcode": body.postcode, "mobile": body.mobile, "phone": body.phone,
+            "email": body.email.strip().lower(), "age_range": body.age_range,
+            "ec_title": body.ec_title, "ec_full_name": body.ec_full_name,
+            "ec_email": body.ec_email, "ec_mobile": body.ec_mobile,
+            "ec_phone": body.ec_phone, "ec_address": body.ec_address,
+            "ec_postcode": body.ec_postcode,
+            "has_health_restrictions": body.has_health_restrictions,
+            "health_notes": body.health_notes,
+            "has_criminal_record": body.has_criminal_record,
+            "criminal_record_details": body.criminal_record_details,
+            "ref1_title": body.ref1_title, "ref1_first_names": body.ref1_first_names,
+            "ref1_last_name": body.ref1_last_name, "ref1_address": body.ref1_address,
+            "ref1_postcode": body.ref1_postcode, "ref1_mobile": body.ref1_mobile,
+            "ref1_phone": body.ref1_phone, "ref1_email": body.ref1_email,
+            "ref2_title": body.ref2_title, "ref2_first_names": body.ref2_first_names,
+            "ref2_last_name": body.ref2_last_name, "ref2_address": body.ref2_address,
+            "ref2_postcode": body.ref2_postcode, "ref2_mobile": body.ref2_mobile,
+            "ref2_phone": body.ref2_phone, "ref2_email": body.ref2_email,
+            "skills": _jsonify(body.skills),
+            "skills_other_text": body.skills_other_text,
+            "availability": _jsonify(body.availability),
+            "availability_pattern": body.availability_pattern,
+            "declaration_signed_at": now,
+            "confidentiality_agreed": body.confidentiality_agreed,
+            "marketing_consent": body.marketing_consent,
+            "branch_id": body.branch_id, "submitted_ip": submitted_ip,
+            "user_agent": user_agent, "now": now,
+        })
+        await db.commit()
+
+    return {
+        "success": True,
+        "reference_number": reference,
+        "message": (
+            "Thank you. Your application has been received. "
+            "A trustee will review it and contact you by email."
+        ),
+    }
+
+
+def _jsonify(obj: Any) -> str:
+    """Serialise dict/list to JSON for SQLAlchemy bind into a jsonb column."""
+    import json
+    return json.dumps(obj)
+
+
+# ─── Admin endpoints — list + detail + approve/reject ─────────────────────────
+
+@router.get("/admin/volunteers")
+async def admin_list_volunteers(
+    ctx: CurrentSpace,
+    status_filter: str = "",  # PENDING | APPROVED | REJECTED | "" (all)
+    branch_id: str = "",
+    search: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """List volunteers for admin review. Returns summary fields only — full
+    detail (including referee + criminal-record info) requires the detail
+    endpoint to keep list responses light."""
+    _require_admin(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    where: list[str] = []
+    params: dict[str, Any] = {"limit": max(1, min(limit, 200)), "offset": max(0, offset)}
+    if status_filter:
+        where.append("status = :status")
+        params["status"] = status_filter
+    if branch_id:
+        where.append("branch_id = :branch_id")
+        params["branch_id"] = branch_id
+    if search.strip():
+        where.append(
+            "(LOWER(first_names || ' ' || last_name) LIKE :search "
+            "OR LOWER(email) LIKE :search "
+            "OR LOWER(reference_number) LIKE :search)"
+        )
+        params["search"] = f"%{search.strip().lower()}%"
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    async with SessionLocal() as db:
+        rows = await db.execute(text(f"""
+            SELECT id, reference_number, first_names, last_name,
+                   email, mobile, phone, age_range, branch_id,
+                   status, created_at, reviewed_at,
+                   has_criminal_record, has_health_restrictions
+            FROM   volunteers
+            {where_sql}
+            ORDER  BY created_at DESC
+            LIMIT  :limit OFFSET :offset
+        """), params)
+        items = [dict(r._mapping) for r in rows]
+        total_row = await db.execute(text(f"SELECT COUNT(*) AS n FROM volunteers {where_sql}"), params)
+        total = total_row.scalar_one()
+    return {"items": items, "total": total, "limit": params["limit"], "offset": params["offset"]}
+
+
+@router.get("/admin/volunteers/{volunteer_id}")
+async def admin_get_volunteer(volunteer_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        row = await db.execute(
+            text("SELECT * FROM volunteers WHERE id::text = :id"),
+            {"id": volunteer_id},
+        )
+        rec = row.mappings().one_or_none()
+    if not rec:
+        raise HTTPException(404, detail="Volunteer record not found")
+    return {"volunteer": dict(rec)}
+
+
+class ReviewBody(BaseModel):
+    rejection_reason: str = ""
+
+
+@router.post("/admin/volunteers/{volunteer_id}/approve")
+async def admin_approve_volunteer(
+    volunteer_id: str, ctx: CurrentSpace,
+) -> dict[str, Any]:
+    _require_admin(ctx)
+    return await _set_review_status(volunteer_id, ctx, "APPROVED", "")
+
+
+@router.post("/admin/volunteers/{volunteer_id}/reject")
+async def admin_reject_volunteer(
+    volunteer_id: str, body: ReviewBody, ctx: CurrentSpace,
+) -> dict[str, Any]:
+    _require_admin(ctx)
+    return await _set_review_status(volunteer_id, ctx, "REJECTED", body.rejection_reason.strip())
+
+
+async def _set_review_status(
+    volunteer_id: str, ctx: CurrentSpace, new_status: str, rejection_reason: str,
+) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    now = datetime.now(UTC)
+    async with SessionLocal() as db:
+        # Two-step lookup avoids the eager UUID-cast trap that bit projects.py
+        # before #31 — id::text = :id won't raise on non-UUID inputs.
+        existing = await db.execute(
+            text("SELECT id, status FROM volunteers WHERE id::text = :id"),
+            {"id": volunteer_id},
+        )
+        rec = existing.mappings().one_or_none()
+        if not rec:
+            raise HTTPException(404, detail="Volunteer record not found")
+
+        await db.execute(text("""
+            UPDATE volunteers
+            SET    status = :new_status,
+                   reviewed_by_user_id = :reviewer,
+                   reviewed_at = :now,
+                   rejection_reason = :reason,
+                   updated_at = :now
+            WHERE  id = :id
+        """), {
+            "new_status": new_status,
+            "reviewer": str(ctx.user_id) if getattr(ctx, "user_id", None) else None,
+            "now": now, "reason": rejection_reason, "id": rec["id"],
+        })
+        await db.commit()
+    return {"success": True, "status": new_status, "id": str(rec["id"])}

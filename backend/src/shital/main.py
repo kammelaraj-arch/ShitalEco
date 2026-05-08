@@ -1114,6 +1114,294 @@ async def _patch_schema() -> None:
         # Prevent future duplicates at the database level.
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_recurring_giving_tiers_amount_label "
         "ON recurring_giving_tiers (amount, label)",
+        # ── Bank / Cash / Payment Processor accounts + statement transactions ─
+        # Distinct from the chart-of-accounts `accounts` table (which is for
+        # double-entry bookkeeping / GL). This pair is for *real-world money
+        # locations* — the temple's HSBC current account, in-house petty cash
+        # tin, the locker safe, the PayPal balance, the SumUp / Stripe payouts
+        # account. Statement imports land in `bank_transactions` as raw rows;
+        # reconciliation against the GL is a later phase.
+        """CREATE TABLE IF NOT EXISTS bank_accounts (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            name                VARCHAR(200) NOT NULL,
+            account_type        VARCHAR(20)  NOT NULL DEFAULT 'BANK',
+            parent_account_id   UUID REFERENCES bank_accounts(id) ON DELETE SET NULL,
+            bank_name           VARCHAR(200) NOT NULL DEFAULT '',
+            account_number      VARCHAR(50)  NOT NULL DEFAULT '',
+            sort_code           VARCHAR(20)  NOT NULL DEFAULT '',
+            iban                VARCHAR(50)  NOT NULL DEFAULT '',
+            currency            VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            opening_balance     NUMERIC(14,2) NOT NULL DEFAULT 0,
+            current_balance     NUMERIC(14,2) NOT NULL DEFAULT 0,
+            location            VARCHAR(200) NOT NULL DEFAULT '',
+            holder_name         VARCHAR(200) NOT NULL DEFAULT '',
+            notes               TEXT NOT NULL DEFAULT '',
+            is_active           BOOLEAN NOT NULL DEFAULT true,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_bank_accounts_branch ON bank_accounts(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_accounts_type   ON bank_accounts(account_type)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_accounts_parent ON bank_accounts(parent_account_id)",
+        """CREATE TABLE IF NOT EXISTS bank_transactions (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            account_id          UUID NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+            txn_date            DATE NOT NULL,
+            value_date          DATE,
+            description         TEXT NOT NULL DEFAULT '',
+            counterparty        VARCHAR(255) NOT NULL DEFAULT '',
+            reference           VARCHAR(255) NOT NULL DEFAULT '',
+            amount              NUMERIC(14,2) NOT NULL,
+            balance_after       NUMERIC(14,2),
+            currency            VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            txn_type            VARCHAR(20)  NOT NULL DEFAULT 'OTHER',
+            source              VARCHAR(20)  NOT NULL DEFAULT 'MANUAL',
+            statement_id        UUID,
+            raw_data            JSONB NOT NULL DEFAULT '{}'::jsonb,
+            reconciled          BOOLEAN NOT NULL DEFAULT false,
+            reconciled_with_id  UUID,
+            notes               TEXT NOT NULL DEFAULT '',
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_bank_txn_account ON bank_transactions(account_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_txn_date    ON bank_transactions(txn_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_txn_recon   ON bank_transactions(reconciled)",
+        # ── Volunteer Registration ────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS volunteers (
+            id                          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            reference_number            VARCHAR(40) UNIQUE NOT NULL,
+            -- Personal
+            title                       VARCHAR(20)         DEFAULT '',
+            first_names                 VARCHAR(255) NOT NULL,
+            last_name                   VARCHAR(255) NOT NULL,
+            address                     TEXT                DEFAULT '',
+            postcode                    VARCHAR(20)         DEFAULT '',
+            mobile                      VARCHAR(50)         DEFAULT '',
+            phone                       VARCHAR(50)         DEFAULT '',
+            email                       VARCHAR(255) NOT NULL,
+            age_range                   VARCHAR(20)         DEFAULT '',
+            -- Emergency contact
+            ec_title                    VARCHAR(20)         DEFAULT '',
+            ec_full_name                VARCHAR(255)        DEFAULT '',
+            ec_email                    VARCHAR(255)        DEFAULT '',
+            ec_mobile                   VARCHAR(50)         DEFAULT '',
+            ec_phone                    VARCHAR(50)         DEFAULT '',
+            ec_address                  TEXT                DEFAULT '',
+            ec_postcode                 VARCHAR(20)         DEFAULT '',
+            -- Health
+            has_health_restrictions     BOOLEAN             DEFAULT false,
+            health_notes                TEXT                DEFAULT '',
+            -- Police-check / criminal-record declaration
+            has_criminal_record         BOOLEAN             DEFAULT false,
+            criminal_record_details     TEXT                DEFAULT '',
+            -- Referee 1
+            ref1_title                  VARCHAR(20)         DEFAULT '',
+            ref1_first_names            VARCHAR(255)        DEFAULT '',
+            ref1_last_name              VARCHAR(255)        DEFAULT '',
+            ref1_address                TEXT                DEFAULT '',
+            ref1_postcode               VARCHAR(20)         DEFAULT '',
+            ref1_mobile                 VARCHAR(50)         DEFAULT '',
+            ref1_phone                  VARCHAR(50)         DEFAULT '',
+            ref1_email                  VARCHAR(255)        DEFAULT '',
+            -- Referee 2
+            ref2_title                  VARCHAR(20)         DEFAULT '',
+            ref2_first_names            VARCHAR(255)        DEFAULT '',
+            ref2_last_name              VARCHAR(255)        DEFAULT '',
+            ref2_address                TEXT                DEFAULT '',
+            ref2_postcode               VARCHAR(20)         DEFAULT '',
+            ref2_mobile                 VARCHAR(50)         DEFAULT '',
+            ref2_phone                  VARCHAR(50)         DEFAULT '',
+            ref2_email                  VARCHAR(255)        DEFAULT '',
+            -- Skills (JSONB; structure: { "category": ["skill1", ...] })
+            skills                      JSONB               DEFAULT '{}'::jsonb,
+            skills_other_text           TEXT                DEFAULT '',
+            -- Availability (JSONB; { weekday: { morning|afternoon|evening: "HH:MM-HH:MM" } })
+            availability                JSONB               DEFAULT '{}'::jsonb,
+            availability_pattern        VARCHAR(20)         DEFAULT '',
+            -- Consents (paper form has 3 separate signatures + declarations)
+            declaration_signed_at       TIMESTAMPTZ,
+            confidentiality_agreed      BOOLEAN             DEFAULT false,
+            marketing_consent           BOOLEAN             DEFAULT false,
+            -- Workflow
+            status                      VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+            branch_id                   VARCHAR(100)        DEFAULT 'main',
+            reviewed_by_user_id         UUID,
+            reviewed_at                 TIMESTAMPTZ,
+            rejection_reason            TEXT                DEFAULT '',
+            -- Spam / audit
+            submitted_ip                VARCHAR(45)         DEFAULT '',
+            user_agent                  VARCHAR(500)        DEFAULT '',
+            -- Timestamps
+            created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_status ON volunteers(status)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_email  ON volunteers(email)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_branch ON volunteers(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_created ON volunteers(created_at DESC)",
+        # ── Form-text overrides (admin-editable strings on public forms) ──────
+        # Sparse table: only stores OVERRIDES. Defaults live in code (per
+        # form_key catalogue in shital.api.routers.form_config). Lookup is
+        # by (form_key, field_key); admin sets/clears overrides without
+        # needing to seed every field.
+        """CREATE TABLE IF NOT EXISTS form_text_overrides (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            form_key        VARCHAR(100) NOT NULL,
+            field_key       VARCHAR(200) NOT NULL,
+            override_text   TEXT NOT NULL DEFAULT '',
+            updated_by      UUID,
+            updated_by_name VARCHAR(255) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (form_key, field_key)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_form_text_form ON form_text_overrides(form_key)",
+        # ── Board of Trustees Resolutions & Voting ────────────────────────────
+        # Distinct sub-system: governance records (resolutions, votes, minutes,
+        # conflicts, audit). PR 1 of 6 introduces the foundation tables only —
+        # trustees, meetings, governing rules, plus skeletons for resolutions
+        # and audit_log so subsequent PRs add columns / behaviours via
+        # idempotent ALTERs without renaming.
+        """CREATE TABLE IF NOT EXISTS trustees (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id         UUID,
+            full_name       VARCHAR(255) NOT NULL,
+            email           VARCHAR(255) NOT NULL,
+            role            VARCHAR(40)  NOT NULL DEFAULT 'TRUSTEE',
+            phone           VARCHAR(50)  NOT NULL DEFAULT '',
+            address         TEXT         NOT NULL DEFAULT '',
+            postcode        VARCHAR(20)  NOT NULL DEFAULT '',
+            term_start      DATE,
+            term_end        DATE,
+            notes           TEXT NOT NULL DEFAULT '',
+            is_active       BOOLEAN NOT NULL DEFAULT true,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_trustees_email  ON trustees(email)",
+        "CREATE INDEX IF NOT EXISTS idx_trustees_role   ON trustees(role)",
+        "CREATE INDEX IF NOT EXISTS idx_trustees_active ON trustees(is_active)",
+        # Singleton row keyed on a constant scope value — the charity has one
+        # set of rules. Stored as a row (not env vars) so admins can edit
+        # from UI without redeploying.
+        """CREATE TABLE IF NOT EXISTS governing_rules (
+            id                                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            scope                                  VARCHAR(40) NOT NULL DEFAULT 'DEFAULT',
+            quorum_min                             INT NOT NULL DEFAULT 3,
+            quorum_fraction_numerator              INT NOT NULL DEFAULT 1,
+            quorum_fraction_denominator            INT NOT NULL DEFAULT 3,
+            chair_casting_vote_enabled             BOOLEAN NOT NULL DEFAULT true,
+            written_resolution_requires_unanimous  BOOLEAN NOT NULL DEFAULT true,
+            anonymous_ballot_for_officer_elections BOOLEAN NOT NULL DEFAULT true,
+            notice_period_days                     INT NOT NULL DEFAULT 7,
+            data_retention_years                   INT NOT NULL DEFAULT 6,
+            created_at                             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at                             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (scope)
+        )""",
+        # Seed the singleton DEFAULT row. Idempotent on re-run.
+        """INSERT INTO governing_rules (scope) VALUES ('DEFAULT')
+            ON CONFLICT (scope) DO NOTHING""",
+        """CREATE TABLE IF NOT EXISTS board_meetings (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            meeting_type    VARCHAR(40) NOT NULL DEFAULT 'TRUSTEE_MEETING',
+            mode            VARCHAR(20) NOT NULL DEFAULT 'IN_PERSON',
+            title           VARCHAR(300) NOT NULL DEFAULT '',
+            scheduled_at    TIMESTAMPTZ NOT NULL,
+            location        VARCHAR(500) NOT NULL DEFAULT '',
+            video_link      VARCHAR(500) NOT NULL DEFAULT '',
+            organiser_id    UUID,
+            agenda          TEXT NOT NULL DEFAULT '',
+            attendance      JSONB NOT NULL DEFAULT '[]'::jsonb,
+            quorum_at_open  INT,
+            status          VARCHAR(30) NOT NULL DEFAULT 'SCHEDULED',
+            opened_at       TIMESTAMPTZ,
+            closed_at       TIMESTAMPTZ,
+            minutes_status  VARCHAR(30) NOT NULL DEFAULT 'NOT_STARTED',
+            minutes_text    TEXT NOT NULL DEFAULT '',
+            minutes_approved_at TIMESTAMPTZ,
+            notes           TEXT NOT NULL DEFAULT '',
+            created_by      UUID,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_board_meetings_status   ON board_meetings(status)",
+        "CREATE INDEX IF NOT EXISTS idx_board_meetings_type     ON board_meetings(meeting_type)",
+        "CREATE INDEX IF NOT EXISTS idx_board_meetings_when     ON board_meetings(scheduled_at DESC)",
+        # Skeleton — populated in PR 2 (resolutions builder + amendments).
+        """CREATE TABLE IF NOT EXISTS resolutions (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            meeting_id      UUID REFERENCES board_meetings(id) ON DELETE SET NULL,
+            title           VARCHAR(500) NOT NULL,
+            background      TEXT NOT NULL DEFAULT '',
+            recommendation  TEXT NOT NULL DEFAULT '',
+            risk_impact     TEXT NOT NULL DEFAULT '',
+            budget_impact   TEXT NOT NULL DEFAULT '',
+            category        VARCHAR(60) NOT NULL DEFAULT 'OPERATIONAL',
+            decision_type   VARCHAR(30) NOT NULL DEFAULT 'BOARD_MEETING',
+            status          VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+            decision_date   DATE,
+            is_retrospective       BOOLEAN NOT NULL DEFAULT false,
+            retrospective_reason   TEXT NOT NULL DEFAULT '',
+            outcome         VARCHAR(30) NOT NULL DEFAULT '',
+            outcome_summary TEXT NOT NULL DEFAULT '',
+            created_by      UUID,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_resolutions_status      ON resolutions(status)",
+        "CREATE INDEX IF NOT EXISTS idx_resolutions_meeting     ON resolutions(meeting_id)",
+        "CREATE INDEX IF NOT EXISTS idx_resolutions_decision_dt ON resolutions(decision_date DESC)",
+        # PR 2 — voting engine columns. Idempotent ALTERs so re-applying is safe.
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS created_by_trustee_id UUID",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS quorum_at_close INT",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS effective_quorum_at_close INT",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS tally_for INT NOT NULL DEFAULT 0",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS tally_against INT NOT NULL DEFAULT 0",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS tally_abstain INT NOT NULL DEFAULT 0",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS casting_vote_used BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS casting_vote_choice VARCHAR(10) NOT NULL DEFAULT ''",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb",
+        # ── Resolution votes — one row per trustee per resolution ─────────────
+        # The board acts collectively: each active trustee gets exactly one
+        # vote. Chair's casting vote (when permitted by governing_rules) is
+        # tracked separately on `resolutions.casting_vote_used` to keep its
+        # special status auditable. Trustees can change their own vote up
+        # until status flips to CLOSED.
+        """CREATE TABLE IF NOT EXISTS resolution_votes (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id   UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE RESTRICT,
+            choice          VARCHAR(10) NOT NULL,
+                -- FOR | AGAINST | ABSTAIN
+            anonymous       BOOLEAN NOT NULL DEFAULT false,
+                -- when true, trustee_id is hidden from non-admin readers
+            comment         TEXT NOT NULL DEFAULT '',
+            voted_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (resolution_id, trustee_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_resolution_votes_res ON resolution_votes(resolution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_resolution_votes_tru ON resolution_votes(trustee_id)",
+        """CREATE TABLE IF NOT EXISTS board_audit_log (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            actor_user_id   UUID,
+            actor_name      VARCHAR(255) NOT NULL DEFAULT '',
+            action          VARCHAR(80)  NOT NULL,
+            entity_type     VARCHAR(60)  NOT NULL DEFAULT '',
+            entity_id       UUID,
+            metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+            ip_address      VARCHAR(45)  NOT NULL DEFAULT '',
+            user_agent      VARCHAR(500) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_board_audit_action ON board_audit_log(action)",
+        "CREATE INDEX IF NOT EXISTS idx_board_audit_entity ON board_audit_log(entity_type, entity_id)",
+        "CREATE INDEX IF NOT EXISTS idx_board_audit_when   ON board_audit_log(created_at DESC)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -1667,6 +1955,10 @@ _mount("shital.api.routers.recurring_payments",   "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
+_mount("shital.api.routers.bank_accounts",         "router")
+_mount("shital.api.routers.board",                 "router")
+_mount("shital.api.routers.volunteers",            "router")
+_mount("shital.api.routers.form_config",           "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.accounts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")

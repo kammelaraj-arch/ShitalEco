@@ -28,6 +28,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/donations',         icon: '🙏', label: 'Donations' },
       { href: '/gift-aid',          icon: '🇬🇧', label: 'Gift Aid' },
       { href: '/budgets',           icon: '📊', label: 'Budgets' },
+      { href: '/bank-accounts',     icon: '🏦', label: 'Bank & Cash' },
     ],
   },
   {
@@ -37,6 +38,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/hr/leave',          icon: '🌴', label: 'Leave' },
       { href: '/hr/timesheets',     icon: '⏱️', label: 'Timesheets' },
       { href: '/payroll',           icon: '💷', label: 'Payroll' },
+      { href: '/volunteers',        icon: '🤝', label: 'Volunteers' },
     ],
   },
   {
@@ -52,6 +54,11 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: '/compliance',        icon: '⚖️', label: 'Compliance' },
       { href: '/audit',             icon: '🔍', label: 'Audit Log' },
+      { href: '/board',             icon: '🏛️', label: 'Board & Resolutions' },
+      { href: '/board/trustees',    icon: '👤', label: 'Trustees' },
+      { href: '/board/meetings',    icon: '📅', label: 'Meetings' },
+      { href: '/board/resolutions', icon: '📜', label: 'Resolutions & Voting' },
+      { href: '/board/rules',       icon: '📐', label: 'Governing Rules' },
     ],
   },
   {
@@ -97,6 +104,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: '/settings/branding',         icon: '🎨', label: 'Branding' },
       { href: '/settings/email-templates',  icon: '📧', label: 'Email Templates' },
+      { href: '/settings/volunteer-form',   icon: '✍️', label: 'Volunteer Form Text' },
       { href: '/settings/branches',         icon: '🌿', label: 'Branches' },
       { href: '/settings/users',            icon: '🔐', label: 'Users & Roles' },
       { href: '/settings/azure-ad',         icon: '🔷', label: 'Azure AD / SSO' },
