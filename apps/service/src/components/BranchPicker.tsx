@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { useStore } from '../store'
+import { useStore, SHITAL_LOGO_URL } from '../store'
 import { api } from '../api'
 
 interface Branch {
@@ -43,10 +43,23 @@ export function BranchPicker() {
           <motion.div
             animate={{ boxShadow: ['0 0 20px rgba(212,175,55,0.2)', '0 0 50px rgba(212,175,55,0.5)', '0 0 20px rgba(212,175,55,0.2)'] }}
             transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-            className="w-20 h-20 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-6"
-            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#6B0000' }}
+            className="w-20 h-20 rounded-2xl overflow-hidden flex items-center justify-center mx-auto mb-6"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)' }}
           >
-            🛕
+            <img src={SHITAL_LOGO_URL} alt="SHITAL"
+              className="w-full h-full object-contain p-2"
+              onError={e => {
+                const el = e.currentTarget
+                el.style.display = 'none'
+                const parent = el.parentElement
+                if (parent && !parent.querySelector('.fallback-emoji')) {
+                  const span = document.createElement('span')
+                  span.className = 'fallback-emoji text-4xl'
+                  span.style.color = '#6B0000'
+                  span.textContent = '🛕'
+                  parent.appendChild(span)
+                }
+              }} />
           </motion.div>
           <h1 className="font-display font-bold text-2xl text-gold-400 mb-1 tracking-wide">
             Shri Shirdi Saibaba Temple

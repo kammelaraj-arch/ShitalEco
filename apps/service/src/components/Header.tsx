@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore, useTotal, useItemCount, LANGUAGE_META, type Language, t } from '../store'
+import { useStore, useTotal, useItemCount, LANGUAGE_META, type Language, t, SHITAL_LOGO_URL } from '../store'
 import { THEMES } from '../themes'
 
 export function Header() {
@@ -25,9 +25,24 @@ export function Header() {
 
         {/* Logo */}
         <button onClick={() => setScreen('browse')} className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0 animate-diya-pulse"
-            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: 'var(--btn-dark)' }}>
-            🛕
+          <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 animate-diya-pulse"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)' }}>
+            <img src={SHITAL_LOGO_URL} alt="SHITAL"
+              className="w-full h-full object-contain p-1"
+              onError={e => {
+                // Network blip / DNS issue — fall back to the temple emoji so
+                // the header never renders a broken-image icon.
+                const el = e.currentTarget
+                el.style.display = 'none'
+                const parent = el.parentElement
+                if (parent && !parent.querySelector('.fallback-emoji')) {
+                  const span = document.createElement('span')
+                  span.className = 'fallback-emoji text-xl'
+                  span.style.color = 'var(--btn-dark)'
+                  span.textContent = '🛕'
+                  parent.appendChild(span)
+                }
+              }} />
           </div>
           <div className="hidden sm:block min-w-0">
             <p className="font-display font-bold text-gold-400 text-sm leading-tight truncate tracking-wide">
