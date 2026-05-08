@@ -44,7 +44,23 @@ from shital.api.deps import CurrentSpace
 
 router = APIRouter(tags=["board"])
 
-VALID_ROLES = {"CHAIR", "TREASURER", "SECRETARY", "TRUSTEE"}
+VALID_ROLES = {
+    # Main board (these have voting weight on board resolutions)
+    "CHAIR",                # Maps to board-resolution Chair (casting-vote rights)
+    "TREASURER",
+    "SECRETARY",
+    "TRUSTEE",
+    "CEO",
+    # LMC = Local Management Committee — branch-level officers; do not vote
+    # on main-board resolutions, but appear in the trustee/officer registry.
+    "LMC_CHAIR",
+    "LMC_TREASURER",
+    "LMC_MEMBER",
+    # Non-officer engagements kept here so the directory + audit log can
+    # reference them with the same FK (trustees.id).
+    "EXTERNAL_CONTRACTOR",
+    "TEMP_WORKER",
+}
 VALID_MEETING_TYPES = {"TRUSTEE_MEETING", "COMMITTEE", "AGM", "EMERGENCY"}
 VALID_MEETING_MODES = {"IN_PERSON", "VIRTUAL", "HYBRID"}
 VALID_MEETING_STATUSES = {"SCHEDULED", "OPENED", "CLOSED", "CANCELLED"}
@@ -198,10 +214,17 @@ async def list_trustees(
             FROM   trustees
             {where_sql}
             ORDER  BY CASE role
-                          WHEN 'CHAIR' THEN 1
-                          WHEN 'TREASURER' THEN 2
-                          WHEN 'SECRETARY' THEN 3
-                          ELSE 4
+                          WHEN 'CHAIR'               THEN 1
+                          WHEN 'TREASURER'           THEN 2
+                          WHEN 'SECRETARY'           THEN 3
+                          WHEN 'CEO'                 THEN 4
+                          WHEN 'TRUSTEE'             THEN 5
+                          WHEN 'LMC_CHAIR'           THEN 6
+                          WHEN 'LMC_TREASURER'       THEN 7
+                          WHEN 'LMC_MEMBER'          THEN 8
+                          WHEN 'EXTERNAL_CONTRACTOR' THEN 9
+                          WHEN 'TEMP_WORKER'         THEN 10
+                          ELSE 99
                       END, full_name
             LIMIT  :limit OFFSET :offset
         """), params)

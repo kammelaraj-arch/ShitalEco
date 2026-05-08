@@ -146,9 +146,13 @@ def _validate(v: VolunteerRegistration) -> list[str]:
 
 
 def _gen_reference() -> str:
-    """SHITAL-VOL-YYYYMMDD-<6 hex> — sortable, identifiable, unique enough."""
-    today = datetime.now(UTC).strftime("%Y%m%d")
-    return f"SHITAL-VOL-{today}-{uuid.uuid4().hex[:6].upper()}"
+    """VOL-NNNNNN — short 8-char applicant-friendly reference.
+
+    Drops the SHITAL- prefix and the embedded date (the date lives on
+    `created_at`; trustees can sort by date via the admin UI). 6 hex
+    digits = 16M unique values, plenty for SHITAL's volunteer pipeline.
+    """
+    return f"VOL-{uuid.uuid4().hex[:6].upper()}"
 
 
 def _gen_draft_token() -> str:
