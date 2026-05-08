@@ -133,6 +133,21 @@ export default function BankAccountsPage() {
   const [txnForm, setTxnForm] = useState<TxnForm>(EMPTY_TXN)
   const [savingTxn, setSavingTxn] = useState(false)
 
+  const [showImport, setShowImport] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [providerHint, setProviderHint] = useState<'AUTO' | 'PAYPAL' | 'STRIPE' | 'SUMUP' | 'NATWEST' | 'GENERIC'>('AUTO')
+  const [importBusy, setImportBusy] = useState(false)
+  const [importPreview, setImportPreview] = useState<{
+    statement_id: string; detected_provider: string; transaction_count: number
+    duplicates_count: number; period_start: string | null; period_end: string | null
+    parse_errors: string[]; preview: Array<{
+      txn_date: string; description: string; counterparty: string; reference: string
+      amount: number; balance_after: number | null; currency: string; txn_type: string
+      is_duplicate: boolean
+    }>
+  } | null>(null)
+  const [skipDups, setSkipDups] = useState(true)
+
   const loadAccounts = useCallback(async () => {
     setLoading(true); setError('')
     try {
@@ -267,6 +282,64 @@ export default function BankAccountsPage() {
         setSelectedAccount(refreshed)
       }
     } catch { setError('Failed to delete') }
+  }
+
+  async function uploadAndPreview() {
+    if (!selectedAccount || !importFile) { setError('Pick a CSV file first'); return }
+    setImportBusy(true); setError('')
+    try {
+      const fd = new FormData()
+      fd.append('file', importFile)
+      if (providerHint !== 'AUTO') fd.append('provider_hint', providerHint)
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('shital_access_token') || '') : ''
+      const r = await fetch(`${process.env.NEXT_PUBLIC_API_URL || '/api/v1'}/admin/bank-accounts/${selectedAccount.id}/import`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        const msg = data?.detail?.errors?.length ? data.detail.errors.join(' · ') : (data?.detail || `Upload failed: ${r.status}`)
+        throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+      }
+      setImportPreview(data)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed')
+    } finally { setImportBusy(false) }
+  }
+
+  async function commitImport() {
+    if (!selectedAccount || !importFile || !importPreview) return
+    setImportBusy(true); setError('')
+    try {
+      const fd = new FormData()
+      fd.append('file', importFile)
+      fd.append('statement_id', importPreview.statement_id)
+      fd.append('skip_duplicates', skipDups ? 'true' : 'false')
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('shital_access_token') || '') : ''
+      const r = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || '/api/v1'}/admin/bank-accounts/${selectedAccount.id}/import/commit`,
+        {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: fd,
+        },
+      )
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        const msg = data?.detail?.errors?.length ? data.detail.errors.join(' · ') : (data?.detail || `Commit failed: ${r.status}`)
+        throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+      }
+      // Refresh
+      await Promise.all([loadAccounts(), loadTxns(selectedAccount.id, txnSearch)])
+      const refreshed = (await apiFetch<{ account: BankAccount }>(`/admin/bank-accounts/${selectedAccount.id}`)).account
+      setSelectedAccount(refreshed)
+      setImportPreview(null)
+      setImportFile(null)
+      setShowImport(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Commit failed')
+    } finally { setImportBusy(false) }
   }
 
   // Aggregates
@@ -408,7 +481,11 @@ export default function BankAccountsPage() {
               className="px-4 py-2 rounded-xl bg-saffron-gradient text-white font-semibold text-sm">
               + Add Transaction
             </button>
-            <span className="text-white/40 text-xs italic">CSV / PDF import coming in PR 2 / 3</span>
+            <button onClick={() => setShowImport(true)}
+              className="px-4 py-2 rounded-xl border border-saffron-400/40 text-saffron-300 font-semibold text-sm hover:bg-saffron-400/10">
+              📥 Import CSV
+            </button>
+            <span className="text-white/40 text-xs italic">PDF import coming in PR 3</span>
             <input value={txnSearch} onChange={e => setTxnSearch(e.target.value)}
               placeholder="Search description, counterparty, reference…"
               className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 flex-1 min-w-[240px]" />
@@ -671,6 +748,136 @@ export default function BankAccountsPage() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* CSV import modal */}
+      <AnimatePresence>
+        {showImport && selectedAccount && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center px-4 py-6 overflow-y-auto">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => { if (!importBusy) { setShowImport(false); setImportPreview(null); setImportFile(null) } }}
+              className="fixed inset-0 bg-black/70" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="relative bg-temple-deep border border-white/10 rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-white font-black text-lg">Import CSV statement</h2>
+                  <p className="text-white/50 text-xs mt-1">Account: <strong>{selectedAccount.name}</strong> · {selectedAccount.bank_name || ACCOUNT_TYPE_META[selectedAccount.account_type].label}</p>
+                </div>
+                <button onClick={() => { if (!importBusy) { setShowImport(false); setImportPreview(null); setImportFile(null) } }}
+                  className="text-white/40 hover:text-white text-xl">✕</button>
+              </div>
+
+              {!importPreview && (
+                <>
+                  <div className="space-y-3">
+                    <div>
+                      <label className={lbl}>CSV file *</label>
+                      <input type="file" accept=".csv,text/csv,text/plain"
+                        onChange={e => setImportFile(e.target.files?.[0] ?? null)}
+                        className="block w-full text-sm text-white/70 file:mr-3 file:px-4 file:py-2 file:rounded-xl file:border-0 file:bg-saffron-gradient file:text-white file:font-bold file:text-xs file:cursor-pointer cursor-pointer" />
+                      <p className="text-white/40 text-xs mt-1">PayPal / SumUp / Stripe / NatWest / generic UK bank. 10 MB max.</p>
+                    </div>
+                    <div>
+                      <label className={lbl}>Provider hint</label>
+                      <select value={providerHint} onChange={e => setProviderHint(e.target.value as typeof providerHint)} className={inp}>
+                        <option value="AUTO">Auto-detect (recommended)</option>
+                        <option value="PAYPAL">PayPal</option>
+                        <option value="STRIPE">Stripe</option>
+                        <option value="SUMUP">SumUp</option>
+                        <option value="NATWEST">NatWest</option>
+                        <option value="GENERIC">Generic UK bank</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 mt-5">
+                    <button onClick={() => { setShowImport(false); setImportFile(null) }}
+                      className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm font-semibold">Cancel</button>
+                    <button onClick={uploadAndPreview} disabled={importBusy || !importFile}
+                      className="flex-[2] py-2.5 rounded-xl bg-saffron-gradient text-white text-sm font-black disabled:opacity-40">
+                      {importBusy ? 'Parsing…' : 'Upload & Preview'}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {importPreview && (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <Stat label="Provider" value={importPreview.detected_provider} />
+                    <Stat label="Transactions" value={String(importPreview.transaction_count)} />
+                    <Stat label="Duplicates" value={String(importPreview.duplicates_count)} tone={importPreview.duplicates_count > 0 ? 'warn' : undefined} />
+                    <Stat label="Period" value={importPreview.period_start && importPreview.period_end ? `${importPreview.period_start} → ${importPreview.period_end}` : '—'} />
+                  </div>
+
+                  {importPreview.parse_errors.length > 0 && (
+                    <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-4 py-3 mb-4 text-xs text-amber-200">
+                      <p className="font-bold mb-1">{importPreview.parse_errors.length} row(s) failed to parse — review before commit:</p>
+                      <ul className="list-disc list-inside space-y-0.5">
+                        {importPreview.parse_errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}
+                        {importPreview.parse_errors.length > 5 && <li>…and {importPreview.parse_errors.length - 5} more</li>}
+                      </ul>
+                    </div>
+                  )}
+
+                  <p className="text-white/50 text-xs uppercase tracking-wide font-bold mb-2">Preview (first 50)</p>
+                  <div className="rounded-xl border border-white/5 overflow-x-auto max-h-80 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-white/5 sticky top-0">
+                        <tr className="text-white/60 text-[10px] uppercase tracking-wide">
+                          <th className="px-2 py-1.5 text-left">Date</th>
+                          <th className="px-2 py-1.5 text-left">Description</th>
+                          <th className="px-2 py-1.5 text-left">Reference</th>
+                          <th className="px-2 py-1.5 text-right">Amount</th>
+                          <th className="px-2 py-1.5"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importPreview.preview.map((p, i) => (
+                          <tr key={i} className={`border-t border-white/5 ${p.is_duplicate ? 'opacity-50' : ''}`}>
+                            <td className="px-2 py-1 whitespace-nowrap text-white/80">{p.txn_date}</td>
+                            <td className="px-2 py-1 text-white/70">{p.description}</td>
+                            <td className="px-2 py-1 text-white/40 font-mono">{p.reference || '—'}</td>
+                            <td className={`px-2 py-1 text-right font-mono font-bold ${p.amount >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {p.amount >= 0 ? '+' : ''}{p.amount.toFixed(2)}
+                            </td>
+                            <td className="px-2 py-1">
+                              {p.is_duplicate && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">DUP</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <label className="flex items-center gap-2 mt-4 cursor-pointer">
+                    <input type="checkbox" checked={skipDups} onChange={e => setSkipDups(e.target.checked)}
+                      className="w-4 h-4 rounded accent-saffron-400" />
+                    <span className="text-white/70 text-sm">Skip duplicates on commit (recommended)</span>
+                  </label>
+
+                  <div className="flex gap-3 mt-5">
+                    <button onClick={() => { setImportPreview(null) }}
+                      className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm font-semibold">← Back</button>
+                    <button onClick={commitImport} disabled={importBusy}
+                      className="flex-[2] py-2.5 rounded-xl bg-saffron-gradient text-white text-sm font-black disabled:opacity-40">
+                      {importBusy ? 'Committing…' : `Commit ${importPreview.transaction_count - (skipDups ? importPreview.duplicates_count : 0)} transactions`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function Stat({ label, value, tone }: { label: string; value: string; tone?: 'warn' }) {
+  return (
+    <div className="rounded-xl bg-white/3 border border-white/5 px-3 py-2">
+      <p className="text-white/40 text-[10px] uppercase tracking-wide font-bold">{label}</p>
+      <p className={`text-sm font-bold ${tone === 'warn' ? 'text-amber-300' : 'text-white'}`}>{value}</p>
     </div>
   )
 }

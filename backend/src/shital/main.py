@@ -1168,6 +1168,31 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_bank_txn_account ON bank_transactions(account_id)",
         "CREATE INDEX IF NOT EXISTS idx_bank_txn_date    ON bank_transactions(txn_date DESC)",
         "CREATE INDEX IF NOT EXISTS idx_bank_txn_recon   ON bank_transactions(reconciled)",
+        # ── Bank statement import history ─────────────────────────────────────
+        # One row per uploaded statement file. file_hash dedups same-file
+        # re-uploads. statement_id on bank_transactions points here once the
+        # row is committed.
+        """CREATE TABLE IF NOT EXISTS bank_statements (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            account_id          UUID NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+            file_name           VARCHAR(500) NOT NULL DEFAULT '',
+            file_hash           VARCHAR(80)  NOT NULL DEFAULT '',
+            file_format         VARCHAR(20)  NOT NULL DEFAULT 'CSV',
+            detected_provider   VARCHAR(40)  NOT NULL DEFAULT '',
+            period_start        DATE,
+            period_end          DATE,
+            transaction_count   INT          NOT NULL DEFAULT 0,
+            duplicates_count    INT          NOT NULL DEFAULT 0,
+            status              VARCHAR(20)  NOT NULL DEFAULT 'PARSED',
+            uploaded_by_user_id UUID,
+            uploaded_by_name    VARCHAR(255) NOT NULL DEFAULT '',
+            error_message       TEXT         NOT NULL DEFAULT '',
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            committed_at        TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_bank_stmt_account ON bank_statements(account_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_stmt_hash    ON bank_statements(file_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_stmt_status  ON bank_statements(status)",
         # ── Volunteer Registration ────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS volunteers (
             id                          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1980,6 +2005,7 @@ _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.bank_accounts",         "router")
+_mount("shital.api.routers.bank_imports",          "router")
 _mount("shital.api.routers.board",                 "router")
 _mount("shital.api.routers.board_voting",          "router")
 _mount("shital.api.routers.volunteers",            "router")
