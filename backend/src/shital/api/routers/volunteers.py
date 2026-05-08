@@ -151,6 +151,13 @@ def _gen_reference() -> str:
     return f"SHITAL-VOL-{today}-{uuid.uuid4().hex[:6].upper()}"
 
 
+def _gen_draft_token() -> str:
+    """44-char URL-safe random — opaque resume token. The applicant
+    stashes it in their URL hash; we use it as a primary lookup key."""
+    import secrets
+    return secrets.token_urlsafe(32)
+
+
 def _require_admin(ctx: CurrentSpace) -> None:
     if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
         raise HTTPException(
@@ -327,6 +334,102 @@ def _jsonify(obj: Any) -> str:
     """Serialise dict/list to JSON for SQLAlchemy bind into a jsonb column."""
     import json
     return json.dumps(obj)
+
+
+# ─── Public endpoints — partial save / resume ────────────────────────────────
+
+class DraftBody(BaseModel):
+    """Wizard auto-save payload. The whole form goes in `payload` as-is —
+    no validation, since drafts are explicitly mid-fill. The server only
+    cares about the token (for upserts) and email (for resume-by-email
+    later, if the applicant loses their token but remembers their email)."""
+    token: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    email: str = ""
+    branch_id: str = "main"
+
+
+@router.post("/service/volunteers/draft")
+async def save_draft(body: DraftBody) -> dict[str, Any]:
+    """Create a new draft, or upsert an existing one by token. Returns
+    the (possibly new) token + expiry the client should display."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    token = body.token.strip() or _gen_draft_token()
+    email_key = body.email.strip().lower()[:255]
+
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            INSERT INTO volunteer_drafts
+                (id, token, email, payload, branch_id, created_at, updated_at, expires_at)
+            VALUES
+                (gen_random_uuid(), :token, :email, CAST(:payload AS jsonb), :branch,
+                 NOW(), NOW(), NOW() + INTERVAL '30 days')
+            ON CONFLICT (token) DO UPDATE SET
+                payload    = EXCLUDED.payload,
+                email      = COALESCE(NULLIF(EXCLUDED.email,''), volunteer_drafts.email),
+                branch_id  = EXCLUDED.branch_id,
+                updated_at = NOW(),
+                expires_at = NOW() + INTERVAL '30 days'
+            RETURNING token, expires_at
+        """), {
+            "token": token, "email": email_key,
+            "payload": _jsonify(body.payload), "branch": body.branch_id,
+        })
+        row = result.mappings().one()
+        await db.commit()
+    return {
+        "ok": True,
+        "token": row["token"],
+        "expires_at": row["expires_at"].isoformat() if row["expires_at"] else None,
+    }
+
+
+@router.get("/service/volunteers/draft/{token}")
+async def get_draft(token: str) -> dict[str, Any]:
+    """Resume — fetch a saved draft by token. 404 if expired/missing.
+    Public on purpose: the token IS the auth (32 bytes of urandom),
+    so anyone with the link can resume."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        row = await db.execute(text("""
+            SELECT token, payload, branch_id, updated_at, expires_at
+            FROM   volunteer_drafts
+            WHERE  token = :token
+              AND  expires_at > NOW()
+        """), {"token": token})
+        rec = row.mappings().one_or_none()
+    if not rec:
+        raise HTTPException(404, detail="Draft not found or expired")
+    return {
+        "token":      rec["token"],
+        "payload":    rec["payload"],
+        "branch_id":  rec["branch_id"],
+        "updated_at": rec["updated_at"].isoformat() if rec["updated_at"] else None,
+        "expires_at": rec["expires_at"].isoformat() if rec["expires_at"] else None,
+    }
+
+
+@router.delete("/service/volunteers/draft/{token}")
+async def delete_draft(token: str) -> dict[str, Any]:
+    """Discard — applicant explicitly clearing their draft. No-op if the
+    token isn't found (idempotent)."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        await db.execute(
+            text("DELETE FROM volunteer_drafts WHERE token = :token"),
+            {"token": token},
+        )
+        await db.commit()
+    return {"ok": True}
 
 
 # ─── Admin endpoints — list + detail + approve/reject ─────────────────────────

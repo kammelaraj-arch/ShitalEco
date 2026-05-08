@@ -192,43 +192,99 @@ export function VolunteerRegistrationPage() {
   const [wizardStep, setWizardStep] = useState(0)
   const [stepErrors, setStepErrors] = useState<string[]>([])
   const [hasDraft, setHasDraft] = useState(false)
+  const [draftToken, setDraftToken] = useState('')
+  const [draftSyncedAt, setDraftSyncedAt] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [reference, setReference] = useState('')
 
-  // Restore draft from localStorage once on mount. The form is otherwise
-  // fully usable on first paint — the draft just rehydrates if present.
+  // Restore draft on mount. URL hash `#draft=<token>` wins — that's how
+  // resume-on-another-device works. Otherwise fall back to localStorage.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as { form?: Form; wizardStep?: number; savedAt?: string }
-      if (parsed.form && typeof parsed.form === 'object') {
-        setForm({ ...EMPTY, ...parsed.form })
-        if (typeof parsed.wizardStep === 'number') setWizardStep(parsed.wizardStep)
-        setHasDraft(true)
+    let cancelled = false
+    async function restore() {
+      // 1) Try URL hash token (cross-device resume)
+      const m = /[#&]draft=([A-Za-z0-9_-]+)/.exec(window.location.hash || '')
+      const hashToken = m?.[1]
+      if (hashToken) {
+        try {
+          const d = await api.getVolunteerDraft(hashToken)
+          if (cancelled) return
+          if (d.payload && typeof d.payload === 'object') {
+            const p = d.payload as Partial<Form> & { __wizardStep?: number }
+            setForm({ ...EMPTY, ...p })
+            if (typeof p.__wizardStep === 'number') setWizardStep(p.__wizardStep)
+            setDraftToken(d.token)
+            setHasDraft(true)
+            setDraftSyncedAt(d.updated_at || '')
+            return
+          }
+        } catch {
+          // Token expired or wrong — fall through to localStorage.
+        }
       }
-    } catch {
-      // Corrupt draft — ignore. User starts fresh.
+      // 2) Fall back to localStorage (same-device resume)
+      try {
+        const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+        if (!raw) return
+        const parsed = JSON.parse(raw) as { form?: Form; wizardStep?: number; token?: string; savedAt?: string }
+        if (parsed.form && typeof parsed.form === 'object') {
+          setForm({ ...EMPTY, ...parsed.form })
+          if (typeof parsed.wizardStep === 'number') setWizardStep(parsed.wizardStep)
+          if (parsed.token) setDraftToken(parsed.token)
+          setHasDraft(true)
+        }
+      } catch {
+        // Corrupt draft — ignore.
+      }
     }
+    restore()
+    return () => { cancelled = true }
   }, [])
 
-  // Auto-save to localStorage on every form / step change. Cheap and
-  // synchronous; covers same-device resume after a tab close or crash.
+  // localStorage auto-save (synchronous, every change). Covers tab-close /
+  // crash recovery on the same device — lossless.
   useEffect(() => {
     if (step !== 'fill') return
     try {
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({
-        form, wizardStep, savedAt: new Date().toISOString(),
+        form, wizardStep, token: draftToken, savedAt: new Date().toISOString(),
       }))
-    } catch {
-      // Quota / private mode — fine to silently skip.
-    }
-  }, [form, wizardStep, step])
+    } catch { /* quota / private-mode — fine to skip */ }
+  }, [form, wizardStep, step, draftToken])
 
-  function discardDraft() {
+  // Server-side draft sync (debounced 1.5s). Lets the applicant resume
+  // on another device by sharing the URL hash. Quietly no-ops on errors —
+  // localStorage is still the primary source of truth for resume.
+  useEffect(() => {
+    if (step !== 'fill') return
+    const tid = setTimeout(async () => {
+      try {
+        const d = await api.saveVolunteerDraft({
+          token: draftToken || undefined,
+          payload: { ...form, __wizardStep: wizardStep },
+          email: form.email,
+          branchId,
+        })
+        setDraftToken(prev => prev || d.token)
+        setDraftSyncedAt(new Date().toISOString())
+        if (!draftToken && d.token) {
+          // First save → put the token in the URL so a copied link resumes
+          window.history.replaceState(null, '', `#draft=${d.token}`)
+        }
+      } catch { /* ignore — server may be down */ }
+    }, 1500)
+    return () => clearTimeout(tid)
+  }, [form, wizardStep, step, draftToken, branchId])
+
+  async function discardDraft() {
     try { localStorage.removeItem(DRAFT_STORAGE_KEY) } catch { /* ignore */ }
+    if (draftToken) {
+      try { await api.deleteVolunteerDraft(draftToken) } catch { /* ignore */ }
+    }
+    window.history.replaceState(null, '', window.location.pathname + window.location.search)
     setForm(EMPTY); setWizardStep(0); setHasDraft(false); setStepErrors([])
+    setDraftToken(''); setDraftSyncedAt('')
   }
 
   // Active branches (for the "where would you like to volunteer?" picker).
@@ -336,9 +392,14 @@ export function VolunteerRegistrationPage() {
       const res = await api.registerVolunteer(payload)
       setReference(res.reference_number)
       setStep('done')
-      // Submission successful — wipe the draft so a refresh doesn't
-      // resurrect it for the next applicant on a shared device.
+      // Submission successful — wipe BOTH the local + server draft so a
+      // refresh doesn't resurrect it for the next applicant on a shared
+      // device, and the resume URL stops working.
       try { localStorage.removeItem(DRAFT_STORAGE_KEY) } catch { /* ignore */ }
+      if (draftToken) {
+        try { await api.deleteVolunteerDraft(draftToken) } catch { /* ignore */ }
+      }
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Registration failed')
     } finally {
@@ -685,9 +746,9 @@ export function VolunteerRegistrationPage() {
 
       {/* ── STEP 4 — Skills + Availability ──────────────────────────────── */}
       {wizardStep === 4 && (<>
-      <Section title={t('section.skills.title', 'Your Skills')}>
+      <Section title={t('section.skills.title', 'Your Skills (optional)')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          {t('section.skills.intro', 'Tap a category to see options. Pick everything that applies — we use this to match you with suitable opportunities.')}
+          {t('section.skills.intro', 'Optional — but the more you tell us, the better we can match you with suitable opportunities. Tap a category to expand.')}
         </p>
         <div className="space-y-2">
           {SKILLS_CATALOG.map(cat => {
@@ -740,9 +801,9 @@ export function VolunteerRegistrationPage() {
       </Section>
 
       {/* Availability */}
-      <Section title={t('section.availability.title', 'Availability')}>
+      <Section title={t('section.availability.title', 'Availability (optional)')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          {t('section.availability.intro', 'Tell us roughly when you can help. Tap any that apply — we’ll work around your schedule.')}
+          {t('section.availability.intro', "Optional — tell us roughly when you can help. Tap any that apply, or skip and we'll discuss at interview.")}
         </p>
 
         <div className="mb-4">
@@ -898,7 +959,9 @@ export function VolunteerRegistrationPage() {
 
       <p className="text-center text-xs mt-3" style={{ color: 'rgba(255,248,220,0.3)' }}>
         {wizardStep < WIZARD_STEPS.length - 1
-          ? '💾 Your progress is saved automatically. You can come back later.'
+          ? draftToken
+            ? `💾 Saved. Bookmark this page — you can resume on any device for 30 days.${draftSyncedAt ? '' : ''}`
+            : '💾 Your progress is saved automatically. You can come back later.'
           : t('submit.help', 'After submission, a trustee will review your application. References will be taken before a role is confirmed.')}
       </p>
     </div>

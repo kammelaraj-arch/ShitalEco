@@ -213,6 +213,39 @@ export const api = {
     if (!r.ok) throw new Error(`form-config fetch failed: ${r.status}`)
     return r.json()
   },
+
+  // ── Volunteer draft (cross-device partial save) ─────────────────────────
+  async saveVolunteerDraft(args: { token?: string; payload: unknown; email?: string; branchId?: string }):
+      Promise<{ ok: boolean; token: string; expires_at: string | null }> {
+    const r = await fetch(`${API}/service/volunteers/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: args.token || '',
+        payload: args.payload,
+        email: args.email || '',
+        branch_id: args.branchId || 'main',
+      }),
+    })
+    if (!r.ok) throw new Error(`Draft save failed: ${r.status}`)
+    return r.json()
+  },
+
+  async getVolunteerDraft(token: string): Promise<{
+    token: string
+    payload: Record<string, unknown>
+    branch_id: string
+    updated_at: string | null
+    expires_at: string | null
+  }> {
+    const r = await fetch(`${API}/service/volunteers/draft/${encodeURIComponent(token)}`)
+    if (!r.ok) throw new Error(`Draft not found: ${r.status}`)
+    return r.json()
+  },
+
+  async deleteVolunteerDraft(token: string): Promise<void> {
+    await fetch(`${API}/service/volunteers/draft/${encodeURIComponent(token)}`, { method: 'DELETE' })
+  },
 }
 
 export interface VolunteerRegistrationPayload {

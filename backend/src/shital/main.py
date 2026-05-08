@@ -1252,6 +1252,24 @@ async def _patch_schema() -> None:
         # literal 'remote' as a sentinel for online/remote-only. Distinct from
         # `branch_id` (which is the org branch that owns the application).
         "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_branches JSONB NOT NULL DEFAULT '[]'::jsonb",
+        # ── Volunteer drafts (cross-device partial save) ──────────────────────
+        # The wizard auto-saves to localStorage on every change. For applicants
+        # who want to resume on a different device — or who clear browser data
+        # mid-fill — we also persist to this table, keyed by an opaque token
+        # the client stashes in the URL hash. Drafts expire after 30 days.
+        """CREATE TABLE IF NOT EXISTS volunteer_drafts (
+            id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            token       VARCHAR(64)  UNIQUE NOT NULL,
+            email       VARCHAR(255) NOT NULL DEFAULT '',
+            payload     JSONB        NOT NULL DEFAULT '{}'::jsonb,
+            branch_id   VARCHAR(100) NOT NULL DEFAULT 'main',
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            expires_at  TIMESTAMPTZ  NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_volunteer_drafts_token   ON volunteer_drafts(token)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteer_drafts_email   ON volunteer_drafts(LOWER(email)) WHERE email != ''",
+        "CREATE INDEX IF NOT EXISTS idx_volunteer_drafts_expires ON volunteer_drafts(expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_contact ON volunteers(contact_id)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_partial_token ON volunteers(partial_save_token) WHERE partial_save_token != ''",
         # Backfill: link existing volunteer rows to a contact row by email.
