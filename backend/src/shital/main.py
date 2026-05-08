@@ -1241,6 +1241,23 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_volunteers_email  ON volunteers(email)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_branch ON volunteers(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_created ON volunteers(created_at DESC)",
+        # ── Form-text overrides (admin-editable strings on public forms) ──────
+        # Sparse table: only stores OVERRIDES. Defaults live in code (per
+        # form_key catalogue in shital.api.routers.form_config). Lookup is
+        # by (form_key, field_key); admin sets/clears overrides without
+        # needing to seed every field.
+        """CREATE TABLE IF NOT EXISTS form_text_overrides (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            form_key        VARCHAR(100) NOT NULL,
+            field_key       VARCHAR(200) NOT NULL,
+            override_text   TEXT NOT NULL DEFAULT '',
+            updated_by      UUID,
+            updated_by_name VARCHAR(255) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (form_key, field_key)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_form_text_form ON form_text_overrides(form_key)",
         # ── Board of Trustees Resolutions & Voting ────────────────────────────
         # Distinct sub-system: governance records (resolutions, votes, minutes,
         # conflicts, audit). PR 1 of 6 introduces the foundation tables only —
@@ -1908,6 +1925,7 @@ _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.bank_accounts",         "router")
 _mount("shital.api.routers.board",                 "router")
 _mount("shital.api.routers.volunteers",            "router")
+_mount("shital.api.routers.form_config",           "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.accounts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
