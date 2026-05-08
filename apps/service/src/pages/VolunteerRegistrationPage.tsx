@@ -8,32 +8,40 @@ const TITLES = ['', 'Dr', 'Mr', 'Mrs', 'Ms', 'Master', 'Other']
 const AGE_RANGES = ['18-25', '26-35', '36-45', '46-55', '55+']
 
 // Skills checklist mirrors paper-form V1.2 page 4 layout. Each row is one
-// category with its options. Renamed to match how staff describe them.
-const SKILLS_CATALOG: Array<{ key: string; label: string; options: string[] }> = [
-  { key: 'Administrative',  label: 'Administrative',     options: ['General Office Duties', 'Accountancy', 'Research', 'Secretarial', 'Other'] },
-  { key: 'Logistics',       label: 'Logistics',          options: ['Driving', 'Loading / Unloading', 'Warehouse Management', 'Import / Export', 'Other'] },
-  { key: 'Cultural',        label: 'Cultural',           options: ['Singing', 'Dancing', 'Drama', 'Other'] },
-  { key: 'Communications',  label: 'Communications',     options: ['Marketing / PR', 'Community Relations', 'Cataloguing', 'Conducting Surveys', 'Social Media', 'Other'] },
-  { key: 'IT',              label: 'IT',                 options: ['Data Entry', 'Web Developing', 'Networking', 'Other'] },
-  { key: 'Religious',       label: 'Religious',          options: ['Bhajans / Shlokas', 'Other'] },
-  { key: 'EventManagement', label: 'Event Management',   options: ['Advertising / Publicity', 'Public Relations', 'First Aider', 'Security', 'Other'] },
-  { key: 'Education',       label: 'Education',          options: ['Tuition', 'Teaching', 'Counselling', 'Consultancy', 'Language', 'Other'] },
-  { key: 'Hospitality',     label: 'Hospitality',        options: ['Care Taker', 'Child Minder', 'Other'] },
-  { key: 'CharityServices', label: 'Charity Services',   options: ['Fund Raising', 'Distributing Food', 'Other'] },
-  { key: 'Other',           label: 'Other Skills',       options: ['DIY', 'Carpentry', 'Electrical', 'Plumbing', 'Cooking', 'Other'] },
+// category with its options. Categories collapsed by default to stop the
+// form being a wall of 55 chips on first paint.
+const SKILLS_CATALOG: Array<{ key: string; label: string; icon: string; options: string[] }> = [
+  { key: 'Administrative',  label: 'Administrative',   icon: '📋', options: ['General Office Duties', 'Accountancy', 'Research', 'Secretarial', 'Other'] },
+  { key: 'Logistics',       label: 'Logistics',        icon: '🚚', options: ['Driving', 'Loading / Unloading', 'Warehouse Management', 'Import / Export', 'Other'] },
+  { key: 'Cultural',        label: 'Cultural',         icon: '🎭', options: ['Singing', 'Dancing', 'Drama', 'Other'] },
+  { key: 'Communications',  label: 'Communications',   icon: '📣', options: ['Marketing / PR', 'Community Relations', 'Cataloguing', 'Conducting Surveys', 'Social Media', 'Other'] },
+  { key: 'IT',              label: 'IT',               icon: '💻', options: ['Data Entry', 'Web Developing', 'Networking', 'Other'] },
+  { key: 'Religious',       label: 'Religious',        icon: '🕉️', options: ['Bhajans / Shlokas', 'Other'] },
+  { key: 'EventManagement', label: 'Event Management', icon: '🎪', options: ['Advertising / Publicity', 'Public Relations', 'First Aider', 'Security', 'Other'] },
+  { key: 'Education',       label: 'Education',        icon: '📚', options: ['Tuition', 'Teaching', 'Counselling', 'Consultancy', 'Language', 'Other'] },
+  { key: 'Hospitality',     label: 'Hospitality',      icon: '🏠', options: ['Care Taker', 'Child Minder', 'Other'] },
+  { key: 'CharityServices', label: 'Charity Services', icon: '🤲', options: ['Fund Raising', 'Distributing Food', 'Other'] },
+  { key: 'Other',           label: 'Other Skills',     icon: '🛠️', options: ['DIY', 'Carpentry', 'Electrical', 'Plumbing', 'Cooking', 'Other'] },
 ]
 
-const WEEKDAYS: Array<{ key: string; label: string }> = [
-  { key: 'monday',    label: 'Monday'    },
-  { key: 'tuesday',   label: 'Tuesday'   },
-  { key: 'wednesday', label: 'Wednesday' },
-  { key: 'thursday',  label: 'Thursday'  },
-  { key: 'friday',    label: 'Friday'    },
-  { key: 'saturday',  label: 'Saturday'  },
-  { key: 'sunday',    label: 'Sunday'    },
+const WEEKDAYS: Array<{ key: string; label: string; short: string }> = [
+  { key: 'monday',    label: 'Monday',    short: 'Mon' },
+  { key: 'tuesday',   label: 'Tuesday',   short: 'Tue' },
+  { key: 'wednesday', label: 'Wednesday', short: 'Wed' },
+  { key: 'thursday',  label: 'Thursday',  short: 'Thu' },
+  { key: 'friday',    label: 'Friday',    short: 'Fri' },
+  { key: 'saturday',  label: 'Saturday',  short: 'Sat' },
+  { key: 'sunday',    label: 'Sunday',    short: 'Sun' },
 ]
 
-const AVAILABILITY_PATTERNS = ['daily', 'weekly', 'events-only']
+const TIME_SLOTS: Array<{ key: string; label: string; hint: string }> = [
+  { key: 'morning',   label: 'Morning',   hint: '~9am – noon' },
+  { key: 'afternoon', label: 'Afternoon', hint: '~noon – 5pm' },
+  { key: 'evening',   label: 'Evening',   hint: '~5pm onwards' },
+  { key: 'flexible',  label: 'Flexible',  hint: 'Any time' },
+]
+
+const AVAILABILITY_PATTERNS = ['weekly', 'fortnightly', 'monthly', 'events-only', 'flexible']
 
 const inp = 'w-full px-4 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 focus:border-saffron-400/50 outline-none text-ivory-100 placeholder-white/30'
 const lbl = 'block text-xs font-bold uppercase tracking-widest mb-1.5'
@@ -74,7 +82,10 @@ interface Form {
 
   skills: Record<string, string[]>
   skills_other_text: string
-  availability: Record<string, Record<string, string>>
+  // New shape: { days: string[], times: string[], notes: string }. Stored
+  // as a JSONB blob server-side; admin renders both this and the legacy
+  // {day: {slot: time}} shape for backwards compatibility with old rows.
+  availability: { days: string[]; times: string[]; notes: string }
   availability_pattern: string
 
   declaration_agreed: boolean
@@ -98,7 +109,7 @@ const EMPTY: Form = {
   ref2_address: '', ref2_postcode: '', ref2_uprn: '',
   ref2_mobile: '', ref2_phone: '', ref2_email: '',
   skills: {}, skills_other_text: '',
-  availability: {}, availability_pattern: '',
+  availability: { days: [], times: [], notes: '' }, availability_pattern: '',
   declaration_agreed: false, confidentiality_agreed: false, marketing_consent: false,
   preferred_branches: [],
 }
@@ -169,15 +180,41 @@ export function VolunteerRegistrationPage() {
     })
   }
 
-  function setAvailSlot(day: string, slot: 'morning' | 'afternoon' | 'evening', value: string) {
+  function toggleAvailDay(day: string) {
     setForm(p => {
-      const dayObj = { ...(p.availability[day] || {}) }
-      if (value.trim()) dayObj[slot] = value
-      else delete dayObj[slot]
-      const availability = { ...p.availability }
-      if (Object.keys(dayObj).length) availability[day] = dayObj
-      else delete availability[day]
-      return { ...p, availability }
+      const has = p.availability.days.includes(day)
+      return {
+        ...p,
+        availability: {
+          ...p.availability,
+          days: has ? p.availability.days.filter(d => d !== day) : [...p.availability.days, day],
+        },
+      }
+    })
+  }
+  function toggleAvailTime(slot: string) {
+    setForm(p => {
+      const has = p.availability.times.includes(slot)
+      return {
+        ...p,
+        availability: {
+          ...p.availability,
+          times: has ? p.availability.times.filter(t => t !== slot) : [...p.availability.times, slot],
+        },
+      }
+    })
+  }
+  function setAvailNotes(notes: string) {
+    setForm(p => ({ ...p, availability: { ...p.availability, notes } }))
+  }
+
+  // Skills categories collapsed by default — track which ones are open.
+  const [openSkillCats, setOpenSkillCats] = useState<Set<string>>(new Set())
+  function toggleCat(key: string) {
+    setOpenSkillCats(p => {
+      const n = new Set(p)
+      if (n.has(key)) n.delete(key); else n.add(key)
+      return n
     })
   }
 
@@ -485,73 +522,107 @@ export function VolunteerRegistrationPage() {
       {/* Skills */}
       <Section title={t('section.skills.title', 'Your Skills')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          {t('section.skills.intro', 'Tick everything that applies. We use this to match you with suitable opportunities.')}
+          {t('section.skills.intro', 'Tap a category to see options. Pick everything that applies — we use this to match you with suitable opportunities.')}
         </p>
-        {SKILLS_CATALOG.map(cat => (
-          <div key={cat.key} className="mb-3">
-            <p className="text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.55)' }}>{cat.label}</p>
-            <div className="flex flex-wrap gap-2">
-              {cat.options.map(opt => {
-                const active = (form.skills[cat.key] || []).includes(opt)
-                return (
-                  <button key={opt} type="button" onClick={() => toggleSkill(cat.key, opt)}
-                    className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-                    style={{
-                      background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
-                      border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
-                      color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
-                    }}>
-                    {opt}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        ))}
+        <div className="space-y-2">
+          {SKILLS_CATALOG.map(cat => {
+            const selected = form.skills[cat.key] || []
+            const open = openSkillCats.has(cat.key) || selected.length > 0
+            return (
+              <div key={cat.key} className="rounded-xl overflow-hidden"
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <button type="button" onClick={() => toggleCat(cat.key)}
+                  className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg">{cat.icon}</span>
+                    <span className="font-bold text-sm text-ivory-100">{cat.label}</span>
+                    {selected.length > 0 && (
+                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+                        style={{ background: 'rgba(212,175,55,0.2)', color: '#FFD980' }}>
+                        {selected.length} picked
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-white/40 text-sm">{open ? '−' : '+'}</span>
+                </button>
+                {open && (
+                  <div className="px-4 pb-4 pt-1 flex flex-wrap gap-2">
+                    {cat.options.map(opt => {
+                      const active = selected.includes(opt)
+                      return (
+                        <button key={opt} type="button" onClick={() => toggleSkill(cat.key, opt)}
+                          className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                          style={{
+                            background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
+                            border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
+                            color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
+                          }}>
+                          {opt}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
         <div className="mt-4">
-          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>{t('section.skills.other_label', 'Other skills (free-text)')}</label>
+          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>{t('section.skills.other_label', 'Anything else? (free-text)')}</label>
           <textarea value={form.skills_other_text} onChange={e => update('skills_other_text', e.target.value)} rows={2}
-            className={inp + ' resize-none'} placeholder={t('section.skills.other_placeholder', 'Security, First Aid, Singing, Musical Instruments etc.')} />
+            className={inp + ' resize-none'} placeholder={t('section.skills.other_placeholder', 'First Aid, Musical Instruments, Languages etc.')} />
         </div>
       </Section>
 
       {/* Availability */}
       <Section title={t('section.availability.title', 'Availability')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          {t('section.availability.intro', "Tell us when you're typically free. You can leave any cell blank.")}
+          {t('section.availability.intro', 'Tell us roughly when you can help. Tap any that apply — we’ll work around your schedule.')}
         </p>
-        <div className="overflow-x-auto -mx-2 mb-4">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left" style={{ color: 'rgba(212,175,55,0.55)' }}>
-                <th className="px-2 py-1 font-bold uppercase tracking-widest">Day</th>
-                <th className="px-2 py-1 font-bold uppercase tracking-widest">Morning</th>
-                <th className="px-2 py-1 font-bold uppercase tracking-widest">Afternoon</th>
-                <th className="px-2 py-1 font-bold uppercase tracking-widest">Evening</th>
-              </tr>
-            </thead>
-            <tbody>
-              {WEEKDAYS.map(day => (
-                <tr key={day.key}>
-                  <td className="px-2 py-1 text-ivory-200 font-semibold whitespace-nowrap">{day.label}</td>
-                  {(['morning', 'afternoon', 'evening'] as const).map(slot => (
-                    <td key={slot} className="px-2 py-1">
-                      <input
-                        value={form.availability[day.key]?.[slot] || ''}
-                        onChange={e => setAvailSlot(day.key, slot, e.target.value)}
-                        placeholder="9-12"
-                        className="w-full px-2 py-1.5 rounded-lg text-xs bg-white/5 border border-white/10 outline-none focus:border-saffron-400/50 text-ivory-100 placeholder-white/25"
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        <div className="mb-4">
+          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Days</p>
+          <div className="flex flex-wrap gap-2">
+            {WEEKDAYS.map(d => {
+              const active = form.availability.days.includes(d.key)
+              return (
+                <button key={d.key} type="button" onClick={() => toggleAvailDay(d.key)}
+                  className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                  style={{
+                    background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
+                    color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
+                  }}>
+                  {d.short}
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <div>
-          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Pattern</label>
-          <div className="flex gap-2">
+
+        <div className="mb-4">
+          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Times of day</p>
+          <div className="flex flex-wrap gap-2">
+            {TIME_SLOTS.map(s => {
+              const active = form.availability.times.includes(s.key)
+              return (
+                <button key={s.key} type="button" onClick={() => toggleAvailTime(s.key)}
+                  className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                  style={{
+                    background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
+                    color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
+                  }}>
+                  {s.label} <span className="opacity-50">· {s.hint}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>How often</p>
+          <div className="flex flex-wrap gap-2">
             {AVAILABILITY_PATTERNS.map(p => {
               const active = form.availability_pattern === p
               return (
@@ -567,6 +638,13 @@ export function VolunteerRegistrationPage() {
               )
             })}
           </div>
+        </div>
+
+        <div>
+          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Anything else about your availability? (optional)</label>
+          <textarea value={form.availability.notes} onChange={e => setAvailNotes(e.target.value)} rows={2}
+            className={inp + ' resize-none'}
+            placeholder="e.g. school holidays only, alternate weekends, every Tuesday from January…" />
         </div>
       </Section>
 

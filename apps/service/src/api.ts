@@ -235,7 +235,11 @@ export interface VolunteerRegistrationPayload {
   ref2_mobile: string; ref2_phone: string; ref2_email: string
   // Skills + availability
   skills: Record<string, string[]>; skills_other_text: string
-  availability: Record<string, Record<string, string>>; availability_pattern: string
+  // Availability shape: { days: string[], times: string[], notes: string }.
+  // Stored as JSONB server-side; the admin UI also handles legacy
+  // {day: {slot: time}} rows submitted before this redesign.
+  availability: { days: string[]; times: string[]; notes: string }
+  availability_pattern: string
   // Consents
   declaration_agreed: boolean; confidentiality_agreed: boolean; marketing_consent: boolean
   branch_id: string
