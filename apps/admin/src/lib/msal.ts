@@ -63,8 +63,12 @@ export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
 
   // Use admin-configured redirect URI (MS_REDIRECT_URI secret) so it matches
   // exactly what's registered in Azure AD app registration.
-  // Falls back to window.location.origin + '/auth-callback'.
-  const redirectUri = (config as any).redirect_uri || `${window.location.origin}/auth-callback`
+  //
+  // Fallback must include the /admin basePath — the Next.js admin app is
+  // served under /admin/* (next.config.mjs: basePath:'/admin', trailingSlash:
+  // true), so /auth-callback without that prefix doesn't resolve and nginx
+  // bounces the popup to /admin/login/, looking like an infinite sign-in loop.
+  const redirectUri = (config as any).redirect_uri || `${window.location.origin}/admin/auth-callback/`
   // Use Date.now() as nonce — avoids window.crypto which is HTTPS-only
   const nonce = String(Date.now())
   const scope = encodeURIComponent('openid profile email')
