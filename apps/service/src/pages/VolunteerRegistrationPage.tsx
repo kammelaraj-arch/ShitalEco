@@ -194,6 +194,8 @@ export function VolunteerRegistrationPage() {
   const [hasDraft, setHasDraft] = useState(false)
   const [draftToken, setDraftToken] = useState('')
   const [draftSyncedAt, setDraftSyncedAt] = useState<string>('')
+  const [emailLinkBusy, setEmailLinkBusy] = useState(false)
+  const [emailLinkMsg, setEmailLinkMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [reference, setReference] = useState('')
@@ -359,6 +361,31 @@ export function VolunteerRegistrationPage() {
       if (n.has(key)) n.delete(key); else n.add(key)
       return n
     })
+  }
+
+  async function emailMyLink() {
+    setEmailLinkMsg(null)
+    if (!draftToken) {
+      setEmailLinkMsg({ text: "Save in progress — please try again in a moment.", ok: false })
+      return
+    }
+    const target = form.email.trim()
+    if (!target || !target.includes('@')) {
+      setEmailLinkMsg({ text: 'Enter your email on Step 1 first, then come back.', ok: false })
+      return
+    }
+    setEmailLinkBusy(true)
+    try {
+      await api.emailVolunteerDraftLink({ token: draftToken, email: target })
+      setEmailLinkMsg({ text: `Sent to ${target}. Check your inbox (and spam folder).`, ok: true })
+    } catch (e) {
+      setEmailLinkMsg({
+        text: e instanceof Error ? e.message : 'Email send failed',
+        ok: false,
+      })
+    } finally {
+      setEmailLinkBusy(false)
+    }
   }
 
   function goNext() {
@@ -964,6 +991,25 @@ export function VolunteerRegistrationPage() {
             : '💾 Your progress is saved automatically. You can come back later.'
           : t('submit.help', 'After submission, a trustee will review your application. References will be taken before a role is confirmed.')}
       </p>
+
+      {/* Email-me-my-resume-link — only on the wizard, never on the
+          confirmation screen, and only if there's actually a draft to
+          email. The applicant must have entered their email on Step 1. */}
+      {wizardStep < WIZARD_STEPS.length - 1 && draftToken && (
+        <div className="mt-4 text-center">
+          <button onClick={emailMyLink} disabled={emailLinkBusy || !form.email.trim()}
+            className="text-xs underline disabled:opacity-50"
+            style={{ color: 'rgba(96,165,250,0.85)' }}>
+            {emailLinkBusy ? 'Sending…' : '📧 Email me a resume link'}
+          </button>
+          {emailLinkMsg && (
+            <p className="text-xs mt-2"
+              style={{ color: emailLinkMsg.ok ? '#86efac' : '#fca5a5' }}>
+              {emailLinkMsg.text}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

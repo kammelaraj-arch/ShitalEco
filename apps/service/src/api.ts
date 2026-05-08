@@ -246,6 +246,20 @@ export const api = {
   async deleteVolunteerDraft(token: string): Promise<void> {
     await fetch(`${API}/service/volunteers/draft/${encodeURIComponent(token)}`, { method: 'DELETE' })
   },
+
+  async emailVolunteerDraftLink(args: { token: string; email: string }): Promise<{ ok: boolean; sent_to: string }> {
+    const r = await fetch(`${API}/service/volunteers/draft/email-link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(args),
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      const detail = (data as { detail?: string })?.detail
+      throw new Error(detail || `Email send failed (HTTP ${r.status})`)
+    }
+    return data
+  },
 }
 
 export interface VolunteerRegistrationPayload {

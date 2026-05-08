@@ -415,6 +415,129 @@ async def get_draft(token: str) -> dict[str, Any]:
     }
 
 
+class EmailLinkBody(BaseModel):
+    """Send the resume link to an email address. The token IS the auth —
+    anyone who has it can already resume the draft, so emailing the
+    matching link to whichever address they pick doesn't expand access.
+    Office 365 SMTP does the heavy rate-limiting in practice."""
+    token: str
+    email: str
+
+
+@router.post("/service/volunteers/draft/email-link")
+async def email_draft_link(body: EmailLinkBody) -> dict[str, Any]:
+    """Email the resume link for a saved draft. Used when an applicant
+    closes the tab and forgets to bookmark — they ask the form to email
+    them, click the link in their inbox, resume on any device."""
+    import asyncio
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
+
+    if "@" not in body.email or len(body.email) > 255:
+        raise HTTPException(400, detail="Valid email address required")
+
+    # Confirm the draft exists and isn't expired before we send anything —
+    # otherwise the email would link to a 404.
+    async with SessionLocal() as db:
+        row = await db.execute(text("""
+            SELECT token, expires_at
+            FROM   volunteer_drafts
+            WHERE  token = :token AND expires_at > NOW()
+        """), {"token": body.token})
+        rec = row.mappings().one_or_none()
+        if not rec:
+            raise HTTPException(404, detail="Draft not found or expired")
+        # Persist whichever email the applicant wants the link sent to,
+        # so admins can also re-send manually if needed.
+        await db.execute(
+            text("UPDATE volunteer_drafts SET email = :email, updated_at = NOW() WHERE token = :token"),
+            {"email": body.email.strip().lower(), "token": body.token},
+        )
+        await db.commit()
+
+    # Resume URL: ?screen=volunteer hash routes the service portal straight
+    # to the wizard; #draft=TOKEN rehydrates the saved form.
+    site = (settings.SITE_URL or "https://shital.org.uk").rstrip("/")
+    # The volunteer wizard lives on the service-portal subdomain.
+    if "://" in site and "service." not in site:
+        # Best-effort rewrite of shital.org.uk → service.shital.org.uk
+        # without forcing config to grow a new SERVICE_URL setting yet.
+        scheme, host = site.split("://", 1)
+        if not host.startswith("service."):
+            site = f"{scheme}://service.{host}"
+    resume_url = f"{site}/?screen=volunteer#draft={body.token}"
+
+    if not settings.OFFICE365_PASSWORD:
+        raise HTTPException(503, detail="Email service not configured")
+
+    subject = "Your SHITAL volunteer-application resume link"
+    text_body = (
+        "Hello,\n\n"
+        "Here's the link to continue your SHITAL volunteer application "
+        "where you left off. The link is valid for 30 days from your last "
+        "save and can be opened on any device.\n\n"
+        f"{resume_url}\n\n"
+        "If you didn't request this email, you can ignore it — the link "
+        "won't work without the unique code at the end.\n\n"
+        "— SHITAL Volunteers"
+    )
+    html_body = f"""
+        <div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:auto;color:#222">
+          <p>Hello,</p>
+          <p>Here's the link to continue your SHITAL volunteer application
+             where you left off. The link is valid for <strong>30 days</strong>
+             from your last save and can be opened on any device.</p>
+          <p style="margin:24px 0">
+            <a href="{resume_url}"
+               style="display:inline-block;background:linear-gradient(135deg,#D4AF37,#C5A028);
+                      color:#3B0000;font-weight:700;text-decoration:none;
+                      padding:12px 24px;border-radius:12px">
+              Resume my application
+            </a>
+          </p>
+          <p style="font-size:12px;color:#666;word-break:break-all">
+            Or paste this URL into your browser: <br>{resume_url}
+          </p>
+          <p style="font-size:12px;color:#666">
+            If you didn't request this email you can safely ignore it —
+            the link won't work without the unique code at the end.
+          </p>
+          <p style="font-size:12px;color:#999;margin-top:24px">— SHITAL Volunteers</p>
+        </div>
+    """
+
+    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
+    password = settings.OFFICE365_PASSWORD
+    to_email = body.email.strip()
+
+    def _send() -> None:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"SHITAL Volunteers <{from_email}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText(text_body, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
+            srv.ehlo()
+            srv.starttls()
+            srv.login(from_email, password)
+            srv.sendmail(from_email, to_email, msg.as_string())
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send)
+    except Exception as exc:
+        raise HTTPException(502, detail=f"Email send failed: {exc}") from exc
+
+    return {"ok": True, "sent_to": to_email}
+
+
 @router.delete("/service/volunteers/draft/{token}")
 async def delete_draft(token: str) -> dict[str, Any]:
     """Discard — applicant explicitly clearing their draft. No-op if the
