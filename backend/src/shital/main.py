@@ -1266,6 +1266,69 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_volunteers_email  ON volunteers(email)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_branch ON volunteers(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_created ON volunteers(created_at DESC)",
+        # ── Volunteer ↔ Contact link (CRM dedup; criminal/health stay here) ───
+        # The volunteer/donor/member is one PERSON in `contacts`; the volunteer
+        # APPLICATION is a separate row keyed by contact_id. Sensitive fields
+        # (criminal record, health) deliberately stay on volunteers, not on
+        # contacts which is touched by every donation flow.
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id) ON DELETE SET NULL",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS partial_save_token VARCHAR(64) NOT NULL DEFAULT ''",
+        # Where the volunteer wants to help — array of branch codes, with the
+        # literal 'remote' as a sentinel for online/remote-only. Distinct from
+        # `branch_id` (which is the org branch that owns the application).
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_branches JSONB NOT NULL DEFAULT '[]'::jsonb",
+        # ── Volunteer drafts (cross-device partial save) ──────────────────────
+        # The wizard auto-saves to localStorage on every change. For applicants
+        # who want to resume on a different device — or who clear browser data
+        # mid-fill — we also persist to this table, keyed by an opaque token
+        # the client stashes in the URL hash. Drafts expire after 30 days.
+        """CREATE TABLE IF NOT EXISTS volunteer_drafts (
+            id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            token       VARCHAR(64)  UNIQUE NOT NULL,
+            email       VARCHAR(255) NOT NULL DEFAULT '',
+            payload     JSONB        NOT NULL DEFAULT '{}'::jsonb,
+            branch_id   VARCHAR(100) NOT NULL DEFAULT 'main',
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            expires_at  TIMESTAMPTZ  NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_volunteer_drafts_token   ON volunteer_drafts(token)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteer_drafts_email   ON volunteer_drafts(LOWER(email)) WHERE email != ''",
+        "CREATE INDEX IF NOT EXISTS idx_volunteer_drafts_expires ON volunteer_drafts(expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_contact ON volunteers(contact_id)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_partial_token ON volunteers(partial_save_token) WHERE partial_save_token != ''",
+        # Backfill: link existing volunteer rows to a contact row by email.
+        # Idempotent — only touches rows where contact_id IS NULL. Safe to
+        # re-run; later schema patches won't overwrite an explicit contact_id.
+        """
+        WITH new_contacts AS (
+            INSERT INTO contacts (id, email, first_name, surname, full_name, phone,
+                                  gdpr_consent, gdpr_consented_at,
+                                  tac_consent, tac_consented_at,
+                                  first_source, first_branch_id, created_at, updated_at)
+            SELECT  gen_random_uuid(),
+                    LOWER(v.email),
+                    v.first_names,
+                    v.last_name,
+                    TRIM(v.first_names || ' ' || v.last_name),
+                    COALESCE(NULLIF(v.mobile,''), v.phone),
+                    true, v.created_at,
+                    v.confidentiality_agreed, v.created_at,
+                    'volunteer-registration', v.branch_id, v.created_at, v.created_at
+            FROM    volunteers v
+            WHERE   v.contact_id IS NULL
+              AND   v.email IS NOT NULL
+              AND   v.email <> ''
+            ON CONFLICT (email) DO UPDATE
+              SET updated_at = EXCLUDED.updated_at
+            RETURNING id, email
+        )
+        UPDATE volunteers
+           SET contact_id = c.id
+          FROM contacts c
+         WHERE volunteers.contact_id IS NULL
+           AND LOWER(volunteers.email) = c.email
+        """,
         # ── Form-text overrides (admin-editable strings on public forms) ──────
         # Sparse table: only stores OVERRIDES. Defaults live in code (per
         # form_key catalogue in shital.api.routers.form_config). Lookup is
