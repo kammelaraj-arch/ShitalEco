@@ -1337,6 +1337,39 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_resolutions_status      ON resolutions(status)",
         "CREATE INDEX IF NOT EXISTS idx_resolutions_meeting     ON resolutions(meeting_id)",
         "CREATE INDEX IF NOT EXISTS idx_resolutions_decision_dt ON resolutions(decision_date DESC)",
+        # PR 2 — voting engine columns. Idempotent ALTERs so re-applying is safe.
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS created_by_trustee_id UUID",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS quorum_at_close INT",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS effective_quorum_at_close INT",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS tally_for INT NOT NULL DEFAULT 0",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS tally_against INT NOT NULL DEFAULT 0",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS tally_abstain INT NOT NULL DEFAULT 0",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS casting_vote_used BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS casting_vote_choice VARCHAR(10) NOT NULL DEFAULT ''",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb",
+        # ── Resolution votes — one row per trustee per resolution ─────────────
+        # The board acts collectively: each active trustee gets exactly one
+        # vote. Chair's casting vote (when permitted by governing_rules) is
+        # tracked separately on `resolutions.casting_vote_used` to keep its
+        # special status auditable. Trustees can change their own vote up
+        # until status flips to CLOSED.
+        """CREATE TABLE IF NOT EXISTS resolution_votes (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id   UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE RESTRICT,
+            choice          VARCHAR(10) NOT NULL,
+                -- FOR | AGAINST | ABSTAIN
+            anonymous       BOOLEAN NOT NULL DEFAULT false,
+                -- when true, trustee_id is hidden from non-admin readers
+            comment         TEXT NOT NULL DEFAULT '',
+            voted_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (resolution_id, trustee_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_resolution_votes_res ON resolution_votes(resolution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_resolution_votes_tru ON resolution_votes(trustee_id)",
         """CREATE TABLE IF NOT EXISTS board_audit_log (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             actor_user_id   UUID,
