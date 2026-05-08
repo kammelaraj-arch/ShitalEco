@@ -1526,6 +1526,7 @@ async def _seed_api_key_metadata() -> None:
         ("MS_CLIENT_ID",              "Microsoft Azure App (client) ID",                "Microsoft", False),
         ("MS_TENANT_ID",              "Microsoft Azure Directory (tenant) ID",          "Microsoft", False),
         ("MS_CLIENT_SECRET",          "Microsoft Azure client secret",                  "Microsoft", True),
+        ("MS_REDIRECT_URI",           "Azure AD OAuth redirect URI — must match Azure exactly, e.g. https://admin.shital.org.uk/admin/auth-callback/ (trailing slash matters)", "Microsoft", False),
         ("GOOGLE_CLIENT_ID",          "Google OAuth client ID",                         "Google",    False),
         ("GOOGLE_CLIENT_SECRET",      "Google OAuth client secret",                     "Google",    True),
         ("META_WHATSAPP_TOKEN",       "Meta WhatsApp Business API token",               "WhatsApp",  True),
