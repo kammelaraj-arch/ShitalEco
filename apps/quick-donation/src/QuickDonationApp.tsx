@@ -19,14 +19,19 @@ const THEME_BG: Record<string, string> = {
 }
 
 export function QuickDonationApp() {
-  const { screen, setScreen, isDeviceLoggedIn, _hasHydrated, kioskTheme, bgColor, loggedInUsername, setDeviceFlags, setBranchId, setReader } = useDonationStore()
+  const { screen, setScreen, isDeviceLoggedIn, _hasHydrated, stripeReaderId, sumupReaderId, cloverDeviceId, kioskTheme, bgColor, loggedInUsername, setDeviceFlags, setBranchId, setReader } = useDonationStore()
+
+  // Any of stripe terminal / sumup / clover counts as "a reader is set up".
+  // Without this guard, staff land on the tile screen, tap an amount, and
+  // only THEN see the "no card reader configured" dead-end on Processing.
+  const hasAnyReader = !!(stripeReaderId.trim() || sumupReaderId.trim() || cloverDeviceId.trim())
 
   // Wait for persisted state to load before deciding whether to show admin setup.
   // Without this check, isDeviceLoggedIn is always false on first render (before
   // Zustand rehydrates from localStorage), causing the admin screen to flash every load.
   useEffect(() => {
     if (!_hasHydrated) return
-    if (!isDeviceLoggedIn) { setScreen('admin'); return }
+    if (!isDeviceLoggedIn || !hasAnyReader) { setScreen('admin'); return }
 
     // Auto-refresh device config on power-on without requiring password
     if (!loggedInUsername) return
@@ -54,7 +59,9 @@ export function QuickDonationApp() {
         })
       })
       .catch(() => {})
-  }, [_hasHydrated]) // eslint-disable-line react-hooks/exhaustive-deps
+    // React to changes in login or any reader id — the original effect was
+    // mount-only, so a logout / reader-cleared mid-session left staff stuck.
+  }, [_hasHydrated, isDeviceLoggedIn, hasAnyReader, loggedInUsername]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const background = useMemo(() => {
     if (bgColor) return bgColor
