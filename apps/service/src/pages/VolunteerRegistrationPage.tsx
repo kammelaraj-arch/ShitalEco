@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useStore } from '../store'
 import { api, type VolunteerRegistrationPayload } from '../api'
@@ -104,9 +104,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+// Fetch admin-overridable form text. Falls back silently to the defaults
+// passed at each call-site if the API is slow / errors / hasn't been
+// reached yet — the form is fully usable on first paint either way.
+function useFormText(formKey: string): (key: string, fallback: string) => string {
+  const [overrides, setOverrides] = useState<Record<string, string>>({})
+  useEffect(() => {
+    api.getFormConfig(formKey).then(d => setOverrides(d.fields || {})).catch(() => {})
+  }, [formKey])
+  return (key, fallback) => overrides[key] ?? fallback
+}
+
 export function VolunteerRegistrationPage() {
   const setScreen = useStore(s => s.setScreen)
   const branchId = useStore(s => s.branchId)
+  const t = useFormText('volunteer_registration')
   const [form, setForm] = useState<Form>(EMPTY)
   const [step, setStep] = useState<'fill' | 'done'>('fill')
   const [submitting, setSubmitting] = useState(false)
@@ -160,23 +172,19 @@ export function VolunteerRegistrationPage() {
       <div className="max-w-xl mx-auto px-4 py-10 pb-24 text-center">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <div className="text-5xl mb-4">🙏</div>
-          <h1 className="font-display font-bold text-2xl text-gold-400 mb-3">Application Received</h1>
-          <p className="text-sm text-ivory-200 mb-5">
-            Thank you for offering to volunteer with SHITAL.
-          </p>
+          <h1 className="font-display font-bold text-2xl text-gold-400 mb-3">{t('done.title', 'Application Received')}</h1>
+          <p className="text-sm text-ivory-200 mb-5">{t('done.thanks', 'Thank you for offering to volunteer with SHITAL.')}</p>
           <div className="temple-card p-4 mb-5 text-left">
-            <p className="text-xs uppercase tracking-widest font-bold mb-1" style={{ color: 'rgba(212,175,55,0.6)' }}>Your reference</p>
+            <p className="text-xs uppercase tracking-widest font-bold mb-1" style={{ color: 'rgba(212,175,55,0.6)' }}>{t('done.reference_label', 'Your reference')}</p>
             <p className="font-mono font-bold text-base text-gold-400 break-all">{reference}</p>
           </div>
           <p className="text-xs leading-relaxed" style={{ color: 'rgba(255,248,220,0.6)' }}>
-            A trustee will review your application and contact you by email. References will be
-            taken before a role is confirmed. Please quote the reference above in any
-            correspondence.
+            {t('done.next_steps', 'A trustee will review your application and contact you by email. References will be taken before a role is confirmed. Please quote the reference above in any correspondence.')}
           </p>
           <button onClick={() => setScreen('browse')}
             className="mt-6 px-6 py-3 rounded-2xl font-black text-sm"
             style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-            Back to Home
+            {t('done.back_button', 'Back to Home')}
           </button>
         </motion.div>
       </div>
@@ -191,14 +199,14 @@ export function VolunteerRegistrationPage() {
 
       <div className="text-center mb-6">
         <div className="text-4xl mb-2">🤝</div>
-        <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">Volunteer Registration</h1>
+        <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">{t('page.title', 'Volunteer Registration')}</h1>
         <p className="text-sm" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          Join the SHITAL volunteering family. Minimum age 18.
+          {t('page.subtitle', 'Join the SHITAL volunteering family. Minimum age 18.')}
         </p>
       </div>
 
       {/* Personal */}
-      <Section title="Personal Details">
+      <Section title={t('section.personal.title', 'Personal Details')}>
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div>
             <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Title</label>
@@ -251,7 +259,7 @@ export function VolunteerRegistrationPage() {
       </Section>
 
       {/* Emergency contact */}
-      <Section title="Emergency Contact">
+      <Section title={t('section.emergency.title', 'Emergency Contact')}>
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div>
             <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Title</label>
@@ -291,47 +299,43 @@ export function VolunteerRegistrationPage() {
       </Section>
 
       {/* Health */}
-      <Section title="Health">
+      <Section title={t('section.health.title', 'Health')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          Are there any restricting factors or medication that we should be aware of?
+          {t('section.health.question', 'Are there any restricting factors or medication that we should be aware of?')}
         </p>
         <label className="flex items-center gap-3 mb-3 cursor-pointer">
           <input type="checkbox" checked={form.has_health_restrictions}
             onChange={e => update('has_health_restrictions', e.target.checked)}
             className="w-4 h-4 rounded accent-saffron-400" />
-          <span className="text-sm text-ivory-200">Yes — I have a health condition or medication SHITAL should know about</span>
+          <span className="text-sm text-ivory-200">{t('section.health.checkbox_yes', 'Yes — I have a health condition or medication SHITAL should know about')}</span>
         </label>
         {form.has_health_restrictions && (
           <textarea value={form.health_notes} onChange={e => update('health_notes', e.target.value)} rows={3}
-            className={inp + ' resize-none'} placeholder="Please specify how we can help you" />
+            className={inp + ' resize-none'} placeholder={t('section.health.help_placeholder', 'Please specify how we can help you')} />
         )}
       </Section>
 
       {/* Criminal-record declaration */}
-      <Section title="Police-Check Declaration">
+      <Section title={t('section.police_check.title', 'Police-Check Declaration')}>
         <p className="text-xs leading-relaxed mb-3" style={{ color: 'rgba(255,248,220,0.55)' }}>
-          The volunteering opportunities will involve direct contact with devotees. As such,
-          applications to volunteer are exempt from the Rehabilitation of Offenders Act 1974 —
-          you are required to declare your entire criminal record, including cautions,
-          reprimands, final warnings and convictions categorised "spent" under that legislation.
-          Information will be kept strictly confidential.
+          {t('section.police_check.intro', 'The volunteering opportunities will involve direct contact with devotees. As such, applications to volunteer are exempt from the Rehabilitation of Offenders Act 1974 — you are required to declare your entire criminal record, including cautions, reprimands, final warnings and convictions categorised "spent" under that legislation. Information will be kept strictly confidential.')}
         </p>
         <label className="flex items-center gap-3 mb-3 cursor-pointer">
           <input type="checkbox" checked={form.has_criminal_record}
             onChange={e => update('has_criminal_record', e.target.checked)}
             className="w-4 h-4 rounded accent-saffron-400" />
-          <span className="text-sm text-ivory-200">Yes — I have been convicted at a Court or cautioned by the Police</span>
+          <span className="text-sm text-ivory-200">{t('section.police_check.checkbox_yes', 'Yes — I have been convicted at a Court or cautioned by the Police')}</span>
         </label>
         {form.has_criminal_record && (
           <textarea value={form.criminal_record_details} onChange={e => update('criminal_record_details', e.target.value)} rows={3}
-            className={inp + ' resize-none'} placeholder="Please give details, including dates and nature of offences" />
+            className={inp + ' resize-none'} placeholder={t('section.police_check.detail_placeholder', 'Please give details, including dates and nature of offences')} />
         )}
       </Section>
 
       {/* Referees */}
-      <Section title="Character Referee 1">
+      <Section title={t('section.referee1.title', 'Character Referee 1')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          Please give an independent referee (not a family member).
+          {t('section.referee1.intro', 'Please give an independent referee (not a family member).')}
         </p>
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div>
@@ -371,9 +375,9 @@ export function VolunteerRegistrationPage() {
         </div>
       </Section>
 
-      <Section title="Character Referee 2">
+      <Section title={t('section.referee2.title', 'Character Referee 2')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          A second independent referee (not a family member).
+          {t('section.referee2.intro', 'A second independent referee (not a family member).')}
         </p>
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div>
@@ -414,9 +418,9 @@ export function VolunteerRegistrationPage() {
       </Section>
 
       {/* Skills */}
-      <Section title="Your Skills">
+      <Section title={t('section.skills.title', 'Your Skills')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          Tick everything that applies. We use this to match you with suitable opportunities.
+          {t('section.skills.intro', 'Tick everything that applies. We use this to match you with suitable opportunities.')}
         </p>
         {SKILLS_CATALOG.map(cat => (
           <div key={cat.key} className="mb-3">
@@ -440,16 +444,16 @@ export function VolunteerRegistrationPage() {
           </div>
         ))}
         <div className="mt-4">
-          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Other skills (free-text)</label>
+          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>{t('section.skills.other_label', 'Other skills (free-text)')}</label>
           <textarea value={form.skills_other_text} onChange={e => update('skills_other_text', e.target.value)} rows={2}
-            className={inp + ' resize-none'} placeholder="Security, First Aid, Singing, Musical Instruments etc." />
+            className={inp + ' resize-none'} placeholder={t('section.skills.other_placeholder', 'Security, First Aid, Singing, Musical Instruments etc.')} />
         </div>
       </Section>
 
       {/* Availability */}
-      <Section title="Availability">
+      <Section title={t('section.availability.title', 'Availability')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          Tell us when you're typically free. You can leave any cell blank.
+          {t('section.availability.intro', "Tell us when you're typically free. You can leave any cell blank.")}
         </p>
         <div className="overflow-x-auto -mx-2 mb-4">
           <table className="w-full text-xs">
@@ -502,17 +506,13 @@ export function VolunteerRegistrationPage() {
       </Section>
 
       {/* Declarations */}
-      <Section title="Declarations">
+      <Section title={t('section.declarations.title', 'Declarations')}>
         <label className="flex items-start gap-3 mb-4 cursor-pointer">
           <input type="checkbox" checked={form.declaration_agreed}
             onChange={e => update('declaration_agreed', e.target.checked)}
             className="w-4 h-4 rounded accent-saffron-400 mt-1 flex-shrink-0" />
           <span className="text-xs leading-relaxed" style={{ color: 'rgba(255,248,220,0.7)' }}>
-            <strong className="text-ivory-100">Volunteer activity declaration *</strong> — I am voluntarily participating
-            in the activities of SHITAL's events with the knowledge of the danger involved and that
-            medical facilities may not be immediately available in the event of injury. I confirm
-            that neither I nor anyone on my behalf will demand or expect any remuneration in cash
-            or in kind for my services and time volunteering for SHITAL.
+            <strong className="text-ivory-100">{t('section.declarations.activity_label', 'Volunteer activity declaration')} *</strong> — {t('section.declarations.activity_text', "I am voluntarily participating in the activities of SHITAL's events with the knowledge of the danger involved and that medical facilities may not be immediately available in the event of injury. I confirm that neither I nor anyone on my behalf will demand or expect any remuneration in cash or in kind for my services and time volunteering for SHITAL.")}
           </span>
         </label>
         <label className="flex items-start gap-3 mb-4 cursor-pointer">
@@ -520,9 +520,7 @@ export function VolunteerRegistrationPage() {
             onChange={e => update('confidentiality_agreed', e.target.checked)}
             className="w-4 h-4 rounded accent-saffron-400 mt-1 flex-shrink-0" />
           <span className="text-xs leading-relaxed" style={{ color: 'rgba(255,248,220,0.7)' }}>
-            <strong className="text-ivory-100">Confidentiality undertaking *</strong> — I agree to abide by
-            SHITAL's Confidentiality Policy and acknowledge that violation may lead to disciplinary
-            action and termination of my volunteering services.
+            <strong className="text-ivory-100">{t('section.declarations.confidentiality_label', 'Confidentiality undertaking')} *</strong> — {t('section.declarations.confidentiality_text', "I agree to abide by SHITAL's Confidentiality Policy and acknowledge that violation may lead to disciplinary action and termination of my volunteering services.")}
           </span>
         </label>
         <label className="flex items-start gap-3 cursor-pointer">
@@ -530,9 +528,7 @@ export function VolunteerRegistrationPage() {
             onChange={e => update('marketing_consent', e.target.checked)}
             className="w-4 h-4 rounded accent-saffron-400 mt-1 flex-shrink-0" />
           <span className="text-xs leading-relaxed" style={{ color: 'rgba(255,248,220,0.7)' }}>
-            I'd like SHITAL to keep me informed about news, events and volunteering opportunities
-            by email or SMS. We never sell or share your details with third parties — you can
-            withdraw at any time.
+            {t('section.declarations.marketing_text', "I'd like SHITAL to keep me informed about news, events and volunteering opportunities by email or SMS. We never sell or share your details with third parties — you can withdraw at any time.")}
           </span>
         </label>
       </Section>
@@ -547,11 +543,11 @@ export function VolunteerRegistrationPage() {
       <button onClick={submit} disabled={submitting}
         className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-50 transition-all active:scale-[0.99]"
         style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-        {submitting ? 'Submitting…' : 'Submit Application →'}
+        {submitting ? 'Submitting…' : t('submit.button', 'Submit Application →')}
       </button>
 
       <p className="text-center text-xs mt-3" style={{ color: 'rgba(255,248,220,0.3)' }}>
-        After submission, a trustee will review your application. References will be taken before a role is confirmed.
+        {t('submit.help', 'After submission, a trustee will review your application. References will be taken before a role is confirmed.')}
       </p>
     </div>
   )

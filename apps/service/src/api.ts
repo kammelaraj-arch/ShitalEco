@@ -207,6 +207,12 @@ export const api = {
     }
     return data
   },
+
+  async getFormConfig(formKey: string): Promise<{ form_key: string; fields: Record<string, string> }> {
+    const r = await fetch(`${API}/service/form-config/${formKey}`)
+    if (!r.ok) throw new Error(`form-config fetch failed: ${r.status}`)
+    return r.json()
+  },
 }
 
 export interface VolunteerRegistrationPayload {
