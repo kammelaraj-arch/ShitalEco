@@ -181,6 +181,36 @@ export default function LoginPage() {
                     : 'Sign in with Microsoft 365'}
                 </button>
 
+                {/* Diagnostic disclosure — collapsed by default. The two
+                    settings below trip up every new admin: Azure rejects
+                    redirect URIs that don't match exactly (trailing slash
+                    matters), and the admin app is served under /admin so
+                    the callback path includes that prefix. */}
+                <details className="mb-3 -mt-2 group">
+                  <summary className="text-[11px] cursor-pointer list-none select-none"
+                    style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    <span className="group-open:hidden">Sign-in keeps looping? ↓</span>
+                    <span className="hidden group-open:inline">Hide help ↑</span>
+                  </summary>
+                  <div className="mt-2 px-3 py-2.5 rounded-lg text-[11px] leading-relaxed"
+                    style={{
+                      background: 'rgba(96,165,250,0.08)',
+                      border: '1px solid rgba(96,165,250,0.2)',
+                      color: 'rgba(191,219,254,0.85)',
+                    }}>
+                    <p className="font-semibold mb-1">If Microsoft 365 sign-in keeps redirecting:</p>
+                    <ol className="list-decimal pl-4 space-y-1">
+                      <li>Bookmark <code className="font-mono">admin.shital.org.uk/admin/login/</code> — not the root domain. Popup + parent must share an origin.</li>
+                      <li>In Azure Portal → App registration → Authentication → <strong>Redirect URIs</strong>, register exactly:
+                        <code className="block font-mono mt-1 px-2 py-1 rounded" style={{ background: 'rgba(0,0,0,0.25)' }}>
+                          https://admin.shital.org.uk/admin/auth-callback/
+                        </code>
+                        Trailing slash is required (Azure error AADSTS50011 if it doesn't match).</li>
+                      <li>In Admin → Settings → API Keys, set <strong><code className="font-mono">MS_REDIRECT_URI</code></strong> to the same URL.</li>
+                    </ol>
+                  </div>
+                </details>
+
                 {/* Divider */}
                 <div className="flex items-center gap-3 mb-5">
                   <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.08)' }} />
