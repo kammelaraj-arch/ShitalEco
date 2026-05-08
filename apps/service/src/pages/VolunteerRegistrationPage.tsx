@@ -123,6 +123,55 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+// Each wizard step. `validate` returns an array of human-readable errors
+// for the fields shown on this step — empty array means "you may proceed".
+const WIZARD_STEPS: Array<{ key: string; title: string }> = [
+  { key: 'about',      title: 'About you'           },
+  { key: 'where',      title: 'Where to help'       },
+  { key: 'background', title: 'Health & background' },
+  { key: 'references', title: 'References'          },
+  { key: 'skills',     title: 'Skills & schedule'   },
+  { key: 'review',     title: 'Review & submit'     },
+]
+
+function validateStep(stepIdx: number, f: Form): string[] {
+  const errs: string[] = []
+  if (stepIdx === 0) {
+    if (!f.first_names.trim()) errs.push('First name is required')
+    if (!f.last_name.trim())   errs.push('Last name is required')
+    if (!f.email.trim() || !f.email.includes('@')) errs.push('A valid email is required')
+    if (!f.address.trim() || !f.postcode.trim()) errs.push('Address is required')
+    if (!f.mobile.trim() && !f.phone.trim()) errs.push('At least one contact number is required')
+    if (!f.age_range) errs.push('Age range is required (minimum 18)')
+  }
+  if (stepIdx === 1) {
+    if (f.preferred_branches.length === 0) errs.push("Pick at least one branch (or remote)")
+    if (!f.ec_full_name.trim()) errs.push('Emergency contact name is required')
+    if (!f.ec_mobile.trim() && !f.ec_phone.trim()) errs.push('Emergency contact phone is required')
+  }
+  if (stepIdx === 2) {
+    if (f.has_health_restrictions && !f.health_notes.trim())
+      errs.push('Please describe how we can help with your health restrictions')
+    if (f.has_criminal_record && !f.criminal_record_details.trim())
+      errs.push('Please provide the requested criminal-record details')
+  }
+  if (stepIdx === 3) {
+    if (!f.ref1_first_names.trim() || !f.ref1_last_name.trim()) errs.push('Referee 1 name is required')
+    if (!f.ref1_email.trim() && !f.ref1_mobile.trim() && !f.ref1_phone.trim())
+      errs.push('Referee 1 contact (email or phone) is required')
+    if (!f.ref2_first_names.trim() || !f.ref2_last_name.trim()) errs.push('Referee 2 name is required')
+    if (!f.ref2_email.trim() && !f.ref2_mobile.trim() && !f.ref2_phone.trim())
+      errs.push('Referee 2 contact (email or phone) is required')
+  }
+  if (stepIdx === 5) {
+    if (!f.declaration_agreed) errs.push('You must agree to the volunteer activity declaration')
+    if (!f.confidentiality_agreed) errs.push('You must agree to the confidentiality undertaking')
+  }
+  return errs
+}
+
+const DRAFT_STORAGE_KEY = 'volunteer-draft-v1'
+
 // Fetch admin-overridable form text. Falls back silently to the defaults
 // passed at each call-site if the API is slow / errors / hasn't been
 // reached yet — the form is fully usable on first paint either way.
@@ -140,9 +189,47 @@ export function VolunteerRegistrationPage() {
   const t = useFormText('volunteer_registration')
   const [form, setForm] = useState<Form>(EMPTY)
   const [step, setStep] = useState<'fill' | 'done'>('fill')
+  const [wizardStep, setWizardStep] = useState(0)
+  const [stepErrors, setStepErrors] = useState<string[]>([])
+  const [hasDraft, setHasDraft] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [reference, setReference] = useState('')
+
+  // Restore draft from localStorage once on mount. The form is otherwise
+  // fully usable on first paint — the draft just rehydrates if present.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { form?: Form; wizardStep?: number; savedAt?: string }
+      if (parsed.form && typeof parsed.form === 'object') {
+        setForm({ ...EMPTY, ...parsed.form })
+        if (typeof parsed.wizardStep === 'number') setWizardStep(parsed.wizardStep)
+        setHasDraft(true)
+      }
+    } catch {
+      // Corrupt draft — ignore. User starts fresh.
+    }
+  }, [])
+
+  // Auto-save to localStorage on every form / step change. Cheap and
+  // synchronous; covers same-device resume after a tab close or crash.
+  useEffect(() => {
+    if (step !== 'fill') return
+    try {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({
+        form, wizardStep, savedAt: new Date().toISOString(),
+      }))
+    } catch {
+      // Quota / private mode — fine to silently skip.
+    }
+  }, [form, wizardStep, step])
+
+  function discardDraft() {
+    try { localStorage.removeItem(DRAFT_STORAGE_KEY) } catch { /* ignore */ }
+    setForm(EMPTY); setWizardStep(0); setHasDraft(false); setStepErrors([])
+  }
 
   // Active branches (for the "where would you like to volunteer?" picker).
   // Quietly empty if the API is down — the Remote-only option still works.
@@ -218,14 +305,40 @@ export function VolunteerRegistrationPage() {
     })
   }
 
+  function goNext() {
+    const errs = validateStep(wizardStep, form)
+    setStepErrors(errs)
+    if (errs.length) {
+      // Bring the errors into view
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    setWizardStep(s => Math.min(s + 1, WIZARD_STEPS.length - 1))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function goPrev() {
+    setStepErrors([])
+    setWizardStep(s => Math.max(s - 1, 0))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function submit() {
-    setError('')
+    // Re-validate the final step (declarations) before sending — defends
+    // against state changes that bypass goNext().
+    const errs = validateStep(WIZARD_STEPS.length - 1, form)
+    if (errs.length) { setStepErrors(errs); return }
+
+    setError(''); setStepErrors([])
     setSubmitting(true)
     try {
       const payload: VolunteerRegistrationPayload = { ...form, branch_id: branchId }
       const res = await api.registerVolunteer(payload)
       setReference(res.reference_number)
       setStep('done')
+      // Submission successful — wipe the draft so a refresh doesn't
+      // resurrect it for the next applicant on a shared device.
+      try { localStorage.removeItem(DRAFT_STORAGE_KEY) } catch { /* ignore */ }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Registration failed')
     } finally {
@@ -263,7 +376,7 @@ export function VolunteerRegistrationPage() {
         style={{ color: 'rgba(255,248,220,0.4)' }}>← Back
       </button>
 
-      <div className="text-center mb-6">
+      <div className="text-center mb-5">
         <div className="text-4xl mb-2">🤝</div>
         <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">{t('page.title', 'Volunteer Registration')}</h1>
         <p className="text-sm" style={{ color: 'rgba(255,248,220,0.5)' }}>
@@ -271,7 +384,47 @@ export function VolunteerRegistrationPage() {
         </p>
       </div>
 
-      {/* Personal */}
+      {/* Step progress + label */}
+      <div className="mb-5">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.65)' }}>
+            Step {wizardStep + 1} of {WIZARD_STEPS.length} · {WIZARD_STEPS[wizardStep].title}
+          </p>
+          {hasDraft && wizardStep === 0 && (
+            <button onClick={discardDraft}
+              className="text-[11px] underline" style={{ color: 'rgba(255,248,220,0.4)' }}>
+              Start over
+            </button>
+          )}
+        </div>
+        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+          <div className="h-full rounded-full transition-all duration-300"
+            style={{
+              width: `${((wizardStep + 1) / WIZARD_STEPS.length) * 100}%`,
+              background: 'linear-gradient(90deg,#D4AF37,#FFD980)',
+            }} />
+        </div>
+      </div>
+
+      {hasDraft && wizardStep === 0 && (
+        <div className="rounded-xl px-4 py-3 mb-5 text-xs"
+          style={{ background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: '#BFDBFE' }}>
+          ↩ Picked up where you left off. Tap "Start over" to clear.
+        </div>
+      )}
+
+      {stepErrors.length > 0 && (
+        <div className="rounded-xl px-4 py-3 mb-5 text-sm"
+          style={{ background: 'rgba(198,40,40,0.15)', color: '#fca5a5', border: '1px solid rgba(198,40,40,0.3)' }}>
+          <p className="font-bold mb-1">Please check the following:</p>
+          <ul className="list-disc list-inside space-y-0.5 text-xs">
+            {stepErrors.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* ── STEP 0 — About you ───────────────────────────────────────────── */}
+      {wizardStep === 0 && (<>
       <Section title={t('section.personal.title', 'Personal Details')}>
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div>
@@ -325,7 +478,10 @@ export function VolunteerRegistrationPage() {
         </div>
       </Section>
 
-      {/* Where they want to help */}
+      </>)}
+
+      {/* ── STEP 1 — Where to help + Emergency Contact ───────────────────── */}
+      {wizardStep === 1 && (<>
       <Section title={t('section.where.title', 'Where would you like to volunteer?')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
           {t('section.where.intro', 'Pick one or more branches you can travel to, or "Remote / Online" if you want to help from home.')}
@@ -406,7 +562,10 @@ export function VolunteerRegistrationPage() {
         />
       </Section>
 
-      {/* Health */}
+      </>)}
+
+      {/* ── STEP 2 — Health + Police-Check Declaration ──────────────────── */}
+      {wizardStep === 2 && (<>
       <Section title={t('section.health.title', 'Health')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
           {t('section.health.question', 'Are there any restricting factors or medication that we should be aware of?')}
@@ -440,7 +599,10 @@ export function VolunteerRegistrationPage() {
         )}
       </Section>
 
-      {/* Referees */}
+      </>)}
+
+      {/* ── STEP 3 — References ─────────────────────────────────────────── */}
+      {wizardStep === 3 && (<>
       <Section title={t('section.referee1.title', 'Character Referee 1')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
           {t('section.referee1.intro', 'Please give an independent referee (not a family member).')}
@@ -519,7 +681,10 @@ export function VolunteerRegistrationPage() {
         />
       </Section>
 
-      {/* Skills */}
+      </>)}
+
+      {/* ── STEP 4 — Skills + Availability ──────────────────────────────── */}
+      {wizardStep === 4 && (<>
       <Section title={t('section.skills.title', 'Your Skills')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
           {t('section.skills.intro', 'Tap a category to see options. Pick everything that applies — we use this to match you with suitable opportunities.')}
@@ -648,7 +813,30 @@ export function VolunteerRegistrationPage() {
         </div>
       </Section>
 
-      {/* Declarations */}
+      </>)}
+
+      {/* ── STEP 5 — Review & Submit (declarations) ─────────────────────── */}
+      {wizardStep === 5 && (<>
+      <Section title="Review">
+        <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
+          Quick summary of what you've told us. Tap "Back" to change anything.
+        </p>
+        <div className="text-xs space-y-1.5" style={{ color: 'rgba(255,248,220,0.75)' }}>
+          <p><span className="text-gold-400 font-semibold">Name:</span> {form.title} {form.first_names} {form.last_name}</p>
+          <p><span className="text-gold-400 font-semibold">Email:</span> {form.email}</p>
+          <p><span className="text-gold-400 font-semibold">Phone:</span> {form.mobile || form.phone || '—'}</p>
+          <p><span className="text-gold-400 font-semibold">Address:</span> {form.address}, {form.postcode}</p>
+          <p><span className="text-gold-400 font-semibold">Wants to volunteer at:</span> {
+            form.preferred_branches.length
+              ? form.preferred_branches.map(p => p === 'remote' ? '🌐 Remote' : p.charAt(0).toUpperCase() + p.slice(1)).join(', ')
+              : '—'
+          }</p>
+          <p><span className="text-gold-400 font-semibold">Skills picked:</span> {Object.values(form.skills).reduce((n, arr) => n + arr.length, 0) || 0}</p>
+          <p><span className="text-gold-400 font-semibold">Available days:</span> {form.availability.days.length || 0}</p>
+          <p><span className="text-gold-400 font-semibold">References:</span> {[form.ref1_first_names && form.ref1_last_name, form.ref2_first_names && form.ref2_last_name].filter(Boolean).length} provided</p>
+        </div>
+      </Section>
+
       <Section title={t('section.declarations.title', 'Declarations')}>
         <label className="flex items-start gap-3 mb-4 cursor-pointer">
           <input type="checkbox" checked={form.declaration_agreed}
@@ -676,6 +864,8 @@ export function VolunteerRegistrationPage() {
         </label>
       </Section>
 
+      </>)}
+
       {error && (
         <div className="rounded-xl px-4 py-3 mb-4 text-sm font-medium"
           style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.3)' }}>
@@ -683,14 +873,33 @@ export function VolunteerRegistrationPage() {
         </div>
       )}
 
-      <button onClick={submit} disabled={submitting}
-        className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-50 transition-all active:scale-[0.99]"
-        style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-        {submitting ? 'Submitting…' : t('submit.button', 'Submit Application →')}
-      </button>
+      <div className="flex gap-3">
+        {wizardStep > 0 && (
+          <button onClick={goPrev}
+            className="flex-1 py-4 rounded-2xl font-bold text-sm transition-all active:scale-[0.99]"
+            style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.8)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            ← Back
+          </button>
+        )}
+        {wizardStep < WIZARD_STEPS.length - 1 ? (
+          <button onClick={goNext}
+            className="flex-[2] py-4 rounded-2xl font-black text-base transition-all active:scale-[0.99]"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+            Next →
+          </button>
+        ) : (
+          <button onClick={submit} disabled={submitting}
+            className="flex-[2] py-4 rounded-2xl font-black text-base disabled:opacity-50 transition-all active:scale-[0.99]"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+            {submitting ? 'Submitting…' : t('submit.button', 'Submit Application →')}
+          </button>
+        )}
+      </div>
 
       <p className="text-center text-xs mt-3" style={{ color: 'rgba(255,248,220,0.3)' }}>
-        {t('submit.help', 'After submission, a trustee will review your application. References will be taken before a role is confirmed.')}
+        {wizardStep < WIZARD_STEPS.length - 1
+          ? '💾 Your progress is saved automatically. You can come back later.'
+          : t('submit.help', 'After submission, a trustee will review your application. References will be taken before a role is confirmed.')}
       </p>
     </div>
   )
