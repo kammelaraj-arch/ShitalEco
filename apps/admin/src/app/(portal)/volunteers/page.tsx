@@ -13,6 +13,7 @@ interface VolunteerSummary {
   phone: string
   age_range: string
   branch_id: string
+  preferred_branches: string[]
   status: 'PENDING' | 'APPROVED' | 'REJECTED'
   created_at: string
   reviewed_at: string | null
@@ -35,7 +36,9 @@ interface VolunteerDetail extends VolunteerSummary {
   ref2_mobile: string; ref2_phone: string; ref2_email: string
   skills: Record<string, string[]>
   skills_other_text: string
-  availability: Record<string, Record<string, string>>
+  // Two shapes accepted: the new { days, times, notes } pickers + the
+  // legacy { weekday: { slot: time } } from rows submitted pre-redesign.
+  availability: Record<string, unknown>
   availability_pattern: string
   declaration_signed_at: string | null
   confidentiality_agreed: boolean
@@ -190,6 +193,7 @@ export default function VolunteersPage() {
                 <th className="px-4 py-3 text-left font-semibold">Email</th>
                 <th className="px-4 py-3 text-left font-semibold">Mobile</th>
                 <th className="px-4 py-3 text-left font-semibold">Branch</th>
+                <th className="px-4 py-3 text-left font-semibold">Wants</th>
                 <th className="px-4 py-3 text-left font-semibold">Submitted</th>
                 <th className="px-4 py-3 text-left font-semibold">Flags</th>
                 <th className="px-4 py-3 text-left font-semibold">Status</th>
@@ -197,10 +201,10 @@ export default function VolunteersPage() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8} className="px-4 py-12 text-center text-white/40">Loading…</td></tr>
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-white/40">Loading…</td></tr>
               )}
               {!loading && items.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-12 text-center text-white/40">No volunteers found</td></tr>
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-white/40">No volunteers found</td></tr>
               )}
               {items.map(v => (
                 <tr key={v.id} onClick={() => openDetail(v.id)}
@@ -210,6 +214,21 @@ export default function VolunteersPage() {
                   <td className="px-4 py-3 text-white/60">{v.email}</td>
                   <td className="px-4 py-3 text-white/60">{v.mobile || v.phone || '—'}</td>
                   <td className="px-4 py-3 text-white/60 capitalize">{v.branch_id}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {(v.preferred_branches || []).slice(0, 3).map(p => (
+                        <span key={p} className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${p === 'remote' ? 'bg-blue-500/20 text-blue-300' : 'bg-amber-500/15 text-amber-300'}`}>
+                          {p === 'remote' ? '🌐 remote' : p}
+                        </span>
+                      ))}
+                      {(v.preferred_branches || []).length > 3 && (
+                        <span className="text-white/30 text-[10px]">+{v.preferred_branches.length - 3}</span>
+                      )}
+                      {(!v.preferred_branches || v.preferred_branches.length === 0) && (
+                        <span className="text-white/20 text-xs">—</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-white/50">{fmtDate(v.created_at)}</td>
                   <td className="px-4 py-3 text-xs">
                     <div className="flex gap-1.5">
@@ -266,6 +285,13 @@ export default function VolunteersPage() {
                   ['Address', selected.address],
                   ['Postcode', selected.postcode],
                   ['Branch', selected.branch_id],
+                  ['Wants to volunteer at',
+                    (selected.preferred_branches || []).length
+                      ? selected.preferred_branches
+                          .map(p => p === 'remote' ? '🌐 Remote' : p.charAt(0).toUpperCase() + p.slice(1))
+                          .join(', ')
+                      : '—',
+                  ],
                 ]} />
 
                 <DetailGrid title="Emergency Contact" rows={[
@@ -326,17 +352,7 @@ export default function VolunteersPage() {
 
                 <div>
                   <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-2">Availability {selected.availability_pattern && `(${selected.availability_pattern})`}</p>
-                  {Object.keys(selected.availability).length === 0 && (
-                    <p className="text-white/30 text-xs">— Not specified —</p>
-                  )}
-                  <div className="space-y-1">
-                    {Object.entries(selected.availability).map(([day, slots]) => (
-                      <p key={day} className="text-xs text-white/70">
-                        <span className="capitalize font-semibold text-white/90">{day}:</span>{' '}
-                        {Object.entries(slots).map(([slot, time]) => `${slot} ${time}`).join(' · ')}
-                      </p>
-                    ))}
-                  </div>
+                  <AvailabilityBlock data={selected.availability} />
                 </div>
 
                 <DetailGrid title="Consents" rows={[
@@ -390,6 +406,44 @@ export default function VolunteersPage() {
           </>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+// Renders the availability JSONB regardless of which shape was submitted:
+//  - new   { days: string[], times: string[], notes: string }
+//  - legacy { monday: { morning: "9-12" }, tuesday: { afternoon: "..." } }
+function AvailabilityBlock({ data }: { data: Record<string, unknown> | null | undefined }) {
+  if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
+    return <p className="text-white/30 text-xs">— Not specified —</p>
+  }
+  const isNewShape = Array.isArray((data as Record<string, unknown>).days)
+                  || Array.isArray((data as Record<string, unknown>).times)
+                  || typeof (data as Record<string, unknown>).notes === 'string'
+  if (isNewShape) {
+    const d = data as { days?: string[]; times?: string[]; notes?: string }
+    const days = (d.days || []).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(', ')
+    const times = (d.times || []).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(', ')
+    if (!days && !times && !d.notes) return <p className="text-white/30 text-xs">— Not specified —</p>
+    return (
+      <div className="space-y-1 text-xs text-white/80">
+        {days && <p><span className="text-white/50 font-semibold">Days:</span> {days}</p>}
+        {times && <p><span className="text-white/50 font-semibold">Times:</span> {times}</p>}
+        {d.notes && <p className="text-white/70"><span className="text-white/50 font-semibold">Notes:</span> {d.notes}</p>}
+      </div>
+    )
+  }
+  // Legacy shape
+  return (
+    <div className="space-y-1">
+      {Object.entries(data as Record<string, Record<string, string>>).map(([day, slots]) => (
+        <p key={day} className="text-xs text-white/70">
+          <span className="capitalize font-semibold text-white/90">{day}:</span>{' '}
+          {typeof slots === 'object' && slots
+            ? Object.entries(slots).map(([slot, time]) => `${slot} ${time}`).join(' · ')
+            : String(slots)}
+        </p>
+      ))}
     </div>
   )
 }

@@ -91,6 +91,10 @@ class VolunteerRegistration(BaseModel):
     # Branch the application is destined for (e.g. wembley, main)
     branch_id: str = "main"
 
+    # Where the volunteer wants to help — list of branch codes, with the
+    # literal "remote" as a sentinel for online/remote-only volunteering.
+    preferred_branches: list[str] = Field(default_factory=list)
+
 
 def _validate(v: VolunteerRegistration) -> list[str]:
     """Required-field validation matching the paper-form * markers + handbook
@@ -136,6 +140,8 @@ def _validate(v: VolunteerRegistration) -> list[str]:
         errs.append("You must agree to the volunteer activity declaration")
     if not v.confidentiality_agreed:
         errs.append("You must agree to the confidentiality undertaking")
+    if not v.preferred_branches:
+        errs.append("Please tell us where you'd like to volunteer (at least one branch or remote)")
     return errs
 
 
@@ -143,6 +149,13 @@ def _gen_reference() -> str:
     """SHITAL-VOL-YYYYMMDD-<6 hex> — sortable, identifiable, unique enough."""
     today = datetime.now(UTC).strftime("%Y%m%d")
     return f"SHITAL-VOL-{today}-{uuid.uuid4().hex[:6].upper()}"
+
+
+def _gen_draft_token() -> str:
+    """44-char URL-safe random — opaque resume token. The applicant
+    stashes it in their URL hash; we use it as a primary lookup key."""
+    import secrets
+    return secrets.token_urlsafe(32)
 
 
 def _require_admin(ctx: CurrentSpace) -> None:
@@ -175,11 +188,70 @@ async def register_volunteer(
     now = datetime.now(UTC)
     submitted_ip = (request.client.host if request.client else "")[:45]
     user_agent = (request.headers.get("user-agent") or "")[:500]
+    email_key = body.email.strip().lower()
 
     async with SessionLocal() as db:
+        # Upsert the volunteer as a CRM contact first. Same pattern as the
+        # PayPal capture flow — a person who later donates (or has already)
+        # ends up sharing one contacts row, deduped by email. Sensitive
+        # volunteer-only fields (criminal record, health, references) stay
+        # on the volunteers row; contacts only holds identity + consents.
+        contact_uuid = str(uuid.uuid4())
+        c_result = await db.execute(text("""
+            INSERT INTO contacts
+                (id, email, first_name, surname, full_name, phone,
+                 gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                 first_source, first_branch_id, created_at, updated_at)
+            VALUES
+                (:id, :email, :first, :surname, :name, :phone,
+                 true, :now, :tac, :tac_at,
+                 'volunteer-registration', :branch, :now, :now)
+            ON CONFLICT (email) DO UPDATE SET
+                first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                phone             = COALESCE(NULLIF(EXCLUDED.phone,''),      contacts.phone),
+                gdpr_consent      = true,
+                gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                tac_consent       = (contacts.tac_consent OR EXCLUDED.tac_consent),
+                tac_consented_at  = COALESCE(contacts.tac_consented_at,  EXCLUDED.tac_consented_at),
+                updated_at        = EXCLUDED.updated_at
+            RETURNING id
+        """), {
+            "id": contact_uuid, "email": email_key,
+            "first": body.first_names.strip(), "surname": body.last_name.strip(),
+            "name": f"{body.first_names.strip()} {body.last_name.strip()}".strip(),
+            "phone": body.mobile.strip() or body.phone.strip(),
+            "tac": body.confidentiality_agreed,
+            "tac_at": now if body.confidentiality_agreed else None,
+            "branch": body.branch_id, "now": now,
+        })
+        c_row = c_result.mappings().first()
+        contact_id = str(c_row["id"]) if c_row else contact_uuid
+
+        # Address linked to the contact (so future donate/volunteer flows
+        # can prefill). Matches PayPal capture: same insert, dedup index
+        # (addresses_unique_contact_pc_house) handles repeat applications.
+        # The unique index is partial (WHERE contact_id IS NOT NULL) so the
+        # ON CONFLICT must repeat that predicate for inference to match.
+        if body.postcode.strip() or body.address.strip():
+            _house = (body.address or "").split(",")[0].strip()[:50]
+            await db.execute(text("""
+                INSERT INTO addresses
+                    (id, contact_id, formatted, postcode, house_number, uprn,
+                     is_primary, lookup_source, created_at)
+                VALUES (:id, :cid, :fmt, :pc, :house, '', true, 'volunteer-registration', :now)
+                ON CONFLICT (contact_id, postcode, house_number)
+                    WHERE contact_id IS NOT NULL DO NOTHING
+            """), {
+                "id": str(uuid.uuid4()), "cid": contact_id,
+                "fmt": body.address, "pc": body.postcode.upper(),
+                "house": _house, "now": now,
+            })
+
         await db.execute(text("""
             INSERT INTO volunteers (
-                id, reference_number,
+                id, reference_number, contact_id,
                 title, first_names, last_name, address, postcode,
                 mobile, phone, email, age_range,
                 ec_title, ec_full_name, ec_email, ec_mobile, ec_phone,
@@ -192,11 +264,11 @@ async def register_volunteer(
                 ref2_address, ref2_postcode, ref2_mobile, ref2_phone, ref2_email,
                 skills, skills_other_text, availability, availability_pattern,
                 declaration_signed_at, confidentiality_agreed, marketing_consent,
-                status, branch_id,
+                status, branch_id, preferred_branches,
                 submitted_ip, user_agent,
                 created_at, updated_at
             ) VALUES (
-                :id, :reference,
+                :id, :reference, :contact_id,
                 :title, :first_names, :last_name, :address, :postcode,
                 :mobile, :phone, :email, :age_range,
                 :ec_title, :ec_full_name, :ec_email, :ec_mobile, :ec_phone,
@@ -210,16 +282,17 @@ async def register_volunteer(
                 CAST(:skills AS jsonb), :skills_other_text,
                 CAST(:availability AS jsonb), :availability_pattern,
                 :declaration_signed_at, :confidentiality_agreed, :marketing_consent,
-                'PENDING', :branch_id,
+                'PENDING', :branch_id, CAST(:preferred_branches AS jsonb),
                 :submitted_ip, :user_agent,
                 :now, :now
             )
         """), {
             "id": str(uuid.uuid4()), "reference": reference,
+            "contact_id": contact_id,
             "title": body.title, "first_names": body.first_names.strip(),
             "last_name": body.last_name.strip(), "address": body.address,
             "postcode": body.postcode, "mobile": body.mobile, "phone": body.phone,
-            "email": body.email.strip().lower(), "age_range": body.age_range,
+            "email": email_key, "age_range": body.age_range,
             "ec_title": body.ec_title, "ec_full_name": body.ec_full_name,
             "ec_email": body.ec_email, "ec_mobile": body.ec_mobile,
             "ec_phone": body.ec_phone, "ec_address": body.ec_address,
@@ -243,7 +316,11 @@ async def register_volunteer(
             "declaration_signed_at": now,
             "confidentiality_agreed": body.confidentiality_agreed,
             "marketing_consent": body.marketing_consent,
-            "branch_id": body.branch_id, "submitted_ip": submitted_ip,
+            "branch_id": body.branch_id,
+            "preferred_branches": _jsonify(
+                [b.strip().lower() for b in body.preferred_branches if b.strip()]
+            ),
+            "submitted_ip": submitted_ip,
             "user_agent": user_agent, "now": now,
         })
         await db.commit()
@@ -262,6 +339,225 @@ def _jsonify(obj: Any) -> str:
     """Serialise dict/list to JSON for SQLAlchemy bind into a jsonb column."""
     import json
     return json.dumps(obj)
+
+
+# ─── Public endpoints — partial save / resume ────────────────────────────────
+
+class DraftBody(BaseModel):
+    """Wizard auto-save payload. The whole form goes in `payload` as-is —
+    no validation, since drafts are explicitly mid-fill. The server only
+    cares about the token (for upserts) and email (for resume-by-email
+    later, if the applicant loses their token but remembers their email)."""
+    token: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    email: str = ""
+    branch_id: str = "main"
+
+
+@router.post("/service/volunteers/draft")
+async def save_draft(body: DraftBody) -> dict[str, Any]:
+    """Create a new draft, or upsert an existing one by token. Returns
+    the (possibly new) token + expiry the client should display."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    token = body.token.strip() or _gen_draft_token()
+    email_key = body.email.strip().lower()[:255]
+
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            INSERT INTO volunteer_drafts
+                (id, token, email, payload, branch_id, created_at, updated_at, expires_at)
+            VALUES
+                (gen_random_uuid(), :token, :email, CAST(:payload AS jsonb), :branch,
+                 NOW(), NOW(), NOW() + INTERVAL '30 days')
+            ON CONFLICT (token) DO UPDATE SET
+                payload    = EXCLUDED.payload,
+                email      = COALESCE(NULLIF(EXCLUDED.email,''), volunteer_drafts.email),
+                branch_id  = EXCLUDED.branch_id,
+                updated_at = NOW(),
+                expires_at = NOW() + INTERVAL '30 days'
+            RETURNING token, expires_at
+        """), {
+            "token": token, "email": email_key,
+            "payload": _jsonify(body.payload), "branch": body.branch_id,
+        })
+        row = result.mappings().one()
+        await db.commit()
+    return {
+        "ok": True,
+        "token": row["token"],
+        "expires_at": row["expires_at"].isoformat() if row["expires_at"] else None,
+    }
+
+
+@router.get("/service/volunteers/draft/{token}")
+async def get_draft(token: str) -> dict[str, Any]:
+    """Resume — fetch a saved draft by token. 404 if expired/missing.
+    Public on purpose: the token IS the auth (32 bytes of urandom),
+    so anyone with the link can resume."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        row = await db.execute(text("""
+            SELECT token, payload, branch_id, updated_at, expires_at
+            FROM   volunteer_drafts
+            WHERE  token = :token
+              AND  expires_at > NOW()
+        """), {"token": token})
+        rec = row.mappings().one_or_none()
+    if not rec:
+        raise HTTPException(404, detail="Draft not found or expired")
+    return {
+        "token":      rec["token"],
+        "payload":    rec["payload"],
+        "branch_id":  rec["branch_id"],
+        "updated_at": rec["updated_at"].isoformat() if rec["updated_at"] else None,
+        "expires_at": rec["expires_at"].isoformat() if rec["expires_at"] else None,
+    }
+
+
+class EmailLinkBody(BaseModel):
+    """Send the resume link to an email address. The token IS the auth —
+    anyone who has it can already resume the draft, so emailing the
+    matching link to whichever address they pick doesn't expand access.
+    Office 365 SMTP does the heavy rate-limiting in practice."""
+    token: str
+    email: str
+
+
+@router.post("/service/volunteers/draft/email-link")
+async def email_draft_link(body: EmailLinkBody) -> dict[str, Any]:
+    """Email the resume link for a saved draft. Used when an applicant
+    closes the tab and forgets to bookmark — they ask the form to email
+    them, click the link in their inbox, resume on any device."""
+    import asyncio
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
+
+    if "@" not in body.email or len(body.email) > 255:
+        raise HTTPException(400, detail="Valid email address required")
+
+    # Confirm the draft exists and isn't expired before we send anything —
+    # otherwise the email would link to a 404.
+    async with SessionLocal() as db:
+        row = await db.execute(text("""
+            SELECT token, expires_at
+            FROM   volunteer_drafts
+            WHERE  token = :token AND expires_at > NOW()
+        """), {"token": body.token})
+        rec = row.mappings().one_or_none()
+        if not rec:
+            raise HTTPException(404, detail="Draft not found or expired")
+        # Persist whichever email the applicant wants the link sent to,
+        # so admins can also re-send manually if needed.
+        await db.execute(
+            text("UPDATE volunteer_drafts SET email = :email, updated_at = NOW() WHERE token = :token"),
+            {"email": body.email.strip().lower(), "token": body.token},
+        )
+        await db.commit()
+
+    # Resume URL: ?screen=volunteer hash routes the service portal straight
+    # to the wizard; #draft=TOKEN rehydrates the saved form.
+    site = (settings.SITE_URL or "https://shital.org.uk").rstrip("/")
+    # The volunteer wizard lives on the service-portal subdomain.
+    if "://" in site and "service." not in site:
+        # Best-effort rewrite of shital.org.uk → service.shital.org.uk
+        # without forcing config to grow a new SERVICE_URL setting yet.
+        scheme, host = site.split("://", 1)
+        if not host.startswith("service."):
+            site = f"{scheme}://service.{host}"
+    resume_url = f"{site}/?screen=volunteer#draft={body.token}"
+
+    if not settings.OFFICE365_PASSWORD:
+        raise HTTPException(503, detail="Email service not configured")
+
+    subject = "Your SHITAL volunteer-application resume link"
+    text_body = (
+        "Hello,\n\n"
+        "Here's the link to continue your SHITAL volunteer application "
+        "where you left off. The link is valid for 30 days from your last "
+        "save and can be opened on any device.\n\n"
+        f"{resume_url}\n\n"
+        "If you didn't request this email, you can ignore it — the link "
+        "won't work without the unique code at the end.\n\n"
+        "— SHITAL Volunteers"
+    )
+    html_body = f"""
+        <div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:auto;color:#222">
+          <p>Hello,</p>
+          <p>Here's the link to continue your SHITAL volunteer application
+             where you left off. The link is valid for <strong>30 days</strong>
+             from your last save and can be opened on any device.</p>
+          <p style="margin:24px 0">
+            <a href="{resume_url}"
+               style="display:inline-block;background:linear-gradient(135deg,#D4AF37,#C5A028);
+                      color:#3B0000;font-weight:700;text-decoration:none;
+                      padding:12px 24px;border-radius:12px">
+              Resume my application
+            </a>
+          </p>
+          <p style="font-size:12px;color:#666;word-break:break-all">
+            Or paste this URL into your browser: <br>{resume_url}
+          </p>
+          <p style="font-size:12px;color:#666">
+            If you didn't request this email you can safely ignore it —
+            the link won't work without the unique code at the end.
+          </p>
+          <p style="font-size:12px;color:#999;margin-top:24px">— SHITAL Volunteers</p>
+        </div>
+    """
+
+    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
+    password = settings.OFFICE365_PASSWORD
+    to_email = body.email.strip()
+
+    def _send() -> None:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"SHITAL Volunteers <{from_email}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText(text_body, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
+            srv.ehlo()
+            srv.starttls()
+            srv.login(from_email, password)
+            srv.sendmail(from_email, to_email, msg.as_string())
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send)
+    except Exception as exc:
+        raise HTTPException(502, detail=f"Email send failed: {exc}") from exc
+
+    return {"ok": True, "sent_to": to_email}
+
+
+@router.delete("/service/volunteers/draft/{token}")
+async def delete_draft(token: str) -> dict[str, Any]:
+    """Discard — applicant explicitly clearing their draft. No-op if the
+    token isn't found (idempotent)."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        await db.execute(
+            text("DELETE FROM volunteer_drafts WHERE token = :token"),
+            {"token": token},
+        )
+        await db.commit()
+    return {"ok": True}
 
 
 # ─── Admin endpoints — list + detail + approve/reject ─────────────────────────
@@ -304,6 +600,7 @@ async def admin_list_volunteers(
         rows = await db.execute(text(f"""
             SELECT id, reference_number, first_names, last_name,
                    email, mobile, phone, age_range, branch_id,
+                   preferred_branches,
                    status, created_at, reviewed_at,
                    has_criminal_record, has_health_restrictions
             FROM   volunteers
