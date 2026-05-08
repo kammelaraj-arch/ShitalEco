@@ -77,6 +77,8 @@ interface Form {
   declaration_agreed: boolean
   confidentiality_agreed: boolean
   marketing_consent: boolean
+
+  preferred_branches: string[]
 }
 
 const EMPTY: Form = {
@@ -93,6 +95,7 @@ const EMPTY: Form = {
   skills: {}, skills_other_text: '',
   availability: {}, availability_pattern: '',
   declaration_agreed: false, confidentiality_agreed: false, marketing_consent: false,
+  preferred_branches: [],
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -125,7 +128,28 @@ export function VolunteerRegistrationPage() {
   const [error, setError] = useState('')
   const [reference, setReference] = useState('')
 
+  // Active branches (for the "where would you like to volunteer?" picker).
+  // Quietly empty if the API is down — the Remote-only option still works.
+  const [branches, setBranches] = useState<Array<{ branch_id: string; name: string; city: string }>>([])
+  useEffect(() => {
+    api.getBranches()
+      .then(list => setBranches(list.filter(b => b.is_active)))
+      .catch(() => setBranches([]))
+  }, [])
+
   const update = <K extends keyof Form>(k: K, v: Form[K]) => setForm(p => ({ ...p, [k]: v }))
+
+  function togglePreferredBranch(code: string) {
+    setForm(p => {
+      const has = p.preferred_branches.includes(code)
+      return {
+        ...p,
+        preferred_branches: has
+          ? p.preferred_branches.filter(c => c !== code)
+          : [...p.preferred_branches, code],
+      }
+    })
+  }
 
   function toggleSkill(category: string, option: string) {
     setForm(p => {
@@ -256,6 +280,50 @@ export function VolunteerRegistrationPage() {
             <input value={form.phone} onChange={e => update('phone', e.target.value)} className={inp} />
           </div>
         </div>
+      </Section>
+
+      {/* Where they want to help */}
+      <Section title={t('section.where.title', 'Where would you like to volunteer?')}>
+        <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
+          {t('section.where.intro', 'Pick one or more branches you can travel to, or "Remote / Online" if you want to help from home.')}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {branches.map(b => {
+            const active = form.preferred_branches.includes(b.branch_id)
+            return (
+              <button key={b.branch_id} type="button"
+                onClick={() => togglePreferredBranch(b.branch_id)}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                style={{
+                  background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
+                  color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
+                }}>
+                {b.name}{b.city ? <span className="opacity-60"> · {b.city}</span> : null}
+              </button>
+            )
+          })}
+          {(() => {
+            const active = form.preferred_branches.includes('remote')
+            return (
+              <button type="button"
+                onClick={() => togglePreferredBranch('remote')}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                style={{
+                  background: active ? 'linear-gradient(135deg,rgba(96,165,250,0.3),rgba(96,165,250,0.15))' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${active ? '#60A5FA' : 'rgba(255,255,255,0.1)'}`,
+                  color: active ? '#BFDBFE' : 'rgba(255,248,220,0.7)',
+                }}>
+                🌐 Remote / Online
+              </button>
+            )
+          })()}
+        </div>
+        {form.preferred_branches.length === 0 && (
+          <p className="text-[11px] mt-2" style={{ color: 'rgba(255,248,220,0.4)' }}>
+            {t('section.where.help', 'Tap at least one option.')}
+          </p>
+        )}
       </Section>
 
       {/* Emergency contact */}

@@ -91,6 +91,10 @@ class VolunteerRegistration(BaseModel):
     # Branch the application is destined for (e.g. wembley, main)
     branch_id: str = "main"
 
+    # Where the volunteer wants to help — list of branch codes, with the
+    # literal "remote" as a sentinel for online/remote-only volunteering.
+    preferred_branches: list[str] = Field(default_factory=list)
+
 
 def _validate(v: VolunteerRegistration) -> list[str]:
     """Required-field validation matching the paper-form * markers + handbook
@@ -136,6 +140,8 @@ def _validate(v: VolunteerRegistration) -> list[str]:
         errs.append("You must agree to the volunteer activity declaration")
     if not v.confidentiality_agreed:
         errs.append("You must agree to the confidentiality undertaking")
+    if not v.preferred_branches:
+        errs.append("Please tell us where you'd like to volunteer (at least one branch or remote)")
     return errs
 
 
@@ -246,7 +252,7 @@ async def register_volunteer(
                 ref2_address, ref2_postcode, ref2_mobile, ref2_phone, ref2_email,
                 skills, skills_other_text, availability, availability_pattern,
                 declaration_signed_at, confidentiality_agreed, marketing_consent,
-                status, branch_id,
+                status, branch_id, preferred_branches,
                 submitted_ip, user_agent,
                 created_at, updated_at
             ) VALUES (
@@ -264,7 +270,7 @@ async def register_volunteer(
                 CAST(:skills AS jsonb), :skills_other_text,
                 CAST(:availability AS jsonb), :availability_pattern,
                 :declaration_signed_at, :confidentiality_agreed, :marketing_consent,
-                'PENDING', :branch_id,
+                'PENDING', :branch_id, CAST(:preferred_branches AS jsonb),
                 :submitted_ip, :user_agent,
                 :now, :now
             )
@@ -298,7 +304,11 @@ async def register_volunteer(
             "declaration_signed_at": now,
             "confidentiality_agreed": body.confidentiality_agreed,
             "marketing_consent": body.marketing_consent,
-            "branch_id": body.branch_id, "submitted_ip": submitted_ip,
+            "branch_id": body.branch_id,
+            "preferred_branches": _jsonify(
+                [b.strip().lower() for b in body.preferred_branches if b.strip()]
+            ),
+            "submitted_ip": submitted_ip,
             "user_agent": user_agent, "now": now,
         })
         await db.commit()

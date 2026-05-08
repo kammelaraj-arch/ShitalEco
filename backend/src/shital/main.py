@@ -1248,6 +1248,10 @@ async def _patch_schema() -> None:
         # contacts which is touched by every donation flow.
         "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id) ON DELETE SET NULL",
         "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS partial_save_token VARCHAR(64) NOT NULL DEFAULT ''",
+        # Where the volunteer wants to help — array of branch codes, with the
+        # literal 'remote' as a sentinel for online/remote-only. Distinct from
+        # `branch_id` (which is the org branch that owns the application).
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_branches JSONB NOT NULL DEFAULT '[]'::jsonb",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_contact ON volunteers(contact_id)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_partial_token ON volunteers(partial_save_token) WHERE partial_save_token != ''",
         # Backfill: link existing volunteer rows to a contact row by email.

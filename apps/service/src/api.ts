@@ -239,6 +239,9 @@ export interface VolunteerRegistrationPayload {
   // Consents
   declaration_agreed: boolean; confidentiality_agreed: boolean; marketing_consent: boolean
   branch_id: string
+  // Where the volunteer wants to help: array of branch codes, with the
+  // literal "remote" as a sentinel for online/remote-only volunteering.
+  preferred_branches: string[]
 }
 
 export interface GivingTier {
