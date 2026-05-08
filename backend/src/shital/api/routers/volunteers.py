@@ -175,11 +175,65 @@ async def register_volunteer(
     now = datetime.now(UTC)
     submitted_ip = (request.client.host if request.client else "")[:45]
     user_agent = (request.headers.get("user-agent") or "")[:500]
+    email_key = body.email.strip().lower()
 
     async with SessionLocal() as db:
+        # Upsert the volunteer as a CRM contact first. Same pattern as the
+        # PayPal capture flow — a person who later donates (or has already)
+        # ends up sharing one contacts row, deduped by email. Sensitive
+        # volunteer-only fields (criminal record, health, references) stay
+        # on the volunteers row; contacts only holds identity + consents.
+        contact_uuid = str(uuid.uuid4())
+        c_result = await db.execute(text("""
+            INSERT INTO contacts
+                (id, email, first_name, surname, full_name, phone,
+                 gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                 first_source, first_branch_id, created_at, updated_at)
+            VALUES
+                (:id, :email, :first, :surname, :name, :phone,
+                 true, :now, :tac, :tac_at,
+                 'volunteer-registration', :branch, :now, :now)
+            ON CONFLICT (email) DO UPDATE SET
+                first_name        = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                surname           = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                full_name         = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                phone             = COALESCE(NULLIF(EXCLUDED.phone,''),      contacts.phone),
+                gdpr_consent      = true,
+                gdpr_consented_at = COALESCE(contacts.gdpr_consented_at, EXCLUDED.gdpr_consented_at),
+                tac_consent       = (contacts.tac_consent OR EXCLUDED.tac_consent),
+                tac_consented_at  = COALESCE(contacts.tac_consented_at,  EXCLUDED.tac_consented_at),
+                updated_at        = EXCLUDED.updated_at
+            RETURNING id
+        """), {
+            "id": contact_uuid, "email": email_key,
+            "first": body.first_names.strip(), "surname": body.last_name.strip(),
+            "name": f"{body.first_names.strip()} {body.last_name.strip()}".strip(),
+            "phone": body.mobile.strip() or body.phone.strip(),
+            "tac": body.confidentiality_agreed,
+            "tac_at": now if body.confidentiality_agreed else None,
+            "branch": body.branch_id, "now": now,
+        })
+        c_row = c_result.mappings().first()
+        contact_id = str(c_row["id"]) if c_row else contact_uuid
+
+        # Address linked to the contact (so future donate/volunteer flows
+        # can prefill). Matches PayPal capture: same insert, dedup index
+        # (addresses_unique_contact_pc_house) handles repeat applications.
+        if body.postcode.strip() or body.address.strip():
+            await db.execute(text("""
+                INSERT INTO addresses
+                    (id, contact_id, formatted, postcode, uprn,
+                     is_primary, lookup_source, created_at)
+                VALUES (:id, :cid, :fmt, :pc, '', true, 'volunteer-registration', :now)
+                ON CONFLICT (contact_id, postcode, house_number) DO NOTHING
+            """), {
+                "id": str(uuid.uuid4()), "cid": contact_id,
+                "fmt": body.address, "pc": body.postcode.upper(), "now": now,
+            })
+
         await db.execute(text("""
             INSERT INTO volunteers (
-                id, reference_number,
+                id, reference_number, contact_id,
                 title, first_names, last_name, address, postcode,
                 mobile, phone, email, age_range,
                 ec_title, ec_full_name, ec_email, ec_mobile, ec_phone,
@@ -196,7 +250,7 @@ async def register_volunteer(
                 submitted_ip, user_agent,
                 created_at, updated_at
             ) VALUES (
-                :id, :reference,
+                :id, :reference, :contact_id,
                 :title, :first_names, :last_name, :address, :postcode,
                 :mobile, :phone, :email, :age_range,
                 :ec_title, :ec_full_name, :ec_email, :ec_mobile, :ec_phone,
@@ -216,10 +270,11 @@ async def register_volunteer(
             )
         """), {
             "id": str(uuid.uuid4()), "reference": reference,
+            "contact_id": contact_id,
             "title": body.title, "first_names": body.first_names.strip(),
             "last_name": body.last_name.strip(), "address": body.address,
             "postcode": body.postcode, "mobile": body.mobile, "phone": body.phone,
-            "email": body.email.strip().lower(), "age_range": body.age_range,
+            "email": email_key, "age_range": body.age_range,
             "ec_title": body.ec_title, "ec_full_name": body.ec_full_name,
             "ec_email": body.ec_email, "ec_mobile": body.ec_mobile,
             "ec_phone": body.ec_phone, "ec_address": body.ec_address,
