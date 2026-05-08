@@ -2,6 +2,10 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { type ThemeId, DEFAULT_THEME, applyTheme, getTheme } from './themes'
 
+// Hardcoded org logo. Lives on shirdisai.org.uk so cache + CDN are managed
+// outside this app. Swap here to rebrand the public service portal.
+export const SHITAL_LOGO_URL = 'https://shirdisai.org.uk/Cnt/img/shital-logo-new.png'
+
 export type Screen =
   | 'browse' | 'basket' | 'contact' | 'gift-aid' | 'payment' | 'confirmation' | 'monthly-giving' | 'volunteer'
 

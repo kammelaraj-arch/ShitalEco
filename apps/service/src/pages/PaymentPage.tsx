@@ -188,11 +188,13 @@ export function PaymentPage() {
     input: { color: '#f5f0dc', 'font-size': '14px', 'font-family': 'inherit', background: 'transparent', height: '100%' },
     '.invalid': { color: '#f87171' },
   }
-  // Wrapper around the iframe. Must be fixed-height + relative + overflow-hidden
-  // so PayPal's iframe (which renders with height:100%) sizes correctly. The
-  // previous h-10 (40px) was too short for some browsers' default iframe
-  // padding and caused overflow that pushed the Pay button up over the
-  // expiry/CVV row.
+  // Wrapper around PayPal's hosted-card iframe. Combines fixes from PR #42
+  // (the kiosk monthly-giving Guest Card flow) and PR #47 (the basket
+  // payment page):
+  //   - relative + overflow-hidden + explicit height (48px) lets the iframe
+  //     size correctly across browsers without spilling into siblings
+  //   - horizontal padding only — vertical padding squeezed the iframe to
+  //     20px and made the Pay button slide up over the expiry/CVV row
   const hostedFieldClass = 'block relative bg-black/30 border border-white/10 rounded-xl px-3 overflow-hidden'
   const hostedFieldHeight = { height: 48 }
 
@@ -330,7 +332,7 @@ export function PaymentPage() {
                   setCapturing(false)
                 }}
               >
-                <div className="temple-card p-5 space-y-4">
+                <div className="temple-card p-5 space-y-4 relative">
                   {/* Billing name */}
                   <div className="flex gap-3">
                     <div className="flex-1">

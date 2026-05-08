@@ -1168,6 +1168,31 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_bank_txn_account ON bank_transactions(account_id)",
         "CREATE INDEX IF NOT EXISTS idx_bank_txn_date    ON bank_transactions(txn_date DESC)",
         "CREATE INDEX IF NOT EXISTS idx_bank_txn_recon   ON bank_transactions(reconciled)",
+        # ── Bank statement import history ─────────────────────────────────────
+        # One row per uploaded statement file. file_hash dedups same-file
+        # re-uploads. statement_id on bank_transactions points here once the
+        # row is committed.
+        """CREATE TABLE IF NOT EXISTS bank_statements (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            account_id          UUID NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+            file_name           VARCHAR(500) NOT NULL DEFAULT '',
+            file_hash           VARCHAR(80)  NOT NULL DEFAULT '',
+            file_format         VARCHAR(20)  NOT NULL DEFAULT 'CSV',
+            detected_provider   VARCHAR(40)  NOT NULL DEFAULT '',
+            period_start        DATE,
+            period_end          DATE,
+            transaction_count   INT          NOT NULL DEFAULT 0,
+            duplicates_count    INT          NOT NULL DEFAULT 0,
+            status              VARCHAR(20)  NOT NULL DEFAULT 'PARSED',
+            uploaded_by_user_id UUID,
+            uploaded_by_name    VARCHAR(255) NOT NULL DEFAULT '',
+            error_message       TEXT         NOT NULL DEFAULT '',
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            committed_at        TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_bank_stmt_account ON bank_statements(account_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_stmt_hash    ON bank_statements(file_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_stmt_status  ON bank_statements(status)",
         # ── Volunteer Registration ────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS volunteers (
             id                          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1241,6 +1266,69 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_volunteers_email  ON volunteers(email)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_branch ON volunteers(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_created ON volunteers(created_at DESC)",
+        # ── Volunteer ↔ Contact link (CRM dedup; criminal/health stay here) ───
+        # The volunteer/donor/member is one PERSON in `contacts`; the volunteer
+        # APPLICATION is a separate row keyed by contact_id. Sensitive fields
+        # (criminal record, health) deliberately stay on volunteers, not on
+        # contacts which is touched by every donation flow.
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS contact_id UUID REFERENCES contacts(id) ON DELETE SET NULL",
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS partial_save_token VARCHAR(64) NOT NULL DEFAULT ''",
+        # Where the volunteer wants to help — array of branch codes, with the
+        # literal 'remote' as a sentinel for online/remote-only. Distinct from
+        # `branch_id` (which is the org branch that owns the application).
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_branches JSONB NOT NULL DEFAULT '[]'::jsonb",
+        # ── Volunteer drafts (cross-device partial save) ──────────────────────
+        # The wizard auto-saves to localStorage on every change. For applicants
+        # who want to resume on a different device — or who clear browser data
+        # mid-fill — we also persist to this table, keyed by an opaque token
+        # the client stashes in the URL hash. Drafts expire after 30 days.
+        """CREATE TABLE IF NOT EXISTS volunteer_drafts (
+            id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            token       VARCHAR(64)  UNIQUE NOT NULL,
+            email       VARCHAR(255) NOT NULL DEFAULT '',
+            payload     JSONB        NOT NULL DEFAULT '{}'::jsonb,
+            branch_id   VARCHAR(100) NOT NULL DEFAULT 'main',
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            expires_at  TIMESTAMPTZ  NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_volunteer_drafts_token   ON volunteer_drafts(token)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteer_drafts_email   ON volunteer_drafts(LOWER(email)) WHERE email != ''",
+        "CREATE INDEX IF NOT EXISTS idx_volunteer_drafts_expires ON volunteer_drafts(expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_contact ON volunteers(contact_id)",
+        "CREATE INDEX IF NOT EXISTS idx_volunteers_partial_token ON volunteers(partial_save_token) WHERE partial_save_token != ''",
+        # Backfill: link existing volunteer rows to a contact row by email.
+        # Idempotent — only touches rows where contact_id IS NULL. Safe to
+        # re-run; later schema patches won't overwrite an explicit contact_id.
+        """
+        WITH new_contacts AS (
+            INSERT INTO contacts (id, email, first_name, surname, full_name, phone,
+                                  gdpr_consent, gdpr_consented_at,
+                                  tac_consent, tac_consented_at,
+                                  first_source, first_branch_id, created_at, updated_at)
+            SELECT  gen_random_uuid(),
+                    LOWER(v.email),
+                    v.first_names,
+                    v.last_name,
+                    TRIM(v.first_names || ' ' || v.last_name),
+                    COALESCE(NULLIF(v.mobile,''), v.phone),
+                    true, v.created_at,
+                    v.confidentiality_agreed, v.created_at,
+                    'volunteer-registration', v.branch_id, v.created_at, v.created_at
+            FROM    volunteers v
+            WHERE   v.contact_id IS NULL
+              AND   v.email IS NOT NULL
+              AND   v.email <> ''
+            ON CONFLICT (email) DO UPDATE
+              SET updated_at = EXCLUDED.updated_at
+            RETURNING id, email
+        )
+        UPDATE volunteers
+           SET contact_id = c.id
+          FROM contacts c
+         WHERE volunteers.contact_id IS NULL
+           AND LOWER(volunteers.email) = c.email
+        """,
         # ── Form-text overrides (admin-editable strings on public forms) ──────
         # Sparse table: only stores OVERRIDES. Defaults live in code (per
         # form_key catalogue in shital.api.routers.form_config). Lookup is
@@ -1283,6 +1371,30 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_trustees_email  ON trustees(email)",
         "CREATE INDEX IF NOT EXISTS idx_trustees_role   ON trustees(role)",
         "CREATE INDEX IF NOT EXISTS idx_trustees_active ON trustees(is_active)",
+        # PIN-protected magic-link voting. Each trustee sets their own 4-6
+        # digit PIN to confirm a vote cast via an emailed magic link. PIN is
+        # bcrypt-hashed; rate-limited via pin_failed_attempts +
+        # pin_locked_until.
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS pin_hash VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS pin_set_at TIMESTAMPTZ",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS pin_failed_attempts INT NOT NULL DEFAULT 0",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMPTZ",
+        # Magic-link tokens for trustees to read + vote on a specific
+        # resolution without logging in. One token per (resolution, trustee).
+        # Token stays valid until the resolution closes.
+        """CREATE TABLE IF NOT EXISTS resolution_vote_tokens (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            token           VARCHAR(80) UNIQUE NOT NULL,
+            resolution_id   UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
+            sent_via        VARCHAR(20) NOT NULL DEFAULT 'EMAIL',
+            sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_used_at    TIMESTAMPTZ,
+            used_count      INT NOT NULL DEFAULT 0,
+            UNIQUE (resolution_id, trustee_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_rvtok_token ON resolution_vote_tokens(token)",
+        "CREATE INDEX IF NOT EXISTS idx_rvtok_res   ON resolution_vote_tokens(resolution_id)",
         # Singleton row keyed on a constant scope value — the charity has one
         # set of rules. Stored as a row (not env vars) so admins can edit
         # from UI without redeploying.
@@ -1438,6 +1550,7 @@ async def _seed_api_key_metadata() -> None:
         ("MS_CLIENT_ID",              "Microsoft Azure App (client) ID",                "Microsoft", False),
         ("MS_TENANT_ID",              "Microsoft Azure Directory (tenant) ID",          "Microsoft", False),
         ("MS_CLIENT_SECRET",          "Microsoft Azure client secret",                  "Microsoft", True),
+        ("MS_REDIRECT_URI",           "Azure AD OAuth redirect URI — must match Azure exactly, e.g. https://admin.shital.org.uk/admin/auth-callback/ (trailing slash matters)", "Microsoft", False),
         ("GOOGLE_CLIENT_ID",          "Google OAuth client ID",                         "Google",    False),
         ("GOOGLE_CLIENT_SECRET",      "Google OAuth client secret",                     "Google",    True),
         ("META_WHATSAPP_TOKEN",       "Meta WhatsApp Business API token",               "WhatsApp",  True),
@@ -1956,7 +2069,9 @@ _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.bank_accounts",         "router")
+_mount("shital.api.routers.bank_imports",          "router")
 _mount("shital.api.routers.board",                 "router")
+_mount("shital.api.routers.board_voting",          "router")
 _mount("shital.api.routers.volunteers",            "router")
 _mount("shital.api.routers.form_config",           "router")
 _mount("shital.api.routers.contacts",             "router")

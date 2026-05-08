@@ -44,7 +44,23 @@ from shital.api.deps import CurrentSpace
 
 router = APIRouter(tags=["board"])
 
-VALID_ROLES = {"CHAIR", "TREASURER", "SECRETARY", "TRUSTEE"}
+VALID_ROLES = {
+    # Main board (these have voting weight on board resolutions)
+    "CHAIR",                # Maps to board-resolution Chair (casting-vote rights)
+    "TREASURER",
+    "SECRETARY",
+    "TRUSTEE",
+    "CEO",
+    # LMC = Local Management Committee — branch-level officers; do not vote
+    # on main-board resolutions, but appear in the trustee/officer registry.
+    "LMC_CHAIR",
+    "LMC_TREASURER",
+    "LMC_MEMBER",
+    # Non-officer engagements kept here so the directory + audit log can
+    # reference them with the same FK (trustees.id).
+    "EXTERNAL_CONTRACTOR",
+    "TEMP_WORKER",
+}
 VALID_MEETING_TYPES = {"TRUSTEE_MEETING", "COMMITTEE", "AGM", "EMERGENCY"}
 VALID_MEETING_MODES = {"IN_PERSON", "VIRTUAL", "HYBRID"}
 VALID_MEETING_STATUSES = {"SCHEDULED", "OPENED", "CLOSED", "CANCELLED"}
@@ -198,10 +214,17 @@ async def list_trustees(
             FROM   trustees
             {where_sql}
             ORDER  BY CASE role
-                          WHEN 'CHAIR' THEN 1
-                          WHEN 'TREASURER' THEN 2
-                          WHEN 'SECRETARY' THEN 3
-                          ELSE 4
+                          WHEN 'CHAIR'               THEN 1
+                          WHEN 'TREASURER'           THEN 2
+                          WHEN 'SECRETARY'           THEN 3
+                          WHEN 'CEO'                 THEN 4
+                          WHEN 'TRUSTEE'             THEN 5
+                          WHEN 'LMC_CHAIR'           THEN 6
+                          WHEN 'LMC_TREASURER'       THEN 7
+                          WHEN 'LMC_MEMBER'          THEN 8
+                          WHEN 'EXTERNAL_CONTRACTOR' THEN 9
+                          WHEN 'TEMP_WORKER'         THEN 10
+                          ELSE 99
                       END, full_name
             LIMIT  :limit OFFSET :offset
         """), params)
@@ -234,6 +257,22 @@ async def create_trustee(
     new_id = str(uuid.uuid4())
     now = datetime.now(UTC)
     async with SessionLocal() as db:
+        # Auto-link to a user by email so the casting-vote / per-role
+        # permissions checks work without needing an explicit "link user"
+        # admin step. The trustee admin form has no user_id picker today;
+        # email match is the natural source of truth for "this trustee is
+        # this person logging in".
+        resolved_user_id: str | None = (
+            body.user_id if _looks_uuid(body.user_id) else None
+        )
+        if not resolved_user_id and body.email.strip():
+            u = (await db.execute(
+                text("SELECT id FROM users WHERE LOWER(email) = LOWER(:e)"),
+                {"e": body.email.strip()},
+            )).mappings().one_or_none()
+            if u:
+                resolved_user_id = str(u["id"])
+
         await db.execute(text("""
             INSERT INTO trustees
                 (id, user_id, full_name, email, role, phone, address, postcode,
@@ -242,7 +281,7 @@ async def create_trustee(
                 (:id, :user_id, :full_name, :email, :role, :phone, :address, :postcode,
                  :term_start, :term_end, :notes, true, :now, :now)
         """), {
-            "id": new_id, "user_id": body.user_id if _looks_uuid(body.user_id) else None,
+            "id": new_id, "user_id": resolved_user_id,
             "full_name": body.full_name.strip(), "email": body.email.strip().lower(),
             "role": body.role, "phone": body.phone, "address": body.address,
             "postcode": body.postcode, "term_start": ts, "term_end": te,
@@ -314,11 +353,26 @@ async def update_trustee(
 
     async with SessionLocal() as db:
         existing = (await db.execute(
-            text("SELECT id, role, full_name FROM trustees WHERE id::text = :id"),
+            text("SELECT id, role, full_name, email, user_id FROM trustees WHERE id::text = :id"),
             {"id": trustee_id},
         )).mappings().one_or_none()
         if not existing:
             raise HTTPException(404, detail="Trustee not found")
+        # Auto-link by email when the email is being updated and no
+        # explicit user_id is being set, to keep parity with create.
+        new_email = updates.get("email") or existing["email"]
+        if (
+            "user_id" not in updates
+            and not existing["user_id"]
+            and new_email
+        ):
+            u = (await db.execute(
+                text("SELECT id FROM users WHERE LOWER(email) = LOWER(:e)"),
+                {"e": new_email},
+            )).mappings().one_or_none()
+            if u:
+                updates["user_id"] = str(u["id"])
+                set_clauses = ", ".join(f"{k} = :{k}" for k in updates if k not in ("id", "now"))
         await db.execute(
             text(f"UPDATE trustees SET {set_clauses}, updated_at = :now WHERE id::text = :id"),
             updates,
@@ -1427,17 +1481,31 @@ async def chair_casting_vote(
         if not rules or not rules["chair_casting_vote_enabled"]:
             raise HTTPException(400, detail="Casting vote is not permitted by governing rules")
 
-        # Verify the actor is the Chair. Match via user_id on the trustee row.
+        # Verify the actor is the Chair. Primary match is user_id; fall back
+        # to email so a trustee created via the admin form (which has no
+        # user_id picker) is still recognised as the Chair when their email
+        # matches the signed-in user. When matched by email, opportunistically
+        # backfill user_id so future calls hit the fast path.
         chair = (await db.execute(text("""
-            SELECT id, full_name FROM trustees
-            WHERE  role = 'CHAIR' AND is_active = true AND user_id::text = :uid
-        """), {"uid": str(ctx.user_id)})).mappings().one_or_none()
+            SELECT id, full_name, user_id FROM trustees
+            WHERE  role = 'CHAIR' AND is_active = true
+              AND  (
+                    user_id::text = :uid
+                 OR (user_id IS NULL AND LOWER(email) = LOWER(:email))
+              )
+        """), {"uid": str(ctx.user_id), "email": ctx.user_email or ""})).mappings().one_or_none()
         if not chair:
             raise HTTPException(403, detail=(
-                "Casting vote is restricted to the Chair (matched by user_id "
-                "on the trustees record). If you believe this is an error, "
-                "ensure your user account is linked to the Chair trustee row."
+                "Casting vote is restricted to the Chair. No active trustee "
+                "with role=CHAIR was found for your account. Create a trustee "
+                "row in Admin → Board → Trustees with role 'Chair' and the "
+                "same email you sign in with — the link is automatic."
             ))
+        if not chair["user_id"]:
+            await db.execute(
+                text("UPDATE trustees SET user_id = :uid WHERE id = :id"),
+                {"uid": str(ctx.user_id), "id": chair["id"]},
+            )
 
         new_outcome = "CARRIED" if body.choice == "FOR" else "NOT_CARRIED"
         summary = (

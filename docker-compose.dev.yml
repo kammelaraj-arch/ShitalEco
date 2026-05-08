@@ -60,7 +60,13 @@ services:
       MS_CLIENT_ID:           ${MS_CLIENT_ID:-}
       MS_TENANT_ID:           ${MS_TENANT_ID:-}
       MS_CLIENT_SECRET:       ${MS_CLIENT_SECRET:-}
-      MS_REDIRECT_URI:        https://dev.shital.org.uk/auth-callback
+      # Dev re-uses the same Azure AD app registration as prod — host's
+      # .env supplies MS_CLIENT_ID / MS_TENANT_ID, and both
+      # https://dev.shital.org.uk/admin/auth-callback/ and the prod URL
+      # must both be registered in the Azure portal.
+      # Path includes the /admin basePath; trailing slash matches Next.js
+      # trailingSlash:true so Azure exact-match accepts it.
+      MS_REDIRECT_URI:        ${MS_REDIRECT_URI_DEV:-https://dev.shital.org.uk/admin/auth-callback/}
       DEPLOYER_URL:           ${DEPLOYER_URL:-http://deployer:9000}
     depends_on:
       db-dev:

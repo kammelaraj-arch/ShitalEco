@@ -213,6 +213,53 @@ export const api = {
     if (!r.ok) throw new Error(`form-config fetch failed: ${r.status}`)
     return r.json()
   },
+
+  // ── Volunteer draft (cross-device partial save) ─────────────────────────
+  async saveVolunteerDraft(args: { token?: string; payload: unknown; email?: string; branchId?: string }):
+      Promise<{ ok: boolean; token: string; expires_at: string | null }> {
+    const r = await fetch(`${API}/service/volunteers/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: args.token || '',
+        payload: args.payload,
+        email: args.email || '',
+        branch_id: args.branchId || 'main',
+      }),
+    })
+    if (!r.ok) throw new Error(`Draft save failed: ${r.status}`)
+    return r.json()
+  },
+
+  async getVolunteerDraft(token: string): Promise<{
+    token: string
+    payload: Record<string, unknown>
+    branch_id: string
+    updated_at: string | null
+    expires_at: string | null
+  }> {
+    const r = await fetch(`${API}/service/volunteers/draft/${encodeURIComponent(token)}`)
+    if (!r.ok) throw new Error(`Draft not found: ${r.status}`)
+    return r.json()
+  },
+
+  async deleteVolunteerDraft(token: string): Promise<void> {
+    await fetch(`${API}/service/volunteers/draft/${encodeURIComponent(token)}`, { method: 'DELETE' })
+  },
+
+  async emailVolunteerDraftLink(args: { token: string; email: string }): Promise<{ ok: boolean; sent_to: string }> {
+    const r = await fetch(`${API}/service/volunteers/draft/email-link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(args),
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      const detail = (data as { detail?: string })?.detail
+      throw new Error(detail || `Email send failed (HTTP ${r.status})`)
+    }
+    return data
+  },
 }
 
 export interface VolunteerRegistrationPayload {
@@ -235,10 +282,17 @@ export interface VolunteerRegistrationPayload {
   ref2_mobile: string; ref2_phone: string; ref2_email: string
   // Skills + availability
   skills: Record<string, string[]>; skills_other_text: string
-  availability: Record<string, Record<string, string>>; availability_pattern: string
+  // Availability shape: { days: string[], times: string[], notes: string }.
+  // Stored as JSONB server-side; the admin UI also handles legacy
+  // {day: {slot: time}} rows submitted before this redesign.
+  availability: { days: string[]; times: string[]; notes: string }
+  availability_pattern: string
   // Consents
   declaration_agreed: boolean; confidentiality_agreed: boolean; marketing_consent: boolean
   branch_id: string
+  // Where the volunteer wants to help: array of branch codes, with the
+  // literal "remote" as a sentinel for online/remote-only volunteering.
+  preferred_branches: string[]
 }
 
 export interface GivingTier {

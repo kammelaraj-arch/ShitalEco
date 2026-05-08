@@ -2,37 +2,46 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useStore } from '../store'
 import { api, type VolunteerRegistrationPayload } from '../api'
+import { AddressLookup } from '../components/AddressLookup'
 
 const TITLES = ['', 'Dr', 'Mr', 'Mrs', 'Ms', 'Master', 'Other']
 const AGE_RANGES = ['18-25', '26-35', '36-45', '46-55', '55+']
 
 // Skills checklist mirrors paper-form V1.2 page 4 layout. Each row is one
-// category with its options. Renamed to match how staff describe them.
-const SKILLS_CATALOG: Array<{ key: string; label: string; options: string[] }> = [
-  { key: 'Administrative',  label: 'Administrative',     options: ['General Office Duties', 'Accountancy', 'Research', 'Secretarial', 'Other'] },
-  { key: 'Logistics',       label: 'Logistics',          options: ['Driving', 'Loading / Unloading', 'Warehouse Management', 'Import / Export', 'Other'] },
-  { key: 'Cultural',        label: 'Cultural',           options: ['Singing', 'Dancing', 'Drama', 'Other'] },
-  { key: 'Communications',  label: 'Communications',     options: ['Marketing / PR', 'Community Relations', 'Cataloguing', 'Conducting Surveys', 'Social Media', 'Other'] },
-  { key: 'IT',              label: 'IT',                 options: ['Data Entry', 'Web Developing', 'Networking', 'Other'] },
-  { key: 'Religious',       label: 'Religious',          options: ['Bhajans / Shlokas', 'Other'] },
-  { key: 'EventManagement', label: 'Event Management',   options: ['Advertising / Publicity', 'Public Relations', 'First Aider', 'Security', 'Other'] },
-  { key: 'Education',       label: 'Education',          options: ['Tuition', 'Teaching', 'Counselling', 'Consultancy', 'Language', 'Other'] },
-  { key: 'Hospitality',     label: 'Hospitality',        options: ['Care Taker', 'Child Minder', 'Other'] },
-  { key: 'CharityServices', label: 'Charity Services',   options: ['Fund Raising', 'Distributing Food', 'Other'] },
-  { key: 'Other',           label: 'Other Skills',       options: ['DIY', 'Carpentry', 'Electrical', 'Plumbing', 'Cooking', 'Other'] },
+// category with its options. Categories collapsed by default to stop the
+// form being a wall of 55 chips on first paint.
+const SKILLS_CATALOG: Array<{ key: string; label: string; icon: string; options: string[] }> = [
+  { key: 'Administrative',  label: 'Administrative',   icon: '📋', options: ['General Office Duties', 'Accountancy', 'Research', 'Secretarial', 'Other'] },
+  { key: 'Logistics',       label: 'Logistics',        icon: '🚚', options: ['Driving', 'Loading / Unloading', 'Warehouse Management', 'Import / Export', 'Other'] },
+  { key: 'Cultural',        label: 'Cultural',         icon: '🎭', options: ['Singing', 'Dancing', 'Drama', 'Other'] },
+  { key: 'Communications',  label: 'Communications',   icon: '📣', options: ['Marketing / PR', 'Community Relations', 'Cataloguing', 'Conducting Surveys', 'Social Media', 'Other'] },
+  { key: 'IT',              label: 'IT',               icon: '💻', options: ['Data Entry', 'Web Developing', 'Networking', 'Other'] },
+  { key: 'Religious',       label: 'Religious',        icon: '🕉️', options: ['Bhajans / Shlokas', 'Other'] },
+  { key: 'EventManagement', label: 'Event Management', icon: '🎪', options: ['Advertising / Publicity', 'Public Relations', 'First Aider', 'Security', 'Other'] },
+  { key: 'Education',       label: 'Education',        icon: '📚', options: ['Tuition', 'Teaching', 'Counselling', 'Consultancy', 'Language', 'Other'] },
+  { key: 'Hospitality',     label: 'Hospitality',      icon: '🏠', options: ['Care Taker', 'Child Minder', 'Other'] },
+  { key: 'CharityServices', label: 'Charity Services', icon: '🤲', options: ['Fund Raising', 'Distributing Food', 'Other'] },
+  { key: 'Other',           label: 'Other Skills',     icon: '🛠️', options: ['DIY', 'Carpentry', 'Electrical', 'Plumbing', 'Cooking', 'Other'] },
 ]
 
-const WEEKDAYS: Array<{ key: string; label: string }> = [
-  { key: 'monday',    label: 'Monday'    },
-  { key: 'tuesday',   label: 'Tuesday'   },
-  { key: 'wednesday', label: 'Wednesday' },
-  { key: 'thursday',  label: 'Thursday'  },
-  { key: 'friday',    label: 'Friday'    },
-  { key: 'saturday',  label: 'Saturday'  },
-  { key: 'sunday',    label: 'Sunday'    },
+const WEEKDAYS: Array<{ key: string; label: string; short: string }> = [
+  { key: 'monday',    label: 'Monday',    short: 'Mon' },
+  { key: 'tuesday',   label: 'Tuesday',   short: 'Tue' },
+  { key: 'wednesday', label: 'Wednesday', short: 'Wed' },
+  { key: 'thursday',  label: 'Thursday',  short: 'Thu' },
+  { key: 'friday',    label: 'Friday',    short: 'Fri' },
+  { key: 'saturday',  label: 'Saturday',  short: 'Sat' },
+  { key: 'sunday',    label: 'Sunday',    short: 'Sun' },
 ]
 
-const AVAILABILITY_PATTERNS = ['daily', 'weekly', 'events-only']
+const TIME_SLOTS: Array<{ key: string; label: string; hint: string }> = [
+  { key: 'morning',   label: 'Morning',   hint: '~9am – noon' },
+  { key: 'afternoon', label: 'Afternoon', hint: '~noon – 5pm' },
+  { key: 'evening',   label: 'Evening',   hint: '~5pm onwards' },
+  { key: 'flexible',  label: 'Flexible',  hint: 'Any time' },
+]
+
+const AVAILABILITY_PATTERNS = ['weekly', 'fortnightly', 'monthly', 'events-only', 'flexible']
 
 const inp = 'w-full px-4 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 focus:border-saffron-400/50 outline-none text-ivory-100 placeholder-white/30'
 const lbl = 'block text-xs font-bold uppercase tracking-widest mb-1.5'
@@ -43,6 +52,7 @@ interface Form {
   last_name: string
   address: string
   postcode: string
+  uprn: string
   mobile: string
   phone: string
   email: string
@@ -55,6 +65,7 @@ interface Form {
   ec_phone: string
   ec_address: string
   ec_postcode: string
+  ec_uprn: string
 
   has_health_restrictions: boolean
   health_notes: string
@@ -63,36 +74,44 @@ interface Form {
   criminal_record_details: string
 
   ref1_title: string; ref1_first_names: string; ref1_last_name: string
-  ref1_address: string; ref1_postcode: string
+  ref1_address: string; ref1_postcode: string; ref1_uprn: string
   ref1_mobile: string; ref1_phone: string; ref1_email: string
   ref2_title: string; ref2_first_names: string; ref2_last_name: string
-  ref2_address: string; ref2_postcode: string
+  ref2_address: string; ref2_postcode: string; ref2_uprn: string
   ref2_mobile: string; ref2_phone: string; ref2_email: string
 
   skills: Record<string, string[]>
   skills_other_text: string
-  availability: Record<string, Record<string, string>>
+  // New shape: { days: string[], times: string[], notes: string }. Stored
+  // as a JSONB blob server-side; admin renders both this and the legacy
+  // {day: {slot: time}} shape for backwards compatibility with old rows.
+  availability: { days: string[]; times: string[]; notes: string }
   availability_pattern: string
 
   declaration_agreed: boolean
   confidentiality_agreed: boolean
   marketing_consent: boolean
+
+  preferred_branches: string[]
 }
 
 const EMPTY: Form = {
   title: '', first_names: '', last_name: '',
-  address: '', postcode: '', mobile: '', phone: '', email: '', age_range: '',
+  address: '', postcode: '', uprn: '', mobile: '', phone: '', email: '', age_range: '',
   ec_title: '', ec_full_name: '', ec_email: '', ec_mobile: '', ec_phone: '',
-  ec_address: '', ec_postcode: '',
+  ec_address: '', ec_postcode: '', ec_uprn: '',
   has_health_restrictions: false, health_notes: '',
   has_criminal_record: false, criminal_record_details: '',
   ref1_title: '', ref1_first_names: '', ref1_last_name: '',
-  ref1_address: '', ref1_postcode: '', ref1_mobile: '', ref1_phone: '', ref1_email: '',
+  ref1_address: '', ref1_postcode: '', ref1_uprn: '',
+  ref1_mobile: '', ref1_phone: '', ref1_email: '',
   ref2_title: '', ref2_first_names: '', ref2_last_name: '',
-  ref2_address: '', ref2_postcode: '', ref2_mobile: '', ref2_phone: '', ref2_email: '',
+  ref2_address: '', ref2_postcode: '', ref2_uprn: '',
+  ref2_mobile: '', ref2_phone: '', ref2_email: '',
   skills: {}, skills_other_text: '',
-  availability: {}, availability_pattern: '',
+  availability: { days: [], times: [], notes: '' }, availability_pattern: '',
   declaration_agreed: false, confidentiality_agreed: false, marketing_consent: false,
+  preferred_branches: [],
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -103,6 +122,55 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </div>
   )
 }
+
+// Each wizard step. `validate` returns an array of human-readable errors
+// for the fields shown on this step — empty array means "you may proceed".
+const WIZARD_STEPS: Array<{ key: string; title: string }> = [
+  { key: 'about',      title: 'About you'           },
+  { key: 'where',      title: 'Where to help'       },
+  { key: 'background', title: 'Health & background' },
+  { key: 'references', title: 'References'          },
+  { key: 'skills',     title: 'Skills & schedule'   },
+  { key: 'review',     title: 'Review & submit'     },
+]
+
+function validateStep(stepIdx: number, f: Form): string[] {
+  const errs: string[] = []
+  if (stepIdx === 0) {
+    if (!f.first_names.trim()) errs.push('First name is required')
+    if (!f.last_name.trim())   errs.push('Last name is required')
+    if (!f.email.trim() || !f.email.includes('@')) errs.push('A valid email is required')
+    if (!f.address.trim() || !f.postcode.trim()) errs.push('Address is required')
+    if (!f.mobile.trim() && !f.phone.trim()) errs.push('At least one contact number is required')
+    if (!f.age_range) errs.push('Age range is required (minimum 18)')
+  }
+  if (stepIdx === 1) {
+    if (f.preferred_branches.length === 0) errs.push("Pick at least one branch (or remote)")
+    if (!f.ec_full_name.trim()) errs.push('Emergency contact name is required')
+    if (!f.ec_mobile.trim() && !f.ec_phone.trim()) errs.push('Emergency contact phone is required')
+  }
+  if (stepIdx === 2) {
+    if (f.has_health_restrictions && !f.health_notes.trim())
+      errs.push('Please describe how we can help with your health restrictions')
+    if (f.has_criminal_record && !f.criminal_record_details.trim())
+      errs.push('Please provide the requested criminal-record details')
+  }
+  if (stepIdx === 3) {
+    if (!f.ref1_first_names.trim() || !f.ref1_last_name.trim()) errs.push('Referee 1 name is required')
+    if (!f.ref1_email.trim() && !f.ref1_mobile.trim() && !f.ref1_phone.trim())
+      errs.push('Referee 1 contact (email or phone) is required')
+    if (!f.ref2_first_names.trim() || !f.ref2_last_name.trim()) errs.push('Referee 2 name is required')
+    if (!f.ref2_email.trim() && !f.ref2_mobile.trim() && !f.ref2_phone.trim())
+      errs.push('Referee 2 contact (email or phone) is required')
+  }
+  if (stepIdx === 5) {
+    if (!f.declaration_agreed) errs.push('You must agree to the volunteer activity declaration')
+    if (!f.confidentiality_agreed) errs.push('You must agree to the confidentiality undertaking')
+  }
+  return errs
+}
+
+const DRAFT_STORAGE_KEY = 'volunteer-draft-v1'
 
 // Fetch admin-overridable form text. Falls back silently to the defaults
 // passed at each call-site if the API is slow / errors / hasn't been
@@ -121,11 +189,128 @@ export function VolunteerRegistrationPage() {
   const t = useFormText('volunteer_registration')
   const [form, setForm] = useState<Form>(EMPTY)
   const [step, setStep] = useState<'fill' | 'done'>('fill')
+  const [wizardStep, setWizardStep] = useState(0)
+  const [stepErrors, setStepErrors] = useState<string[]>([])
+  const [hasDraft, setHasDraft] = useState(false)
+  const [draftToken, setDraftToken] = useState('')
+  const [draftSyncedAt, setDraftSyncedAt] = useState<string>('')
+  const [emailLinkBusy, setEmailLinkBusy] = useState(false)
+  const [emailLinkMsg, setEmailLinkMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [reference, setReference] = useState('')
 
+  // Restore draft on mount. URL hash `#draft=<token>` wins — that's how
+  // resume-on-another-device works. Otherwise fall back to localStorage.
+  useEffect(() => {
+    let cancelled = false
+    async function restore() {
+      // 1) Try URL hash token (cross-device resume)
+      const m = /[#&]draft=([A-Za-z0-9_-]+)/.exec(window.location.hash || '')
+      const hashToken = m?.[1]
+      if (hashToken) {
+        try {
+          const d = await api.getVolunteerDraft(hashToken)
+          if (cancelled) return
+          if (d.payload && typeof d.payload === 'object') {
+            const p = d.payload as Partial<Form> & { __wizardStep?: number }
+            setForm({ ...EMPTY, ...p })
+            if (typeof p.__wizardStep === 'number') setWizardStep(p.__wizardStep)
+            setDraftToken(d.token)
+            setHasDraft(true)
+            setDraftSyncedAt(d.updated_at || '')
+            return
+          }
+        } catch {
+          // Token expired or wrong — fall through to localStorage.
+        }
+      }
+      // 2) Fall back to localStorage (same-device resume)
+      try {
+        const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+        if (!raw) return
+        const parsed = JSON.parse(raw) as { form?: Form; wizardStep?: number; token?: string; savedAt?: string }
+        if (parsed.form && typeof parsed.form === 'object') {
+          setForm({ ...EMPTY, ...parsed.form })
+          if (typeof parsed.wizardStep === 'number') setWizardStep(parsed.wizardStep)
+          if (parsed.token) setDraftToken(parsed.token)
+          setHasDraft(true)
+        }
+      } catch {
+        // Corrupt draft — ignore.
+      }
+    }
+    restore()
+    return () => { cancelled = true }
+  }, [])
+
+  // localStorage auto-save (synchronous, every change). Covers tab-close /
+  // crash recovery on the same device — lossless.
+  useEffect(() => {
+    if (step !== 'fill') return
+    try {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({
+        form, wizardStep, token: draftToken, savedAt: new Date().toISOString(),
+      }))
+    } catch { /* quota / private-mode — fine to skip */ }
+  }, [form, wizardStep, step, draftToken])
+
+  // Server-side draft sync (debounced 1.5s). Lets the applicant resume
+  // on another device by sharing the URL hash. Quietly no-ops on errors —
+  // localStorage is still the primary source of truth for resume.
+  useEffect(() => {
+    if (step !== 'fill') return
+    const tid = setTimeout(async () => {
+      try {
+        const d = await api.saveVolunteerDraft({
+          token: draftToken || undefined,
+          payload: { ...form, __wizardStep: wizardStep },
+          email: form.email,
+          branchId,
+        })
+        setDraftToken(prev => prev || d.token)
+        setDraftSyncedAt(new Date().toISOString())
+        if (!draftToken && d.token) {
+          // First save → put the token in the URL so a copied link resumes
+          window.history.replaceState(null, '', `#draft=${d.token}`)
+        }
+      } catch { /* ignore — server may be down */ }
+    }, 1500)
+    return () => clearTimeout(tid)
+  }, [form, wizardStep, step, draftToken, branchId])
+
+  async function discardDraft() {
+    try { localStorage.removeItem(DRAFT_STORAGE_KEY) } catch { /* ignore */ }
+    if (draftToken) {
+      try { await api.deleteVolunteerDraft(draftToken) } catch { /* ignore */ }
+    }
+    window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    setForm(EMPTY); setWizardStep(0); setHasDraft(false); setStepErrors([])
+    setDraftToken(''); setDraftSyncedAt('')
+  }
+
+  // Active branches (for the "where would you like to volunteer?" picker).
+  // Quietly empty if the API is down — the Remote-only option still works.
+  const [branches, setBranches] = useState<Array<{ branch_id: string; name: string; city: string }>>([])
+  useEffect(() => {
+    api.getBranches()
+      .then(list => setBranches(list.filter(b => b.is_active)))
+      .catch(() => setBranches([]))
+  }, [])
+
   const update = <K extends keyof Form>(k: K, v: Form[K]) => setForm(p => ({ ...p, [k]: v }))
+
+  function togglePreferredBranch(code: string) {
+    setForm(p => {
+      const has = p.preferred_branches.includes(code)
+      return {
+        ...p,
+        preferred_branches: has
+          ? p.preferred_branches.filter(c => c !== code)
+          : [...p.preferred_branches, code],
+      }
+    })
+  }
 
   function toggleSkill(category: string, option: string) {
     setForm(p => {
@@ -140,26 +325,108 @@ export function VolunteerRegistrationPage() {
     })
   }
 
-  function setAvailSlot(day: string, slot: 'morning' | 'afternoon' | 'evening', value: string) {
+  function toggleAvailDay(day: string) {
     setForm(p => {
-      const dayObj = { ...(p.availability[day] || {}) }
-      if (value.trim()) dayObj[slot] = value
-      else delete dayObj[slot]
-      const availability = { ...p.availability }
-      if (Object.keys(dayObj).length) availability[day] = dayObj
-      else delete availability[day]
-      return { ...p, availability }
+      const has = p.availability.days.includes(day)
+      return {
+        ...p,
+        availability: {
+          ...p.availability,
+          days: has ? p.availability.days.filter(d => d !== day) : [...p.availability.days, day],
+        },
+      }
+    })
+  }
+  function toggleAvailTime(slot: string) {
+    setForm(p => {
+      const has = p.availability.times.includes(slot)
+      return {
+        ...p,
+        availability: {
+          ...p.availability,
+          times: has ? p.availability.times.filter(t => t !== slot) : [...p.availability.times, slot],
+        },
+      }
+    })
+  }
+  function setAvailNotes(notes: string) {
+    setForm(p => ({ ...p, availability: { ...p.availability, notes } }))
+  }
+
+  // Skills categories collapsed by default — track which ones are open.
+  const [openSkillCats, setOpenSkillCats] = useState<Set<string>>(new Set())
+  function toggleCat(key: string) {
+    setOpenSkillCats(p => {
+      const n = new Set(p)
+      if (n.has(key)) n.delete(key); else n.add(key)
+      return n
     })
   }
 
+  async function emailMyLink() {
+    setEmailLinkMsg(null)
+    if (!draftToken) {
+      setEmailLinkMsg({ text: "Save in progress — please try again in a moment.", ok: false })
+      return
+    }
+    const target = form.email.trim()
+    if (!target || !target.includes('@')) {
+      setEmailLinkMsg({ text: 'Enter your email on Step 1 first, then come back.', ok: false })
+      return
+    }
+    setEmailLinkBusy(true)
+    try {
+      await api.emailVolunteerDraftLink({ token: draftToken, email: target })
+      setEmailLinkMsg({ text: `Sent to ${target}. Check your inbox (and spam folder).`, ok: true })
+    } catch (e) {
+      setEmailLinkMsg({
+        text: e instanceof Error ? e.message : 'Email send failed',
+        ok: false,
+      })
+    } finally {
+      setEmailLinkBusy(false)
+    }
+  }
+
+  function goNext() {
+    const errs = validateStep(wizardStep, form)
+    setStepErrors(errs)
+    if (errs.length) {
+      // Bring the errors into view
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    setWizardStep(s => Math.min(s + 1, WIZARD_STEPS.length - 1))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function goPrev() {
+    setStepErrors([])
+    setWizardStep(s => Math.max(s - 1, 0))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function submit() {
-    setError('')
+    // Re-validate the final step (declarations) before sending — defends
+    // against state changes that bypass goNext().
+    const errs = validateStep(WIZARD_STEPS.length - 1, form)
+    if (errs.length) { setStepErrors(errs); return }
+
+    setError(''); setStepErrors([])
     setSubmitting(true)
     try {
       const payload: VolunteerRegistrationPayload = { ...form, branch_id: branchId }
       const res = await api.registerVolunteer(payload)
       setReference(res.reference_number)
       setStep('done')
+      // Submission successful — wipe BOTH the local + server draft so a
+      // refresh doesn't resurrect it for the next applicant on a shared
+      // device, and the resume URL stops working.
+      try { localStorage.removeItem(DRAFT_STORAGE_KEY) } catch { /* ignore */ }
+      if (draftToken) {
+        try { await api.deleteVolunteerDraft(draftToken) } catch { /* ignore */ }
+      }
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Registration failed')
     } finally {
@@ -197,7 +464,7 @@ export function VolunteerRegistrationPage() {
         style={{ color: 'rgba(255,248,220,0.4)' }}>← Back
       </button>
 
-      <div className="text-center mb-6">
+      <div className="text-center mb-5">
         <div className="text-4xl mb-2">🤝</div>
         <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">{t('page.title', 'Volunteer Registration')}</h1>
         <p className="text-sm" style={{ color: 'rgba(255,248,220,0.5)' }}>
@@ -205,7 +472,47 @@ export function VolunteerRegistrationPage() {
         </p>
       </div>
 
-      {/* Personal */}
+      {/* Step progress + label */}
+      <div className="mb-5">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.65)' }}>
+            Step {wizardStep + 1} of {WIZARD_STEPS.length} · {WIZARD_STEPS[wizardStep].title}
+          </p>
+          {hasDraft && wizardStep === 0 && (
+            <button onClick={discardDraft}
+              className="text-[11px] underline" style={{ color: 'rgba(255,248,220,0.4)' }}>
+              Start over
+            </button>
+          )}
+        </div>
+        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+          <div className="h-full rounded-full transition-all duration-300"
+            style={{
+              width: `${((wizardStep + 1) / WIZARD_STEPS.length) * 100}%`,
+              background: 'linear-gradient(90deg,#D4AF37,#FFD980)',
+            }} />
+        </div>
+      </div>
+
+      {hasDraft && wizardStep === 0 && (
+        <div className="rounded-xl px-4 py-3 mb-5 text-xs"
+          style={{ background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: '#BFDBFE' }}>
+          ↩ Picked up where you left off. Tap "Start over" to clear.
+        </div>
+      )}
+
+      {stepErrors.length > 0 && (
+        <div className="rounded-xl px-4 py-3 mb-5 text-sm"
+          style={{ background: 'rgba(198,40,40,0.15)', color: '#fca5a5', border: '1px solid rgba(198,40,40,0.3)' }}>
+          <p className="font-bold mb-1">Please check the following:</p>
+          <ul className="list-disc list-inside space-y-0.5 text-xs">
+            {stepErrors.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* ── STEP 0 — About you ───────────────────────────────────────────── */}
+      {wizardStep === 0 && (<>
       <Section title={t('section.personal.title', 'Personal Details')}>
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div>
@@ -233,15 +540,16 @@ export function VolunteerRegistrationPage() {
           </div>
         </div>
         <div className="mb-3">
-          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Address *</label>
-          <textarea value={form.address} onChange={e => update('address', e.target.value)} rows={2} className={inp + ' resize-none'} />
+          <AddressLookup
+            postcode={form.postcode} address={form.address} uprn={form.uprn}
+            required postcodeLabel="Postcode" addressLabel="Your address"
+            onChange={({ postcode, address, uprn }) =>
+              setForm(p => ({ ...p, postcode, address, uprn }))
+            }
+          />
         </div>
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Postcode *</label>
-            <input value={form.postcode} onChange={e => update('postcode', e.target.value.toUpperCase())} className={inp + ' uppercase'} placeholder="HA9 0BB" />
-          </div>
-          <div>
+          <div className="col-span-2">
             <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Email *</label>
             <input type="email" value={form.email} onChange={e => update('email', e.target.value)} className={inp} />
           </div>
@@ -256,6 +564,53 @@ export function VolunteerRegistrationPage() {
             <input value={form.phone} onChange={e => update('phone', e.target.value)} className={inp} />
           </div>
         </div>
+      </Section>
+
+      </>)}
+
+      {/* ── STEP 1 — Where to help + Emergency Contact ───────────────────── */}
+      {wizardStep === 1 && (<>
+      <Section title={t('section.where.title', 'Where would you like to volunteer?')}>
+        <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
+          {t('section.where.intro', 'Pick one or more branches you can travel to, or "Remote / Online" if you want to help from home.')}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {branches.map(b => {
+            const active = form.preferred_branches.includes(b.branch_id)
+            return (
+              <button key={b.branch_id} type="button"
+                onClick={() => togglePreferredBranch(b.branch_id)}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                style={{
+                  background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
+                  color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
+                }}>
+                {b.name}{b.city ? <span className="opacity-60"> · {b.city}</span> : null}
+              </button>
+            )
+          })}
+          {(() => {
+            const active = form.preferred_branches.includes('remote')
+            return (
+              <button type="button"
+                onClick={() => togglePreferredBranch('remote')}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                style={{
+                  background: active ? 'linear-gradient(135deg,rgba(96,165,250,0.3),rgba(96,165,250,0.15))' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${active ? '#60A5FA' : 'rgba(255,255,255,0.1)'}`,
+                  color: active ? '#BFDBFE' : 'rgba(255,248,220,0.7)',
+                }}>
+                🌐 Remote / Online
+              </button>
+            )
+          })()}
+        </div>
+        {form.preferred_branches.length === 0 && (
+          <p className="text-[11px] mt-2" style={{ color: 'rgba(255,248,220,0.4)' }}>
+            {t('section.where.help', 'Tap at least one option.')}
+          </p>
+        )}
       </Section>
 
       {/* Emergency contact */}
@@ -286,19 +641,19 @@ export function VolunteerRegistrationPage() {
           <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Email</label>
           <input type="email" value={form.ec_email} onChange={e => update('ec_email', e.target.value)} className={inp} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Address</label>
-            <textarea value={form.ec_address} onChange={e => update('ec_address', e.target.value)} rows={2} className={inp + ' resize-none'} />
-          </div>
-          <div>
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Postcode</label>
-            <input value={form.ec_postcode} onChange={e => update('ec_postcode', e.target.value.toUpperCase())} className={inp + ' uppercase'} />
-          </div>
-        </div>
+        <AddressLookup
+          postcode={form.ec_postcode} address={form.ec_address} uprn={form.ec_uprn}
+          postcodeLabel="Their postcode" addressLabel="Their address"
+          onChange={({ postcode, address, uprn }) =>
+            setForm(p => ({ ...p, ec_postcode: postcode, ec_address: address, ec_uprn: uprn }))
+          }
+        />
       </Section>
 
-      {/* Health */}
+      </>)}
+
+      {/* ── STEP 2 — Health + Police-Check Declaration ──────────────────── */}
+      {wizardStep === 2 && (<>
       <Section title={t('section.health.title', 'Health')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
           {t('section.health.question', 'Are there any restricting factors or medication that we should be aware of?')}
@@ -332,7 +687,10 @@ export function VolunteerRegistrationPage() {
         )}
       </Section>
 
-      {/* Referees */}
+      </>)}
+
+      {/* ── STEP 3 — References ─────────────────────────────────────────── */}
+      {wizardStep === 3 && (<>
       <Section title={t('section.referee1.title', 'Character Referee 1')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
           {t('section.referee1.intro', 'Please give an independent referee (not a family member).')}
@@ -363,16 +721,13 @@ export function VolunteerRegistrationPage() {
             <input type="email" value={form.ref1_email} onChange={e => update('ref1_email', e.target.value)} className={inp} />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Address</label>
-            <textarea value={form.ref1_address} onChange={e => update('ref1_address', e.target.value)} rows={2} className={inp + ' resize-none'} />
-          </div>
-          <div>
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Postcode</label>
-            <input value={form.ref1_postcode} onChange={e => update('ref1_postcode', e.target.value.toUpperCase())} className={inp + ' uppercase'} />
-          </div>
-        </div>
+        <AddressLookup
+          postcode={form.ref1_postcode} address={form.ref1_address} uprn={form.ref1_uprn}
+          postcodeLabel="Their postcode" addressLabel="Their address"
+          onChange={({ postcode, address, uprn }) =>
+            setForm(p => ({ ...p, ref1_postcode: postcode, ref1_address: address, ref1_uprn: uprn }))
+          }
+        />
       </Section>
 
       <Section title={t('section.referee2.title', 'Character Referee 2')}>
@@ -405,88 +760,122 @@ export function VolunteerRegistrationPage() {
             <input type="email" value={form.ref2_email} onChange={e => update('ref2_email', e.target.value)} className={inp} />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Address</label>
-            <textarea value={form.ref2_address} onChange={e => update('ref2_address', e.target.value)} rows={2} className={inp + ' resize-none'} />
-          </div>
-          <div>
-            <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Postcode</label>
-            <input value={form.ref2_postcode} onChange={e => update('ref2_postcode', e.target.value.toUpperCase())} className={inp + ' uppercase'} />
-          </div>
-        </div>
+        <AddressLookup
+          postcode={form.ref2_postcode} address={form.ref2_address} uprn={form.ref2_uprn}
+          postcodeLabel="Their postcode" addressLabel="Their address"
+          onChange={({ postcode, address, uprn }) =>
+            setForm(p => ({ ...p, ref2_postcode: postcode, ref2_address: address, ref2_uprn: uprn }))
+          }
+        />
       </Section>
 
-      {/* Skills */}
-      <Section title={t('section.skills.title', 'Your Skills')}>
+      </>)}
+
+      {/* ── STEP 4 — Skills + Availability ──────────────────────────────── */}
+      {wizardStep === 4 && (<>
+      <Section title={t('section.skills.title', 'Your Skills (optional)')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          {t('section.skills.intro', 'Tick everything that applies. We use this to match you with suitable opportunities.')}
+          {t('section.skills.intro', 'Optional — but the more you tell us, the better we can match you with suitable opportunities. Tap a category to expand.')}
         </p>
-        {SKILLS_CATALOG.map(cat => (
-          <div key={cat.key} className="mb-3">
-            <p className="text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.55)' }}>{cat.label}</p>
-            <div className="flex flex-wrap gap-2">
-              {cat.options.map(opt => {
-                const active = (form.skills[cat.key] || []).includes(opt)
-                return (
-                  <button key={opt} type="button" onClick={() => toggleSkill(cat.key, opt)}
-                    className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-                    style={{
-                      background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
-                      border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
-                      color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
-                    }}>
-                    {opt}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        ))}
+        <div className="space-y-2">
+          {SKILLS_CATALOG.map(cat => {
+            const selected = form.skills[cat.key] || []
+            const open = openSkillCats.has(cat.key) || selected.length > 0
+            return (
+              <div key={cat.key} className="rounded-xl overflow-hidden"
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <button type="button" onClick={() => toggleCat(cat.key)}
+                  className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg">{cat.icon}</span>
+                    <span className="font-bold text-sm text-ivory-100">{cat.label}</span>
+                    {selected.length > 0 && (
+                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+                        style={{ background: 'rgba(212,175,55,0.2)', color: '#FFD980' }}>
+                        {selected.length} picked
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-white/40 text-sm">{open ? '−' : '+'}</span>
+                </button>
+                {open && (
+                  <div className="px-4 pb-4 pt-1 flex flex-wrap gap-2">
+                    {cat.options.map(opt => {
+                      const active = selected.includes(opt)
+                      return (
+                        <button key={opt} type="button" onClick={() => toggleSkill(cat.key, opt)}
+                          className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                          style={{
+                            background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
+                            border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
+                            color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
+                          }}>
+                          {opt}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
         <div className="mt-4">
-          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>{t('section.skills.other_label', 'Other skills (free-text)')}</label>
+          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>{t('section.skills.other_label', 'Anything else? (free-text)')}</label>
           <textarea value={form.skills_other_text} onChange={e => update('skills_other_text', e.target.value)} rows={2}
-            className={inp + ' resize-none'} placeholder={t('section.skills.other_placeholder', 'Security, First Aid, Singing, Musical Instruments etc.')} />
+            className={inp + ' resize-none'} placeholder={t('section.skills.other_placeholder', 'First Aid, Musical Instruments, Languages etc.')} />
         </div>
       </Section>
 
       {/* Availability */}
-      <Section title={t('section.availability.title', 'Availability')}>
+      <Section title={t('section.availability.title', 'Availability (optional)')}>
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          {t('section.availability.intro', "Tell us when you're typically free. You can leave any cell blank.")}
+          {t('section.availability.intro', "Optional — tell us roughly when you can help. Tap any that apply, or skip and we'll discuss at interview.")}
         </p>
-        <div className="overflow-x-auto -mx-2 mb-4">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left" style={{ color: 'rgba(212,175,55,0.55)' }}>
-                <th className="px-2 py-1 font-bold uppercase tracking-widest">Day</th>
-                <th className="px-2 py-1 font-bold uppercase tracking-widest">Morning</th>
-                <th className="px-2 py-1 font-bold uppercase tracking-widest">Afternoon</th>
-                <th className="px-2 py-1 font-bold uppercase tracking-widest">Evening</th>
-              </tr>
-            </thead>
-            <tbody>
-              {WEEKDAYS.map(day => (
-                <tr key={day.key}>
-                  <td className="px-2 py-1 text-ivory-200 font-semibold whitespace-nowrap">{day.label}</td>
-                  {(['morning', 'afternoon', 'evening'] as const).map(slot => (
-                    <td key={slot} className="px-2 py-1">
-                      <input
-                        value={form.availability[day.key]?.[slot] || ''}
-                        onChange={e => setAvailSlot(day.key, slot, e.target.value)}
-                        placeholder="9-12"
-                        className="w-full px-2 py-1.5 rounded-lg text-xs bg-white/5 border border-white/10 outline-none focus:border-saffron-400/50 text-ivory-100 placeholder-white/25"
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        <div className="mb-4">
+          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Days</p>
+          <div className="flex flex-wrap gap-2">
+            {WEEKDAYS.map(d => {
+              const active = form.availability.days.includes(d.key)
+              return (
+                <button key={d.key} type="button" onClick={() => toggleAvailDay(d.key)}
+                  className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                  style={{
+                    background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
+                    color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
+                  }}>
+                  {d.short}
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <div>
-          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Pattern</label>
-          <div className="flex gap-2">
+
+        <div className="mb-4">
+          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Times of day</p>
+          <div className="flex flex-wrap gap-2">
+            {TIME_SLOTS.map(s => {
+              const active = form.availability.times.includes(s.key)
+              return (
+                <button key={s.key} type="button" onClick={() => toggleAvailTime(s.key)}
+                  className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                  style={{
+                    background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
+                    color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
+                  }}>
+                  {s.label} <span className="opacity-50">· {s.hint}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>How often</p>
+          <div className="flex flex-wrap gap-2">
             {AVAILABILITY_PATTERNS.map(p => {
               const active = form.availability_pattern === p
               return (
@@ -503,9 +892,39 @@ export function VolunteerRegistrationPage() {
             })}
           </div>
         </div>
+
+        <div>
+          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Anything else about your availability? (optional)</label>
+          <textarea value={form.availability.notes} onChange={e => setAvailNotes(e.target.value)} rows={2}
+            className={inp + ' resize-none'}
+            placeholder="e.g. school holidays only, alternate weekends, every Tuesday from January…" />
+        </div>
       </Section>
 
-      {/* Declarations */}
+      </>)}
+
+      {/* ── STEP 5 — Review & Submit (declarations) ─────────────────────── */}
+      {wizardStep === 5 && (<>
+      <Section title="Review">
+        <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
+          Quick summary of what you've told us. Tap "Back" to change anything.
+        </p>
+        <div className="text-xs space-y-1.5" style={{ color: 'rgba(255,248,220,0.75)' }}>
+          <p><span className="text-gold-400 font-semibold">Name:</span> {form.title} {form.first_names} {form.last_name}</p>
+          <p><span className="text-gold-400 font-semibold">Email:</span> {form.email}</p>
+          <p><span className="text-gold-400 font-semibold">Phone:</span> {form.mobile || form.phone || '—'}</p>
+          <p><span className="text-gold-400 font-semibold">Address:</span> {form.address}, {form.postcode}</p>
+          <p><span className="text-gold-400 font-semibold">Wants to volunteer at:</span> {
+            form.preferred_branches.length
+              ? form.preferred_branches.map(p => p === 'remote' ? '🌐 Remote' : p.charAt(0).toUpperCase() + p.slice(1)).join(', ')
+              : '—'
+          }</p>
+          <p><span className="text-gold-400 font-semibold">Skills picked:</span> {Object.values(form.skills).reduce((n, arr) => n + arr.length, 0) || 0}</p>
+          <p><span className="text-gold-400 font-semibold">Available days:</span> {form.availability.days.length || 0}</p>
+          <p><span className="text-gold-400 font-semibold">References:</span> {[form.ref1_first_names && form.ref1_last_name, form.ref2_first_names && form.ref2_last_name].filter(Boolean).length} provided</p>
+        </div>
+      </Section>
+
       <Section title={t('section.declarations.title', 'Declarations')}>
         <label className="flex items-start gap-3 mb-4 cursor-pointer">
           <input type="checkbox" checked={form.declaration_agreed}
@@ -533,6 +952,8 @@ export function VolunteerRegistrationPage() {
         </label>
       </Section>
 
+      </>)}
+
       {error && (
         <div className="rounded-xl px-4 py-3 mb-4 text-sm font-medium"
           style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.3)' }}>
@@ -540,15 +961,55 @@ export function VolunteerRegistrationPage() {
         </div>
       )}
 
-      <button onClick={submit} disabled={submitting}
-        className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-50 transition-all active:scale-[0.99]"
-        style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-        {submitting ? 'Submitting…' : t('submit.button', 'Submit Application →')}
-      </button>
+      <div className="flex gap-3">
+        {wizardStep > 0 && (
+          <button onClick={goPrev}
+            className="flex-1 py-4 rounded-2xl font-bold text-sm transition-all active:scale-[0.99]"
+            style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.8)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            ← Back
+          </button>
+        )}
+        {wizardStep < WIZARD_STEPS.length - 1 ? (
+          <button onClick={goNext}
+            className="flex-[2] py-4 rounded-2xl font-black text-base transition-all active:scale-[0.99]"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+            Next →
+          </button>
+        ) : (
+          <button onClick={submit} disabled={submitting}
+            className="flex-[2] py-4 rounded-2xl font-black text-base disabled:opacity-50 transition-all active:scale-[0.99]"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+            {submitting ? 'Submitting…' : t('submit.button', 'Submit Application →')}
+          </button>
+        )}
+      </div>
 
       <p className="text-center text-xs mt-3" style={{ color: 'rgba(255,248,220,0.3)' }}>
-        {t('submit.help', 'After submission, a trustee will review your application. References will be taken before a role is confirmed.')}
+        {wizardStep < WIZARD_STEPS.length - 1
+          ? draftToken
+            ? `💾 Saved. Bookmark this page — you can resume on any device for 30 days.${draftSyncedAt ? '' : ''}`
+            : '💾 Your progress is saved automatically. You can come back later.'
+          : t('submit.help', 'After submission, a trustee will review your application. References will be taken before a role is confirmed.')}
       </p>
+
+      {/* Email-me-my-resume-link — only on the wizard, never on the
+          confirmation screen, and only if there's actually a draft to
+          email. The applicant must have entered their email on Step 1. */}
+      {wizardStep < WIZARD_STEPS.length - 1 && draftToken && (
+        <div className="mt-4 text-center">
+          <button onClick={emailMyLink} disabled={emailLinkBusy || !form.email.trim()}
+            className="text-xs underline disabled:opacity-50"
+            style={{ color: 'rgba(96,165,250,0.85)' }}>
+            {emailLinkBusy ? 'Sending…' : '📧 Email me a resume link'}
+          </button>
+          {emailLinkMsg && (
+            <p className="text-xs mt-2"
+              style={{ color: emailLinkMsg.ok ? '#86efac' : '#fca5a5' }}>
+              {emailLinkMsg.text}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
