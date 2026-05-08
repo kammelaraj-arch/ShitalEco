@@ -369,6 +369,7 @@ async def admin_list_volunteers(
         rows = await db.execute(text(f"""
             SELECT id, reference_number, first_names, last_name,
                    email, mobile, phone, age_range, branch_id,
+                   preferred_branches,
                    status, created_at, reviewed_at,
                    has_criminal_record, has_health_restrictions
             FROM   volunteers
