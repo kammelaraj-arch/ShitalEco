@@ -1371,6 +1371,30 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_trustees_email  ON trustees(email)",
         "CREATE INDEX IF NOT EXISTS idx_trustees_role   ON trustees(role)",
         "CREATE INDEX IF NOT EXISTS idx_trustees_active ON trustees(is_active)",
+        # PIN-protected magic-link voting. Each trustee sets their own 4-6
+        # digit PIN to confirm a vote cast via an emailed magic link. PIN is
+        # bcrypt-hashed; rate-limited via pin_failed_attempts +
+        # pin_locked_until.
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS pin_hash VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS pin_set_at TIMESTAMPTZ",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS pin_failed_attempts INT NOT NULL DEFAULT 0",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMPTZ",
+        # Magic-link tokens for trustees to read + vote on a specific
+        # resolution without logging in. One token per (resolution, trustee).
+        # Token stays valid until the resolution closes.
+        """CREATE TABLE IF NOT EXISTS resolution_vote_tokens (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            token           VARCHAR(80) UNIQUE NOT NULL,
+            resolution_id   UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
+            sent_via        VARCHAR(20) NOT NULL DEFAULT 'EMAIL',
+            sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_used_at    TIMESTAMPTZ,
+            used_count      INT NOT NULL DEFAULT 0,
+            UNIQUE (resolution_id, trustee_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_rvtok_token ON resolution_vote_tokens(token)",
+        "CREATE INDEX IF NOT EXISTS idx_rvtok_res   ON resolution_vote_tokens(resolution_id)",
         # Singleton row keyed on a constant scope value — the charity has one
         # set of rules. Stored as a row (not env vars) so admins can edit
         # from UI without redeploying.
@@ -2047,6 +2071,7 @@ _mount("shital.api.routers.recurring_giving",     "router")
 _mount("shital.api.routers.bank_accounts",         "router")
 _mount("shital.api.routers.bank_imports",          "router")
 _mount("shital.api.routers.board",                 "router")
+_mount("shital.api.routers.board_voting",          "router")
 _mount("shital.api.routers.volunteers",            "router")
 _mount("shital.api.routers.form_config",           "router")
 _mount("shital.api.routers.contacts",             "router")

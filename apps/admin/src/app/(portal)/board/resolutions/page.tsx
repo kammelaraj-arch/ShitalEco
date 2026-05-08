@@ -120,6 +120,7 @@ export default function ResolutionsPage() {
   const [selected, setSelected] = useState<Resolution | null>(null)
   const [votes, setVotes] = useState<Vote[]>([])
   const [castingDir, setCastingDir] = useState<'FOR' | 'AGAINST' | ''>('')
+  const [sendingInvites, setSendingInvites] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -197,6 +198,27 @@ export default function ResolutionsPage() {
       await load()
       await loadDetail(r.id)
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to publish') }
+  }
+
+  async function sendInvites(r: Resolution) {
+    if (!confirm(`Email a magic-link to every active trustee for "${r.title}"? Each trustee will get a personalised link to read + vote with their PIN. Re-sending is safe — same tokens are reused.`)) return
+    setSendingInvites(true)
+    try {
+      const data = await apiFetch<{ trustees_total: number; tokens_created: number; tokens_reused: number; email_failed: string[] }>(
+        `/admin/board/resolutions/${r.id}/send-vote-invites`,
+        { method: 'POST' },
+      )
+      const fails = data.email_failed?.length || 0
+      alert(
+        `Sent to ${data.trustees_total} trustees.\n` +
+        `New tokens: ${data.tokens_created}, reused: ${data.tokens_reused}.\n` +
+        (fails > 0 ? `\nEmail failures (${fails}):\n${data.email_failed.join('\n')}` : `\nAll emails sent successfully.`),
+      )
+    } catch (e) {
+      let msg = e instanceof Error ? e.message : 'Failed to send invites'
+      try { const p = JSON.parse(msg); if (p?.detail?.errors) msg = p.detail.errors.join(' · ') } catch { /* not JSON */ }
+      setError(msg)
+    } finally { setSendingInvites(false) }
   }
 
   async function closeVote(r: Resolution) {
@@ -350,6 +372,12 @@ export default function ResolutionsPage() {
                   <button onClick={() => openEdit(selected)} className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 text-sm">Edit</button>
                   <button onClick={() => publish(selected)} className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-sm font-bold">Publish for Voting →</button>
                 </>
+              )}
+              {selected.status === 'OPEN' && (
+                <button onClick={() => sendInvites(selected)} disabled={sendingInvites}
+                  className="px-3 py-1.5 rounded-lg border border-saffron-400/40 text-saffron-300 text-sm font-bold hover:bg-saffron-400/10 disabled:opacity-40">
+                  {sendingInvites ? 'Sending…' : '📧 Email vote invites'}
+                </button>
               )}
               {selected.status === 'OPEN' && selected.outcome !== 'TIED' && (
                 <button onClick={() => closeVote(selected)} className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-sm font-bold">Close Voting</button>
