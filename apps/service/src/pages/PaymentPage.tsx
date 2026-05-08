@@ -176,7 +176,12 @@ export function PaymentPage() {
     input: { color: '#f5f0dc', 'font-size': '14px', 'font-family': 'inherit', background: 'transparent' },
     '.invalid': { color: '#f87171' },
   }
-  const hostedFieldClass = 'bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 h-10'
+  // PayPal renders the hosted card-field as an iframe that fills its
+  // parent's content box. Combining `h-10` (40px) with `py-2.5` (20px
+  // total vertical padding) left only 20px for the iframe — the digits
+  // clipped out of view AND the Pay button slid up over the row.
+  // Fix: 48px tall box, horizontal padding only.
+  const hostedFieldClass = 'block bg-black/30 border border-white/10 rounded-xl px-3 h-12'
 
   const billingAddressPayload = {
     addressLine1: billingAddress1 || (giftAidDeclaration?.address || contactInfo?.address || '').split(',')[0]?.trim() || '',
@@ -312,7 +317,7 @@ export function PaymentPage() {
                   setCapturing(false)
                 }}
               >
-                <div className="temple-card p-5 space-y-4">
+                <div className="temple-card p-5 space-y-4 relative">
                   {/* Billing name */}
                   <div className="flex gap-3">
                     <div className="flex-1">
