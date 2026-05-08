@@ -305,43 +305,59 @@ export function MonthlyGivingPage() {
                 const addressL1 = parts.slice(0, Math.max(1, lineEnd)).join(', ') || trimmedAddr || postcode.trim()
 
                 const fullName = `${firstName.trim()} ${surname.trim()}`.trim()
+                const addressBlock = {
+                  address_line_1: addressL1,
+                  ...(city && { admin_area_2: city }),
+                  ...(postcode.trim() && { postal_code: postcode.trim() }),
+                  country_code: 'GB',
+                }
                 const subscriber: Record<string, unknown> = {
-                  // Always send a complete name object — `detailsValid` already
-                  // requires both fields to be non-empty before this runs, so
-                  // we can pass the trimmed values directly without the
-                  // undefined-collapse trick (which produced an empty `name: {}`
-                  // when both were missing).
                   name: { given_name: firstName.trim(), surname: surname.trim() },
                   ...(donorEmail.trim() && { email_address: donorEmail.trim() }),
                   ...((addressL1 || postcode.trim()) && {
                     shipping_address: {
                       ...(fullName && { name: { full_name: fullName } }),
-                      address: {
-                        address_line_1: addressL1,
-                        ...(city && { admin_area_2: city }),
-                        ...(postcode.trim() && { postal_code: postcode.trim() }),
-                        country_code: 'GB',
-                      },
+                      address: addressBlock,
                     },
                   }),
                 }
+                // Belt-and-braces pre-fill. PayPal Live's Guest Card form is
+                // unreliable about reading subscriber.shipping_address — third
+                // and fourth attempts (#29, #33) didn't move the needle on
+                // production. Final attempt: send the same identity in MULTIPLE
+                // shapes so PayPal's checkout state machine picks at least one:
+                //   (a) `subscriber` (subscriptions API canonical)
+                //   (b) `payer` (orders API shape — Smart Buttons forwards)
+                //   (c) `application_context.landing_page='BILLING'` to open
+                //       directly on the Guest Card form (skip PayPal-account
+                //       upsell page where the prefill is dropped on the way).
+                // Phone goes only on `payer` (subscriber.phone is documented
+                // as ignored).
+                const payer: Record<string, unknown> = {
+                  name: { given_name: firstName.trim(), surname: surname.trim() },
+                  ...(donorEmail.trim() && { email_address: donorEmail.trim() }),
+                  ...(donorPhone.trim() && {
+                    phone: {
+                      phone_type: 'MOBILE',
+                      phone_number: { national_number: donorPhone.trim().replace(/\D/g, '') },
+                    },
+                  }),
+                  ...((addressL1 || postcode.trim()) && { address: addressBlock }),
+                }
+                // `payer` isn't in @paypal subscriptions typings but Smart
+                // Buttons forwards unknown fields onto the checkout context
+                // — required to coax PayPal Live into pre-filling the Guest
+                // Card billing-address form. Cast the whole thing.
                 return actions.subscription.create({
                   plan_id: planId,
                   subscriber,
+                  payer,
                   application_context: {
                     brand_name:          'Shital Temple',
                     locale:              'en-GB',
                     shipping_preference: 'SET_PROVIDED_ADDRESS',
                     user_action:         'SUBSCRIBE_NOW',
-                    // Intentionally NOT setting application_context.payment_method.
-                    // The previous payer_selected:'PAYPAL' value told PayPal the
-                    // donor had pre-chosen the PayPal-account flow; that biased
-                    // PayPal Live's internal routing such that when the donor
-                    // actually picked "Pay with debit or credit card", the Guest
-                    // Card form rendered with EMPTY name/address fields despite
-                    // a fully populated subscriber payload. Removing the hint
-                    // lets PayPal route on the user's actual button click and
-                    // honour the subscriber object on whichever path they take.
+                    landing_page:        'BILLING',
                     return_url: `${window.location.origin}/?screen=monthly-giving&status=approved`,
                     cancel_url: `${window.location.origin}/?screen=monthly-giving&status=cancelled`,
                   },
