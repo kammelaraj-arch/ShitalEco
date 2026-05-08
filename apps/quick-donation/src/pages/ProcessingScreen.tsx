@@ -64,7 +64,12 @@ export function ProcessingScreen() {
   async function processPayment() {
     setError('')
     if (isReaderError) {
-      setError('No card reader configured for this device.')
+      // Don't strand the user on a dead-end error screen — bounce them
+      // straight to admin login so a manager can configure a reader.
+      // Clearing the (empty) reader values keeps the store consistent
+      // and triggers QuickDonationApp's hasAnyReader guard on next render.
+      setReader('', '')
+      setScreen('admin')
       return
     }
     try {
