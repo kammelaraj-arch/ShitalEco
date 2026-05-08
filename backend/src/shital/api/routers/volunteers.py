@@ -232,16 +232,21 @@ async def register_volunteer(
         # Address linked to the contact (so future donate/volunteer flows
         # can prefill). Matches PayPal capture: same insert, dedup index
         # (addresses_unique_contact_pc_house) handles repeat applications.
+        # The unique index is partial (WHERE contact_id IS NOT NULL) so the
+        # ON CONFLICT must repeat that predicate for inference to match.
         if body.postcode.strip() or body.address.strip():
+            _house = (body.address or "").split(",")[0].strip()[:50]
             await db.execute(text("""
                 INSERT INTO addresses
-                    (id, contact_id, formatted, postcode, uprn,
+                    (id, contact_id, formatted, postcode, house_number, uprn,
                      is_primary, lookup_source, created_at)
-                VALUES (:id, :cid, :fmt, :pc, '', true, 'volunteer-registration', :now)
-                ON CONFLICT (contact_id, postcode, house_number) DO NOTHING
+                VALUES (:id, :cid, :fmt, :pc, :house, '', true, 'volunteer-registration', :now)
+                ON CONFLICT (contact_id, postcode, house_number)
+                    WHERE contact_id IS NOT NULL DO NOTHING
             """), {
                 "id": str(uuid.uuid4()), "cid": contact_id,
-                "fmt": body.address, "pc": body.postcode.upper(), "now": now,
+                "fmt": body.address, "pc": body.postcode.upper(),
+                "house": _house, "now": now,
             })
 
         await db.execute(text("""
