@@ -39,7 +39,17 @@ function CardSubmitButton({
     try {
       await (cardFieldsForm as any).submit({ billingAddress })
     } catch (e: any) {
-      setError(e?.message || 'Card payment failed. Please check your details and try again.')
+      const raw = e?.message || ''
+      // Map PayPal SDK's noisy internal errors to actionable messages.
+      let msg = raw
+      if (raw.includes('postrobot') || raw.includes('Window closed')) {
+        msg = 'Payment was interrupted. Please refresh the page and try again.'
+      } else if (raw.toLowerCase().includes('declin')) {
+        msg = 'Card was declined. Please try another card or contact your bank.'
+      } else if (!raw) {
+        msg = 'Card payment failed. Please check your details and try again.'
+      }
+      setError(msg)
       setCapturing(false)
     }
   }
@@ -172,16 +182,21 @@ export function PaymentPage() {
 
   const fieldStyle = 'w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-ivory-200 text-sm outline-none focus:border-amber-700/40 placeholder:text-white/20'
   const labelStyle = 'block text-xs font-bold uppercase tracking-wider mb-1 text-white/40'
+  // Style for the input INSIDE PayPal's hosted-field iframe (passed to the
+  // SDK as JSON CSS — quoted property names are mandatory).
   const hostedFieldStyle = {
-    input: { color: '#f5f0dc', 'font-size': '14px', 'font-family': 'inherit', background: 'transparent' },
+    input: { color: '#f5f0dc', 'font-size': '14px', 'font-family': 'inherit', background: 'transparent', height: '100%' },
     '.invalid': { color: '#f87171' },
   }
-  // PayPal renders the hosted card-field as an iframe that fills its
-  // parent's content box. Combining `h-10` (40px) with `py-2.5` (20px
-  // total vertical padding) left only 20px for the iframe — the digits
-  // clipped out of view AND the Pay button slid up over the row.
-  // Fix: 48px tall box, horizontal padding only.
-  const hostedFieldClass = 'block bg-black/30 border border-white/10 rounded-xl px-3 h-12'
+  // Wrapper around PayPal's hosted-card iframe. Combines fixes from PR #42
+  // (the kiosk monthly-giving Guest Card flow) and PR #47 (the basket
+  // payment page):
+  //   - relative + overflow-hidden + explicit height (48px) lets the iframe
+  //     size correctly across browsers without spilling into siblings
+  //   - horizontal padding only — vertical padding squeezed the iframe to
+  //     20px and made the Pay button slide up over the expiry/CVV row
+  const hostedFieldClass = 'block relative bg-black/30 border border-white/10 rounded-xl px-3 overflow-hidden'
+  const hostedFieldHeight = { height: 48 }
 
   const billingAddressPayload = {
     addressLine1: billingAddress1 || (giftAidDeclaration?.address || contactInfo?.address || '').split(',')[0]?.trim() || '',
@@ -354,19 +369,27 @@ export function PaymentPage() {
                     </div>
                   </div>
 
-                  {/* PayPal hosted card fields */}
+                  {/* PayPal hosted card fields. Each field is an iframe — we
+                      wrap with a fixed-height div so the iframe renders at the
+                      right height and doesn't overflow into siblings. */}
                   <div>
                     <label className={labelStyle}>Card number</label>
-                    <PayPalNumberField className={hostedFieldClass} style={hostedFieldStyle} />
+                    <div className={hostedFieldClass} style={hostedFieldHeight}>
+                      <PayPalNumberField style={hostedFieldStyle} />
+                    </div>
                   </div>
                   <div className="flex gap-3">
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <label className={labelStyle}>Expiry</label>
-                      <PayPalExpiryField className={hostedFieldClass + ' w-full'} style={hostedFieldStyle} />
+                      <div className={hostedFieldClass} style={hostedFieldHeight}>
+                        <PayPalExpiryField style={hostedFieldStyle} />
+                      </div>
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <label className={labelStyle}>Security code</label>
-                      <PayPalCVVField className={hostedFieldClass + ' w-full'} style={hostedFieldStyle} />
+                      <div className={hostedFieldClass} style={hostedFieldHeight}>
+                        <PayPalCVVField style={hostedFieldStyle} />
+                      </div>
                     </div>
                   </div>
 

@@ -135,8 +135,16 @@ async def create_paypal_order(body: CreateOrderBody) -> dict[str, str]:
         }],
         "application_context": {
             "brand_name": "Shital Temple",
+            "locale": "en-GB",
             "user_action": "PAY_NOW",
             "shipping_preference": "NO_SHIPPING",
+            # landing_page=BILLING opens the Guest Card form directly,
+            # skipping the PayPal-account upsell page where the payer
+            # pre-fill silently gets dropped on the redirect. This is
+            # the same fix that unblocked the kiosk monthly-giving form
+            # in PR claude/paypal-prefill-belt-and-braces — symmetrical
+            # behaviour for one-off donations.
+            "landing_page": "BILLING",
         },
     }
     if payer:
