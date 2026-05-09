@@ -1,0 +1,40 @@
+# Stand-alone compose for the Edge Runtime. Deployed at each factory site
+# (typically on a Raspberry Pi 5 / linux_edge_host). Storage is fully isolated
+# from any other Docker stack on the same box.
+services:
+  neuron-edge:
+    build:
+      context: ..
+      dockerfile: edge_runtime/Dockerfile
+    image: neuron/edge:0.3.0
+    container_name: neuron-edge
+    restart: unless-stopped
+    environment:
+      EDGE_DB_URL: sqlite+aiosqlite:////app/edge_runtime/data/edge.db
+      EDGE_POLICY_PATH: /app/edge_runtime/policies/edge_default.json
+      EDGE_BIND_HOST: 0.0.0.0
+      EDGE_BIND_PORT: 8090
+      EDGE_ID: ${EDGE_ID:-edge-default}
+      EDGE_SITE_ID: ${EDGE_SITE_ID:-site-default}
+      EDGE_PARENT_NODE_URL: ${EDGE_PARENT_NODE_URL:-https://neuron.shital.org.uk}
+      EDGE_LOG_LEVEL: info
+    ports:
+      - "8090:8090"
+    volumes:
+      - edge_data:/app/edge_runtime/data
+      - ./policies:/app/edge_runtime/policies:ro
+      - ./certs:/app/edge_runtime/certs:ro
+    networks:
+      - edge_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8090/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  edge_data:
+
+networks:
+  edge_internal:
+    driver: bridge
