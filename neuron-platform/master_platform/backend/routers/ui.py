@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..library_loader import load_catalog
-from ..models import Device, EdgeSystem, NodeSystem, RootSystem
+from ..models import Device, EdgeSystem, NodeSystem, RecipeRun, RootSystem
+from ..runtime import recipe_runner
 
 
 _BASE = Path(__file__).resolve().parent.parent
@@ -92,4 +93,45 @@ async def ui_device_detail(
     device = await session.get(Device, device_dna)
     return templates.TemplateResponse(
         "device.html", {"request": request, "device": device}
+    )
+
+
+@router.get("/ui/processes", response_class=HTMLResponse)
+async def ui_processes(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    recipes = await recipe_runner.list_available_recipes()
+    runs = (await session.execute(
+        select(RecipeRun).order_by(RecipeRun.started_at.desc()).limit(30)
+    )).scalars().all()
+    twin_kinds = ["twin.heater_control", "twin.motor_control", "twin.weighscale_control"]
+    return templates.TemplateResponse(
+        "processes.html",
+        {"request": request, "recipes": recipes, "runs": runs, "twin_kinds": twin_kinds},
+    )
+
+
+@router.get("/ui/recipes/{recipe_id}", response_class=HTMLResponse)
+async def ui_recipe_run(
+    recipe_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    from pathlib import Path
+    import json
+    from ..config import settings
+    p = settings.libraries_dir / "digital_twin_controls_library" / "recipes" / f"{recipe_id}.json"
+    if not p.exists():
+        return templates.TemplateResponse(
+            "processes.html",
+            {"request": request, "recipes": await recipe_runner.list_available_recipes(),
+             "runs": [], "twin_kinds": []},
+        )
+    with p.open(encoding="utf-8") as fh:
+        recipe = json.load(fh)
+    devices = (await session.execute(select(Device).order_by(Device.created_at.desc()))).scalars().all()
+    return templates.TemplateResponse(
+        "recipe_run.html",
+        {"request": request, "recipe": recipe, "devices": devices},
     )

@@ -132,6 +132,24 @@ class Process(Base):
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
 
+class RecipeRun(Base):
+    """A recipe execution against a device. Stage 5 orchestration unit."""
+
+    __tablename__ = "recipe_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    recipe_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    device_dna: Mapped[str] = mapped_column(ForeignKey("devices.device_dna"), nullable=False, index=True)
+    state: Mapped[str] = mapped_column(String(20), default="queued")  # queued|running|paused|completed|aborted|failed
+    current_step: Mapped[str | None] = mapped_column(String(80))
+    params_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    progress_pct: Mapped[int] = mapped_column(default=0)
+    note: Mapped[str | None] = mapped_column(Text)
+    started_by: Mapped[str | None] = mapped_column(String(120))
+    started_at: Mapped[datetime] = mapped_column(default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column()
+
+
 class APIKey(Base):
     __tablename__ = "api_keys"
 
