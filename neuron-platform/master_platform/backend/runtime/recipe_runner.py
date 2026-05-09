@@ -63,10 +63,21 @@ async def _ensure_run(session: AsyncSession, run_id: str) -> RecipeRun:
 
 
 async def _get_recipe(recipe_id: str) -> dict[str, Any] | None:
-    """File-based recipes live as standalone JSON (not manifest-shaped) under
-    libraries/digital_twin_controls_library/recipes/. They are intentionally
-    not ingested by the manifest catalog, so look them up by file path.
+    """Recipes can live in two places (DB wins on collision):
+      * DB-backed RecipeDef rows (created/edited via /ui/recipes)
+      * JSON files in libraries/digital_twin_controls_library/recipes/
+        or libraries/business_library/manifests/
     """
+    # Check DB first.
+    from ..models import RecipeDef
+    async with SessionLocal() as session:
+        row = await session.scalar(
+            select(RecipeDef).where(RecipeDef.recipe_id == recipe_id,
+                                    RecipeDef.deleted_at.is_(None))
+        )
+        if row is not None:
+            return dict(row.recipe_json)
+
     import json
     from ..config import settings as _s
     candidates = [
@@ -81,11 +92,33 @@ async def _get_recipe(recipe_id: str) -> dict[str, Any] | None:
 
 
 async def list_available_recipes() -> list[dict[str, Any]]:
-    """Scan the libraries' recipes folder for files we can run."""
+    """List every runnable recipe — DB-backed plus file-based, deduplicated
+    by recipe_id (DB wins on collision)."""
     from pathlib import Path
     from ..config import settings as _s
+    from ..models import RecipeDef
 
-    out: list[dict[str, Any]] = []
+    seen: dict[str, dict[str, Any]] = {}
+
+    async with SessionLocal() as session:
+        rows = (await session.execute(
+            select(RecipeDef).where(RecipeDef.deleted_at.is_(None))
+            .order_by(RecipeDef.recipe_id)
+        )).scalars().all()
+        for row in rows:
+            doc = row.recipe_json or {}
+            seen[row.recipe_id] = {
+                "recipe_id": row.recipe_id,
+                "name": doc.get("name", row.recipe_id),
+                "version": doc.get("version", "0.0.0"),
+                "twin_targets": doc.get("twin_targets", []),
+                "params": doc.get("params", {}),
+                "steps": [s.get("id") for s in doc.get("steps", [])],
+                "source": "db",
+                "db_id": row.id,
+                "editable": True,
+            }
+
     recipe_dir = _s.libraries_dir / "digital_twin_controls_library" / "recipes"
     if recipe_dir.is_dir():
         import json
@@ -93,17 +126,23 @@ async def list_available_recipes() -> list[dict[str, Any]]:
             try:
                 with p.open(encoding="utf-8") as fh:
                     doc = json.load(fh)
-                out.append({
-                    "recipe_id": doc.get("recipe_id") or p.stem,
+                rid = doc.get("recipe_id") or p.stem
+                if rid in seen:
+                    continue
+                seen[rid] = {
+                    "recipe_id": rid,
                     "name": doc.get("name", p.stem),
                     "version": doc.get("version", "0.0.0"),
                     "twin_targets": doc.get("twin_targets", []),
                     "params": doc.get("params", {}),
                     "steps": [s.get("id") for s in doc.get("steps", [])],
-                })
+                    "source": "file",
+                    "editable": False,
+                }
             except Exception as exc:  # noqa: BLE001
                 _log.warning("could not parse recipe %s: %s", p, exc)
-    return out
+
+    return list(seen.values())
 
 
 async def start_run(

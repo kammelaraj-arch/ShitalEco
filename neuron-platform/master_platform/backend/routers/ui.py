@@ -14,7 +14,7 @@ from sqlalchemy import desc
 
 from ..db import get_session
 from ..library_loader import load_catalog
-from ..models import APIKey, Device, EdgeSystem, FirmwareChannel, FirmwareRelease, NodeSystem, RecipeRun, RootSystem
+from ..models import APIKey, Device, EdgeSystem, FirmwareChannel, FirmwareRelease, NodeSystem, RecipeDef, RecipeRun, RootSystem
 from ..runtime import recipe_runner
 from ..security import signing
 from ..security.audit import record
@@ -601,26 +601,183 @@ async def ui_device_rollback(
     return RedirectResponse(f"/ui/devices/{device_dna}/ota", status_code=303)
 
 
+# ─── Recipe definition CRUD (DB-backed) ─────────────────────────────────────
+# IMPORTANT: these specific paths must be declared BEFORE the
+# /ui/recipes/{recipe_id} catch-all below, otherwise FastAPI matches the
+# pattern first and 'new' / 'edit' end up as recipe_ids.
+@router.get("/ui/recipes/new", response_class=HTMLResponse)
+async def ui_recipe_new_form(
+    request: Request,
+    error: str | None = None,
+    _: APIKey = Depends(ui_require_admin),
+):
+    starter = {
+        "recipe_id": "recipe.cooking.my_recipe",
+        "name": "My recipe",
+        "version": "0.1.0",
+        "twin_targets": ["twin.heater_control"],
+        "params": {"setpoint_c": 80, "hold_minutes": 30},
+        "steps": [
+            {"id": "preheat",   "action": "set_state",     "args": {"state": "PREHEAT"}},
+            {"id": "wait_hot",  "action": "await",         "args": {"expr": "reported.process_temp_c >= 79.5"}},
+            {"id": "hold",      "action": "set_state",     "args": {"state": "HOLD"}},
+            {"id": "hold_timer","action": "wait_minutes",  "args": {"minutes": "${params.hold_minutes}"}},
+            {"id": "cooldown",  "action": "set_state",     "args": {"state": "COOLDOWN"}},
+        ],
+    }
+    import json as _json
+    return templates.TemplateResponse(
+        "recipe_form.html",
+        {"request": request, "mode": "create", "row": None,
+         "recipe_text": _json.dumps(starter, indent=2), "error": error},
+    )
+
+
+@router.post("/ui/recipes/new")
+async def ui_recipe_new_submit(
+    request: Request,
+    recipe_text: str = Form(...),
+    notes: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    err = await _persist_recipe(session=session, actor=actor,
+                                 recipe_text=recipe_text, existing=None, notes=notes)
+    if err:
+        return templates.TemplateResponse(
+            "recipe_form.html",
+            {"request": request, "mode": "create", "row": None,
+             "recipe_text": recipe_text, "error": err},
+            status_code=400,
+        )
+    return RedirectResponse("/ui/processes", status_code=303)
+
+
+@router.get("/ui/recipes/edit/{db_id}", response_class=HTMLResponse)
+async def ui_recipe_edit_form(
+    db_id: str,
+    request: Request,
+    error: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    _: APIKey = Depends(ui_require_admin),
+):
+    row = await session.get(RecipeDef, db_id)
+    if row is None or row.deleted_at is not None:
+        return RedirectResponse("/ui/processes", status_code=303)
+    import json as _json
+    return templates.TemplateResponse(
+        "recipe_form.html",
+        {"request": request, "mode": "edit", "row": row,
+         "recipe_text": _json.dumps(row.recipe_json, indent=2), "error": error},
+    )
+
+
+@router.post("/ui/recipes/edit/{db_id}")
+async def ui_recipe_edit_submit(
+    db_id: str,
+    request: Request,
+    recipe_text: str = Form(...),
+    notes: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    row = await session.get(RecipeDef, db_id)
+    if row is None or row.deleted_at is not None:
+        return RedirectResponse("/ui/processes", status_code=303)
+    err = await _persist_recipe(session=session, actor=actor,
+                                 recipe_text=recipe_text, existing=row, notes=notes)
+    if err:
+        return templates.TemplateResponse(
+            "recipe_form.html",
+            {"request": request, "mode": "edit", "row": row,
+             "recipe_text": recipe_text, "error": err},
+            status_code=400,
+        )
+    return RedirectResponse("/ui/processes", status_code=303)
+
+
+@router.post("/ui/recipes/delete/{db_id}")
+async def ui_recipe_delete(
+    db_id: str,
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    from datetime import datetime, timezone
+    row = await session.get(RecipeDef, db_id)
+    if row is None:
+        return RedirectResponse("/ui/processes", status_code=303)
+    row.deleted_at = datetime.now(timezone.utc)
+    await record(session, actor=actor.id, actor_kind="ui_session",
+                 action="delete_recipe", target_kind="recipe_def",
+                 target_id=row.recipe_id)
+    await session.commit()
+    return RedirectResponse("/ui/processes", status_code=303)
+
+
 @router.get("/ui/recipes/{recipe_id}", response_class=HTMLResponse)
 async def ui_recipe_run(
     recipe_id: str,
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    from pathlib import Path
-    import json
-    from ..config import settings
-    p = settings.libraries_dir / "digital_twin_controls_library" / "recipes" / f"{recipe_id}.json"
-    if not p.exists():
+    """Run page for a single recipe (DB or file-backed)."""
+    recipe = await recipe_runner._get_recipe(recipe_id)
+    if recipe is None:
         return templates.TemplateResponse(
             "processes.html",
             {"request": request, "recipes": await recipe_runner.list_available_recipes(),
              "runs": [], "twin_kinds": []},
         )
-    with p.open(encoding="utf-8") as fh:
-        recipe = json.load(fh)
     devices = (await session.execute(select(Device).order_by(Device.created_at.desc()))).scalars().all()
     return templates.TemplateResponse(
         "recipe_run.html",
         {"request": request, "recipe": recipe, "devices": devices},
     )
+
+
+async def _persist_recipe(*, session, actor, recipe_text, existing, notes):
+    """Validate + save a recipe doc. Returns an error string if rejected,
+    None on success."""
+    import json as _json
+    try:
+        doc = _json.loads(recipe_text)
+    except _json.JSONDecodeError as exc:
+        return f"Invalid JSON: {exc}"
+    if not isinstance(doc, dict):
+        return "Recipe must be a JSON object."
+    rid = doc.get("recipe_id")
+    if not isinstance(rid, str) or not rid.strip():
+        return "recipe_id is required and must be a non-empty string."
+    if "steps" not in doc or not isinstance(doc["steps"], list) or not doc["steps"]:
+        return "steps[] is required and must be a non-empty list."
+    for i, step in enumerate(doc["steps"]):
+        if not isinstance(step, dict) or not step.get("id") or not step.get("action"):
+            return f"Step {i} must have both id and action."
+    if existing is None:
+        clash = await session.scalar(
+            select(RecipeDef).where(RecipeDef.recipe_id == rid,
+                                    RecipeDef.deleted_at.is_(None))
+        )
+        if clash is not None:
+            return f"recipe_id '{rid}' already exists."
+        row = RecipeDef(
+            recipe_id=rid, name=doc.get("name", rid),
+            version=doc.get("version", "0.1.0"),
+            recipe_json=doc, notes=notes or None, created_by=actor.id,
+        )
+        session.add(row)
+        await session.flush()
+        action = "create_recipe"
+    else:
+        if rid != existing.recipe_id:
+            return "recipe_id is immutable."
+        existing.name = doc.get("name", existing.name)
+        existing.version = doc.get("version", existing.version)
+        existing.recipe_json = doc
+        if notes:
+            existing.notes = notes
+        action = "update_recipe"
+    await record(session, actor=actor.id, actor_kind="ui_session",
+                 action=action, target_kind="recipe_def", target_id=rid)
+    await session.commit()
+    return None
