@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1020" />
+    <title>{% block title %}Neuron Platform{% endblock %} — Master</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+    <header class="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/80 backdrop-blur">
+      <div class="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
+        <a href="/" class="flex items-center gap-2 text-lg font-semibold tracking-tight">
+          <span class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-emerald-400 to-cyan-500 text-slate-950 font-black">N</span>
+          <span>Neuron</span>
+          <span class="text-slate-500 hidden sm:inline">Master Platform</span>
+        </a>
+        <nav class="ml-auto flex items-center gap-1 text-sm">
+          {% set nav = [('/', 'Home'),
+                        ('/ui/library', 'Libraries'),
+                        ('/ui/systems', 'Systems'),
+                        ('/ui/devices', 'Devices'),
+                        ('/docs', 'API')] %}
+          {% for href, label in nav %}
+            <a href="{{ href }}" class="rounded-md px-3 py-1.5 hover:bg-slate-800/70 text-slate-300 hover:text-white transition">{{ label }}</a>
+          {% endfor %}
+        </nav>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-6xl px-4 py-8">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="border-t border-slate-800 py-6 text-center text-xs text-slate-500">
+      Neuron Platform — Stage 2 Master Core · neuron.shital.org.uk
+    </footer>
+  </body>
+</html>

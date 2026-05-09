@@ -108,4 +108,98 @@
 
 ---
 
-## Next Stage: Stage 2 — Master Platform Core
+---
+
+## Stage 2 — Master Platform Core
+
+=== PROJECT MEMORY ===
+
+### Decisions
+
+- Single unified FastAPI app at `master_platform/backend/main.py` covers
+  Admin + Build + Config + Library Registry + API Management.
+- **SQLAlchemy 2.x async + aiosqlite** for dev; same models migrate to
+  Postgres just by switching `NEURON_DB_URL`.
+- **Tailwind via CDN + HTMX + Jinja2** for the Admin UI (zero build step,
+  mobile-responsive, dark-first).
+- **Argon2id** for API key hashing (argon2-cffi). Token-bucket rate limiter
+  is per-process; replace with Redis when horizontally scaling the Master.
+- **Bootstrap admin key** issued once at first run and logged
+  (or pre-set via `NEURON_BOOTSTRAP_ADMIN_KEY`).
+- **Deterministic firmware bundle** — fixed zip mtime, sorted filenames,
+  per-artifact SHA-256, bundle-level SHA-256 — so the same DNA + Brain +
+  Pinmap inputs always produce a byte-identical OTA artifact.
+
+### Interfaces
+
+- All endpoints documented in `docs/api.md`. OpenAPI at `/docs`.
+- HTTP auth: `X-API-Key` header. 401 missing/invalid, 403 insufficient
+  scope, 429 rate-limited.
+- Tier → scope inheritance: `admin` > `integration` > `device` >
+  `readonly`. Per-key explicit scopes are also honoured.
+- **Pin allocator** lives in `backend/pin_allocator.py`. Pools per compute
+  (Pico 2 W, RPi 5). Returns a pinmap conformant to
+  `shared_schemas/pinmap_schema.json`. Conflicts are surfaced
+  non-fatally for review, but firmware build refuses to run with a
+  missing pinmap.
+- **DNA generator** (`backend/dna.py`) emits a `DNA-XXXX-XXXX-XXXX-XXXX`
+  id, schema-validates, and adds a SHA-256 fingerprint over the canonical
+  serialisation.
+- **Brain generator** (`backend/brain.py`) injects per-twin defaults
+  (PID for heater, FSM for motor, passthrough+stability for scale)
+  plus interlocks (overtemp, sensor_lost, overcurrent) and a
+  conservative `continue_safe` offline policy with a 4 KiB buffer.
+
+### Library Schemas
+
+- Unchanged from Stage 1. The Master treats `shared_schemas/` as
+  read-only inputs and `libraries/` as the source-of-truth catalog.
+
+### Security Model
+
+- API keys: tiered + per-key scopes + rate limit + Argon2id hash + status
+  (`active|rotated|revoked|expired`) + rotation chain via `rotated_from`.
+- Audit: every write path records actor + action + target + detail; a
+  `flush()` is invoked before audit so the surrogate UUID is populated
+  before the event row is written.
+- Edge access policy schema is in place from Stage 1 but **not yet
+  enforced** — that ships in Stage 3.
+
+### Versioning / OTA Policy
+
+- Firmware bundle's `manifest.json` already carries
+  `min_supported_base_firmware_version`,
+  `supported_hardware_revisions`,
+  `target_app_bundle_version`,
+  `target_config_schema_version`. Stage 4 will add the signing key + the
+  edge-side rejection rules.
+
+### Safety Rules
+
+- Brain generator emits per-twin interlocks and a default `safe_state`.
+  Watchdog default = 1000 ms. Default offline policy = `continue_safe`
+  with a 1-hour grace and 4 KiB telemetry buffer.
+
+### Open Items
+
+- **Stage 3** scope:
+  - `edge_runtime/` services (gateway, registry, twin_cache,
+    command_router, log_trace_collector, health_monitor) with mTLS +
+    allow-list enforcement using `shared_schemas/access_policy_schema.json`.
+  - Pico 2 W firmware first slice: DNA, heartbeat, offline mode, local
+    test, OTA client.
+  - Cert/key issuance flow from Master → Edge.
+- **Stage 4** scope: OTA application + base-version rejection logic on
+  the device side, signed manifests, rollback channel.
+- **Stage 5** scope: drag/drop process builder UI, AI agent manager
+  (Brain-mediated, never direct-to-hardware), recipe runner end-to-end.
+- Rate limiter is in-process; move to Redis if Master is scaled
+  horizontally.
+- Component/board PNG/SVG assets (referenced from manifests) are still
+  to be authored — only `ui_controls_library/symbols_svg/*.svg` exist.
+
+=== END PROJECT MEMORY ===
+
+---
+
+## Next Stage: Stage 3 — Edge Runtime + Pico 2 W firmware slice + strict allow-list security

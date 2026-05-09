@@ -1,0 +1,14 @@
+:root { color-scheme: dark; }
+
+@media (max-width: 640px) {
+  header nav a { padding-left: .5rem; padding-right: .5rem; font-size: .8rem; }
+}
+
+pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

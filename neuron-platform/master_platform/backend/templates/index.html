@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+  <section class="grid gap-6 md:grid-cols-3">
+    <div class="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-950 p-6 md:col-span-2">
+      <h1 class="text-3xl font-semibold tracking-tight">Smart Factory, library-first.</h1>
+      <p class="mt-2 max-w-2xl text-slate-300">
+        One unified Master that browses the libraries, designs root/node/edge hierarchy,
+        assigns hardware, allocates pins, generates signed DNA + Brain config, and
+        produces firmware bundles ready for OTA.
+      </p>
+      <div class="mt-5 flex flex-wrap gap-2">
+        <a href="/ui/library" class="rounded-lg bg-emerald-500 px-4 py-2 font-medium text-slate-950 hover:bg-emerald-400 transition">Browse libraries</a>
+        <a href="/ui/systems" class="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-100 hover:bg-slate-800 transition">Design systems</a>
+        <a href="/docs" class="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-100 hover:bg-slate-800 transition">OpenAPI</a>
+      </div>
+    </div>
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+      <div class="text-xs uppercase tracking-widest text-slate-400">Catalog</div>
+      <ul class="mt-2 space-y-2 text-sm">
+        {% for lib, count in library_counts.items() %}
+          <li class="flex items-center justify-between border-b border-slate-800/60 pb-1">
+            <span class="text-slate-300">{{ lib.replace('_', ' ') }}</span>
+            <span class="rounded-md bg-slate-800 px-2 py-0.5 text-emerald-300 font-mono text-xs">{{ count }}</span>
+          </li>
+        {% endfor %}
+        <li class="flex items-center justify-between pt-2">
+          <span class="text-slate-300">devices</span>
+          <span class="rounded-md bg-slate-800 px-2 py-0.5 text-cyan-300 font-mono text-xs">{{ device_count }}</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="mt-8 grid gap-4 md:grid-cols-3">
+    {% set steps = [
+      ('1', 'Pick hardware', 'Browse Components, Boards, Compute and Twins from the libraries.'),
+      ('2', 'Design system', 'Create Root → Node → Edge → Device hierarchy and assign components.'),
+      ('3', 'Build & ship', 'Auto pin-map, generate DNA + Brain, build a signed firmware bundle.'),
+    ] %}
+    {% for n, title, body in steps %}
+      <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <div class="text-xs font-mono text-emerald-400">STEP {{ n }}</div>
+        <div class="mt-1 text-lg font-semibold">{{ title }}</div>
+        <p class="mt-2 text-sm text-slate-400">{{ body }}</p>
+      </div>
+    {% endfor %}
+  </section>
+{% endblock %}

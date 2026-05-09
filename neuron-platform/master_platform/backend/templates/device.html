@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ device.device_dna if device else "Device" }}{% endblock %}
+{% block content %}
+  {% if not device %}
+    <div class="rounded-xl border border-amber-700/40 bg-amber-500/10 p-4 text-amber-200">Device not found.</div>
+  {% else %}
+    <header class="flex items-start justify-between gap-3">
+      <div>
+        <div class="text-xs font-mono text-emerald-300">{{ device.device_dna }}</div>
+        <h1 class="text-2xl font-semibold tracking-tight">{{ device.compute_stable_id }}</h1>
+        <p class="text-slate-400 text-sm">type={{ device.device_type }} · hw={{ device.hardware_revision }} · base={{ device.base_firmware_version }} · app={{ device.app_bundle_version }} · cfg={{ device.config_schema_version }}</p>
+      </div>
+    </header>
+
+    <div class="mt-6 grid gap-4 md:grid-cols-3">
+      {% for label, blob in [('DNA', device.dna_json), ('Brain', device.brain_json), ('Pin map', device.pinmap_json)] %}
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <h2 class="font-semibold">{{ label }}</h2>
+          {% if blob %}
+            <pre class="mt-2 max-h-72 overflow-auto rounded-lg bg-slate-950/80 p-3 text-[11px] leading-relaxed text-emerald-100">{{ blob | tojson(indent=2) }}</pre>
+          {% else %}
+            <p class="mt-2 text-sm text-slate-500 italic">Not generated yet.</p>
+          {% endif %}
+        </section>
+      {% endfor %}
+    </div>
+
+    {% if device.firmware_bundle_path %}
+      <div class="mt-6 rounded-2xl border border-emerald-700/40 bg-emerald-500/5 p-4">
+        <div class="text-sm">Firmware bundle ready at <code class="font-mono text-emerald-300">{{ device.firmware_bundle_path }}</code>.</div>
+        <a href="/api/devices/{{ device.device_dna }}/firmware-bundle" class="mt-2 inline-block rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-emerald-400">Download .zip</a>
+      </div>
+    {% endif %}
+  {% endif %}
+{% endblock %}
