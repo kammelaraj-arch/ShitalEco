@@ -18,5 +18,10 @@ def test_validate_manifests_strict(repo_root: Path):
         f"validator failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
     assert "OK:" in result.stdout
-    # Sanity: at least 22 stock manifests + 3 new-library seeds.
-    assert "Manifests scanned: 25" in result.stdout, result.stdout
+    # At least the original 25 stock manifests; growing the catalog is fine,
+    # shrinking it accidentally is what we want to catch.
+    import re
+    m = re.search(r"Manifests scanned: (\d+)", result.stdout)
+    assert m, "validator output missing scanned count"
+    scanned = int(m.group(1))
+    assert scanned >= 25, f"manifest count regressed: {scanned}"
