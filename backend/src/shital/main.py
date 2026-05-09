@@ -1324,6 +1324,24 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_attachments_owner ON attachments(owner_type, owner_id)",
         "CREATE INDEX IF NOT EXISTS idx_attachments_label ON attachments(owner_type, owner_id, label)",
+        # ── Release notes / build features list ───────────────────────────────
+        # One row per shipped feature/PR. Lets trustees + volunteers see what
+        # changed in the latest deploy, and gives the team a queryable
+        # changelog (what was added, when, by which PR).
+        """CREATE TABLE IF NOT EXISTS release_notes (
+            id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            git_sha     VARCHAR(40)  NOT NULL DEFAULT '',
+            pr_number   INT,
+            title       VARCHAR(300) NOT NULL,
+            summary     TEXT         NOT NULL DEFAULT '',
+            area        VARCHAR(50)  NOT NULL DEFAULT '',
+            tags        JSONB        NOT NULL DEFAULT '[]'::jsonb,
+            released_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_release_notes_released ON release_notes(released_at DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_release_notes_pr ON release_notes(pr_number) WHERE pr_number IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_release_notes_area ON release_notes(area)",
         # ── Volunteer drafts (cross-device partial save) ──────────────────────
         # The wizard auto-saves to localStorage on every change. For applicants
         # who want to resume on a different device — or who clear browser data
@@ -1587,6 +1605,7 @@ async def _patch_schema() -> None:
     await _seed_api_key_metadata()
     await _seed_catalog()
     await _seed_email_templates()
+    await _seed_release_notes()
 
 
 async def _seed_api_key_metadata() -> None:
@@ -2096,6 +2115,132 @@ _{{ branch_name }} — Registered UK Charity_"""
     logger.info("email_templates_seeded")
 
 
+async def _seed_release_notes() -> None:
+    """Seed `release_notes` with the canonical list of features shipped per PR.
+
+    Runs every backend startup. ON CONFLICT (pr_number) DO NOTHING so existing
+    rows are preserved — admin can edit the title / summary / tags via the
+    settings UI without the seed clobbering them on next deploy.
+
+    To add a new release note: append a row to RELEASE_NOTES below and the
+    next deploy will pick it up automatically. Trustees see them in
+    Admin → Settings → System → Release Notes.
+    """
+    import json
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    # (pr_number, title, summary, area, tags, released_at_iso)
+    # Sorted oldest → newest so the seeded `created_at` order matches reality.
+    RELEASE_NOTES: list[dict[str, Any]] = [  # noqa: N806
+        {"pr": 40, "title": "Bank statement CSV import",
+         "summary": "Trustees can upload PayPal/Stripe/SumUp/NatWest CSVs to a "
+                    "bank account; auto-detect format, dedupe by file hash + "
+                    "(date,amount,reference), preview before commit, hard-undo.",
+         "area": "finance", "tags": ["bank-accounts", "csv", "import"],
+         "released_at": "2026-05-08T14:46:00Z"},
+        {"pr": 41, "title": "Magic-link trustee voting",
+         "summary": "Chair publishes a resolution → server emails each trustee "
+                    "a unique link → trustee taps it on their phone, picks "
+                    "FOR/AGAINST/ABSTAIN, enters PIN to confirm. CC25-aligned "
+                    "audit trail; no login or app required.",
+         "area": "board", "tags": ["voting", "magic-link", "pin"],
+         "released_at": "2026-05-08T20:52:00Z"},
+        {"pr": 42, "title": "PayPal Guest Card pre-fill (kiosk + service)",
+         "summary": "Donor name/email/phone/address now pre-fill on the PayPal "
+                    "Guest Card form across kiosk monthly giving + service "
+                    "checkout. landing_page=BILLING + payer block + en-GB locale.",
+         "area": "payments", "tags": ["paypal", "kiosk", "monthly-giving"],
+         "released_at": "2026-05-08T20:51:00Z"},
+        {"pr": 43, "title": "Volunteer registration wizard",
+         "summary": "50-field volunteer form is now a 6-step wizard with "
+                    "progress bar, per-step validation, localStorage auto-save, "
+                    "MS auth fix and casting-vote-by-email fallback.",
+         "area": "volunteers", "tags": ["wizard", "auto-save", "msauth"],
+         "released_at": "2026-05-08T15:50:00Z"},
+        {"pr": 44, "title": "Admin login: MS 365 troubleshooting",
+         "summary": "Collapsible help on the login page, nginx rewrite from "
+                    "/auth-callback → /admin/auth-callback/, MS_REDIRECT_URI "
+                    "exposed in Admin → API Keys.",
+         "area": "admin", "tags": ["auth", "ms365", "nginx"],
+         "released_at": "2026-05-08T16:35:00Z"},
+        {"pr": 45, "title": "SHITAL logo on service portal",
+         "summary": "Replaced the temple emoji with the SHITAL logo image in "
+                    "the public service portal header and the branch-picker "
+                    "welcome card. Falls back to the emoji if the CDN is down.",
+         "area": "service", "tags": ["branding", "logo"],
+         "released_at": "2026-05-08T20:50:00Z"},
+        {"pr": 46, "title": "MS_REDIRECT_URI compose defaults",
+         "summary": "Both dev and prod compose files default to "
+                    "/admin/auth-callback/ with trailing slash so a fresh "
+                    "deploy works without touching the secrets store.",
+         "area": "infra", "tags": ["compose", "auth", "msauth"],
+         "released_at": "2026-05-08T20:50:00Z"},
+        {"pr": 47, "title": "PayPal card-fields layout fix",
+         "summary": "Hosted card iframe was 20px tall (clipped digits) and the "
+                    "Pay button overlapped the expiry/CVV row. Now 48px with "
+                    "horizontal padding only.",
+         "area": "service", "tags": ["paypal", "checkout", "css"],
+         "released_at": "2026-05-08T20:50:00Z"},
+        {"pr": 48, "title": "Trustee role expansion + short volunteer ref",
+         "summary": "10 trustee roles in 3 tiers (Main Board / LMC / "
+                    "Non-Officer). Volunteer reference number shortened from "
+                    "SHITAL-VOL-YYYYMMDD-NNNNNN (24 chars) to VOL-NNNNNN.",
+         "area": "board", "tags": ["roles", "lmc", "ceo"],
+         "released_at": "2026-05-08T20:51:00Z"},
+        {"pr": 49, "title": "Quick Donation: no-reader admin redirect",
+         "summary": "Devices without a card reader configured (stripe / sumup "
+                    "/ clover all empty) now redirect to admin login on mount, "
+                    "instead of letting staff hit a dead-end error after "
+                    "tapping an amount.",
+         "area": "kiosk", "tags": ["quick-donation", "ux"],
+         "released_at": "2026-05-08T20:53:00Z"},
+        {"pr": 50, "title": "Volunteer reference-request workflow + DBS scaffold",
+         "summary": "Trustees click Send Reference Requests on the volunteer "
+                    "detail panel; ref1/ref2 each get a magic-link email to a "
+                    "confidential safeguarding-reference form on the service "
+                    "portal. Plus DBS status fields and a generic attachments "
+                    "table for future file uploads.",
+         "area": "volunteers", "tags": ["references", "dbs", "magic-link"],
+         "released_at": "2026-05-09T07:33:00Z"},
+        {"pr": 51, "title": "Admin build hotfix — magic-link vote route",
+         "summary": "Magic-link vote page was a Next.js dynamic [token] route, "
+                    "incompatible with output:'export'. Refactored to read the "
+                    "token from the URL hash. Was blocking every main build "
+                    "for ~12h.",
+         "area": "infra", "tags": ["admin", "build", "nextjs"],
+         "released_at": "2026-05-09T07:43:00Z"},
+        {"pr": 52, "title": "Startup hotfix — attachments table + patch timeout",
+         "summary": "Renamed the new generic file table from documents → "
+                    "attachments to avoid colliding with the existing "
+                    "documents table. Added per-statement 30s timeout to "
+                    "_patch_schema() with progress logging.",
+         "area": "infra", "tags": ["schema", "startup", "robustness"],
+         "released_at": "2026-05-09T08:04:00Z"},
+    ]
+
+    async with SessionLocal() as db:
+        for n in RELEASE_NOTES:
+            try:
+                await db.execute(text("""
+                    INSERT INTO release_notes
+                        (pr_number, title, summary, area, tags, released_at)
+                    VALUES
+                        (:pr, :title, :summary, :area, CAST(:tags AS jsonb), :released_at)
+                    ON CONFLICT (pr_number) DO NOTHING
+                """), {
+                    "pr": n["pr"], "title": n["title"], "summary": n["summary"],
+                    "area": n["area"], "tags": json.dumps(n["tags"]),
+                    "released_at": n["released_at"],
+                })
+            except Exception:
+                pass
+        await db.commit()
+    logger.info("release_notes_seeded", total=len(RELEASE_NOTES))
+
+
 app = FastAPI(
     title="Shital Temple ERP — Digital Brain API",
     description=(
@@ -2195,6 +2340,7 @@ _mount("shital.api.routers.accounts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
 _mount("shital.api.routers.menus",                 "router")
 _mount("shital.api.routers.system",                "router")
+_mount("shital.api.routers.release_notes",         "router")
 
 
 @app.get("/health", tags=["system"])
