@@ -27,6 +27,16 @@ async def lifespan(app: FastAPI):
     await init_db()
     stop_event = asyncio.Event()
     monitor_task = asyncio.create_task(health_monitor_loop(stop_event))
+
+    # Optional MQTT bridge. When EDGE_MQTT_HOST is set, the Edge connects
+    # to the local Mosquitto broker and bridges twin_cache <-> MQTT topics.
+    mqtt_task = None
+    if settings.mqtt_host:
+        from .mqtt_bridge import configure
+        bridge = configure(settings.mqtt_host, settings.mqtt_port)
+        if bridge is not None:
+            mqtt_task = asyncio.create_task(bridge.run())
+
     try:
         yield
     finally:
@@ -35,6 +45,11 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(monitor_task, timeout=2.0)
         except asyncio.TimeoutError:
             monitor_task.cancel()
+        if mqtt_task is not None:
+            from .mqtt_bridge import bridge as _b
+            if _b is not None:
+                _b.stop()
+            mqtt_task.cancel()
 
 
 policy = load_policy()
