@@ -238,6 +238,22 @@ jobs:
               echo "service:latest not yet in registry — skipping (first-deploy path)"
             fi
 
+            # ── Force-recreate the deployer container ─────────────────────────
+            # The deployer is a long-running container with DEPLOY_SECRET baked
+            # into its environment at startup. If `.env` has been rotated since
+            # it was last started (which is days/weeks given how stable that
+            # container is), the backend and deployer hold different secrets
+            # and every API-driven deploy / snapshot fails with
+            # `DEPLOY_SECRET mismatch`.
+            #
+            # Recreating it on every SSH deploy keeps the secret in sync with
+            # whatever `.env` says today. Cheap (small image, fast startup)
+            # and one less manual `docker compose up -d --force-recreate
+            # deployer` for the next admin who hits the mismatch error.
+            echo "=== Recreate deployer (sync DEPLOY_SECRET) ==="
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate deployer 2>&1 | tail -5 || \
+              echo "deployer recreate failed — non-fatal, continue"
+
             echo "Waiting for admin (nginx:alpine on :80)..."
             for i in $(seq 1 10); do
               sleep 3
