@@ -32,15 +32,63 @@ async def ui_index(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
+    from sqlalchemy import func
     catalog = load_catalog()
     counts = {k: len(v) for k, v in catalog.by_library.items()}
-    devices_count = (await session.execute(select(Device))).scalars().all()
+
+    # Quick-start progress: does each tier exist?
+    n_roots = await session.scalar(select(func.count()).select_from(RootSystem)) or 0
+    n_nodes = await session.scalar(select(func.count()).select_from(NodeSystem)) or 0
+    n_edges = await session.scalar(select(func.count()).select_from(EdgeSystem)) or 0
+    devices = (await session.execute(select(Device).order_by(Device.created_at.desc()))).scalars().all()
+    n_devices = len(devices)
+    n_devices_with_dna = sum(1 for d in devices if d.dna_json)
+    n_devices_with_firmware = sum(1 for d in devices if d.firmware_bundle_path)
+    first_unbuilt_dna = next((d.device_dna for d in devices if not d.firmware_bundle_path), None)
+
+    signed_in = bool(request.session.get("neuron_api_key_id"))
+
+    steps = [
+        {"key": "signin",   "label": "Sign in with admin API key", "done": signed_in,
+         "href": "/login" if not signed_in else None,
+         "hint": "Bootstrap key was printed once after the first deploy."},
+        {"key": "root",     "label": "Create a Root system",       "done": n_roots > 0,
+         "href": "/ui/systems",
+         "hint": "Top of the hierarchy — your organisation."},
+        {"key": "node",     "label": "Create a Node",              "done": n_nodes > 0,
+         "href": "/ui/systems",
+         "hint": "Optional regional grouping (e.g. UK)."},
+        {"key": "edge",     "label": "Create an Edge",             "done": n_edges > 0,
+         "href": "/ui/systems",
+         "hint": "A factory site. Set its URL so Master can push commands."},
+        {"key": "device",   "label": "Register a Device",          "done": n_devices > 0,
+         "href": "/ui/devices",
+         "hint": "Pick compute (Pico 2 W) + components from the catalog."},
+        {"key": "build",    "label": "Run pin-map → DNA → Brain → firmware",
+         "done": n_devices_with_firmware > 0,
+         "href": f"/ui/devices/{first_unbuilt_dna}" if first_unbuilt_dna else "/ui/devices",
+         "hint": "Four buttons on the device page do this in order."},
+        {"key": "flash",    "label": "Flash a Pico 2 W",            "done": False,
+         "href": "https://github.com/kammelaraj-arch/ShitalEco/blob/claude/shital-erp-platform-iR2UF/neuron-platform/level0-pico2w/provisioning/FLASHING.md",
+         "external": True,
+         "hint": "Bench step — drop the firmware bundle onto a real device."},
+    ]
+    completed = sum(1 for s in steps if s["done"])
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "library_counts": counts,
-            "device_count": len(devices_count),
+            "device_count": n_devices,
+            "n_roots": n_roots,
+            "n_nodes": n_nodes,
+            "n_edges": n_edges,
+            "n_devices_with_dna": n_devices_with_dna,
+            "n_devices_with_firmware": n_devices_with_firmware,
+            "steps": steps,
+            "completed": completed,
+            "signed_in": signed_in,
+            "all_done": completed >= len(steps),
         },
     )
 
