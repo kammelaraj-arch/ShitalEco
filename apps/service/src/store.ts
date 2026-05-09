@@ -7,7 +7,7 @@ import { type ThemeId, DEFAULT_THEME, applyTheme, getTheme } from './themes'
 export const SHITAL_LOGO_URL = 'https://shirdisai.org.uk/Cnt/img/shital-logo-new.png'
 
 export type Screen =
-  | 'browse' | 'basket' | 'contact' | 'gift-aid' | 'payment' | 'confirmation' | 'monthly-giving' | 'volunteer'
+  | 'browse' | 'basket' | 'contact' | 'gift-aid' | 'payment' | 'confirmation' | 'monthly-giving' | 'volunteer' | 'reference'
 
 export type Language = 'en' | 'gu' | 'hi' | 'te' | 'ta' | 'pa' | 'mr' | 'bn' | 'kn'
 

@@ -656,6 +656,177 @@ async def admin_reject_volunteer(
     return await _set_review_status(volunteer_id, ctx, "REJECTED", body.rejection_reason.strip())
 
 
+# ─── Reference request workflow ───────────────────────────────────────────────
+
+@router.post("/admin/volunteers/{volunteer_id}/send-references")
+async def admin_send_reference_requests(
+    volunteer_id: str, ctx: CurrentSpace,
+) -> dict[str, Any]:
+    """Email both referees a magic-link to fill in a reference response form.
+    Generates per-referee tokens stored on the volunteer row; tokens stay
+    stable across re-sends so the referee's existing link still works."""
+    _require_admin(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT id, first_names, last_name,
+                   ref1_first_names, ref1_last_name, ref1_email,
+                   ref2_first_names, ref2_last_name, ref2_email,
+                   ref1_request_token, ref2_request_token
+            FROM   volunteers
+            WHERE  id::text = :id
+        """), {"id": volunteer_id})).mappings().one_or_none()
+        if not row:
+            raise HTTPException(404, detail="Volunteer not found")
+
+        # Re-use existing tokens if present so a previously-sent link stays
+        # valid for the referee. New volunteers get fresh tokens.
+        token1 = row["ref1_request_token"] or _gen_draft_token()
+        token2 = row["ref2_request_token"] or _gen_draft_token()
+        now = datetime.now(UTC)
+        await db.execute(text("""
+            UPDATE volunteers
+            SET    ref1_request_token = :t1,
+                   ref2_request_token = :t2,
+                   references_sent_at = :now,
+                   updated_at         = :now
+            WHERE  id::text = :id
+        """), {"t1": token1, "t2": token2, "id": volunteer_id, "now": now})
+        await db.commit()
+
+    site = (settings.SITE_URL or "https://shital.org.uk").rstrip("/")
+    if "://" in site and "service." not in site:
+        scheme, host = site.split("://", 1)
+        if not host.startswith("service."):
+            site = f"{scheme}://service.{host}"
+    applicant_name = f"{row['first_names']} {row['last_name']}".strip()
+    charity_number = settings.CHARITY_NUMBER or "1138530"
+
+    from shital.api.routers.email_templates import send_template
+
+    results: list[dict[str, Any]] = []
+    for tag, token, ref_name, ref_email in (
+        ("ref1", token1,
+            f"{row['ref1_first_names']} {row['ref1_last_name']}".strip() or "Referee",
+            (row["ref1_email"] or "").strip()),
+        ("ref2", token2,
+            f"{row['ref2_first_names']} {row['ref2_last_name']}".strip() or "Referee",
+            (row["ref2_email"] or "").strip()),
+    ):
+        if not ref_email or "@" not in ref_email:
+            results.append({"ref": tag, "sent": False, "reason": "no email on file"})
+            continue
+        url = f"{site}/?screen=reference#token={token}"
+        out = await send_template(
+            "volunteer_reference_request",
+            ref_email,
+            {
+                "referee_name":   ref_name,
+                "applicant_name": applicant_name,
+                "response_url":   url,
+                "charity_number": charity_number,
+            },
+        )
+        results.append({"ref": tag, "to": ref_email, **out})
+
+    return {"ok": True, "results": results}
+
+
+# ─── Public endpoints — referee submits a reference response ─────────────────
+
+class ReferenceResponseBody(BaseModel):
+    """Free-form reference response from the public form. We capture standard
+    safeguarding fields plus an open free-text recommendation."""
+    relationship: str = ""        # "Manager / Friend / Teacher / etc."
+    known_for_years: str = ""     # "5"  or  "More than 10"
+    known_in_capacity: str = ""   # Free text
+    is_honest_reliable: str = ""  # "yes" / "no" / "unsure"
+    suitable_for_volunteering: str = ""  # same scale
+    safeguarding_concerns: str = ""      # "yes" / "no"
+    safeguarding_details: str = ""       # required if previous = yes
+    other_comments: str = ""             # free-text recommendation
+
+
+@router.get("/public/volunteers/reference/{token}")
+async def public_get_reference_context(token: str) -> dict[str, Any]:
+    """Public — looks up the volunteer + which referee is responding so the
+    form can show "You are providing a reference for {applicant} as
+    {referee}". Token IS the auth — anyone with the link can submit."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT first_names, last_name,
+                   ref1_first_names, ref1_last_name, ref1_request_token,
+                   ref2_first_names, ref2_last_name, ref2_request_token,
+                   ref1_response_received_at, ref2_response_received_at
+            FROM   volunteers
+            WHERE  ref1_request_token = :t OR ref2_request_token = :t
+            LIMIT  1
+        """), {"t": token})).mappings().one_or_none()
+    if not row:
+        raise HTTPException(404, detail="Reference link not found or expired")
+    is_ref1 = row["ref1_request_token"] == token
+    return {
+        "applicant_name": f"{row['first_names']} {row['last_name']}".strip(),
+        "referee_name":
+            f"{row['ref1_first_names']} {row['ref1_last_name']}".strip() if is_ref1
+            else f"{row['ref2_first_names']} {row['ref2_last_name']}".strip(),
+        "already_submitted": bool(
+            row["ref1_response_received_at"] if is_ref1 else row["ref2_response_received_at"]
+        ),
+    }
+
+
+@router.post("/public/volunteers/reference/{token}")
+async def public_submit_reference(
+    token: str, body: ReferenceResponseBody, request: Request,
+) -> dict[str, Any]:
+    """Public — referee submits the reference. Stores in ref{N}_response
+    JSONB on the volunteer row, marks received_at. Idempotent on token —
+    re-submission updates the same row."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    payload = {
+        **body.model_dump(),
+        "submitted_ip": (request.client.host if request.client else "")[:45],
+        "user_agent":   (request.headers.get("user-agent") or "")[:500],
+    }
+    if body.safeguarding_concerns.lower() == "yes" and not body.safeguarding_details.strip():
+        raise HTTPException(400, detail="Please describe the safeguarding concerns")
+
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT id, ref1_request_token, ref2_request_token
+            FROM   volunteers
+            WHERE  ref1_request_token = :t OR ref2_request_token = :t
+            LIMIT  1
+        """), {"t": token})).mappings().one_or_none()
+        if not row:
+            raise HTTPException(404, detail="Reference link not found or expired")
+        is_ref1 = row["ref1_request_token"] == token
+        col_payload = "ref1_response" if is_ref1 else "ref2_response"
+        col_at = "ref1_response_received_at" if is_ref1 else "ref2_response_received_at"
+        now = datetime.now(UTC)
+        await db.execute(text(f"""
+            UPDATE volunteers
+            SET    {col_payload} = CAST(:p AS jsonb),
+                   {col_at}      = :now,
+                   updated_at    = :now
+            WHERE  id = :id
+        """), {"p": _jsonify(payload), "now": now, "id": row["id"]})
+        await db.commit()
+    return {"ok": True}
+
+
 async def _set_review_status(
     volunteer_id: str, ctx: CurrentSpace, new_status: str, rejection_reason: str,
 ) -> dict[str, Any]:

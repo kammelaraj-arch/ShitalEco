@@ -44,6 +44,16 @@ interface VolunteerDetail extends VolunteerSummary {
   confidentiality_agreed: boolean
   marketing_consent: boolean
   rejection_reason: string
+  // Reference workflow (PR adding /admin/volunteers/{id}/send-references)
+  references_sent_at: string | null
+  ref1_response_received_at: string | null
+  ref2_response_received_at: string | null
+  ref1_response: Record<string, unknown> | null
+  ref2_response: Record<string, unknown> | null
+  // DBS / safeguarding
+  dbs_status: '' | 'have_certificate' | 'apply_for_me' | 'not_required'
+  dbs_application_status: string
+  dbs_notes: string
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -70,6 +80,32 @@ export default function VolunteersPage() {
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [reviewing, setReviewing] = useState(false)
+  const [sendingRefs, setSendingRefs] = useState(false)
+  const [refsMsg, setRefsMsg] = useState<{ text: string; ok: boolean } | null>(null)
+
+  const sendReferences = async () => {
+    if (!selected) return
+    setRefsMsg(null); setSendingRefs(true)
+    try {
+      const data = await apiFetch<{ ok: boolean; results: Array<{ ref: string; sent: boolean; reason?: string; to?: string }> }>(
+        `/admin/volunteers/${selected.id}/send-references`,
+        { method: 'POST' },
+      )
+      const okCount = data.results.filter(r => r.sent).length
+      const failed  = data.results.filter(r => !r.sent)
+      setRefsMsg({
+        ok: okCount > 0,
+        text: failed.length === 0
+          ? `Sent to both referees.`
+          : `Sent ${okCount}/2. ${failed.map(f => `${f.ref}: ${f.reason || 'failed'}`).join(' · ')}`,
+      })
+      // Refetch detail so references_sent_at updates
+      const fresh = await apiFetch<{ volunteer: VolunteerDetail }>(`/admin/volunteers/${selected.id}`)
+      setSelected(fresh.volunteer)
+    } catch (e) {
+      setRefsMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed to send' })
+    } finally { setSendingRefs(false) }
+  }
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -360,6 +396,67 @@ export default function VolunteersPage() {
                   ['Confidentiality NDA', selected.confidentiality_agreed ? '✓ Agreed' : '✗ Not agreed'],
                   ['Marketing consent', selected.marketing_consent ? '✓ Yes' : 'No'],
                 ]} />
+
+                {/* References — magic-link request workflow */}
+                <div>
+                  <div className="flex items-baseline justify-between mb-2">
+                    <p className="text-white/50 text-xs font-semibold uppercase tracking-wide">References</p>
+                    <button onClick={sendReferences} disabled={sendingRefs}
+                      className="text-xs font-bold underline disabled:opacity-50"
+                      style={{ color: '#FFD980' }}>
+                      {sendingRefs
+                        ? 'Sending…'
+                        : selected.references_sent_at
+                          ? `Resend reference requests`
+                          : `📧 Send reference requests`}
+                    </button>
+                  </div>
+                  {refsMsg && (
+                    <p className={`text-xs mb-2 ${refsMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{refsMsg.text}</p>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { n: 1, name: `${selected.ref1_first_names} ${selected.ref1_last_name}`.trim(), email: selected.ref1_email, at: selected.ref1_response_received_at, resp: selected.ref1_response },
+                      { n: 2, name: `${selected.ref2_first_names} ${selected.ref2_last_name}`.trim(), email: selected.ref2_email, at: selected.ref2_response_received_at, resp: selected.ref2_response },
+                    ].map(r => (
+                      <div key={r.n} className="rounded-lg p-3 text-xs"
+                        style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${r.at ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'}` }}>
+                        <p className="text-white/70 font-semibold">Referee {r.n}: {r.name || '—'}</p>
+                        <p className="text-white/40 text-[11px] mb-1">{r.email || 'no email'}</p>
+                        {r.at ? (
+                          <>
+                            <p className="text-green-400 text-[11px] mb-1">✓ Response received {fmtDate(r.at)}</p>
+                            {r.resp && Object.keys(r.resp).length > 0 && (
+                              <details className="mt-1">
+                                <summary className="cursor-pointer text-white/50">View response</summary>
+                                <pre className="mt-1 whitespace-pre-wrap text-[10px] text-white/70 font-mono leading-snug">{Object.entries(r.resp)
+                                  .filter(([k, v]) => v && k !== 'submitted_ip' && k !== 'user_agent')
+                                  .map(([k, v]) => `${k}: ${v}`).join('\n')}</pre>
+                              </details>
+                            )}
+                          </>
+                        ) : selected.references_sent_at ? (
+                          <p className="text-amber-400 text-[11px]">⏳ Awaiting response (sent {fmtDate(selected.references_sent_at)})</p>
+                        ) : (
+                          <p className="text-white/30 text-[11px]">Not yet requested</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* DBS / Safeguarding */}
+                {(selected.dbs_status || selected.dbs_notes) && (
+                  <DetailGrid title="DBS / Safeguarding" rows={[
+                    ['Status',
+                      selected.dbs_status === 'have_certificate' ? '✓ Has DBS certificate'
+                      : selected.dbs_status === 'apply_for_me'   ? '🟡 Wants SHITAL to apply'
+                      : selected.dbs_status === 'not_required'   ? 'Not required for role'
+                      : '— Not asked yet'],
+                    ['Application status', selected.dbs_application_status || '—'],
+                    ['Notes', selected.dbs_notes || ''],
+                  ]} />
+                )}
 
                 {selected.status === 'REJECTED' && selected.rejection_reason && (
                   <Note title="Rejection Reason" tone="warn">{selected.rejection_reason}</Note>
