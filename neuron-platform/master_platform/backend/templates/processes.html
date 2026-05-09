@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Processes & Recipes{% endblock %}
 {% block content %}
-  <header class="flex items-end justify-between">
+  <header class="flex items-end justify-between gap-3">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">Processes & Recipes</h1>
       <p class="text-slate-400 text-sm">Drag &amp; drop process graphs (saved as JSON) and run recipes against any registered device.</p>
     </div>
+    <a href="/ui/recipes/new" class="rounded-lg bg-emerald-500 px-4 py-2 font-medium text-slate-950 hover:bg-emerald-400 transition text-sm">+ New recipe</a>
   </header>
 
   <section class="mt-6 grid gap-6 lg:grid-cols-2">
@@ -14,16 +15,32 @@
       <ul class="mt-3 divide-y divide-slate-800/70 text-sm">
         {% for r in recipes %}
           <li class="py-3 flex items-start justify-between gap-3">
-            <div>
-              <div class="font-medium">{{ r.name }}</div>
-              <div class="font-mono text-xs text-slate-500">{{ r.recipe_id }}</div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-medium">{{ r.name }}</span>
+                {% if r.source == 'db' %}
+                  <span class="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">db (editable)</span>
+                {% else %}
+                  <span class="rounded-md bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">file</span>
+                {% endif %}
+              </div>
+              <div class="font-mono text-xs text-slate-500 break-all">{{ r.recipe_id }}</div>
               <div class="mt-1 text-xs text-slate-400">targets: {{ r.twin_targets | join(', ') }} · steps: {{ r.steps | join(' → ') }}</div>
             </div>
-            <a class="rounded-md border border-slate-700 px-2.5 py-1 text-xs hover:border-emerald-400 hover:text-emerald-300"
-               href="/ui/recipes/{{ r.recipe_id }}">Run</a>
+            <div class="flex flex-col gap-1 shrink-0">
+              <a class="rounded-md border border-slate-700 px-2.5 py-1 text-xs hover:border-emerald-400 hover:text-emerald-300"
+                 href="/ui/recipes/{{ r.recipe_id }}">Run</a>
+              {% if r.editable %}
+                <a class="rounded-md border border-slate-700 px-2.5 py-1 text-xs hover:border-cyan-400 hover:text-cyan-300"
+                   href="/ui/recipes/edit/{{ r.db_id }}">Edit</a>
+                <form method="post" action="/ui/recipes/delete/{{ r.db_id }}" onsubmit="return confirm('Delete recipe {{ r.recipe_id }}?')">
+                  <button class="w-full rounded-md border border-slate-700 px-2.5 py-1 text-xs hover:border-red-400 hover:text-red-300">Delete</button>
+                </form>
+              {% endif %}
+            </div>
           </li>
         {% else %}
-          <li class="py-6 text-center text-slate-500 italic">No recipes found in libraries/digital_twin_controls_library/recipes/</li>
+          <li class="py-6 text-center text-slate-500 italic">No recipes yet — click "+ New recipe" or drop a file in libraries/digital_twin_controls_library/recipes/</li>
         {% endfor %}
       </ul>
     </div>

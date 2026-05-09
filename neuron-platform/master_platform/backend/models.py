@@ -132,6 +132,26 @@ class Process(Base):
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
 
+class RecipeDef(Base):
+    """DB-backed recipe definition. The same recipe shape used by file-based
+    recipes (libraries/digital_twin_controls_library/recipes/*.json) but
+    editable via /ui/recipes/edit. DB wins on recipe_id collision with files.
+    """
+
+    __tablename__ = "recipe_defs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    recipe_id: Mapped[str] = mapped_column(String(160), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    version: Mapped[str] = mapped_column(String(20), default="0.1.0")
+    recipe_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column()
+
+
 class RecipeRun(Base):
     """A recipe execution against a device. Stage 5 orchestration unit."""
 
