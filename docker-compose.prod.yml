@@ -242,8 +242,47 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt
     entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done"
 
+  # ── Neuron Master Platform ─────────────────────────────────────────────────
+  # Smart factory platform served at neuron.shital.org.uk. Built on the box
+  # from neuron-platform/. Storage is FULLY ISOLATED from ShitalEco — its own
+  # SQLite file in the neuron_data volume, never touches the Postgres db
+  # service. backend/db.py refuses to start if NEURON_DB_URL ever points at
+  # the ShitalEco database.
+  neuron-master:
+    build:
+      context: ./neuron-platform
+      dockerfile: master_platform/Dockerfile
+    image: shitaleco-neuron-master:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 384M
+    environment:
+      NEURON_DB_URL: sqlite+aiosqlite:////app/master_platform/data/neuron.db
+      NEURON_LIBRARIES_DIR: /app/libraries
+      NEURON_SHARED_SCHEMAS_DIR: /app/shared_schemas
+      NEURON_BUILD_ARTIFACTS_DIR: /app/master_platform/build_artifacts
+      NEURON_BIND_HOST: 0.0.0.0
+      NEURON_BIND_PORT: 8088
+      NEURON_LOG_LEVEL: info
+    volumes:
+      - neuron_data:/app/master_platform/data
+      - neuron_artifacts:/app/master_platform/build_artifacts
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8088/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
   pgdata:
+  neuron_data:
+  neuron_artifacts:
 
 networks:
   internal:
