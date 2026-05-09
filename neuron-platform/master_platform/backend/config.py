@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     libraries_dir: Path = Field(default=Path("../libraries"))
     shared_schemas_dir: Path = Field(default=Path("../shared_schemas"))
     build_artifacts_dir: Path = Field(default=Path("./build_artifacts"))
-    bootstrap_admin_key: str = ""
     bind_host: str = "0.0.0.0"
     bind_port: int = 8080
     log_level: str = "info"

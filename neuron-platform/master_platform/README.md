@@ -32,15 +32,14 @@ cp .env.example .env
 uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
-On first boot a bootstrap **admin API key** is logged exactly once — copy it,
-that is the only time it is shown:
+On first boot the Master auto-issues a **bootstrap admin API key** and
+writes it (chmod 0600) to `master_platform/data/bootstrap_admin.txt`.
+Open the Master at `http://localhost:8088/login`, paste the key, then
+**delete the file**. From that point on, every key is created, rotated
+and revoked from the **Secrets** section in the UI (`/ui/secrets`).
 
-```
-WARNING:neuron.master:BOOTSTRAP ADMIN API KEY (shown once): neu_xxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-To use a known key on first run instead, set
-`NEURON_BOOTSTRAP_ADMIN_KEY=neu_my-prebaked-secret` before starting.
+There is intentionally no environment variable for this key — secret
+material doesn't belong in env files or container env vars.
 
 ## Endpoints
 
@@ -78,14 +77,18 @@ All `/api/*` endpoints require `X-API-Key: <secret>`. Scopes are tier-derived:
 
 ## UI
 
-| Path             | What                                       |
-| ---------------- | ------------------------------------------ |
-| `/`              | dashboard                                  |
-| `/ui/library`    | catalog with search filter                 |
-| `/ui/systems`    | root/node/edge listing                     |
-| `/ui/devices`    | devices with status badges                 |
-| `/ui/devices/{dna}` | DNA + Brain + pin map + firmware download |
-| `/docs`          | OpenAPI / Swagger UI                       |
+| Path                   | What                                       |
+| ---------------------- | ------------------------------------------ |
+| `/`                    | dashboard                                  |
+| `/login` / `/logout`   | session sign-in (paste API key)            |
+| `/ui/library`          | catalog with search filter                 |
+| `/ui/library/manage`   | **Library Management** (Hardware / Twin / UI / Business / Functional / API) — create, edit, delete DB-backed items |
+| `/ui/systems`          | root/node/edge listing                     |
+| `/ui/devices`          | devices with status badges                 |
+| `/ui/devices/{dna}`    | DNA + Brain + pin map + firmware download  |
+| `/ui/secrets`          | **Secrets Management** — issue/rotate/revoke API keys, plaintext shown exactly once at issuance |
+| `/ui/audit`            | audit log viewer                           |
+| `/docs`                | OpenAPI / Swagger UI                       |
 
 The UI uses Tailwind via CDN + HTMX (zero build step), is mobile-responsive,
 and renders rich tiles for library cards and devices.

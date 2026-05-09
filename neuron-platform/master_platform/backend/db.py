@@ -43,6 +43,7 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 
 async def init_db() -> None:
     from . import models  # noqa: F401  (register models)
+    from . import models_library  # noqa: F401  (register library item model)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

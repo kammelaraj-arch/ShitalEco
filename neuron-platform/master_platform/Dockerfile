@@ -21,7 +21,8 @@ COPY shared_schemas /app/shared_schemas
 ENV NEURON_LIBRARIES_DIR=/app/libraries \
     NEURON_SHARED_SCHEMAS_DIR=/app/shared_schemas \
     NEURON_DB_URL=sqlite+aiosqlite:////app/master_platform/data/neuron.db \
-    NEURON_BUILD_ARTIFACTS_DIR=/app/master_platform/build_artifacts
+    NEURON_BUILD_ARTIFACTS_DIR=/app/master_platform/build_artifacts \
+    NEURON_BIND_PORT=8088
 
 RUN mkdir -p /app/master_platform/data /app/master_platform/build_artifacts
 

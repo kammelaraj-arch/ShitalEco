@@ -1,7 +1,6 @@
 .env
-data/*.db
-data/*.db-*
-build_artifacts/*.zip
+data/
+build_artifacts/
 __pycache__/
 *.pyc
 .venv/

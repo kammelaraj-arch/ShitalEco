@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://neuron.shital.org.uk/schemas/manifest.schema.json",
   "title": "Neuron Platform Library Item Manifest",
-  "description": "Universal manifest schema applied to every library item across all five libraries.",
+  "description": "Universal manifest schema applied to every library item across all libraries (hardware, twin, ui, business, functional, api).",
   "type": "object",
   "required": [
     "stable_id",
@@ -40,7 +40,10 @@
         "control_board_library",
         "micro_compute_library",
         "digital_twin_controls_library",
-        "ui_controls_library"
+        "ui_controls_library",
+        "business_library",
+        "functional_library",
+        "api_library"
       ]
     },
     "category": { "type": "string", "minLength": 1 },

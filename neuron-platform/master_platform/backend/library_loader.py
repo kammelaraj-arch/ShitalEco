@@ -17,7 +17,23 @@ LIBRARY_DIRS = (
     "micro_compute_library",
     "digital_twin_controls_library",
     "ui_controls_library",
+    "business_library",
+    "functional_library",
+    "api_library",
 )
+
+LIBRARY_GROUPS: dict[str, tuple[str, ...]] = {
+    "Hardware": (
+        "components_library",
+        "control_board_library",
+        "micro_compute_library",
+    ),
+    "Digital Twin": ("digital_twin_controls_library",),
+    "UI": ("ui_controls_library",),
+    "Business": ("business_library",),
+    "Functional": ("functional_library",),
+    "API": ("api_library",),
+}
 
 
 @dataclass
@@ -29,11 +45,17 @@ class LibraryItem:
     name: str
     vendor: str
     manifest: dict[str, Any]
-    path: Path
+    path: Path | None = None
+    source: str = "file"  # "file" or "db"
+    db_id: str | None = None
 
     @property
     def safety_class(self) -> str:
         return self.manifest.get("safety_class", "nominal")
+
+    @property
+    def editable(self) -> bool:
+        return self.source == "db"
 
 
 @dataclass
@@ -100,12 +122,77 @@ def _scan(libraries_root: Path, schema: dict[str, Any]) -> LibraryCatalog:
     return catalog
 
 
+def _merge_db_items(catalog: LibraryCatalog, schema: dict[str, Any]) -> None:
+    """Merge DB-backed library items on top of file-based ones.
+
+    DB items override file items if the same stable_id exists, so admins
+    can correct a stock manifest without touching the source tree.
+    """
+    try:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from .config import settings as _s
+        from .models_library import LibraryItemRow  # local import to avoid cycle
+    except Exception:
+        return
+
+    sync_url = _s.db_url.replace("+aiosqlite", "")
+    try:
+        engine = create_engine(sync_url, future=True)
+        Session = sessionmaker(engine, future=True)
+        validator = jsonschema.Draft7Validator(schema)
+        with Session() as ses:
+            try:
+                rows = ses.query(LibraryItemRow).filter(LibraryItemRow.deleted_at.is_(None)).all()
+            except Exception:
+                # Table may not exist on first call before init_db().
+                return
+            for row in rows:
+                doc = row.manifest_json
+                errs = list(validator.iter_errors(doc))
+                if errs:
+                    continue
+                item = LibraryItem(
+                    stable_id=doc["stable_id"],
+                    library=doc["library"],
+                    category=doc["category"],
+                    version=doc["version"],
+                    name=doc["name"],
+                    vendor=doc["vendor"],
+                    manifest=doc,
+                    path=None,
+                    source="db",
+                    db_id=row.id,
+                )
+                # If this stable_id already exists from a file, replace it.
+                old = catalog.by_id.get(item.stable_id)
+                if old is not None:
+                    catalog.by_library[old.library] = [
+                        x for x in catalog.by_library[old.library] if x.stable_id != item.stable_id
+                    ]
+                catalog.by_id[item.stable_id] = item
+                catalog.by_library.setdefault(item.library, []).append(item)
+    except Exception:
+        # Never let DB issues prevent the file catalog from loading.
+        return
+
+
 def load_catalog(force: bool = False) -> LibraryCatalog:
     global _catalog
     with _lock:
         if _catalog is None or force:
-            _catalog = _scan(settings.libraries_dir, _load_schema())
+            schema = _load_schema()
+            _catalog = _scan(settings.libraries_dir, schema)
+            _merge_db_items(_catalog, schema)
         return _catalog
+
+
+def invalidate_catalog() -> None:
+    """Force the next load to re-read from disk + DB."""
+    global _catalog
+    with _lock:
+        _catalog = None
 
 
 @lru_cache(maxsize=1)

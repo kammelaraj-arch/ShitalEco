@@ -15,17 +15,27 @@
         <a href="/" class="flex items-center gap-2 text-lg font-semibold tracking-tight">
           <span class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-emerald-400 to-cyan-500 text-slate-950 font-black">N</span>
           <span>Neuron</span>
-          <span class="text-slate-500 hidden sm:inline">Master Platform</span>
+          <span class="text-slate-500 hidden sm:inline">Master</span>
         </a>
         <nav class="ml-auto flex items-center gap-1 text-sm">
           {% set nav = [('/', 'Home'),
-                        ('/ui/library', 'Libraries'),
+                        ('/ui/library', 'Catalog'),
+                        ('/ui/library/manage', 'Library Mgmt'),
                         ('/ui/systems', 'Systems'),
                         ('/ui/devices', 'Devices'),
+                        ('/ui/secrets', 'Secrets'),
+                        ('/ui/audit', 'Audit'),
                         ('/docs', 'API')] %}
           {% for href, label in nav %}
-            <a href="{{ href }}" class="rounded-md px-3 py-1.5 hover:bg-slate-800/70 text-slate-300 hover:text-white transition">{{ label }}</a>
+            <a href="{{ href }}" class="rounded-md px-2.5 py-1.5 hover:bg-slate-800/70 text-slate-300 hover:text-white transition">{{ label }}</a>
           {% endfor %}
+          {% if request.session.get('neuron_api_key_id') %}
+            <form method="post" action="/logout" class="ml-2">
+              <button class="rounded-md border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:border-red-400 hover:text-red-300">Sign out</button>
+            </form>
+          {% else %}
+            <a href="/login" class="ml-2 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-medium text-slate-950 hover:bg-emerald-400">Sign in</a>
+          {% endif %}
         </nav>
       </div>
     </header>
@@ -35,7 +45,7 @@
     </main>
 
     <footer class="border-t border-slate-800 py-6 text-center text-xs text-slate-500">
-      Neuron Platform — Stage 2 Master Core · neuron.shital.org.uk
+      Neuron Platform · neuron.shital.org.uk · DB isolated from ShitalEco
     </footer>
   </body>
 </html>

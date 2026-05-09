@@ -48,6 +48,9 @@ async def ui_library(request: Request):
             "micro_compute_library",
             "digital_twin_controls_library",
             "ui_controls_library",
+            "business_library",
+            "functional_library",
+            "api_library",
         )
     }
     return templates.TemplateResponse(

@@ -43,6 +43,9 @@ LIBRARIES = (
     "micro_compute_library",
     "digital_twin_controls_library",
     "ui_controls_library",
+    "business_library",
+    "functional_library",
+    "api_library",
 )
 
 
@@ -112,6 +115,9 @@ def validate_cross_references(report: Report) -> None:
         "micro_compute_library":         {"micropython", "cpython", "linux_pkg"},
         "digital_twin_controls_library": {"cpython", "node"},
         "ui_controls_library":           {"node", "cpython"},
+        "business_library":              {"cpython"},
+        "functional_library":            {"cpython", "micropython"},
+        "api_library":                   {"cpython"},
     }
 
     for stable_id, doc in by_id.items():

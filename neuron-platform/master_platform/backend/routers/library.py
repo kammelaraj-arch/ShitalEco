@@ -66,6 +66,41 @@ async def list_ui_controls() -> dict:
     return {"items": _serialise(cat.list_library("ui_controls_library"))}
 
 
+@router.get("/business", dependencies=[Depends(require_scopes("library:read"))])
+async def list_business() -> dict:
+    cat = load_catalog()
+    return {"items": _serialise(cat.list_library("business_library"))}
+
+
+@router.get("/functional", dependencies=[Depends(require_scopes("library:read"))])
+async def list_functional() -> dict:
+    cat = load_catalog()
+    return {"items": _serialise(cat.list_library("functional_library"))}
+
+
+@router.get("/api-integrations", dependencies=[Depends(require_scopes("library:read"))])
+async def list_api_integrations() -> dict:
+    cat = load_catalog()
+    return {"items": _serialise(cat.list_library("api_library"))}
+
+
+@router.get("/by/{library}", dependencies=[Depends(require_scopes("library:read"))])
+async def list_by_library(library: str) -> dict:
+    cat = load_catalog()
+    if library not in cat.by_library and library not in (
+        "components_library",
+        "control_board_library",
+        "micro_compute_library",
+        "digital_twin_controls_library",
+        "ui_controls_library",
+        "business_library",
+        "functional_library",
+        "api_library",
+    ):
+        raise HTTPException(404, f"unknown library: {library}")
+    return {"items": _serialise(cat.list_library(library))}
+
+
 @router.get("/item/{stable_id}", dependencies=[Depends(require_scopes("library:read"))])
 async def get_item(stable_id: str) -> dict:
     cat = load_catalog()
