@@ -1,6 +1,5 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
@@ -60,8 +59,17 @@ function fmtDate(iso: string | null): string {
 }
 
 export default function MagicLinkVotePage() {
-  const params = useParams<{ token: string }>()
-  const token = (params?.token as string) || ''
+  // Token comes from the URL hash (`#token=…`) or query param (`?token=…`).
+  // We can't use a [token] dynamic segment because the admin app is a
+  // static export (next.config.mjs: output:'export') and dynamic params
+  // need generateStaticParams() — which we can't enumerate at build
+  // time (token = 32 random bytes per (resolution, trustee) pair).
+  const [token, setToken] = useState('')
+  useEffect(() => {
+    const m = /[#&]token=([A-Za-z0-9_-]+)/.exec(window.location.hash || '')
+    const q = new URLSearchParams(window.location.search).get('token')
+    setToken(m?.[1] || q || '')
+  }, [])
 
   const [data, setData] = useState<LoadResponse | null>(null)
   const [loading, setLoading] = useState(true)

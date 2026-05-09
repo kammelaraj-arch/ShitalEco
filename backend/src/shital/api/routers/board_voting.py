@@ -208,7 +208,11 @@ async def _send_invite_email(*, full_name: str, email: str, token: str, resoluti
         return
 
     admin_base = await SecretsManager.get("ADMIN_BASE_URL") or "https://admin.shital.org.uk"
-    link = f"{admin_base.rstrip('/')}/board/vote/{token}"
+    # Hash format (#token=…) — the admin app is a static Next.js export,
+    # so we can't have a [token] dynamic segment without enumerating tokens
+    # at build time. The /board/vote/ page reads the token from
+    # window.location.hash on mount.
+    link = f"{admin_base.rstrip('/')}/admin/board/vote/#token={token}"
 
     body_html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
