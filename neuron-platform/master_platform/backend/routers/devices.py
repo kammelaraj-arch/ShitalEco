@@ -334,6 +334,84 @@ async def _resolve_release(
     return res.scalars().first()
 
 
+class DesiredBody(BaseModel):
+    twin_kind: str
+    field: str
+    value: object | None = None
+
+
+@router.post("/{device_dna}/desired")
+async def set_desired(
+    device_dna: str,
+    body: DesiredBody,
+    session: AsyncSession = Depends(get_session),
+    api_key: APIKey = Depends(require_scopes("devices:write")),
+):
+    """Master → Edge desired-state push.
+
+    Looks up the device's Edge address and POSTs a desired field
+    immediately. Edge merges into its twin cache, then echoes back to
+    Master via /api/v1/internal/twin-push so the SSE feed updates the
+    browser within a network round-trip.
+    """
+    from ..runtime.edge_bridge import push_desired, EdgeUnreachable
+    device = await _load_device(session, device_dna)
+    try:
+        edge_resp = await push_desired(
+            session,
+            edge_id=device.edge_id,
+            device_dna=device_dna,
+            twin_kind=body.twin_kind,
+            field=body.field,
+            value=body.value,
+        )
+    except EdgeUnreachable as exc:
+        raise HTTPException(503, f"edge unreachable: {exc}")
+    await record(session, actor=api_key.id, action="set_desired",
+                 target_kind="device", target_id=device_dna,
+                 detail={"twin_kind": body.twin_kind, "field": body.field, "value": body.value})
+    await session.commit()
+    return {"ok": True, "edge": edge_resp}
+
+
+@router.get("/{device_dna}/twin/stream")
+async def stream_twin(
+    device_dna: str,
+    session: AsyncSession = Depends(get_session),
+    _: APIKey = Depends(require_scopes("devices:read")),
+):
+    """Server-Sent Events stream of live twin telemetry. The Master polls
+    the relevant Edge once per second (one task shared across all
+    subscribers) and pushes only-when-changed payloads to the browser.
+
+    Each event is a JSON line:
+      data: {"online": true, "twin": {...}, "at": "..."}
+    Heartbeat ': ping' comments arrive every 15s to keep the connection
+    alive through proxies.
+    """
+    from fastapi.responses import StreamingResponse
+    from ..runtime.twin_stream import hub
+
+    # Ensure the device actually exists before opening a long-lived stream.
+    device = await session.get(Device, device_dna)
+    if device is None:
+        raise HTTPException(404, "device not found")
+
+    async def gen():
+        async for chunk in hub.subscribe(device_dna):
+            yield chunk
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # nginx: don't buffer the stream
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @router.get("/{device_dna}/twin")
 async def fetch_twin_from_edge(
     device_dna: str,
