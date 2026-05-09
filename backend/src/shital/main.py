@@ -1302,12 +1302,15 @@ async def _patch_schema() -> None:
         "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ref2_response_received_at TIMESTAMPTZ",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_ref1_token ON volunteers(ref1_request_token) WHERE ref1_request_token != ''",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_ref2_token ON volunteers(ref2_request_token) WHERE ref2_request_token != ''",
-        # ── Generic documents/attachments ─────────────────────────────────────
-        # Owner-typed lookups (e.g. all docs for a volunteer, all DBS certs
-        # across the org). Files <5MB stored inline as BYTEA — keeps the
-        # storage layer simple. Larger files would need Azure Blob; not
-        # needed for DBS certificates which are typically <500KB PDFs.
-        """CREATE TABLE IF NOT EXISTS documents (
+        # ── Generic file attachments ──────────────────────────────────────────
+        # Owner-typed file storage (e.g. all attachments for a volunteer, all
+        # DBS certificates across the org). Files <5MB stored inline as BYTEA;
+        # larger ones would need Azure Blob (not needed for DBS PDFs which
+        # are typically <500KB).
+        # Named `attachments` not `documents` because the existing `documents`
+        # table in this repo is for compliance/policy documents with a
+        # totally different schema (file_url, category, review_due, etc.).
+        """CREATE TABLE IF NOT EXISTS attachments (
             id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
             owner_type  VARCHAR(50)  NOT NULL,
             owner_id    UUID         NOT NULL,
@@ -1319,8 +1322,8 @@ async def _patch_schema() -> None:
             uploaded_by VARCHAR(200) NOT NULL DEFAULT '',
             created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
         )""",
-        "CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_type, owner_id)",
-        "CREATE INDEX IF NOT EXISTS idx_documents_label ON documents(owner_type, owner_id, label)",
+        "CREATE INDEX IF NOT EXISTS idx_attachments_owner ON attachments(owner_type, owner_id)",
+        "CREATE INDEX IF NOT EXISTS idx_attachments_label ON attachments(owner_type, owner_id, label)",
         # ── Volunteer drafts (cross-device partial save) ──────────────────────
         # The wizard auto-saves to localStorage on every change. For applicants
         # who want to resume on a different device — or who clear browser data
@@ -1562,14 +1565,25 @@ async def _patch_schema() -> None:
 
     # Each statement runs in its own transaction so one failure doesn't
     # abort the entire batch (PostgreSQL aborts the txn on any error).
-    for sql in patches:
+    # Per-statement 30s timeout means a single bad ALTER waiting on a
+    # held lock can't hang the entire startup. Last-known-good was a
+    # 30/30 healthcheck failure traced back to a stuck schema patch
+    # — adding the timeout + per-N progress logging so the pattern is
+    # visible in container logs next time something stalls.
+    import asyncio
+    total = len(patches)
+    for idx, sql in enumerate(patches):
         try:
             async with SessionLocal() as db:
-                await db.execute(text(sql))
+                await asyncio.wait_for(db.execute(text(sql)), timeout=30)
                 await db.commit()
+        except TimeoutError:
+            logger.warning("schema_patch_timeout", index=idx, sql_preview=sql[:80])
         except Exception:
             pass  # column already exists / table missing — safe to skip
-    logger.info("schema_patch_done")
+        if idx and idx % 50 == 0:
+            logger.info("schema_patch_progress", done=idx, total=total)
+    logger.info("schema_patch_done", total=total)
     await _seed_api_key_metadata()
     await _seed_catalog()
     await _seed_email_templates()
