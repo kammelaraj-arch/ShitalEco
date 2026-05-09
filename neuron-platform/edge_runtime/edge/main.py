@@ -37,6 +37,16 @@ async def lifespan(app: FastAPI):
         if bridge is not None:
             mqtt_task = asyncio.create_task(bridge.run())
 
+    # Optional vendor integrations. Each runs its own loop and publishes
+    # into the Edge's twin_cache; the cache then fans out via MQTT + SSE
+    # automatically. Failures don't stop the Edge.
+    integration_tasks: list[asyncio.Task] = []
+    try:
+        from .integrations import tapo as tapo_integration
+        integration_tasks.append(asyncio.create_task(tapo_integration.run_loop(stop_event)))
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("tapo integration failed to start: %s", exc)
+
     try:
         yield
     finally:
@@ -50,6 +60,8 @@ async def lifespan(app: FastAPI):
             if _b is not None:
                 _b.stop()
             mqtt_task.cancel()
+        for t in integration_tasks:
+            t.cancel()
 
 
 policy = load_policy()
