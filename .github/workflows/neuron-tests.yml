@@ -1,0 +1,46 @@
+name: Neuron Platform Tests
+
+on:
+  push:
+    branches:
+      - claude/create-project-blocks-N8kpy
+      - claude/shital-erp-platform-iR2UF
+    paths:
+      - 'neuron-platform/**'
+      - '.github/workflows/neuron-tests.yml'
+  pull_request:
+    paths:
+      - 'neuron-platform/**'
+      - '.github/workflows/neuron-tests.yml'
+
+jobs:
+  validator:
+    name: Validate manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install jsonschema
+        run: pip install --quiet 'jsonschema>=4.21,<5'
+      - name: Run validator (strict)
+        working-directory: neuron-platform
+        run: python tools/validate_manifests.py --root . --strict
+
+  pytest:
+    name: pytest (master + edge + pico)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        working-directory: neuron-platform
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/requirements.txt
+      - name: Run pytest
+        working-directory: neuron-platform
+        run: pytest -ra -v

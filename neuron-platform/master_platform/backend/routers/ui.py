@@ -103,6 +103,35 @@ async def ui_device_detail(
     )
 
 
+@router.get("/ui/devices/{device_dna}/twin-fragment", response_class=HTMLResponse)
+async def ui_device_twin_fragment(
+    device_dna: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """HTMX fragment polled every few seconds by the device detail page."""
+    import httpx
+    device = await session.get(Device, device_dna)
+    if device is None:
+        return HTMLResponse("<div class='text-red-400 text-xs'>device not found</div>", status_code=404)
+    edge = await session.get(EdgeSystem, device.edge_id)
+    payload: dict = {"online": False, "reason": "edge_address_unset"}
+    if edge and edge.address:
+        url = f"{edge.address.rstrip('/')}/api/v1/twin/{device_dna}"
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(url)
+            if resp.status_code == 200:
+                payload = {"online": True, "twin": resp.json(), "edge_url": edge.address}
+            else:
+                payload = {"online": False, "reason": f"edge HTTP {resp.status_code}"}
+        except httpx.HTTPError as exc:
+            payload = {"online": False, "reason": f"edge unreachable ({exc.__class__.__name__})"}
+    return templates.TemplateResponse(
+        "_device_twin.html", {"request": request, "device": device, "payload": payload}
+    )
+
+
 @router.get("/ui/processes", response_class=HTMLResponse)
 async def ui_processes(
     request: Request,

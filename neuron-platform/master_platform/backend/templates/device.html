@@ -13,6 +13,15 @@
       <a href="/ui/devices/{{ device.device_dna }}/ota" class="rounded-lg border border-slate-700 px-3 py-1.5 text-sm hover:border-emerald-400 hover:text-emerald-300">OTA →</a>
     </header>
 
+    <section class="mt-6"
+             hx-get="/ui/devices/{{ device.device_dna }}/twin-fragment"
+             hx-trigger="load, every 3s"
+             hx-swap="innerHTML">
+      <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 text-xs text-slate-500">
+        connecting to live twin…
+      </div>
+    </section>
+
     <div class="mt-6 grid gap-4 md:grid-cols-3">
       {% for label, blob in [('DNA', device.dna_json), ('Brain', device.brain_json), ('Pin map', device.pinmap_json)] %}
         <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">

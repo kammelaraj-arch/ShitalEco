@@ -334,6 +334,33 @@ async def _resolve_release(
     return res.scalars().first()
 
 
+@router.get("/{device_dna}/twin")
+async def fetch_twin_from_edge(
+    device_dna: str,
+    session: AsyncSession = Depends(get_session),
+    _: APIKey = Depends(require_scopes("devices:read")),
+):
+    """Live read-through to the device's Edge twin cache.
+
+    Returns ``{"online": false, "reason": ...}`` when the Edge is
+    unreachable so the UI can render the offline state without errors.
+    """
+    import httpx
+    device = await _load_device(session, device_dna)
+    edge = await session.get(EdgeSystem, device.edge_id)
+    if edge is None or not edge.address:
+        return {"online": False, "reason": "edge_address_unset"}
+    url = f"{edge.address.rstrip('/')}/api/v1/twin/{device_dna}"
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            return {"online": False, "reason": f"edge_status_{resp.status_code}"}
+        return {"online": True, "twin": resp.json(), "edge_url": edge.address}
+    except httpx.HTTPError as exc:
+        return {"online": False, "reason": f"edge_unreachable: {exc.__class__.__name__}"}
+
+
 @router.get("/{device_dna}/firmware-bundle")
 async def download_firmware(
     device_dna: str,
