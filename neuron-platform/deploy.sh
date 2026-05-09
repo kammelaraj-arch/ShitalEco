@@ -20,6 +20,9 @@ SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 NEURON_DIR="$SCRIPT_DIR"
 COMPOSE="$NEURON_DIR/master_platform/docker-compose.yml"
 
+# Canonical deploy branch. Override with --branch=... or env var if testing.
+DEPLOY_BRANCH="${NEURON_DEPLOY_BRANCH:-claude/shital-erp-platform-iR2UF}"
+
 # nginx is shared. We only ask it to reload its config; we never restart
 # its container or touch its compose. Override with --nginx-compose to
 # point elsewhere, or --no-nginx to skip the reload entirely.
@@ -35,6 +38,7 @@ for arg in "$@"; do
     --no-nginx) DO_NGINX=0 ;;
     --logs)     LOGS_AFTER=1 ;;
     --nginx-compose=*) NGINX_COMPOSE="${arg#*=}" ;;
+    --branch=*) DEPLOY_BRANCH="${arg#*=}" ;;
     -h|--help)
       sed -n '2,16p' "$0"; exit 0 ;;
   esac
@@ -48,23 +52,34 @@ step() { echo -e "\n${B}▶ $*${N}"; }
 
 step "Neuron Master Platform — independent deploy"
 echo "  compose:        $COMPOSE"
+echo "  deploy branch:  $DEPLOY_BRANCH"
 echo "  nginx compose:  $NGINX_COMPOSE (reload only, never restart)"
 echo "  pull:           $([ $DO_PULL -eq 1 ] && echo yes || echo no)"
 echo "  nginx reload:   $([ $DO_NGINX -eq 1 ] && echo yes || echo no)"
 
 # ─── 1. Sync repo (only if asked) ────────────────────────────────────────────
+# Pinned to DEPLOY_BRANCH — never inferred from `git rev-parse HEAD`, since
+# the operator may be on a feature branch when they run this.
 if [ "$DO_PULL" -eq 1 ]; then
-  step "[1/5] Syncing repo"
+  step "[1/5] Syncing repo to $DEPLOY_BRANCH"
   REPO_ROOT="$( cd -- "$NEURON_DIR/.." &> /dev/null && pwd )"
   cd "$REPO_ROOT"
   if [ -d .git ]; then
-    BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    git fetch origin "$BRANCH" --quiet
-    git reset --hard "origin/$BRANCH"
-    ok "Updated to $(git rev-parse --short HEAD) ($BRANCH)"
+    git fetch origin "$DEPLOY_BRANCH" --quiet
+    git checkout -B "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH" --quiet
+    git reset --hard "origin/$DEPLOY_BRANCH" --quiet
+    ok "Updated to $(git rev-parse --short HEAD) ($DEPLOY_BRANCH)"
   else
     warn "Not a git checkout — skipping pull"
   fi
+fi
+
+# Re-resolve in case the pull above moved files in/out of NEURON_DIR.
+if [ ! -d "$NEURON_DIR/master_platform" ]; then
+  err "Expected $NEURON_DIR/master_platform to exist after sync."
+  err "Either DEPLOY_BRANCH=$DEPLOY_BRANCH doesn't have neuron-platform/ yet,"
+  err "or the checkout is in an unexpected state."
+  exit 1
 fi
 
 # ─── 2. Build the Neuron image ───────────────────────────────────────────────
