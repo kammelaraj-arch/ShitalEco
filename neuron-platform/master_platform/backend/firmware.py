@@ -21,6 +21,7 @@ from typing import Any
 
 from .config import settings
 from .library_loader import LibraryCatalog
+from .security import signing
 
 
 _STUB_MAIN_PY = '''"""
@@ -68,7 +69,7 @@ def build_bundle(
             drivers.append(drv)
 
     bundle_manifest = {
-        "manifest_id": f"bundle-{device_dna}",
+        "manifest_id": f"bundle-{device_dna}-{dna['app_bundle_version']}",
         "kind": "app_bundle",
         "issued_at": datetime.now(timezone.utc).isoformat(),
         "issuer": "master_platform",
@@ -83,7 +84,11 @@ def build_bundle(
 
     artifacts_dir = settings.build_artifacts_dir
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    bundle_path = artifacts_dir / f"{device_dna}.zip"
+    # Versioned per app_bundle_version so older releases stay around for
+    # rollback. The plain `<DNA>.zip` name remains as the channel-active
+    # symlink-equivalent (rewritten on every successful promote).
+    versioned_path = artifacts_dir / f"{device_dna}-{dna['app_bundle_version']}.zip"
+    bundle_path = versioned_path
 
     files: dict[str, bytes] = {
         "dna.json": json.dumps(dna, sort_keys=True, indent=2).encode("utf-8"),
@@ -102,7 +107,13 @@ def build_bundle(
         )
     bundle_manifest["artifacts"] = artifacts_meta
 
-    # Re-serialise manifest.json now that artifacts list is final.
+    # Sign the manifest. We sign the canonical form (sorted keys, no spaces)
+    # before adding the signature so verification is straightforward: drop
+    # the .signature field and re-canonicalise.
+    canon = json.dumps(bundle_manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    bundle_manifest["signature"] = signing.sign_b64(canon)
+
+    # Re-serialise manifest.json now that artifacts + signature are final.
     manifest_bytes = json.dumps(bundle_manifest, sort_keys=True, indent=2).encode("utf-8")
     files["manifest.json"] = manifest_bytes
 

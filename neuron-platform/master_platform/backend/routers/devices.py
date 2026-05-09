@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,10 +12,11 @@ from ..db import get_session
 from ..dna import build_dna, new_dna_id
 from ..firmware import build_bundle
 from ..library_loader import load_catalog
-from ..models import APIKey, Device, EdgeSystem, NodeSystem
+from ..models import APIKey, Device, EdgeSystem, FirmwareChannel, FirmwareRelease, NodeSystem
 from ..pin_allocator import auto_allocate, PinAllocationError
 from ..security.audit import record
 from ..security.auth import require_scopes
+from sqlalchemy import desc
 
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
@@ -239,6 +241,21 @@ async def generate_brain_config(
     return brain
 
 
+_VALID_CHANNELS = ("dev", "beta", "stable")
+
+
+async def _set_channel_active(
+    session: AsyncSession, *, device_dna: str, channel: str, release_id: str, actor_id: str
+) -> FirmwareChannel:
+    row = await session.get(FirmwareChannel, (device_dna, channel))
+    if row is None:
+        row = FirmwareChannel(device_dna=device_dna, channel=channel)
+        session.add(row)
+    row.active_release_id = release_id
+    row.updated_by = actor_id
+    return row
+
+
 @router.post("/{device_dna}/build-firmware-bundle")
 async def build_firmware(
     device_dna: str,
@@ -256,13 +273,40 @@ async def build_firmware(
         pinmap=device.pinmap_json,
         catalog=catalog,
     )
+    sig = info["manifest"].get("signature") or {}
+    release = FirmwareRelease(
+        device_dna=device.device_dna,
+        app_bundle_version=device.app_bundle_version,
+        base_firmware_version=device.base_firmware_version,
+        config_schema_version=device.config_schema_version,
+        hardware_revision=device.hardware_revision,
+        bundle_path=str(path),
+        bundle_sha256=info["sha256"],
+        manifest_json=info["manifest"],
+        sig_alg=sig.get("alg", "ed25519"),
+        sig_kid=sig.get("kid", ""),
+        sig_value=sig.get("value", ""),
+    )
+    session.add(release)
+    await session.flush()
+    # Default behaviour: a fresh build is the active release on the 'dev'
+    # channel. Promotion to beta/stable is explicit.
+    await _set_channel_active(
+        session, device_dna=device.device_dna, channel="dev",
+        release_id=release.id, actor_id=api_key.id,
+    )
     device.firmware_bundle_path = str(path)
     await record(session, actor=api_key.id, action="build_firmware",
                  target_kind="device", target_id=device.device_dna,
-                 detail={"size_bytes": info["size_bytes"], "sha256": info["sha256"]})
+                 detail={
+                     "size_bytes": info["size_bytes"], "sha256": info["sha256"],
+                     "release_id": release.id,
+                     "app_bundle_version": device.app_bundle_version,
+                 })
     await session.commit()
     return {
         "device_dna": device.device_dna,
+        "release_id": release.id,
         "bundle_path": str(path),
         "size_bytes": info["size_bytes"],
         "sha256": info["sha256"],
@@ -270,17 +314,195 @@ async def build_firmware(
     }
 
 
+async def _resolve_release(
+    session: AsyncSession, device_dna: str, channel: str | None
+) -> FirmwareRelease | None:
+    if channel:
+        if channel not in _VALID_CHANNELS:
+            raise HTTPException(400, f"channel must be one of {_VALID_CHANNELS}")
+        ch = await session.get(FirmwareChannel, (device_dna, channel))
+        if ch is None or ch.active_release_id is None:
+            return None
+        return await session.get(FirmwareRelease, ch.active_release_id)
+    # No channel requested → newest non-retired release.
+    res = await session.execute(
+        select(FirmwareRelease)
+        .where(FirmwareRelease.device_dna == device_dna, FirmwareRelease.retired_at.is_(None))
+        .order_by(desc(FirmwareRelease.created_at))
+        .limit(1)
+    )
+    return res.scalars().first()
+
+
 @router.get("/{device_dna}/firmware-bundle")
 async def download_firmware(
+    device_dna: str,
+    channel: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    _: APIKey = Depends(require_scopes("devices:read")),
+):
+    device = await _load_device(session, device_dna)
+    release = await _resolve_release(session, device.device_dna, channel)
+    path = release.bundle_path if release else device.firmware_bundle_path
+    if not path:
+        raise HTTPException(404, "no firmware bundle built for this device" + (f" on channel={channel}" if channel else ""))
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=f"{device.device_dna}.zip",
+    )
+
+
+@router.get("/{device_dna}/firmware-manifest")
+async def get_firmware_manifest(
+    device_dna: str,
+    channel: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    _: APIKey = Depends(require_scopes("devices:read")),
+):
+    device = await _load_device(session, device_dna)
+    release = await _resolve_release(session, device.device_dna, channel)
+    if release is None:
+        raise HTTPException(404, "no release for this device on the requested channel")
+    return release.manifest_json
+
+
+@router.get("/{device_dna}/releases")
+async def list_releases(
     device_dna: str,
     session: AsyncSession = Depends(get_session),
     _: APIKey = Depends(require_scopes("devices:read")),
 ):
     device = await _load_device(session, device_dna)
-    if not device.firmware_bundle_path:
-        raise HTTPException(404, "no firmware bundle built for this device")
-    return FileResponse(
-        device.firmware_bundle_path,
-        media_type="application/zip",
-        filename=f"{device.device_dna}.zip",
+    res = await session.execute(
+        select(FirmwareRelease)
+        .where(FirmwareRelease.device_dna == device.device_dna)
+        .order_by(desc(FirmwareRelease.created_at))
     )
+    rows = res.scalars().all()
+    chs = (await session.execute(
+        select(FirmwareChannel).where(FirmwareChannel.device_dna == device.device_dna)
+    )).scalars().all()
+    chmap = {c.channel: c.active_release_id for c in chs}
+    return {
+        "device_dna": device.device_dna,
+        "channels": chmap,
+        "releases": [
+            {
+                "id": r.id,
+                "app_bundle_version": r.app_bundle_version,
+                "base_firmware_version": r.base_firmware_version,
+                "config_schema_version": r.config_schema_version,
+                "hardware_revision": r.hardware_revision,
+                "bundle_sha256": r.bundle_sha256,
+                "sig_alg": r.sig_alg,
+                "sig_kid": r.sig_kid,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "retired_at": r.retired_at.isoformat() if r.retired_at else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+class PromoteBody(BaseModel):
+    channel: str
+    release_id: str
+    rollback_allowed: bool = False
+
+
+@router.post("/{device_dna}/promote")
+async def promote_release(
+    device_dna: str,
+    body: PromoteBody,
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(require_scopes("devices:write")),
+):
+    if body.channel not in _VALID_CHANNELS:
+        raise HTTPException(400, f"channel must be one of {_VALID_CHANNELS}")
+    device = await _load_device(session, device_dna)
+    release = await session.get(FirmwareRelease, body.release_id)
+    if release is None or release.device_dna != device.device_dna:
+        raise HTTPException(404, "release not found for this device")
+
+    # Check downgrade / hardware gates against the release manifest itself.
+    manifest = release.manifest_json or {}
+    if device.hardware_revision not in manifest.get("supported_hardware_revisions", []):
+        raise HTTPException(
+            400,
+            f"hardware_revision {device.hardware_revision} is not in supported_hardware_revisions",
+        )
+
+    current = await session.get(FirmwareChannel, (device.device_dna, body.channel))
+    if current and current.active_release_id and current.active_release_id != release.id:
+        cur = await session.get(FirmwareRelease, current.active_release_id)
+        if cur and _semver(cur.app_bundle_version) > _semver(release.app_bundle_version):
+            if not body.rollback_allowed or not manifest.get("rollback_allowed"):
+                raise HTTPException(
+                    400,
+                    "downgrade requires rollback_allowed=true on both the request "
+                    "and a re-signed manifest with rollback_allowed=true",
+                )
+
+    await _set_channel_active(
+        session, device_dna=device.device_dna, channel=body.channel,
+        release_id=release.id, actor_id=actor.id,
+    )
+    if body.channel == "stable":
+        device.firmware_bundle_path = release.bundle_path
+    await record(
+        session, actor=actor.id, action="promote_firmware",
+        target_kind="device", target_id=device.device_dna,
+        detail={"channel": body.channel, "release_id": release.id,
+                "app_bundle_version": release.app_bundle_version,
+                "rollback_allowed": body.rollback_allowed},
+    )
+    await session.commit()
+    return {"channel": body.channel, "active_release_id": release.id}
+
+
+class RollbackBody(BaseModel):
+    channel: str = "stable"
+
+
+@router.post("/{device_dna}/rollback")
+async def rollback_release(
+    device_dna: str,
+    body: RollbackBody,
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(require_scopes("devices:write")),
+):
+    if body.channel not in _VALID_CHANNELS:
+        raise HTTPException(400, f"channel must be one of {_VALID_CHANNELS}")
+    device = await _load_device(session, device_dna)
+    res = await session.execute(
+        select(FirmwareRelease)
+        .where(FirmwareRelease.device_dna == device.device_dna)
+        .order_by(desc(FirmwareRelease.created_at))
+    )
+    rows = res.scalars().all()
+    if len(rows) < 2:
+        raise HTTPException(400, "no prior release to roll back to")
+    prev = rows[1]
+    await _set_channel_active(
+        session, device_dna=device.device_dna, channel=body.channel,
+        release_id=prev.id, actor_id=actor.id,
+    )
+    if body.channel == "stable":
+        device.firmware_bundle_path = prev.bundle_path
+    await record(
+        session, actor=actor.id, action="rollback_firmware",
+        target_kind="device", target_id=device.device_dna,
+        detail={"channel": body.channel, "release_id": prev.id,
+                "app_bundle_version": prev.app_bundle_version},
+    )
+    await session.commit()
+    return {"channel": body.channel, "active_release_id": prev.id}
+
+
+def _semver(v: str) -> tuple[int, int, int]:
+    parts = (v.split("-")[0].split(".") + ["0", "0", "0"])[:3]
+    try:
+        return tuple(int(p) for p in parts)  # type: ignore[return-value]
+    except ValueError:
+        return (0, 0, 0)

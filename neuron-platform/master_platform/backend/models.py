@@ -84,6 +84,42 @@ class Device(Base):
     edge: Mapped[EdgeSystem] = relationship(back_populates="devices")
 
 
+class FirmwareRelease(Base):
+    """A built firmware bundle. Multiple per device — rollback target lives
+    in this table, the active one per channel is pointed at from
+    ``FirmwareChannel``.
+    """
+
+    __tablename__ = "firmware_releases"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    device_dna: Mapped[str] = mapped_column(ForeignKey("devices.device_dna"), nullable=False, index=True)
+    app_bundle_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    base_firmware_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    config_schema_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    hardware_revision: Mapped[str] = mapped_column(String(40), nullable=False)
+    bundle_path: Mapped[str] = mapped_column(Text, nullable=False)
+    bundle_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    sig_alg: Mapped[str] = mapped_column(String(16), default="ed25519")
+    sig_kid: Mapped[str] = mapped_column(String(60), default="")
+    sig_value: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    retired_at: Mapped[datetime | None] = mapped_column()
+
+
+class FirmwareChannel(Base):
+    """Per-device per-channel pointer to the active release."""
+
+    __tablename__ = "firmware_channels"
+
+    device_dna: Mapped[str] = mapped_column(ForeignKey("devices.device_dna"), primary_key=True)
+    channel: Mapped[str] = mapped_column(String(20), primary_key=True)  # dev|beta|stable
+    active_release_id: Mapped[str | None] = mapped_column(ForeignKey("firmware_releases.id"))
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+    updated_by: Mapped[str | None] = mapped_column(String(80))
+
+
 class Process(Base):
     __tablename__ = "processes"
 

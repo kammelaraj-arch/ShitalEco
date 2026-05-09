@@ -23,6 +23,7 @@ from .routers import (
     devices,
     library,
     library_manage_ui,
+    ota,
     processes,
     secrets_ui,
     systems,
@@ -148,6 +149,7 @@ app.include_router(devices.router)
 app.include_router(processes.router)
 app.include_router(apikeys.router)
 app.include_router(audit.router)
+app.include_router(ota.router)
 
 
 @app.get("/healthz", tags=["meta"])
