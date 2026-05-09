@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     tls_key_path: Path = Field(default=Path("./certs/edge.key"))
     tls_ca_path: Path = Field(default=Path("./certs/parent_ca.crt"))
 
+    # Local Mosquitto broker — Pico devices publish/subscribe directly,
+    # the Edge bridges its twin_cache to MQTT. Empty MQTT_HOST disables
+    # the bridge and the Edge keeps using REST + SSE only.
+    mqtt_host: str = ""
+    mqtt_port: int = 1883
+    mqtt_client_id: str = "neuron-edge"
+
     log_level: str = "info"
 
 

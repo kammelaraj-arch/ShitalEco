@@ -39,6 +39,25 @@ class TwinCache:
         # Fire push outside the lock so a slow Master can't stall device IO.
         if settings.master_push_url and settings.master_push_api_key:
             asyncio.create_task(_push_to_master(device_dna, snapshot))
+        # MQTT mirror: publish each merged field under its canonical topic so
+        # Pico subscribers see updates without polling. Best-effort.
+        try:
+            from .mqtt_bridge import bridge as _bridge
+            if _bridge is not None:
+                twin_kind = (device_dna.split(".")[0] if "." in device_dna else "twin")
+                # Better: derive twin_kind from a registry lookup. For now
+                # we publish under the channel for every twin kind topic
+                # tree by prefixing 'twin'.
+                asyncio.create_task(
+                    _bridge.publish_merge(
+                        twin_kind="twin",
+                        device_dna=device_dna,
+                        channel=channel,
+                        payload=payload or {},
+                    )
+                )
+        except Exception:
+            pass
         return dict(channel_state)
 
     async def get(self, device_dna: str) -> dict[str, dict[str, Any]]:
