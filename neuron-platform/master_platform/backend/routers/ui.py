@@ -198,6 +198,20 @@ async def ui_systems_new_edge(
     return RedirectResponse("/ui/systems", status_code=303)
 
 
+@router.get("/ui/live", response_class=HTMLResponse)
+async def ui_live_wall(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Wall-display: every device's rich widget tile streaming live via SSE."""
+    devices = (await session.execute(select(Device).order_by(Device.created_at.desc()))).scalars().all()
+    return templates.TemplateResponse(
+        "live_wall.html",
+        {"request": request, "devices": devices,
+         "signed_in": bool(request.session.get("neuron_api_key_id"))},
+    )
+
+
 @router.get("/ui/devices", response_class=HTMLResponse)
 async def ui_devices(
     request: Request,
