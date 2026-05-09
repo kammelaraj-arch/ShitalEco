@@ -18,7 +18,7 @@ from ..models import APIKey, Device, EdgeSystem, FirmwareChannel, FirmwareReleas
 from ..runtime import recipe_runner
 from ..security import signing
 from ..security.audit import record
-from ..security.ui_auth import ui_require_admin
+from ..security.ui_auth import ui_require_admin, ui_require_login
 
 
 _BASE = Path(__file__).resolve().parent.parent
@@ -74,10 +74,80 @@ async def ui_systems(
     roots = (await session.execute(select(RootSystem).order_by(RootSystem.created_at))).scalars().all()
     nodes = (await session.execute(select(NodeSystem).order_by(NodeSystem.created_at))).scalars().all()
     edges = (await session.execute(select(EdgeSystem).order_by(EdgeSystem.created_at))).scalars().all()
+    flash = request.session.pop("systems_flash", None)
     return templates.TemplateResponse(
         "systems.html",
-        {"request": request, "roots": roots, "nodes": nodes, "edges": edges},
+        {"request": request, "roots": roots, "nodes": nodes, "edges": edges,
+         "signed_in": bool(request.session.get("neuron_api_key_id")),
+         "flash": flash},
     )
+
+
+@router.post("/ui/systems/root/new")
+async def ui_systems_new_root(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    existing = await session.scalar(select(RootSystem).where(RootSystem.name == name))
+    if existing:
+        request.session["systems_flash"] = {"kind": "amber", "msg": f"Root '{name}' already exists."}
+    else:
+        row = RootSystem(name=name.strip(), description=description.strip() or None)
+        session.add(row); await session.flush()
+        await record(session, actor=actor.id, actor_kind="ui_session",
+                     action="create_root", target_kind="root_system", target_id=row.id)
+        await session.commit()
+        request.session["systems_flash"] = {"kind": "emerald", "msg": f"Created root '{name}'."}
+    return RedirectResponse("/ui/systems", status_code=303)
+
+
+@router.post("/ui/systems/node/new")
+async def ui_systems_new_node(
+    request: Request,
+    root_id: str = Form(...),
+    name: str = Form(...),
+    region: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    if await session.get(RootSystem, root_id) is None:
+        request.session["systems_flash"] = {"kind": "red", "msg": "Selected root does not exist."}
+        return RedirectResponse("/ui/systems", status_code=303)
+    row = NodeSystem(root_id=root_id, name=name.strip(), region=region.strip() or None)
+    session.add(row); await session.flush()
+    await record(session, actor=actor.id, actor_kind="ui_session",
+                 action="create_node", target_kind="node_system", target_id=row.id,
+                 detail={"root_id": root_id})
+    await session.commit()
+    request.session["systems_flash"] = {"kind": "emerald", "msg": f"Created node '{name}'."}
+    return RedirectResponse("/ui/systems", status_code=303)
+
+
+@router.post("/ui/systems/edge/new")
+async def ui_systems_new_edge(
+    request: Request,
+    node_id: str = Form(...),
+    name: str = Form(...),
+    site_id: str = Form(...),
+    address: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    if await session.get(NodeSystem, node_id) is None:
+        request.session["systems_flash"] = {"kind": "red", "msg": "Selected node does not exist."}
+        return RedirectResponse("/ui/systems", status_code=303)
+    row = EdgeSystem(node_id=node_id, name=name.strip(), site_id=site_id.strip(),
+                     address=address.strip() or None)
+    session.add(row); await session.flush()
+    await record(session, actor=actor.id, actor_kind="ui_session",
+                 action="create_edge", target_kind="edge_system", target_id=row.id,
+                 detail={"node_id": node_id, "site_id": site_id, "address": address or None})
+    await session.commit()
+    request.session["systems_flash"] = {"kind": "emerald", "msg": f"Created edge '{name}' at site '{site_id}'."}
+    return RedirectResponse("/ui/systems", status_code=303)
 
 
 @router.get("/ui/devices", response_class=HTMLResponse)
@@ -86,9 +156,74 @@ async def ui_devices(
     session: AsyncSession = Depends(get_session),
 ):
     devices = (await session.execute(select(Device).order_by(Device.created_at.desc()))).scalars().all()
+    edges = (await session.execute(select(EdgeSystem).order_by(EdgeSystem.name))).scalars().all()
+    catalog = load_catalog()
+    computes = catalog.list_library("micro_compute_library")
+    components = catalog.list_library("components_library")
+    flash = request.session.pop("devices_flash", None)
     return templates.TemplateResponse(
-        "devices.html", {"request": request, "devices": devices}
+        "devices.html",
+        {"request": request, "devices": devices, "edges": edges,
+         "computes": computes, "components": components,
+         "signed_in": bool(request.session.get("neuron_api_key_id")),
+         "flash": flash},
     )
+
+
+@router.post("/ui/devices/new")
+async def ui_devices_new(
+    request: Request,
+    edge_id: str = Form(...),
+    compute_stable_id: str = Form(...),
+    component_ids: list[str] = Form(default=[]),
+    hardware_revision: str = Form("rev_a"),
+    base_firmware_version: str = Form("1.0.0"),
+    app_bundle_version: str = Form("1.0.0"),
+    config_schema_version: str = Form("1.0.0"),
+    auto_build: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    from ..dna import new_dna_id
+    if await session.get(EdgeSystem, edge_id) is None:
+        request.session["devices_flash"] = {"kind": "red", "msg": "Selected edge does not exist."}
+        return RedirectResponse("/ui/devices", status_code=303)
+    catalog = load_catalog()
+    if catalog.get(compute_stable_id) is None:
+        request.session["devices_flash"] = {"kind": "red", "msg": f"Unknown compute: {compute_stable_id}"}
+        return RedirectResponse("/ui/devices", status_code=303)
+    components_json = []
+    for cid in component_ids:
+        if not cid: continue
+        if catalog.get(cid) is None: continue
+        components_json.append({
+            "component_stable_id": cid,
+            "instance_id": cid.split(".")[-1],
+        })
+    device = Device(
+        device_dna=new_dna_id(),
+        edge_id=edge_id,
+        device_type="pico2w",
+        compute_stable_id=compute_stable_id,
+        hardware_revision=hardware_revision.strip() or "rev_a",
+        base_firmware_version=base_firmware_version.strip() or "1.0.0",
+        app_bundle_version=app_bundle_version.strip() or "1.0.0",
+        config_schema_version=config_schema_version.strip() or "1.0.0",
+        components_json=components_json,
+    )
+    session.add(device); await session.flush()
+    await record(session, actor=actor.id, actor_kind="ui_session",
+                 action="register_device", target_kind="device", target_id=device.device_dna,
+                 detail={"edge_id": edge_id, "compute": compute_stable_id,
+                         "n_components": len(components_json)})
+    await session.commit()
+    request.session["devices_flash"] = {
+        "kind": "emerald",
+        "msg": f"Registered {device.device_dna} — go to its page to auto-pin/DNA/Brain/firmware.",
+    }
+    if auto_build:
+        return RedirectResponse(f"/ui/devices/{device.device_dna}", status_code=303)
+    return RedirectResponse("/ui/devices", status_code=303)
 
 
 @router.get("/ui/devices/{device_dna}", response_class=HTMLResponse)
@@ -99,8 +234,153 @@ async def ui_device_detail(
 ):
     device = await session.get(Device, device_dna)
     return templates.TemplateResponse(
-        "device.html", {"request": request, "device": device}
+        "device.html",
+        {"request": request, "device": device,
+         "signed_in": bool(request.session.get("neuron_api_key_id"))},
     )
+
+
+@router.post("/ui/devices/{device_dna}/pinmap-auto")
+async def ui_device_pinmap_auto(
+    device_dna: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    from ..pin_allocator import auto_allocate, PinAllocationError
+    device = await session.get(Device, device_dna)
+    if device is None:
+        return RedirectResponse("/ui/devices", status_code=303)
+    catalog = load_catalog()
+    components = [{"component_stable_id": c["component_stable_id"],
+                   "instance_id": c.get("instance_id")} for c in (device.components_json or [])]
+    try:
+        pinmap = auto_allocate(
+            compute_stable_id=device.compute_stable_id,
+            component_assignments=components,
+            catalog=catalog,
+            device_dna=device.device_dna,
+            board_stable_id=device.board_stable_id,
+        )
+    except PinAllocationError as exc:
+        request.session["devices_flash"] = {"kind": "red", "msg": f"Pin allocation failed: {exc}"}
+        return RedirectResponse(f"/ui/devices/{device_dna}", status_code=303)
+    device.pinmap_json = pinmap
+    await record(session, actor=actor.id, actor_kind="ui_session",
+                 action="pinmap_auto", target_kind="device", target_id=device_dna,
+                 detail={"conflicts": pinmap["conflicts"]})
+    await session.commit()
+    return RedirectResponse(f"/ui/devices/{device_dna}", status_code=303)
+
+
+@router.post("/ui/devices/{device_dna}/generate-dna")
+async def ui_device_generate_dna(
+    device_dna: str,
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    from ..dna import build_dna
+    device = await session.get(Device, device_dna)
+    if device is None:
+        return RedirectResponse("/ui/devices", status_code=303)
+    edge = await session.get(EdgeSystem, device.edge_id)
+    node = await session.get(NodeSystem, edge.node_id) if edge else None
+    catalog = load_catalog()
+    components = [{
+        "stable_id": c["component_stable_id"],
+        "instance_id": c.get("instance_id") or c["component_stable_id"].split(".")[-1],
+        "version": (catalog.get(c["component_stable_id"]).version
+                    if catalog.get(c["component_stable_id"]) else "0.0.0"),
+        "role": c.get("role") or "component",
+    } for c in (device.components_json or [])]
+    twin_controls = sorted({
+        tc for c in components
+        for tc in ((catalog.get(c["stable_id"]).manifest.get("compatibility", {}) or {}).get("twin_controls", [])
+                   if catalog.get(c["stable_id"]) else [])
+    })
+    dna = build_dna(
+        device_dna=device.device_dna, device_type=device.device_type,
+        compute_stable_id=device.compute_stable_id, board_stable_id=device.board_stable_id,
+        hardware_revision=device.hardware_revision, serial_number=device.serial_number,
+        mac_address=device.mac_address,
+        base_firmware_version=device.base_firmware_version,
+        app_bundle_version=device.app_bundle_version,
+        config_schema_version=device.config_schema_version,
+        parent_node_id=node.id if node else "unknown",
+        site_id=edge.site_id if edge else "unknown",
+        issued_by=actor.id, components=components, twin_controls=twin_controls,
+    )
+    device.dna_json = dna
+    await record(session, actor=actor.id, actor_kind="ui_session",
+                 action="generate_dna", target_kind="device", target_id=device_dna)
+    await session.commit()
+    return RedirectResponse(f"/ui/devices/{device_dna}", status_code=303)
+
+
+@router.post("/ui/devices/{device_dna}/generate-brain")
+async def ui_device_generate_brain(
+    device_dna: str,
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    from ..brain import build_brain
+    device = await session.get(Device, device_dna)
+    if device is None or not device.dna_json:
+        return RedirectResponse(f"/ui/devices/{device_dna}", status_code=303)
+    catalog = load_catalog()
+    brain = build_brain(
+        device_dna=device.device_dna,
+        config_schema_version=device.config_schema_version,
+        twin_controls=device.dna_json.get("twin_controls", []),
+        catalog=catalog,
+    )
+    device.brain_json = brain
+    await record(session, actor=actor.id, actor_kind="ui_session",
+                 action="generate_brain", target_kind="device", target_id=device_dna)
+    await session.commit()
+    return RedirectResponse(f"/ui/devices/{device_dna}", status_code=303)
+
+
+@router.post("/ui/devices/{device_dna}/build-firmware")
+async def ui_device_build_firmware(
+    device_dna: str,
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    from ..firmware import build_bundle
+    device = await session.get(Device, device_dna)
+    if device is None or not (device.dna_json and device.brain_json and device.pinmap_json):
+        return RedirectResponse(f"/ui/devices/{device_dna}", status_code=303)
+    path, info = build_bundle(
+        device_dna=device.device_dna, dna=device.dna_json,
+        brain=device.brain_json, pinmap=device.pinmap_json,
+        catalog=load_catalog(),
+    )
+    sig = info["manifest"].get("signature") or {}
+    release = FirmwareRelease(
+        device_dna=device.device_dna,
+        app_bundle_version=device.app_bundle_version,
+        base_firmware_version=device.base_firmware_version,
+        config_schema_version=device.config_schema_version,
+        hardware_revision=device.hardware_revision,
+        bundle_path=str(path), bundle_sha256=info["sha256"],
+        manifest_json=info["manifest"],
+        sig_alg=sig.get("alg", "ed25519"), sig_kid=sig.get("kid", ""), sig_value=sig.get("value", ""),
+    )
+    session.add(release); await session.flush()
+    ch = await session.get(FirmwareChannel, (device.device_dna, "dev"))
+    if ch is None:
+        ch = FirmwareChannel(device_dna=device.device_dna, channel="dev")
+        session.add(ch)
+    ch.active_release_id = release.id
+    ch.updated_by = actor.id
+    device.firmware_bundle_path = str(path)
+    await record(session, actor=actor.id, actor_kind="ui_session",
+                 action="build_firmware", target_kind="device", target_id=device_dna,
+                 detail={"size_bytes": info["size_bytes"], "sha256": info["sha256"],
+                         "release_id": release.id})
+    await session.commit()
+    return RedirectResponse(f"/ui/devices/{device_dna}", status_code=303)
 
 
 @router.get("/ui/devices/{device_dna}/twin-fragment", response_class=HTMLResponse)

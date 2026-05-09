@@ -13,6 +13,27 @@
       <a href="/ui/devices/{{ device.device_dna }}/ota" class="rounded-lg border border-slate-700 px-3 py-1.5 text-sm hover:border-emerald-400 hover:text-emerald-300">OTA →</a>
     </header>
 
+    {% if signed_in and not device.firmware_bundle_path %}
+      <section class="mt-4 rounded-2xl border border-emerald-700/40 bg-emerald-500/5 p-4">
+        <h2 class="text-sm font-semibold text-emerald-200">Build pipeline</h2>
+        <p class="mt-1 text-xs text-emerald-200/80">Run these in order to take the device from registered → flashable. Each step records an audit event.</p>
+        <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+          <form method="post" action="/ui/devices/{{ device.device_dna }}/pinmap-auto">
+            <button class="w-full rounded-md border border-slate-700 px-3 py-2 hover:border-emerald-400 hover:text-emerald-300 {% if device.pinmap_json %}bg-emerald-500/10 border-emerald-500/40{% endif %}">{% if device.pinmap_json %}✓{% else %}1.{% endif %} Auto pin map</button>
+          </form>
+          <form method="post" action="/ui/devices/{{ device.device_dna }}/generate-dna">
+            <button class="w-full rounded-md border border-slate-700 px-3 py-2 hover:border-emerald-400 hover:text-emerald-300 {% if device.dna_json and device.dna_json.fingerprint %}bg-emerald-500/10 border-emerald-500/40{% endif %}">{% if device.dna_json and device.dna_json.fingerprint %}✓{% else %}2.{% endif %} Generate DNA</button>
+          </form>
+          <form method="post" action="/ui/devices/{{ device.device_dna }}/generate-brain">
+            <button class="w-full rounded-md border border-slate-700 px-3 py-2 hover:border-emerald-400 hover:text-emerald-300 {% if device.brain_json %}bg-emerald-500/10 border-emerald-500/40{% endif %}">{% if device.brain_json %}✓{% else %}3.{% endif %} Generate Brain</button>
+          </form>
+          <form method="post" action="/ui/devices/{{ device.device_dna }}/build-firmware">
+            <button class="w-full rounded-md border border-slate-700 px-3 py-2 hover:border-emerald-400 hover:text-emerald-300">4. Build firmware</button>
+          </form>
+        </div>
+      </section>
+    {% endif %}
+
     <div id="alarm-host" class="mt-4"></div>
 
     <section id="status-bar" class="mt-4 flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-2 text-xs">
