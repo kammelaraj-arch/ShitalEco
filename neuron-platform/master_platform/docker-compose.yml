@@ -1,0 +1,49 @@
+# Stand-alone docker-compose for the Neuron Master Platform.
+#
+# This stack is fully INDEPENDENT from the ShitalEco backend. The Neuron
+# database lives in a private volume (neuron_data) and is never reachable
+# from any other ShitalEco service. The Master only listens on its own
+# port (default 8088) on the Neuron-internal network.
+#
+# Usage (from neuron-platform/master_platform):
+#   docker compose up -d
+# or, when integrating into the ShitalEco pipeline, build the image and
+# wire the Master container into the host's nginx with a separate vhost
+# for neuron.shital.org.uk.
+services:
+  neuron-master:
+    build:
+      context: ..
+      dockerfile: master_platform/Dockerfile
+    image: neuron/master:0.2.0
+    container_name: neuron-master
+    restart: unless-stopped
+    environment:
+      NEURON_DB_URL: sqlite+aiosqlite:////app/master_platform/data/neuron.db
+      NEURON_LIBRARIES_DIR: /app/libraries
+      NEURON_SHARED_SCHEMAS_DIR: /app/shared_schemas
+      NEURON_BUILD_ARTIFACTS_DIR: /app/master_platform/build_artifacts
+      NEURON_BOOTSTRAP_ADMIN_KEY: ${NEURON_BOOTSTRAP_ADMIN_KEY:-}
+      NEURON_BIND_HOST: 0.0.0.0
+      NEURON_BIND_PORT: 8088
+      NEURON_LOG_LEVEL: info
+    ports:
+      - "8088:8088"
+    volumes:
+      - neuron_data:/app/master_platform/data
+      - neuron_artifacts:/app/master_platform/build_artifacts
+    networks:
+      - neuron_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8088/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  neuron_data:
+  neuron_artifacts:
+
+networks:
+  neuron_internal:
+    driver: bridge

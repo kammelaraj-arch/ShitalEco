@@ -26,6 +26,6 @@ ENV NEURON_LIBRARIES_DIR=/app/libraries \
 RUN mkdir -p /app/master_platform/data /app/master_platform/build_artifacts
 
 WORKDIR /app/master_platform
-EXPOSE 8080
+EXPOSE 8088
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${NEURON_BIND_PORT:-8088}"]

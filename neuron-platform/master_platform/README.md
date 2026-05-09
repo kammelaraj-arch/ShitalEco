@@ -2,6 +2,24 @@
 
 Single unified app: **Admin + Build + Config + Library Registry + API Management**.
 
+## Database isolation
+
+The Neuron Master Platform's database is **fully independent** from
+ShitalEco. There is no shared schema, shared connection, or shared
+volume:
+
+| Aspect              | ShitalEco backend            | Neuron Master            |
+| ------------------- | ---------------------------- | ------------------------ |
+| Engine              | Postgres                     | SQLite (or Postgres)     |
+| Env var             | `DATABASE_URL`               | `NEURON_DB_URL`          |
+| Default URL         | `postgresql+asyncpg://…`     | `sqlite+aiosqlite:///./data/neuron.db` |
+| Docker volume       | `pgdata`                     | `neuron_data`            |
+| Docker network      | ShitalEco compose network    | `neuron_internal`        |
+
+`backend/db.py` actively **refuses to start** if `NEURON_DB_URL` ever
+contains `shital` or `shitaleco`, so a misconfigured deploy can't
+accidentally share storage with the host monorepo.
+
 ## Run locally
 
 ```bash
