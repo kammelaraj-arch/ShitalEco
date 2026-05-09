@@ -322,19 +322,9 @@ for svc in admin service quick-donation kiosk screen; do
     && ok "$svc started" || warn "$svc not available — skipping"
 done
 
-# Build and start the Neuron Master Platform (not pulled from GHCR; built
-# locally from the neuron-platform/ subtree). DB is fully isolated from
-# ShitalEco — separate sqlite file in the neuron_data volume.
-if [ -d "$APP_DIR/neuron-platform" ]; then
-  info "Building Neuron Master Platform..."
-  docker compose -f "$COMPOSE_FILE" build neuron-master \
-    && ok "neuron-master built" || warn "neuron-master build failed — continuing"
-  docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate neuron-master 2>/dev/null \
-    && ok "neuron-master started (https://neuron.shital.org.uk)" \
-    || warn "neuron-master not started — check 'docker compose logs neuron-master'"
-else
-  warn "neuron-platform/ not present in repo checkout — skipping Neuron"
-fi
+# Neuron Master Platform deploys independently via
+# neuron-platform/deploy.sh — never touched here so this script never
+# restarts a ShitalEco service for a Neuron change.
 
 # Start nginx, certbot, deployer
 docker compose -f "$COMPOSE_FILE" up -d nginx certbot deployer backup-scheduler 2>/dev/null || true
@@ -371,18 +361,6 @@ ok "Kiosk accounts: ${CREATED} created, ${SKIPPED} already existed"
 # ═══════════════════════════════════════════════════════════════════════════════
 step "[8/8] Smoke tests"
 
-smoke_neuron() {
-  if docker compose -f "$COMPOSE_FILE" ps neuron-master --status=running 2>/dev/null | grep -q neuron-master; then
-    if docker compose -f "$COMPOSE_FILE" exec -T neuron-master \
-         python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8088/healthz').status==200 else 1)" \
-         > /dev/null 2>&1; then
-      ok "neuron-master /healthz"
-    else
-      warn "neuron-master /healthz not responding"
-    fi
-  fi
-}
-
 smoke() {
   local label=$1 url=$2
   if curl -sf --max-time 8 "$url" > /dev/null 2>&1; then
@@ -398,7 +376,6 @@ smoke "Kiosk"                   "http://localhost/kiosk/"
 smoke "Donate (Quick Donation)" "http://localhost/donate/"
 smoke "Service portal"          "http://localhost/service/"
 smoke "Screen"                  "http://localhost/screen/"
-smoke_neuron
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Summary

@@ -1,21 +1,27 @@
 # Stand-alone docker-compose for the Neuron Master Platform.
 #
-# This stack is fully INDEPENDENT from the ShitalEco backend. The Neuron
-# database lives in a private volume (neuron_data) and is never reachable
-# from any other ShitalEco service. The Master only listens on its own
-# port (default 8088) on the Neuron-internal network.
+# Fully INDEPENDENT from any ShitalEco service:
+#   - own image (neuron/master:0.3.0)
+#   - own private volumes (neuron_data, neuron_artifacts) — never shared
+#   - own bridge network (neuron_internal)
+#   - own SQLite file; backend/db.py refuses to start if NEURON_DB_URL ever
+#     contains 'shital' or 'shitaleco'
+#
+# Bound to the docker0 bridge IP (172.17.0.1) on port 8088 so the host's
+# existing nginx can proxy to it via:
+#     proxy_pass http://172.17.0.1:8088
+# but the public internet cannot reach it directly. The same trick is
+# already used elsewhere on this host for dev.shital.org.uk → :8080.
 #
 # Usage (from neuron-platform/master_platform):
-#   docker compose up -d
-# or, when integrating into the ShitalEco pipeline, build the image and
-# wire the Master container into the host's nginx with a separate vhost
-# for neuron.shital.org.uk.
+#   docker compose up -d --build
+# Or run ../deploy.sh which wraps this + reloads the shared nginx.
 services:
   neuron-master:
     build:
       context: ..
       dockerfile: master_platform/Dockerfile
-    image: neuron/master:0.2.0
+    image: neuron/master:0.3.0
     container_name: neuron-master
     restart: unless-stopped
     environment:
@@ -27,7 +33,10 @@ services:
       NEURON_BIND_PORT: 8088
       NEURON_LOG_LEVEL: info
     ports:
-      - "8088:8088"
+      # Bind only on the docker bridge gateway so nginx can reach it but
+      # the public internet cannot. Override to "8088:8088" for direct
+      # access during local development.
+      - "${NEURON_BIND_IP:-172.17.0.1}:8088:8088"
     volumes:
       - neuron_data:/app/master_platform/data
       - neuron_artifacts:/app/master_platform/build_artifacts
@@ -38,6 +47,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
 volumes:
   neuron_data:
