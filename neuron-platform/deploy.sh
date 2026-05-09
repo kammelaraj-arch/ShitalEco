@@ -114,14 +114,38 @@ if [ -z "${HEALTHY:-}" ]; then
   exit 1
 fi
 
-# ─── 5. Reload the shared nginx (no restart, no downtime) ───────────────────
+# ─── 5. Re-stage + reload the shared nginx (no restart, no downtime) ────────
+# The vhost file canonical copy lives inside neuron-platform/nginx/neuron.conf
+# and we copy it to the host's nginx conf.d on every deploy. This way other
+# automation that mutates /opt/shitaleco (e.g. the deployer container's git
+# hook) can't permanently break the Neuron vhost — re-run this script and
+# the vhost is back.
+NGINX_CONF_HOST_DIR="${NGINX_CONF_HOST_DIR:-/opt/shitaleco/nginx/conf.d}"
+SOURCE_VHOST="$NEURON_DIR/nginx/neuron.conf"
+
 if [ "$DO_NGINX" -eq 1 ]; then
-  step "[5/5] Reloading shared nginx (SIGHUP, never restart)"
-  if docker compose -f "$NGINX_COMPOSE" exec -T "$NGINX_SERVICE" nginx -s reload >/dev/null 2>&1; then
-    ok "Nginx config reloaded"
+  step "[5/5] Re-staging neuron.conf and reloading shared nginx"
+  if [ -f "$SOURCE_VHOST" ] && [ -d "$NGINX_CONF_HOST_DIR" ]; then
+    if ! cmp -s "$SOURCE_VHOST" "$NGINX_CONF_HOST_DIR/neuron.conf" 2>/dev/null; then
+      cp "$SOURCE_VHOST" "$NGINX_CONF_HOST_DIR/neuron.conf"
+      ok "Re-staged $NGINX_CONF_HOST_DIR/neuron.conf from $SOURCE_VHOST"
+    else
+      ok "neuron.conf already up to date in $NGINX_CONF_HOST_DIR"
+    fi
+  elif [ ! -f "$SOURCE_VHOST" ]; then
+    warn "Source vhost missing: $SOURCE_VHOST"
   else
-    warn "Could not reload nginx via $NGINX_COMPOSE — is the file present?"
-    warn "If you run nginx differently, reload it manually with: nginx -s reload"
+    warn "Nginx conf dir missing: $NGINX_CONF_HOST_DIR"
+  fi
+  if docker compose -f "$NGINX_COMPOSE" exec -T "$NGINX_SERVICE" nginx -t >/dev/null 2>&1; then
+    if docker compose -f "$NGINX_COMPOSE" exec -T "$NGINX_SERVICE" nginx -s reload >/dev/null 2>&1; then
+      ok "Nginx config reloaded"
+    else
+      warn "nginx -t passed but reload failed; reload manually: docker compose -f $NGINX_COMPOSE exec $NGINX_SERVICE nginx -s reload"
+    fi
+  else
+    err "nginx -t FAILED — refusing to reload. Run manually to see the error:"
+    err "  docker compose -f $NGINX_COMPOSE exec $NGINX_SERVICE nginx -t"
   fi
 else
   step "[5/5] Skipping nginx reload (--no-nginx)"
