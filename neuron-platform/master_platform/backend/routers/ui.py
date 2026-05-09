@@ -8,10 +8,17 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi import Form
+from fastapi.responses import RedirectResponse
+from sqlalchemy import desc
+
 from ..db import get_session
 from ..library_loader import load_catalog
-from ..models import Device, EdgeSystem, NodeSystem, RecipeRun, RootSystem
+from ..models import APIKey, Device, EdgeSystem, FirmwareChannel, FirmwareRelease, NodeSystem, RecipeRun, RootSystem
 from ..runtime import recipe_runner
+from ..security import signing
+from ..security.audit import record
+from ..security.ui_auth import ui_require_admin
 
 
 _BASE = Path(__file__).resolve().parent.parent
@@ -110,6 +117,131 @@ async def ui_processes(
         "processes.html",
         {"request": request, "recipes": recipes, "runs": runs, "twin_kinds": twin_kinds},
     )
+
+
+@router.get("/ui/devices/{device_dna}/ota", response_class=HTMLResponse)
+async def ui_device_ota(
+    device_dna: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    device = await session.get(Device, device_dna)
+    if device is None:
+        return RedirectResponse("/ui/devices", status_code=303)
+    rels = (
+        await session.execute(
+            select(FirmwareRelease)
+            .where(FirmwareRelease.device_dna == device_dna)
+            .order_by(desc(FirmwareRelease.created_at))
+        )
+    ).scalars().all()
+    chs = (
+        await session.execute(
+            select(FirmwareChannel).where(FirmwareChannel.device_dna == device_dna)
+        )
+    ).scalars().all()
+    channels = {c.channel: c.active_release_id for c in chs}
+    last = request.session.pop("ota_last_action", None)
+    return templates.TemplateResponse(
+        "ota.html",
+        {
+            "request": request,
+            "device": device,
+            "releases": rels,
+            "releases_by_id": {r.id: r for r in rels},
+            "channels": channels,
+            "pubkey_b64": signing.public_key_b64(),
+            "pubkey_kid": signing.signing_kid(),
+            "last_action": last,
+        },
+    )
+
+
+@router.post("/ui/devices/{device_dna}/promote")
+async def ui_device_promote(
+    device_dna: str,
+    request: Request,
+    channel: str = Form(...),
+    release_id: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    device = await session.get(Device, device_dna)
+    release = await session.get(FirmwareRelease, release_id)
+    if device is None or release is None or release.device_dna != device_dna:
+        request.session["ota_last_action"] = {"kind": "red", "message": "Release or device not found."}
+        return RedirectResponse(f"/ui/devices/{device_dna}/ota", status_code=303)
+    if channel not in ("dev", "beta", "stable"):
+        request.session["ota_last_action"] = {"kind": "red", "message": f"Invalid channel: {channel}."}
+        return RedirectResponse(f"/ui/devices/{device_dna}/ota", status_code=303)
+
+    cur = await session.get(FirmwareChannel, (device_dna, channel))
+    if cur is None:
+        cur = FirmwareChannel(device_dna=device_dna, channel=channel)
+        session.add(cur)
+    cur.active_release_id = release.id
+    cur.updated_by = actor.id
+    if channel == "stable":
+        device.firmware_bundle_path = release.bundle_path
+    await record(
+        session, actor=actor.id, actor_kind="ui_session",
+        action="promote_firmware", target_kind="device", target_id=device_dna,
+        detail={"channel": channel, "release_id": release.id,
+                "app_bundle_version": release.app_bundle_version},
+    )
+    await session.commit()
+    request.session["ota_last_action"] = {
+        "kind": "emerald",
+        "message": f"Promoted {release.app_bundle_version} → {channel}.",
+    }
+    return RedirectResponse(f"/ui/devices/{device_dna}/ota", status_code=303)
+
+
+@router.post("/ui/devices/{device_dna}/rollback")
+async def ui_device_rollback(
+    device_dna: str,
+    request: Request,
+    channel: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    device = await session.get(Device, device_dna)
+    if device is None or channel not in ("dev", "beta", "stable"):
+        return RedirectResponse(f"/ui/devices/{device_dna}/ota", status_code=303)
+    rels = (
+        await session.execute(
+            select(FirmwareRelease)
+            .where(FirmwareRelease.device_dna == device_dna)
+            .order_by(desc(FirmwareRelease.created_at))
+        )
+    ).scalars().all()
+    if len(rels) < 2:
+        request.session["ota_last_action"] = {
+            "kind": "amber",
+            "message": "Nothing to roll back to — only one release exists.",
+        }
+        return RedirectResponse(f"/ui/devices/{device_dna}/ota", status_code=303)
+    prev = rels[1]
+    cur = await session.get(FirmwareChannel, (device_dna, channel))
+    if cur is None:
+        cur = FirmwareChannel(device_dna=device_dna, channel=channel)
+        session.add(cur)
+    cur.active_release_id = prev.id
+    cur.updated_by = actor.id
+    if channel == "stable":
+        device.firmware_bundle_path = prev.bundle_path
+    await record(
+        session, actor=actor.id, actor_kind="ui_session",
+        action="rollback_firmware", target_kind="device", target_id=device_dna,
+        detail={"channel": channel, "release_id": prev.id,
+                "app_bundle_version": prev.app_bundle_version},
+    )
+    await session.commit()
+    request.session["ota_last_action"] = {
+        "kind": "emerald",
+        "message": f"Rolled {channel} back to {prev.app_bundle_version}.",
+    }
+    return RedirectResponse(f"/ui/devices/{device_dna}/ota", status_code=303)
 
 
 @router.get("/ui/recipes/{recipe_id}", response_class=HTMLResponse)
