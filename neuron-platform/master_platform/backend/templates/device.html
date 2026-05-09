@@ -13,14 +13,78 @@
       <a href="/ui/devices/{{ device.device_dna }}/ota" class="rounded-lg border border-slate-700 px-3 py-1.5 text-sm hover:border-emerald-400 hover:text-emerald-300">OTA →</a>
     </header>
 
-    <section class="mt-6"
-             hx-get="/ui/devices/{{ device.device_dna }}/twin-fragment"
-             hx-trigger="load, every 3s"
-             hx-swap="innerHTML">
+    <section id="twin-live-host" class="mt-6">
       <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 text-xs text-slate-500">
-        connecting to live twin…
+        opening live twin stream…
       </div>
     </section>
+
+    <script>
+    (function () {
+      const dna = "{{ device.device_dna }}";
+      const host = document.getElementById("twin-live-host");
+
+      function render(payload) {
+        if (!payload.online) {
+          host.innerHTML = `
+            <div class="rounded-2xl border border-amber-700/40 bg-amber-500/5 p-5">
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="inline-block h-2 w-2 rounded-full bg-amber-400"></span>
+                  <span class="ml-2 text-xs uppercase tracking-widest text-amber-300">Edge offline</span>
+                </div>
+                <span class="text-[11px] text-slate-500">${payload.reason || ''}</span>
+              </div>
+              <p class="mt-2 text-xs text-slate-400">SSE stream open — waiting for the Edge to come back.</p>
+            </div>`;
+          return;
+        }
+        const twin = payload.twin || {};
+        const panel = (label, state) => {
+          const rows = Object.entries(state || {}).map(
+            ([k, v]) => `
+              <li class="flex items-center justify-between border-b border-slate-800/60 pb-0.5">
+                <span class="font-mono text-slate-400">${k}</span>
+                <span class="font-mono text-emerald-200">${typeof v === 'object' ? JSON.stringify(v) : v}</span>
+              </li>`
+          ).join('');
+          return `
+            <div class="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+              <div class="text-[11px] uppercase tracking-widest text-slate-400">${label}</div>
+              ${rows ? '<ul class="mt-2 space-y-1 text-xs">' + rows + '</ul>'
+                     : '<div class="mt-2 text-xs text-slate-500 italic">no fields yet</div>'}
+            </div>`;
+        };
+        host.innerHTML = `
+          <div class="rounded-2xl border border-emerald-700/40 bg-emerald-500/5 p-5">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="inline-block h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="ml-2 text-xs uppercase tracking-widest text-emerald-300">Live · SSE · ${payload.at ? payload.at.slice(11,19) : ''}</span>
+              </div>
+              <span id="twin-stream-state" class="text-[11px] text-slate-500">streaming</span>
+            </div>
+            <div class="mt-4 grid gap-3 md:grid-cols-3">
+              ${panel('desired', twin.desired)}
+              ${panel('reported', twin.reported)}
+              ${panel('current', twin.current)}
+            </div>
+          </div>`;
+      }
+
+      const es = new EventSource(`/api/devices/${dna}/twin/stream`);
+      es.onmessage = (ev) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          render(payload);
+        } catch (e) { /* ignore */ }
+      };
+      es.onerror = () => {
+        const s = document.getElementById('twin-stream-state');
+        if (s) s.textContent = 'reconnecting…';
+      };
+    })();
+    </script>
 
     <div class="mt-6 grid gap-4 md:grid-cols-3">
       {% for label, blob in [('DNA', device.dna_json), ('Brain', device.brain_json), ('Pin map', device.pinmap_json)] %}

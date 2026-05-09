@@ -29,6 +29,7 @@ from .routers import (
     recipes,
     secrets_ui,
     systems,
+    twin_push,
     ui,
 )
 from .security.keys import issue_payload
@@ -154,6 +155,7 @@ app.include_router(audit.router)
 app.include_router(ota.router)
 app.include_router(recipes.router)
 app.include_router(ai_agent.router)
+app.include_router(twin_push.router)
 
 
 @app.get("/healthz", tags=["meta"])

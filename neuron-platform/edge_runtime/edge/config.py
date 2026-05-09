@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     site_id: str = "site-default"
     parent_node_url: str = "https://neuron.shital.org.uk"
 
+    # Push twin updates to the Master the moment they change so the Master's
+    # browser SSE delivery has zero polling lag. Set both env vars to enable.
+    master_push_url: str = ""           # e.g. https://neuron.shital.org.uk
+    master_push_api_key: str = ""       # an X-API-Key with devices:write scope
+
     tls_enabled: bool = False
     tls_cert_path: Path = Field(default=Path("./certs/edge.crt"))
     tls_key_path: Path = Field(default=Path("./certs/edge.key"))
