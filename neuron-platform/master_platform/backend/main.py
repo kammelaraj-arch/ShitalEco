@@ -17,13 +17,16 @@ from .db import SessionLocal, init_db
 from .library_loader import load_catalog
 from .models import APIKey
 from .routers import (
+    ai_agent,
     apikeys,
     audit,
     auth_ui,
     devices,
     library,
     library_manage_ui,
+    ota,
     processes,
+    recipes,
     secrets_ui,
     systems,
     ui,
@@ -148,6 +151,9 @@ app.include_router(devices.router)
 app.include_router(processes.router)
 app.include_router(apikeys.router)
 app.include_router(audit.router)
+app.include_router(ota.router)
+app.include_router(recipes.router)
+app.include_router(ai_agent.router)
 
 
 @app.get("/healthz", tags=["meta"])
