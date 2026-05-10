@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type ComponentType } from 'react'
+import { useEffect, useState, useCallback, useRef, type ComponentType } from 'react'
 import { motion } from 'framer-motion'
 import {
   PayPalScriptProvider as _PPP,
@@ -113,24 +113,48 @@ export function MonthlyGivingPage() {
     }
   }
 
+  // PayPalButtons.onApprove must be identity-stable: if its reference
+  // changes between when the user opens the popup and when they approve,
+  // the callback either fires with stale state or doesn't fire at all
+  // (PayPal SDK caches the props at button-render time). The previous
+  // useCallback rebuilt every keystroke in any donor field, so the
+  // approve handler the SDK had captured was already stale by the time
+  // the popup callback returned, and the subscription wasn't recorded
+  // server-side.
+  //
+  // Same pattern as PaymentPage.tsx: read mutable state through a ref
+  // so the callback's identity stays stable for the lifetime of the
+  // page.
+  const approveRef = useRef({
+    selected, planId, branchId,
+    firstName, surname, donorEmail, donorPhone, postcode, selectedAddress,
+  })
+  useEffect(() => {
+    approveRef.current = {
+      selected, planId, branchId,
+      firstName, surname, donorEmail, donorPhone, postcode, selectedAddress,
+    }
+  })
+
   const handleApprove = useCallback(async (data: { subscriptionID?: string }) => {
-    if (!data.subscriptionID || !selected || !planId) return
+    const s = approveRef.current
+    if (!data.subscriptionID || !s.selected || !s.planId) return
     await api.givingApprove({
       subscription_id: data.subscriptionID,
-      plan_id: planId,
-      tier_id: selected.id,
-      amount: selected.amount,
-      frequency: selected.frequency,
-      branch_id: branchId,
-      donor_first_name: firstName.trim(),
-      donor_surname: surname.trim(),
-      donor_email: donorEmail.trim(),
-      donor_phone: donorPhone.trim(),
-      donor_postcode: postcode.trim(),
-      donor_address: selectedAddress,
+      plan_id: s.planId,
+      tier_id: s.selected.id,
+      amount: s.selected.amount,
+      frequency: s.selected.frequency,
+      branch_id: s.branchId,
+      donor_first_name: s.firstName.trim(),
+      donor_surname: s.surname.trim(),
+      donor_email: s.donorEmail.trim(),
+      donor_phone: s.donorPhone.trim(),
+      donor_postcode: s.postcode.trim(),
+      donor_address: s.selectedAddress,
     }).catch(() => {})
     setStep('done')
-  }, [selected, planId, branchId, firstName, surname, donorEmail, donorPhone, postcode, selectedAddress])
+  }, [])  // ← stable identity; reads via approveRef
 
   if (loading) {
     return (
