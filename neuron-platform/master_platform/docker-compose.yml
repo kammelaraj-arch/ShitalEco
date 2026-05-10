@@ -49,6 +49,45 @@ services:
       retries: 5
       start_period: 30s
 
+  # ── Neuron-only webhook deployer ───────────────────────────────────────────
+  # Independent from ShitalEco's deployer — separate image, separate
+  # secret, separate port. The shared nginx proxies
+  # https://neuron.shital.org.uk/deploy → 172.17.0.1:8089.
+  # On a webhook hit it runs /app/deploy.sh which only touches the
+  # Neuron stack (this very compose file). It never restarts a ShitalEco
+  # service.
+  neuron-deployer:
+    build:
+      context: ../deployer
+      dockerfile: Dockerfile
+    image: neuron/deployer:0.3.0
+    container_name: neuron-deployer
+    restart: unless-stopped
+    environment:
+      NEURON_DEPLOY_SECRET: ${NEURON_DEPLOY_SECRET:?NEURON_DEPLOY_SECRET must be set}
+      NEURON_DEPLOY_BRANCH: ${NEURON_DEPLOY_BRANCH:-claude/shital-erp-platform-iR2UF}
+      NEURON_DEPLOYER_PORT: "9090"
+    ports:
+      # docker0 bridge gateway only — public internet cannot reach this.
+      - "${NEURON_BIND_IP:-172.17.0.1}:8089:9090"
+    volumes:
+      # Bind-mount the host repo so the deployer can git pull + invoke
+      # neuron-platform/deploy.sh. Path is configurable for hosts that
+      # check the repo out somewhere other than /opt/shitaleco.
+      - ${NEURON_REPO_PATH:-/opt/shitaleco}:/workspace
+      # Docker socket so deploy.sh can `docker compose up -d` the Neuron
+      # stack. The deployer uses the host's docker daemon — same as the
+      # ShitalEco deployer does for its own stack.
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - neuron_internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:9090/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   neuron_data:
   neuron_artifacts:

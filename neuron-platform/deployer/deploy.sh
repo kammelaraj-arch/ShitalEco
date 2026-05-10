@@ -1,18 +1,20 @@
 #!/bin/bash
-# Wrapper that the deployer container invokes when it gets a hit on
-# /deploy/neuron. Ensures /workspace is on the deploy branch and that
-# neuron-platform/deploy.sh actually exists on disk before running it
-# — past incidents showed the bind-mounted checkout can get partially
-# wiped between runs.
+# Neuron-only deploy script — runs inside the neuron-deployer container
+# when the webhook fires. Self-heals the /workspace checkout to the
+# deploy branch tip and then invokes neuron-platform/deploy.sh.
+#
+# This script NEVER touches a ShitalEco service. It runs `git fetch +
+# reset --hard` against /workspace (the bind-mounted repo), and then
+# the underlying neuron-platform/deploy.sh restarts only the Neuron
+# Docker stack. The shared nginx is only ever asked for a SIGHUP.
 set -eo pipefail
 
-LOG=/tmp/deploy-neuron-$(date +%s).log
+LOG=/tmp/neuron-deploy-$(date +%s).log
 exec >> "$LOG" 2>&1
 
 echo "=== Neuron deploy started $(date) ==="
 cd /workspace
 
-# Same branch the ShitalEco deployer uses.
 BRANCH="${NEURON_DEPLOY_BRANCH:-claude/shital-erp-platform-iR2UF}"
 
 git fetch origin "$BRANCH" --quiet || {

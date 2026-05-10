@@ -1,18 +1,17 @@
 name: Neuron Auto-Deploy
 
-# Auto-deploys the Neuron block to production by hitting the existing
-# ShitalEco webhook deployer at https://shital.org.uk/deploy/neuron.
-# That endpoint is served by the `deployer` container, which runs
-# /workspace/neuron-platform/deploy.sh in the background. This is the
-# same pattern the main ShitalEco workflow uses (deploy-vultr.yml),
-# so we no longer need SSH keys, hostnames, or username secrets.
+# Auto-deploys the Neuron block by hitting the NEURON-OWNED webhook
+# deployer at https://neuron.shital.org.uk/deploy. That endpoint is
+# served by the `neuron-deployer` container (see
+# neuron-platform/master_platform/docker-compose.yml) — a completely
+# separate image, secret, and port from the ShitalEco /deploy webhook.
+# This workflow can NOT trigger a ShitalEco deploy and vice-versa.
 #
 # Required GitHub Actions secret:
 #
-#   DEPLOY_SECRET   The X-Deploy-Secret header value the deployer
-#                   accepts. Already set for ShitalEco — Neuron reuses it.
-#
-# That's it. No SSH key, no NEURON_DEPLOY_HOST, no NEURON_DEPLOY_USER.
+#   NEURON_DEPLOY_SECRET   The X-Deploy-Secret header value the
+#                          neuron-deployer accepts. Must match the
+#                          NEURON_DEPLOY_SECRET env var on the VPS.
 
 on:
   push:
@@ -33,29 +32,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Validate secret
+        env:
+          NEURON_DEPLOY_SECRET: ${{ secrets.NEURON_DEPLOY_SECRET }}
+        run: |
+          if [ -z "$NEURON_DEPLOY_SECRET" ]; then
+            echo "::error::NEURON_DEPLOY_SECRET is not set in repo secrets."
+            echo "::error::Set it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
       - name: Trigger Neuron webhook deployer
         env:
-          DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
+          NEURON_DEPLOY_SECRET: ${{ secrets.NEURON_DEPLOY_SECRET }}
         run: |
           set -e
-          # Fall back to the same default the ShitalEco workflow uses
-          # if the secret is missing — keeps both stacks in lockstep.
-          SECRET="${DEPLOY_SECRET:-ShitalDeploy2026!}"
-          echo "==> POST https://shital.org.uk/deploy/neuron"
+          echo "==> POST https://neuron.shital.org.uk/deploy"
           code=$(curl -s -o /tmp/body -w "%{http_code}" \
-            -X POST https://shital.org.uk/deploy/neuron \
-            -H "X-Deploy-Secret: ${SECRET}" \
+            -X POST https://neuron.shital.org.uk/deploy \
+            -H "X-Deploy-Secret: ${NEURON_DEPLOY_SECRET}" \
             --max-time 15 --retry 3 --retry-delay 5)
           echo "HTTP ${code}"
           cat /tmp/body || true
-          # 202 = accepted (deployer started in background)
-          [ "$code" = "202" ] || { echo "::error::deployer rejected the webhook"; exit 1; }
+          [ "$code" = "202" ] || { echo "::error::neuron-deployer rejected the webhook"; exit 1; }
 
       - name: Wait for the Master to come back up
         run: |
           set -e
-          # The deployer runs deploy.sh in the background, so we poll
-          # the live healthz until the new revision is up. ~3 min budget.
+          # neuron-deployer runs deploy.sh in the background; poll
+          # /healthz until the new revision is live. ~3 min budget.
           for i in $(seq 1 36); do
             if out=$(curl -fsS --max-time 5 https://neuron.shital.org.uk/healthz 2>/dev/null); then
               echo "attempt $i: $out"
