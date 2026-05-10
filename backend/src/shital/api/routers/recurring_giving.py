@@ -193,6 +193,7 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
     # Custom-amount path — no row in recurring_giving_tiers; build a
     # synthetic tier dict so the rest of the flow (plan creation, donor
     # persist, response) is identical to the preset-tier path.
+    tier: dict[str, Any]
     if body.tier_id == "custom":
         amount = float(body.custom_amount or 0)
         if amount < 1 or amount > 1000:
@@ -209,12 +210,17 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
                 text("SELECT id, amount, label, frequency FROM recurring_giving_tiers WHERE id = :id AND is_active = true"),
                 {"id": body.tier_id},
             )
-            tier = row.mappings().one_or_none()
-        if not tier:
+            row_obj = row.mappings().one_or_none()
+        if not row_obj:
             raise HTTPException(404, detail="Giving tier not found")
-        tier = dict(tier)
+        tier = dict(row_obj)
 
-    plan_id = await _ensure_plan(str(tier["id"]), float(tier["amount"]), tier["label"], tier["frequency"])
+    plan_id = await _ensure_plan(
+        str(tier["id"]),
+        float(tier["amount"]),  # type: ignore[arg-type]
+        str(tier["label"]),
+        str(tier["frequency"]),
+    )
 
     # Persist donor info now (pre-PayPal) so we don't lose abandons. Email is
     # the dedup key — without it we have no recovery channel anyway, so skip
@@ -266,7 +272,11 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
         except Exception:
             pass  # CRM upsert must never block the PayPal plan response
 
-    return {"plan_id": plan_id, "amount": f"{tier['amount']:.2f}", "frequency": tier["frequency"]}
+    return {
+        "plan_id": plan_id,
+        "amount": f"{float(tier['amount']):.2f}",  # type: ignore[arg-type]
+        "frequency": str(tier["frequency"]),
+    }
 
 
 class ApproveBody(BaseModel):
