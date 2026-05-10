@@ -170,6 +170,28 @@ class RecipeRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column()
 
 
+class EdgeCert(Base):
+    """mTLS client cert issued by the platform CA, pinned for an Edge.
+
+    The plaintext cert+key PEMs are returned ONCE at issuance; we only
+    persist the fingerprint + metadata so a leaked DB doesn't reveal the
+    key material.
+    """
+
+    __tablename__ = "edge_certs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    edge_id: Mapped[str | None] = mapped_column(ForeignKey("edge_systems.id"))
+    subject_cn: Mapped[str] = mapped_column(String(160), nullable=False)
+    fingerprint_sha256: Mapped[str] = mapped_column(String(95), nullable=False, unique=True)
+    serial: Mapped[str] = mapped_column(String(80))
+    issued_at: Mapped[datetime] = mapped_column(default=_now)
+    expires_at: Mapped[datetime | None] = mapped_column()
+    issued_by: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active|revoked|expired
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class APIKey(Base):
     __tablename__ = "api_keys"
 

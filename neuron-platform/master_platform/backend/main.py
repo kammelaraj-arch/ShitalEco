@@ -26,6 +26,7 @@ from .routers import (
     fabric,
     library,
     library_manage_ui,
+    mtls,
     ota,
     processes,
     recipes,
@@ -171,6 +172,7 @@ app.include_router(recipes.router)
 app.include_router(ai_agent.router)
 app.include_router(twin_push.router)
 app.include_router(fabric.router)
+app.include_router(mtls.router)
 
 
 @app.get("/healthz", tags=["meta"])
