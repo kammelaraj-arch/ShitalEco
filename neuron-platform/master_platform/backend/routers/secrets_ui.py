@@ -180,3 +180,108 @@ async def audit_page(
             "action_filter": action_filter or "",
         },
     )
+
+
+# ─── mTLS — Edge cert issuance UI (admin) ───────────────────────────────────
+@router.get("/ui/mtls", response_class=HTMLResponse)
+async def mtls_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    _: APIKey = Depends(ui_require_admin),
+):
+    from ..models import EdgeCert, EdgeSystem
+    from ..security import mtls
+    rows = (await session.execute(
+        select(EdgeCert).order_by(EdgeCert.issued_at.desc())
+    )).scalars().all()
+    edges = (await session.execute(select(EdgeSystem).order_by(EdgeSystem.name))).scalars().all()
+
+    last = request.session.pop("mtls_last_issued", None)
+    return templates.TemplateResponse(
+        "mtls.html",
+        {
+            "request": request,
+            "rows": rows,
+            "edges": edges,
+            "ca_pem": mtls.ca_cert_pem(),
+            "ca_fingerprint": mtls.ca_fingerprint_sha256(),
+            "last_issued": last,
+        },
+    )
+
+
+@router.post("/ui/mtls/new")
+async def mtls_issue(
+    request: Request,
+    subject_cn: str = Form(...),
+    edge_id: str = Form(""),
+    validity_days: int = Form(365),
+    notes: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    from ..models import EdgeCert, EdgeSystem
+    from ..security import mtls
+    from ..security.audit import record
+    import datetime
+
+    if edge_id and (await session.get(EdgeSystem, edge_id)) is None:
+        edge_id = ""
+
+    issued = mtls.issue_edge_cert(
+        subject_cn=subject_cn.strip(),
+        validity_days=max(1, min(int(validity_days), 3650)),
+    )
+    row = EdgeCert(
+        edge_id=edge_id or None,
+        subject_cn=issued["subject_cn"],
+        fingerprint_sha256=issued["fingerprint_sha256"],
+        serial=issued["serial"],
+        issued_at=datetime.datetime.fromisoformat(issued["issued_at"]),
+        expires_at=datetime.datetime.fromisoformat(issued["expires_at"]),
+        issued_by=actor.id,
+        status="active",
+        notes=notes or None,
+    )
+    session.add(row)
+    await session.flush()
+    await record(
+        session, actor=actor.id, actor_kind="ui_session",
+        action="issue_edge_cert", target_kind="edge_cert", target_id=row.id,
+        detail={"subject_cn": subject_cn, "edge_id": edge_id or None,
+                "fingerprint_sha256": issued["fingerprint_sha256"]},
+    )
+    await session.commit()
+
+    # Stash plaintext cert+key for ONE-shot render. Same pattern as the
+    # bootstrap API key flow.
+    request.session["mtls_last_issued"] = {
+        "id": row.id,
+        "subject_cn": issued["subject_cn"],
+        "fingerprint_sha256": issued["fingerprint_sha256"],
+        "cert_pem": issued["cert_pem"],
+        "key_pem": issued["key_pem"],
+        "expires_at": issued["expires_at"],
+    }
+    return RedirectResponse("/ui/mtls", status_code=303)
+
+
+@router.post("/ui/mtls/{cert_id}/revoke")
+async def mtls_revoke(
+    cert_id: str,
+    session: AsyncSession = Depends(get_session),
+    actor: APIKey = Depends(ui_require_admin),
+):
+    from ..models import EdgeCert
+    from ..security.audit import record
+    row = await session.get(EdgeCert, cert_id)
+    if row is None:
+        return RedirectResponse("/ui/mtls", status_code=303)
+    row.status = "revoked"
+    await record(
+        session, actor=actor.id, actor_kind="ui_session",
+        action="revoke_edge_cert", target_kind="edge_cert", target_id=cert_id,
+        detail={"fingerprint_sha256": row.fingerprint_sha256},
+    )
+    await session.commit()
+    return RedirectResponse("/ui/mtls", status_code=303)
