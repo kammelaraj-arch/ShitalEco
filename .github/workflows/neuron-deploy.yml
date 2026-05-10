@@ -159,14 +159,44 @@ jobs:
           [ "$SKIP_NGINX" = "true" ] && FLAGS="$FLAGS --no-nginx"
           echo "==> Triggered by ${{ github.event_name }} from ${{ github.sha }}"
           echo "==> Running: bash neuron-platform/deploy.sh $FLAGS"
-          # -tt forces a TTY (better progress output for compose build),
-          # -o ConnectTimeout cuts the wait if the box is unreachable.
+          # Self-heal step: the deployer container has been wiping the
+          # /opt/shitaleco checkout intermittently, which means
+          # neuron-platform/deploy.sh sometimes isn't on disk when this
+          # workflow runs. Fetch + reset the deploy branch first so the
+          # file is guaranteed to exist before we invoke it. deploy.sh
+          # itself will then re-fetch + reset internally as well, but
+          # that's idempotent.
           ssh -tt \
               -o ConnectTimeout=10 \
               -o ServerAliveInterval=30 \
               -o BatchMode=yes \
               -p "$PORT" "$USER@$HOST" \
-              "set -e; cd /opt/shitaleco && bash neuron-platform/deploy.sh $FLAGS"
+              bash -s -- "$FLAGS" <<'REMOTE'
+          set -euo pipefail
+          FLAGS="$1"
+          cd /opt/shitaleco
+
+          echo "[pre-flight] resetting checkout to origin/claude/shital-erp-platform-iR2UF"
+          git fetch origin claude/shital-erp-platform-iR2UF --quiet || {
+            echo "::error::git fetch failed on the VPS — is the repo at /opt/shitaleco?"
+            exit 1
+          }
+          # Force a clean checkout on the deploy branch even if the
+          # current branch was something else.
+          git checkout -B claude/shital-erp-platform-iR2UF \
+                       origin/claude/shital-erp-platform-iR2UF --quiet
+          git reset --hard origin/claude/shital-erp-platform-iR2UF --quiet
+
+          if [ ! -f neuron-platform/deploy.sh ]; then
+            echo "::error::neuron-platform/deploy.sh STILL missing after a hard reset."
+            echo "::error::The deploy branch tip may not contain neuron-platform/. Last commit:"
+            git log -1 --oneline
+            exit 1
+          fi
+
+          echo "[pre-flight] checkout is at $(git rev-parse --short HEAD), deploy.sh present"
+          bash neuron-platform/deploy.sh $FLAGS
+          REMOTE
 
       - name: Smoke test the live Master
         env:
