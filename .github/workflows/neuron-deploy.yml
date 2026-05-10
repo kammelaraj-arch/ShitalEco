@@ -8,13 +8,18 @@ name: Neuron Auto-Deploy
 # Required GitHub Actions secrets (set under
 #  Settings → Secrets and variables → Actions):
 #
-#   NEURON_DEPLOY_HOST   e.g. 192.248.147.205
-#   NEURON_DEPLOY_USER   typically 'root'
-#   NEURON_DEPLOY_KEY    Ed25519 PRIVATE key (full -----BEGIN/END----- block).
-#                        Newlines are normalized automatically by
-#                        webfactory/ssh-agent so CRLF clipboard quirks
-#                        don't matter.
-#   NEURON_DEPLOY_PORT   optional, defaults to 22
+#   NEURON_DEPLOY_HOST       e.g. 192.248.147.205
+#   NEURON_DEPLOY_USER       typically 'root'
+#
+# AND ONE of the following two — base64 is preferred because GitHub's
+# secret form sometimes mangles multi-line PEM whitespace:
+#
+#   NEURON_DEPLOY_KEY_B64    base64(private key file).  Single line.
+#                            Generate with:  base64 -w 0 /root/neuron_deploy
+#   NEURON_DEPLOY_KEY        raw -----BEGIN OPENSSH PRIVATE KEY-----…
+#                            -----END OPENSSH PRIVATE KEY----- block.
+#
+#   NEURON_DEPLOY_PORT       optional, defaults to 22
 #
 # Generate the key on the VPS:
 #
@@ -61,45 +66,68 @@ jobs:
           NEURON_DEPLOY_HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
           NEURON_DEPLOY_USER: ${{ secrets.NEURON_DEPLOY_USER }}
           NEURON_DEPLOY_KEY: ${{ secrets.NEURON_DEPLOY_KEY }}
+          NEURON_DEPLOY_KEY_B64: ${{ secrets.NEURON_DEPLOY_KEY_B64 }}
         run: |
           missing=0
-          for v in NEURON_DEPLOY_HOST NEURON_DEPLOY_USER NEURON_DEPLOY_KEY; do
+          for v in NEURON_DEPLOY_HOST NEURON_DEPLOY_USER; do
             if [ -z "${!v}" ]; then echo "::error::Missing secret $v"; missing=1; fi
           done
+          if [ -z "$NEURON_DEPLOY_KEY" ] && [ -z "$NEURON_DEPLOY_KEY_B64" ]; then
+            echo "::error::Set NEURON_DEPLOY_KEY (raw PEM) or NEURON_DEPLOY_KEY_B64 (base64). Base64 is preferred."
+            missing=1
+          fi
           [ $missing -eq 0 ]
 
-      # ── Pre-flight: confirm the secret content is a parseable SSH key ─────
-      # If this step fails, the issue is in the secret value (line endings,
-      # missing header, wrong file pasted). If it passes but the deploy still
-      # fails, the issue is on the VPS side (authorized_keys, port, etc.).
-      - name: Sanity-check NEURON_DEPLOY_KEY parses as an SSH key
+      # ── Pre-flight: decode + sanity-check the SSH key ──────────────────────
+      # Prefers NEURON_DEPLOY_KEY_B64 (single line, paste-safe). Falls back
+      # to NEURON_DEPLOY_KEY (raw PEM) when the b64 secret isn't set.
+      # Either way, we end up with a normalised key file at /tmp/.ssh/test_key
+      # and assert it parses with ssh-keygen.
+      - name: Decode + sanity-check the deploy key
+        id: keycheck
         env:
-          KEY: ${{ secrets.NEURON_DEPLOY_KEY }}
+          KEY:     ${{ secrets.NEURON_DEPLOY_KEY }}
+          KEY_B64: ${{ secrets.NEURON_DEPLOY_KEY_B64 }}
         run: |
           mkdir -p /tmp/.ssh
-          # Normalize line endings: CRLF → LF, ensure trailing newline.
-          printf '%s\n' "$KEY" | tr -d '\r' > /tmp/.ssh/test_key
+          if [ -n "$KEY_B64" ]; then
+            echo "Source: NEURON_DEPLOY_KEY_B64"
+            # Tolerate base64 with or without line wrapping.
+            printf '%s' "$KEY_B64" | tr -d ' \n\r' | base64 -d > /tmp/.ssh/test_key
+          else
+            echo "Source: NEURON_DEPLOY_KEY (raw PEM)"
+            printf '%s\n' "$KEY" | tr -d '\r' > /tmp/.ssh/test_key
+          fi
           chmod 600 /tmp/.ssh/test_key
           echo "Key file byte count: $(wc -c < /tmp/.ssh/test_key)"
           echo "Key file line count: $(wc -l < /tmp/.ssh/test_key)"
-          echo "First line: $(head -1 /tmp/.ssh/test_key)"
-          echo "Last  line: $(tail -1 /tmp/.ssh/test_key)"
+          echo "First line:          $(head -1 /tmp/.ssh/test_key)"
+          echo "Last  line:          $(tail -1 /tmp/.ssh/test_key)"
           if ssh-keygen -y -f /tmp/.ssh/test_key > /tmp/.ssh/test_key.pub 2>&1; then
             echo "::notice::Private key parses OK."
-            echo "Derived public key:"
+            echo "Derived public key (compare against /root/.ssh/authorized_keys on the VPS):"
             cat /tmp/.ssh/test_key.pub
           else
-            echo "::error::Private key in NEURON_DEPLOY_KEY did not parse:"
+            echo "::error::Private key did NOT parse:"
             ssh-keygen -y -f /tmp/.ssh/test_key 2>&1 | sed 's/^/  /'
-            echo "::error::Re-paste the full -----BEGIN-----…-----END----- block."
+            if [ -n "$KEY_B64" ]; then
+              echo "::error::Re-generate the b64 secret with: base64 -w 0 /root/neuron_deploy"
+            else
+              echo "::error::Switch to NEURON_DEPLOY_KEY_B64 — base64 -w 0 /root/neuron_deploy"
+            fi
             exit 1
           fi
-          shred -u /tmp/.ssh/test_key /tmp/.ssh/test_key.pub 2>/dev/null || rm -f /tmp/.ssh/test_key*
 
       - name: Set up ssh-agent with the deploy key
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.NEURON_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          cp /tmp/.ssh/test_key ~/.ssh/id_neuron
+          chmod 600 ~/.ssh/id_neuron
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_neuron
+          # Persist the agent socket for following steps.
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> $GITHUB_ENV
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> $GITHUB_ENV
 
       - name: Trust the VPS host key (one-time per run)
         env:
