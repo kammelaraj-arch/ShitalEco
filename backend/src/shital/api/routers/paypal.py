@@ -1,6 +1,7 @@
 """PayPal payment integration for the Shital Service web portal."""
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any
@@ -87,22 +88,98 @@ def _fmt_uk_postcode(raw: str) -> str:
     return f"{pc[:-3]} {pc[-3:]}" if len(pc) >= 5 else raw.upper()
 
 
-def _parse_uk_address(raw: str, postcode: str) -> dict:
-    """Parse a UK address string into PayPal address fields."""
+_UK_POSTCODE_RE = re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$", re.IGNORECASE)
+
+
+def _parse_uk_address(raw: str, postcode: str) -> dict | None:
+    """Parse a UK address into PayPal's address shape, OR return None.
+
+    PayPal's V2 Orders API drops the ENTIRE payer.address block (silently,
+    no error) if any required field is missing or malformed. Returning None
+    here lets the caller skip sending an address at all rather than ship a
+    half-formed one that PayPal will throw away.
+
+    Required for prefill to land:
+      - country_code (GB)
+      - postal_code  (well-formed UK postcode)
+      - address_line_1 (non-empty)
+      - admin_area_2 (city) — strongly recommended, prefill is unreliable
+        without it on Live
+    """
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     pc_compact = postcode.upper().replace(" ", "")
-    addr: dict = {"country_code": "GB"}
-    if postcode:
-        addr["postal_code"] = _fmt_uk_postcode(postcode)
-    if parts:
-        addr["address_line_1"] = parts[0]
-    if len(parts) >= 2:
-        addr["address_line_2"] = parts[1]
-    # Last non-postcode part is the city/county — compare without spaces
-    city_candidates = [p for p in parts[1:] if p.upper().replace(" ", "") != pc_compact]
-    if city_candidates:
-        addr["admin_area_2"] = city_candidates[-1]
+
+    # Strip any postcode-shaped segment from the comma-list so the city
+    # extraction below doesn't pick up the postcode as the city.
+    non_pc_parts = [p for p in parts if p.upper().replace(" ", "") != pc_compact and not _UK_POSTCODE_RE.match(p)]
+
+    if not non_pc_parts:
+        # Address-line-less submissions (postcode-only or completely empty)
+        # are useless to PayPal — better to omit `payer.address` entirely
+        # so PayPal doesn't blow away the rest of the prefill.
+        return None
+    if not postcode.strip():
+        return None
+
+    addr: dict = {
+        "country_code": "GB",
+        "postal_code":  _fmt_uk_postcode(postcode),
+        "address_line_1": non_pc_parts[0],
+    }
+    if len(non_pc_parts) >= 3:
+        addr["address_line_2"] = non_pc_parts[1]
+        addr["admin_area_2"]   = non_pc_parts[-1]
+    elif len(non_pc_parts) == 2:
+        addr["admin_area_2"]   = non_pc_parts[1]
+    # Single-line address: city unknown. PayPal accepts the block without
+    # admin_area_2 but the prefill quality drops; nothing we can do without
+    # asking the user for city explicitly.
     return addr
+
+
+def _build_payer(body: "CreateOrderBody") -> dict:
+    """Build a clean PayPal V2 `payer` object. Drops fields that would cause
+    PayPal to silently discard the whole block — see comments below."""
+    payer: dict = {}
+
+    # Name: BOTH given_name and surname must be non-empty strings, otherwise
+    # PayPal Live throws away the entire name object (no prefill at all).
+    given  = body.contact_first_name.strip()
+    family = body.contact_surname.strip()
+    if not given and " " in body.contact_name.strip():
+        given, family = body.contact_name.strip().split(" ", 1)
+        family = family.strip()
+    elif not given:
+        given = body.contact_name.strip()
+    if given and family:
+        payer["name"] = {"given_name": given, "surname": family}
+
+    # Email: cheap regex so we never ship "john@" to PayPal and trip 422.
+    email = body.contact_email.strip()
+    if email and "@" in email and "." in email.split("@", 1)[1]:
+        payer["email_address"] = email
+
+    # Phone: PayPal validates national_number against country_code. Strip to
+    # digits and only ship if we end up with a plausibly-UK 10-or-11 digit
+    # number; otherwise PayPal returns 422 INVALID_PARAMETER_VALUE on the
+    # whole order.
+    digits = "".join(c for c in body.contact_phone if c.isdigit())
+    if digits.startswith("44") and len(digits) >= 12:
+        digits = digits[2:]
+    if digits.startswith("0"):
+        digits = digits[1:]
+    if 9 <= len(digits) <= 11:
+        payer["phone"] = {
+            "phone_type": "MOBILE",
+            "phone_number": {"national_number": digits},
+        }
+
+    # Address — see _parse_uk_address; returns None for unusable input.
+    addr = _parse_uk_address(body.contact_address, body.contact_postcode)
+    if addr:
+        payer["address"] = addr
+
+    return payer
 
 
 @router.post("/order")
@@ -111,28 +188,26 @@ async def create_paypal_order(body: CreateOrderBody) -> dict[str, str]:
     token = await _token()
     base  = await _base()
 
-    # Build payer — prefer explicit first/surname, fall back to splitting full name
-    given  = body.contact_first_name.strip() or body.contact_name.strip().split(" ", 1)[0]
-    family = body.contact_surname.strip() or (body.contact_name.strip().split(" ", 1)[1] if " " in body.contact_name.strip() else "")
+    payer = _build_payer(body)
 
-    payer: dict = {}
-    if given or family:
-        payer["name"] = {"given_name": given, "surname": family}
-    if body.contact_email:
-        payer["email_address"] = body.contact_email
-    if body.contact_phone:
-        digits = "".join(c for c in body.contact_phone if c.isdigit())
-        if digits:
-            payer["phone"] = {"phone_type": "MOBILE", "phone_number": {"national_number": digits[-10:]}}
-    if body.contact_postcode or body.contact_address:
-        payer["address"] = _parse_uk_address(body.contact_address, body.contact_postcode)
+    purchase_unit: dict = {
+        "amount": {"currency_code": "GBP", "value": f"{body.amount:.2f}"},
+        "description": body.description[:127],
+    }
+    # purchase_units.shipping.address is the OTHER lever PayPal reads for
+    # the Guest Card billing-address prefill (alongside payer.address). For
+    # NO_SHIPPING flows it still drives the address fields on the card form.
+    if "address" in payer and "name" in payer:
+        purchase_unit["shipping"] = {
+            "name": {
+                "full_name": f"{payer['name']['given_name']} {payer['name']['surname']}".strip(),
+            },
+            "address": payer["address"],
+        }
 
     payload: dict = {
         "intent": "CAPTURE",
-        "purchase_units": [{
-            "amount": {"currency_code": "GBP", "value": f"{body.amount:.2f}"},
-            "description": body.description[:127],
-        }],
+        "purchase_units": [purchase_unit],
         "application_context": {
             "brand_name": "Shital Temple",
             "locale": "en-GB",
