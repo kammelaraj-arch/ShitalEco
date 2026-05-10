@@ -137,7 +137,7 @@ def _parse_uk_address(raw: str, postcode: str) -> dict | None:
     return addr
 
 
-def _build_payer(body: "CreateOrderBody") -> dict:
+def _build_payer(body: CreateOrderBody) -> dict:
     """Build a clean PayPal V2 `payer` object. Drops fields that would cause
     PayPal to silently discard the whole block — see comments below."""
     payer: dict = {}
