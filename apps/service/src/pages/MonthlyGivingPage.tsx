@@ -119,11 +119,13 @@ export function MonthlyGivingPage() {
     }
   }
 
-  // Stable identity: PayPalButtons captures onApprove at render time. If the
-  // reference changes between popup-open and donor-approve, the SDK fires a
-  // stale callback and the subscription never gets recorded server-side.
-  // Read mutable state via a ref so handleApprove stays identity-stable.
-  // (Bug fix mirrored from PaymentPage; same root cause as PR #77.)
+  // PayPalButtons.onApprove must be identity-stable: if its reference
+  // changes between when the user opens the popup and when they approve,
+  // the SDK fires a stale callback and the subscription never gets
+  // recorded server-side (same root cause as PR #77 for PaymentPage).
+  // Read mutable state through approveRef so handleApprove never changes
+  // identity. giftAidDeclared lives in the ref too so the approve call
+  // sends the donor's Gift Aid choice through to the backend.
   const approveRef = useRef({
     selected, planId, branchId, firstName, surname,
     donorEmail, donorPhone, postcode, selectedAddress, giftAidDeclared,
