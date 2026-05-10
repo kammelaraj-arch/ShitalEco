@@ -16,31 +16,57 @@ from .library_loader import LibraryCatalog, LibraryItem
 
 
 # Compute-specific pin pools. Order matters: the allocator drains from the
-# top of each list. Pico 2 W: 26 multi-function GPIO; ADC on GP26..GP28.
+# top of each list. The Pico family shares the RP2040 / RP2350 26-pin
+# layout; the Pi family shares the 40-pin BCM header.
+
+# RP2040 / RP2350 base pin pool — Pico, Pico W, Pico 2, Pico 2 W.
+_PICO_POOL = {
+    "GPIO": [
+        "GP0", "GP1", "GP2", "GP3", "GP6", "GP7", "GP8", "GP9",
+        "GP10", "GP11", "GP12", "GP13", "GP14", "GP15",
+        "GP16", "GP17", "GP18", "GP19", "GP20", "GP21", "GP22",
+    ],
+    "PWM": [
+        "GP0", "GP1", "GP2", "GP3", "GP6", "GP7", "GP8", "GP9",
+        "GP10", "GP11", "GP12", "GP13", "GP14", "GP15",
+    ],
+    "ADC":   ["GP26", "GP27", "GP28"],
+    "I2C0":  ["GP4_SDA", "GP5_SCL"],
+    "I2C1":  ["GP2_SDA", "GP3_SCL"],
+    "1-Wire": ["GP22"],
+}
+
+# Pico 2 / 2 W gain a 4th ADC channel on GP29.
+_PICO_2_POOL = {
+    **_PICO_POOL,
+    "ADC": ["GP26", "GP27", "GP28", "GP29"],
+}
+
+# Standard Raspberry Pi 40-pin BCM header — shared across Pi 3 / 4 / 5 /
+# Zero / Zero 2 W. The default I2C is bus 1 (GPIO2 SDA / GPIO3 SCL); bus
+# 0 (GPIO0/1) is reserved for HAT EEPROMs and listed second.
+_PI_40PIN_POOL = {
+    "GPIO": [f"GPIO{i}" for i in (4, 5, 6, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27)],
+    "PWM":  ["GPIO12", "GPIO13", "GPIO18", "GPIO19"],
+    "ADC":  [],
+    "I2C0": ["GPIO2_SDA", "GPIO3_SCL"],
+    "I2C1": ["GPIO0_SDA", "GPIO1_SCL"],
+    "1-Wire": ["GPIO4"],
+}
+
 COMPUTE_POOLS: dict[str, dict[str, list[str]]] = {
-    "compute.pico2w": {
-        "GPIO": [
-            "GP0", "GP1", "GP2", "GP3", "GP6", "GP7", "GP8", "GP9",
-            "GP10", "GP11", "GP12", "GP13", "GP14", "GP15",
-            "GP16", "GP17", "GP18", "GP19", "GP20", "GP21", "GP22",
-        ],
-        "PWM": [
-            "GP0", "GP1", "GP2", "GP3", "GP6", "GP7", "GP8", "GP9",
-            "GP10", "GP11", "GP12", "GP13", "GP14", "GP15",
-        ],
-        "ADC":   ["GP26", "GP27", "GP28"],
-        "I2C0":  ["GP4_SDA", "GP5_SCL"],
-        "I2C1":  ["GP2_SDA", "GP3_SCL"],
-        "1-Wire": ["GP22"],
-    },
-    "compute.rpi5": {
-        "GPIO": [f"GPIO{i}" for i in (4, 5, 6, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27)],
-        "PWM":  ["GPIO12", "GPIO13", "GPIO18", "GPIO19"],
-        "ADC":  [],
-        "I2C0": ["GPIO0_SDA", "GPIO1_SCL"],
-        "I2C1": ["GPIO2_SDA", "GPIO3_SCL"],
-        "1-Wire": ["GPIO4"],
-    },
+    "compute.pico":       _PICO_POOL,
+    "compute.pico_w":     _PICO_POOL,
+    "compute.pico_2":     _PICO_2_POOL,
+    "compute.pico2w":     _PICO_2_POOL,           # alias for the existing manifest stable_id
+    "compute.rpi3":       _PI_40PIN_POOL,
+    "compute.rpi4":       _PI_40PIN_POOL,
+    "compute.rpi5":       _PI_40PIN_POOL,
+    "compute.rpi_zero":   _PI_40PIN_POOL,
+    "compute.rpi_zero_2w":_PI_40PIN_POOL,
+    # Custom Jagath board — placeholder pool, update when schematic is
+    # finalised. Same shape as a 40-pin Pi for now so allocator works.
+    "compute.jagath":     _PI_40PIN_POOL,
 }
 
 
