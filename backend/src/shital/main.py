@@ -616,6 +616,38 @@ async def _patch_schema() -> None:
             updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_email_templates_key ON email_templates(template_key)",
+        # ── Outgoing email audit log ──────────────────────────────────────────
+        # Every email rendered by send_template() lands here BEFORE the SMTP
+        # call, so a crash mid-send still leaves a paper trail. Status
+        # transitions: PENDING → SENT (success) or FAILED (error captured).
+        # variables is stored verbatim so /admin/sent-emails/{id}/resend can
+        # re-render against the current template and retry without the
+        # caller having to remember what context to pass.
+        """CREATE TABLE IF NOT EXISTS sent_emails (
+            id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            template_key    VARCHAR(100) NOT NULL DEFAULT '',
+            to_email        VARCHAR(255) NOT NULL,
+            from_email      VARCHAR(255) NOT NULL DEFAULT '',
+            subject         TEXT         NOT NULL DEFAULT '',
+            html_body       TEXT         NOT NULL DEFAULT '',
+            text_body       TEXT         NOT NULL DEFAULT '',
+            variables       JSONB        NOT NULL DEFAULT '{}'::jsonb,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            error           TEXT         NOT NULL DEFAULT '',
+            attempts        INTEGER      NOT NULL DEFAULT 0,
+            last_attempt_at TIMESTAMPTZ,
+            sent_at         TIMESTAMPTZ,
+            related_type    VARCHAR(50)  NOT NULL DEFAULT '',
+            related_id      VARCHAR(100) NOT NULL DEFAULT '',
+            triggered_by    VARCHAR(255) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_status   ON sent_emails(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_to       ON sent_emails(LOWER(to_email))",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_template ON sent_emails(template_key)",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_related  ON sent_emails(related_type, related_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_failed   ON sent_emails(created_at DESC) WHERE status = 'FAILED'",
         # ── Temple Services ───────────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS temple_services (
             id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2167,13 +2199,28 @@ _{{ branch_name }} — Registered UK Charity_"""
     async with SessionLocal() as db:
         for t in templates:
             try:
+                # On conflict we keep any admin edits to subject/body but
+                # ALWAYS re-activate. Without this an accidentally-disabled
+                # template (or an earlier failed seed that left the row in
+                # a half-baked state) silently breaks features that depend
+                # on it (eg. volunteer_reference_request bug from PR #N+1).
                 await db.execute(text("""
                     INSERT INTO email_templates (template_key, name, subject, html_body, text_body, variables, is_active)
                     VALUES (:key, :name, :subject, :html_body, :text_body, :variables::jsonb, true)
-                    ON CONFLICT (template_key) DO NOTHING
+                    ON CONFLICT (template_key) DO UPDATE
+                        SET is_active  = true,
+                            -- Heal any rows that ended up with empty bodies
+                            -- (eg. seed crashed mid-row on first deploy).
+                            subject    = CASE WHEN email_templates.subject   = '' THEN EXCLUDED.subject   ELSE email_templates.subject   END,
+                            html_body  = CASE WHEN email_templates.html_body = '' THEN EXCLUDED.html_body ELSE email_templates.html_body END,
+                            text_body  = CASE WHEN email_templates.text_body = '' THEN EXCLUDED.text_body ELSE email_templates.text_body END,
+                            updated_at = NOW()
                 """), t)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Don't swallow silently — these are critical for volunteer +
+                # donation flows. Log loud, keep going so one bad template
+                # doesn't block the others.
+                logger.error("email_template_seed_failed", template_key=t.get("key"), error=str(exc))
         await db.commit()
     logger.info("email_templates_seeded")
 

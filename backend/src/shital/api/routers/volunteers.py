@@ -730,6 +730,9 @@ async def admin_send_reference_requests(
                 "response_url":   url,
                 "charity_number": charity_number,
             },
+            related_type="volunteer_reference",
+            related_id=f"{volunteer_id}:{tag}",
+            triggered_by=getattr(ctx, "user_email", "") or "admin",
         )
         results.append({"ref": tag, "to": ref_email, **out})
 
