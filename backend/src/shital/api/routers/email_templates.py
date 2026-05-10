@@ -172,7 +172,45 @@ def _default_vars() -> dict[str, Any]:
     }
 
 
-async def send_template(template_key: str, to_email: str, variables: dict[str, Any]) -> dict[str, Any]:
+async def _record_sent_email(
+    template_key: str, to_email: str, subject: str, html_body: str, text_body: str,
+    variables: dict[str, Any], related_type: str, related_id: str,
+    status: str, error: str,
+) -> None:
+    """Persist every email send into sent_emails for audit + resend.
+    Best-effort — DB hiccup never blocks the SMTP call from returning."""
+    import json
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    try:
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                INSERT INTO sent_emails
+                    (template_key, to_email, subject, html_body, text_body,
+                     variables, related_type, related_id, status, error)
+                VALUES
+                    (:k, :to, :subj, :html, :text,
+                     CAST(:vars AS jsonb), :rt, :rid, :status, :err)
+            """), {
+                "k": template_key[:100], "to": to_email[:255],
+                "subj": subject[:500], "html": html_body, "text": text_body,
+                "vars": json.dumps(variables, default=str),
+                "rt": related_type[:50],
+                "rid": related_id if related_id else None,
+                "status": status[:20], "err": error,
+            })
+            await db.commit()
+    except Exception:
+        pass
+
+
+async def send_template(
+    template_key: str, to_email: str, variables: dict[str, Any],
+    related_type: str = "", related_id: str = "",
+) -> dict[str, Any]:
     """Render and send an email_templates row to a recipient.
 
     Used by the kiosk record-order flow for per-item post-payment emails
@@ -225,6 +263,14 @@ async def send_template(template_key: str, to_email: str, variables: dict[str, A
                 srv.sendmail(from_email, to_email, msg.as_string())
 
         await asyncio.get_event_loop().run_in_executor(None, _send)
+        await _record_sent_email(
+            template_key, to_email, subject, html_body, text_body,
+            merged, related_type, related_id, "sent", "",
+        )
         return {"sent": True, "to": to_email, "template": template_key}
     except Exception as exc:
+        await _record_sent_email(
+            template_key, to_email, "", "", "",
+            variables, related_type, related_id, "failed", str(exc),
+        )
         return {"sent": False, "error": str(exc), "template": template_key}

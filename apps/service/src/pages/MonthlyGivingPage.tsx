@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type ComponentType } from 'react'
+import { useEffect, useState, useCallback, useRef, type ComponentType } from 'react'
 import { motion } from 'framer-motion'
 import {
   PayPalScriptProvider as _PPP,
@@ -40,6 +40,12 @@ export function MonthlyGivingPage() {
 
   const [step, setStep]             = useState<'pick' | 'details' | 'pay' | 'done'>('pick')
   const [error, setError]           = useState('')
+
+  // Gift Aid declaration — when ticked, the SHITAL trustees can claim 25p
+  // back from HMRC for every £1 the donor gives. UK taxpayers + own funds +
+  // not claiming the gift back are the legal requirements; we surface a
+  // brief reminder under the checkbox so donors can self-disqualify.
+  const [giftAidDeclared, setGiftAidDeclared] = useState(false)
 
   // Custom amount path — devotee picks their own £/month value when none of
   // the preset tiers feel right. Built as a synthetic GivingTier with a
@@ -113,24 +119,43 @@ export function MonthlyGivingPage() {
     }
   }
 
+  // Stable identity: PayPalButtons captures onApprove at render time. If the
+  // reference changes between popup-open and donor-approve, the SDK fires a
+  // stale callback and the subscription never gets recorded server-side.
+  // Read mutable state via a ref so handleApprove stays identity-stable.
+  // (Bug fix mirrored from PaymentPage; same root cause as PR #77.)
+  const approveRef = useRef({
+    selected, planId, branchId, firstName, surname,
+    donorEmail, donorPhone, postcode, selectedAddress, giftAidDeclared,
+  })
+  useEffect(() => {
+    approveRef.current = {
+      selected, planId, branchId, firstName, surname,
+      donorEmail, donorPhone, postcode, selectedAddress, giftAidDeclared,
+    }
+  })
+
   const handleApprove = useCallback(async (data: { subscriptionID?: string }) => {
-    if (!data.subscriptionID || !selected || !planId) return
+    const s = approveRef.current
+    if (!data.subscriptionID || !s.selected || !s.planId) return
     await api.givingApprove({
       subscription_id: data.subscriptionID,
-      plan_id: planId,
-      tier_id: selected.id,
-      amount: selected.amount,
-      frequency: selected.frequency,
-      branch_id: branchId,
-      donor_first_name: firstName.trim(),
-      donor_surname: surname.trim(),
-      donor_email: donorEmail.trim(),
-      donor_phone: donorPhone.trim(),
-      donor_postcode: postcode.trim(),
-      donor_address: selectedAddress,
+      plan_id: s.planId,
+      tier_id: s.selected.id,
+      amount: s.selected.amount,
+      frequency: s.selected.frequency,
+      branch_id: s.branchId,
+      donor_first_name: s.firstName.trim(),
+      donor_surname: s.surname.trim(),
+      donor_email: s.donorEmail.trim(),
+      donor_phone: s.donorPhone.trim(),
+      donor_postcode: s.postcode.trim(),
+      donor_address: s.selectedAddress,
+      gift_aid_declared: s.giftAidDeclared,
+      tier_label: s.selected.label,
     }).catch(() => {})
     setStep('done')
-  }, [selected, planId, branchId, firstName, surname, donorEmail, donorPhone, postcode, selectedAddress])
+  }, [])  // ← stable identity; reads via approveRef
 
   if (loading) {
     return (
@@ -332,6 +357,33 @@ export function MonthlyGivingPage() {
             </div>
           )}
 
+          {/* ── Gift Aid declaration ── */}
+          <button type="button" onClick={() => setGiftAidDeclared(v => !v)}
+            className="w-full text-left rounded-2xl p-4 transition-all"
+            style={{
+              background: giftAidDeclared
+                ? 'linear-gradient(135deg,rgba(34,197,94,0.18),rgba(34,197,94,0.08))'
+                : 'rgba(255,255,255,0.04)',
+              border: `2px solid ${giftAidDeclared ? '#22C55E' : 'rgba(255,255,255,0.1)'}`,
+            }}>
+            <div className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
+                style={{
+                  background: giftAidDeclared ? '#22C55E' : 'rgba(255,255,255,0.05)',
+                  border: giftAidDeclared ? 'none' : '2px solid rgba(255,255,255,0.2)',
+                  color: 'white',
+                }}>
+                {giftAidDeclared ? '✓' : ''}
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-sm text-ivory-100">Add Gift Aid — make my £{selected ? Number(selected.amount).toFixed(0) : '—'} worth £{selected ? (Number(selected.amount) * 1.25).toFixed(2) : '—'}</p>
+                <p className="text-xs mt-1.5 leading-relaxed" style={{ color: 'rgba(255,248,220,0.55)' }}>
+                  I'm a UK taxpayer, this is my own money, and I'd like SHITAL to claim Gift Aid on every monthly donation. I understand if I pay less Income/Capital Gains Tax than the amount of Gift Aid claimed in a year, it's my responsibility to pay the difference.
+                </p>
+              </div>
+            </div>
+          </button>
+
           {error && (
             <p className="text-sm font-medium rounded-xl px-4 py-3"
               style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.3)' }}>
@@ -470,19 +522,37 @@ export function MonthlyGivingPage() {
       {step === 'done' && (
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-8 space-y-4">
           <div className="text-6xl">🙏</div>
-          <h2 className="font-display font-bold text-2xl text-gold-400">Baba's Blessings!</h2>
-          <p className="text-sm" style={{ color: 'rgba(255,248,220,0.6)' }}>
-            Your monthly support of <strong className="text-gold-400">£{selected ? Number(selected.amount).toFixed(0) : '—'}</strong> has been set up.
-            {donorEmail && ` A confirmation will be sent to ${donorEmail}.`}
+          <h2 className="font-display font-bold text-2xl text-gold-400">Baba's Blessings, {firstName || 'Friend'}!</h2>
+          <p className="text-sm" style={{ color: 'rgba(255,248,220,0.7)' }}>
+            Your monthly support of <strong className="text-gold-400">
+              £{selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/{selected?.frequency.toLowerCase() ?? 'month'}
+            </strong> is now active.
           </p>
+
+          {giftAidDeclared && (
+            <div className="rounded-xl mx-auto max-w-xs px-4 py-3 text-xs"
+              style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.3)', color: '#86efac' }}>
+              ✓ Gift Aid declared — SHITAL will reclaim 25p extra for every £1 you give.
+            </div>
+          )}
+
+          {donorEmail && (
+            <p className="text-xs" style={{ color: 'rgba(255,248,220,0.55)' }}>
+              📧 A confirmation email is on its way to <strong>{donorEmail}</strong>
+            </p>
+          )}
+
           <p className="text-xs" style={{ color: 'rgba(255,248,220,0.35)' }}>
-            You can cancel anytime through your PayPal account.
+            You can cancel or change the amount any time via your PayPal account.
           </p>
-          <button onClick={() => setScreen('browse')}
-            className="mt-4 px-6 py-3 rounded-xl font-bold text-sm"
-            style={{ background: 'rgba(212,175,55,0.15)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.3)' }}>
-            Return to Temple
-          </button>
+
+          <div className="flex gap-2 justify-center mt-4">
+            <button onClick={() => setScreen('browse')}
+              className="px-6 py-3 rounded-xl font-bold text-sm"
+              style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+              Return to Temple
+            </button>
+          </div>
         </motion.div>
       )}
     </div>
