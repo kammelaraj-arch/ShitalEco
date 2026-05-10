@@ -159,6 +159,8 @@ export const api = {
     donorFirstName: string, donorSurname: string, donorEmail: string,
     donorPostcode: string, donorAddress: string,
     donorPhone: string = '',
+    customAmount: number | null = null,
+    customLabel: string = '',
   ): Promise<{ plan_id: string; amount: string; frequency: string }> {
     const r = await fetch(`${API}/service/giving/subscribe`, {
       method: 'POST',
@@ -168,6 +170,9 @@ export const api = {
         donor_first_name: donorFirstName, donor_surname: donorSurname,
         donor_email: donorEmail, donor_postcode: donorPostcode, donor_address: donorAddress,
         donor_phone: donorPhone,
+        // Backend uses these only when tier_id == 'custom'.
+        ...(customAmount != null ? { custom_amount: customAmount } : {}),
+        ...(customLabel ? { custom_label: customLabel } : {}),
       }),
     })
     if (!r.ok) throw new Error(`Subscribe failed: ${r.status}`)

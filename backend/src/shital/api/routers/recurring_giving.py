@@ -69,19 +69,26 @@ async def _ensure_product(token: str, base: str) -> str:
 
 
 async def _ensure_plan(tier_id: str, amount: float, label: str, frequency: str) -> str:
-    """Get or create a PayPal billing plan for a tier. Returns plan_id."""
+    """Get or create a PayPal billing plan for a tier. Returns plan_id.
+
+    `tier_id == 'custom'` is the bespoke-amount path: there's no DB row, so
+    skip the cache lookup + cache write and create a fresh plan every call.
+    Custom plans are intentionally one-off; PayPal's billing plans API
+    handles thousands without issue."""
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
 
-    async with SessionLocal() as db:
-        row = await db.execute(
-            text("SELECT paypal_plan_id FROM recurring_giving_tiers WHERE id = :id"),
-            {"id": tier_id},
-        )
-        existing = row.scalar_one_or_none()
-    if existing:
-        return existing
+    is_custom = tier_id == "custom"
+    if not is_custom:
+        async with SessionLocal() as db:
+            row = await db.execute(
+                text("SELECT paypal_plan_id FROM recurring_giving_tiers WHERE id = :id"),
+                {"id": tier_id},
+            )
+            existing = row.scalar_one_or_none()
+        if existing:
+            return existing
 
     token = await _token()
     base  = await _base()
@@ -116,12 +123,13 @@ async def _ensure_plan(tier_id: str, amount: float, label: str, frequency: str) 
         r.raise_for_status()
         plan_id = r.json()["id"]
 
-    async with SessionLocal() as db:
-        await db.execute(
-            text("UPDATE recurring_giving_tiers SET paypal_plan_id = :pid, updated_at = NOW() WHERE id = :id"),
-            {"pid": plan_id, "id": tier_id},
-        )
-        await db.commit()
+    if not is_custom:
+        async with SessionLocal() as db:
+            await db.execute(
+                text("UPDATE recurring_giving_tiers SET paypal_plan_id = :pid, updated_at = NOW() WHERE id = :id"),
+                {"pid": plan_id, "id": tier_id},
+            )
+            await db.commit()
     return plan_id
 
 
@@ -162,6 +170,11 @@ class SubscribeBody(BaseModel):
     donor_phone: str = ""
     donor_postcode: str = ""
     donor_address: str = ""
+    # Custom amount path — when tier_id == 'custom' the frontend sends a
+    # bespoke £/month figure rather than a stored tier. We create an inline
+    # PayPal plan for it (no DB pollution from one-offs).
+    custom_amount: float | None = None
+    custom_label: str = "Custom Monthly Gift"
 
 
 @router.post("/service/giving/subscribe")
@@ -177,14 +190,29 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    async with SessionLocal() as db:
-        row = await db.execute(
-            text("SELECT id, amount, label, frequency FROM recurring_giving_tiers WHERE id = :id AND is_active = true"),
-            {"id": body.tier_id},
-        )
-        tier = row.mappings().one_or_none()
-    if not tier:
-        raise HTTPException(404, detail="Giving tier not found")
+    # Custom-amount path — no row in recurring_giving_tiers; build a
+    # synthetic tier dict so the rest of the flow (plan creation, donor
+    # persist, response) is identical to the preset-tier path.
+    if body.tier_id == "custom":
+        amount = float(body.custom_amount or 0)
+        if amount < 1 or amount > 1000:
+            raise HTTPException(400, detail="Custom amount must be between £1 and £1,000")
+        tier = {
+            "id": "custom",
+            "amount": amount,
+            "label": (body.custom_label or "Custom Monthly Gift").strip()[:100],
+            "frequency": "MONTH",
+        }
+    else:
+        async with SessionLocal() as db:
+            row = await db.execute(
+                text("SELECT id, amount, label, frequency FROM recurring_giving_tiers WHERE id = :id AND is_active = true"),
+                {"id": body.tier_id},
+            )
+            tier = row.mappings().one_or_none()
+        if not tier:
+            raise HTTPException(404, detail="Giving tier not found")
+        tier = dict(tier)
 
     plan_id = await _ensure_plan(str(tier["id"]), float(tier["amount"]), tier["label"], tier["frequency"])
 

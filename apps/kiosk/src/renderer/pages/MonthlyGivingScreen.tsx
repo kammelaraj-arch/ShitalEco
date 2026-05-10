@@ -13,7 +13,10 @@ export function MonthlyGivingScreen() {
   return (
     <div className="w-full h-full flex flex-col" style={{ fontFamily: 'Inter, system-ui, sans-serif', background: th.mainBg }}>
 
-      {/* Header */}
+      {/* Header — kiosk back button + title.
+          The service portal's own header is hidden when embedded in an
+          iframe (Header.tsx isEmbedded check), so this is the only
+          "Monthly Temple Support" bar a user sees. */}
       <header
         className="flex items-center h-16 px-4 gap-3 flex-shrink-0"
         style={{ background: th.headerBg, borderBottom: `2px solid rgba(255,153,51,0.25)`, boxShadow: '0 2px 12px rgba(0,0,0,0.10)' }}
@@ -30,23 +33,15 @@ export function MonthlyGivingScreen() {
         <div className="text-2xl">🔁</div>
       </header>
 
-      {/* Embedded service.shital.org.uk monthly-giving page (branch pre-selected) */}
-      <div className="flex-1 min-h-0 bg-white">
-        <iframe
-          title="Monthly Giving"
-          src={serviceUrl}
-          className="w-full h-full border-0"
-          allow="payment *; clipboard-write"
-        />
-      </div>
-
-      {/* QR Code at the bottom — scan to continue on phone */}
+      {/* QR code — moved to TOP of the iframe so it's the first thing the
+          devotee sees (more discoverable than at the bottom of a long
+          embedded form). Compact: 70px QR + tagline. */}
       <div
-        className="flex-shrink-0 flex items-center gap-4 px-5 py-3"
-        style={{ background: '#fff', borderTop: `2px solid ${th.langActive}30`, boxShadow: '0 -2px 12px rgba(0,0,0,0.06)' }}
+        className="flex-shrink-0 flex items-center gap-4 px-5 py-2.5"
+        style={{ background: '#fff', borderBottom: `2px solid ${th.langActive}30` }}
       >
-        <div className="p-2 bg-white rounded-xl border border-gray-200 flex-shrink-0">
-          <QRCode value={serviceUrl} size={84} level="M" />
+        <div className="p-1.5 bg-white rounded-lg border border-gray-200 flex-shrink-0">
+          <QRCode value={serviceUrl} size={70} level="M" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-black text-sm text-gray-800 leading-tight">Prefer to use your phone?</p>
@@ -57,6 +52,18 @@ export function MonthlyGivingScreen() {
             <span className="font-bold" style={{ color: th.langActive }}>service.shital.org.uk</span>
           </p>
         </div>
+      </div>
+
+      {/* Embedded service.shital.org.uk monthly-giving page (branch pre-selected).
+          Service portal's Header.tsx auto-hides when window.self !== window.top
+          so there's only one header on screen (the kiosk one above). */}
+      <div className="flex-1 min-h-0 bg-white">
+        <iframe
+          title="Monthly Giving"
+          src={serviceUrl}
+          className="w-full h-full border-0"
+          allow="payment *; clipboard-write"
+        />
       </div>
     </div>
   )

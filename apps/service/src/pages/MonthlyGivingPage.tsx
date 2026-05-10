@@ -41,6 +41,34 @@ export function MonthlyGivingPage() {
   const [step, setStep]             = useState<'pick' | 'details' | 'pay' | 'done'>('pick')
   const [error, setError]           = useState('')
 
+  // Custom amount path — devotee picks their own £/month value when none of
+  // the preset tiers feel right. Built as a synthetic GivingTier with a
+  // sentinel id so the rest of the flow (subscribe → approve → confirm)
+  // doesn't need to special-case it.
+  const [customMode, setCustomMode] = useState(false)
+  const [customAmount, setCustomAmount] = useState('')
+  const customAmountValid = (() => {
+    const n = parseFloat(customAmount)
+    return Number.isFinite(n) && n >= 1 && n <= 1000
+  })()
+  function pickCustom() {
+    setCustomMode(true)
+    setSelected(null)
+  }
+  function confirmCustom() {
+    if (!customAmountValid) return
+    const n = parseFloat(customAmount)
+    setSelected({
+      id: 'custom',
+      amount: n,
+      label: 'Custom Monthly Gift',
+      description: `£${n.toFixed(2)} every month`,
+      frequency: 'MONTH',
+      is_default: false,
+      display_order: 999,
+    })
+  }
+
   const detailsValid = firstName.trim().length > 0 && surname.trim().length > 0 && donorEmail.trim().includes('@') && selectedAddress.length > 3
 
   useEffect(() => {
@@ -69,11 +97,14 @@ export function MonthlyGivingPage() {
     if (!selected) return
     setError('')
     try {
+      const isCustom = selected.id === 'custom'
       const res = await api.givingSubscribe(
         selected.id, branchId,
         firstName.trim(), surname.trim(), donorEmail.trim(),
         postcode.trim(), selectedAddress,
         donorPhone.trim(),
+        isCustom ? Number(selected.amount) : null,
+        isCustom ? selected.label : '',
       )
       setPlanId(res.plan_id)
       setStep('pay')
@@ -131,15 +162,15 @@ export function MonthlyGivingPage() {
           <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'rgba(212,175,55,0.6)' }}>
             Choose your monthly amount
           </p>
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="grid grid-cols-2 gap-3 mb-3">
             {tiers.map(tier => (
-              <button key={tier.id} onClick={() => setSelected(tier)}
+              <button key={tier.id} onClick={() => { setCustomMode(false); setSelected(tier) }}
                 className="rounded-2xl p-4 text-left transition-all active:scale-[0.98]"
                 style={{
-                  background: selected?.id === tier.id
+                  background: selected?.id === tier.id && !customMode
                     ? 'linear-gradient(135deg,rgba(212,175,55,0.25),rgba(212,175,55,0.12))'
                     : 'rgba(255,255,255,0.04)',
-                  border: `2px solid ${selected?.id === tier.id ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
+                  border: `2px solid ${selected?.id === tier.id && !customMode ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
                 }}>
                 {tier.is_default && (
                   <span className="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full mb-2 inline-block"
@@ -150,12 +181,69 @@ export function MonthlyGivingPage() {
                 <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.4)' }}>{tier.description}</p>
               </button>
             ))}
+
+            {/* Custom amount tile — toggles to an input box when tapped */}
+            <button onClick={pickCustom}
+              className="rounded-2xl p-4 text-left transition-all active:scale-[0.98] col-span-2"
+              style={{
+                background: customMode
+                  ? 'linear-gradient(135deg,rgba(212,175,55,0.25),rgba(212,175,55,0.12))'
+                  : 'rgba(255,255,255,0.04)',
+                border: `2px dashed ${customMode ? '#D4AF37' : 'rgba(255,255,255,0.15)'}`,
+              }}>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">✨</span>
+                <div className="flex-1">
+                  <p className="font-bold text-sm text-ivory-100">Other amount</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.4)' }}>
+                    Enter your own monthly gift — any amount from £1 to £1,000
+                  </p>
+                </div>
+              </div>
+            </button>
           </div>
 
-          <button onClick={() => setStep('details')} disabled={!selected}
+          {customMode && (
+            <div className="rounded-2xl p-4 mb-4"
+              style={{ background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.25)' }}>
+              <label className="block text-xs font-bold uppercase tracking-widest mb-2"
+                style={{ color: 'rgba(212,175,55,0.8)' }}>
+                Your monthly amount (£)
+              </label>
+              <div className="flex gap-2 items-center">
+                <span className="text-2xl font-black text-gold-400">£</span>
+                <input type="number" min="1" max="1000" step="0.01"
+                  inputMode="decimal"
+                  value={customAmount}
+                  onChange={e => setCustomAmount(e.target.value)}
+                  onBlur={confirmCustom}
+                  placeholder="e.g. 30"
+                  className="flex-1 px-3 py-2 rounded-xl text-2xl font-black bg-black/30 border border-white/10 focus:border-saffron-400/50 outline-none text-gold-400 placeholder-white/20"
+                  autoFocus />
+                <button onClick={confirmCustom} disabled={!customAmountValid}
+                  className="px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-40"
+                  style={{ background: 'rgba(212,175,55,0.25)', color: '#FFD980', border: '1px solid rgba(212,175,55,0.4)' }}>
+                  Set
+                </button>
+              </div>
+              {customAmount && !customAmountValid && (
+                <p className="text-xs mt-2" style={{ color: '#fca5a5' }}>
+                  Please enter an amount between £1 and £1,000.
+                </p>
+              )}
+              {selected?.id === 'custom' && customAmountValid && (
+                <p className="text-xs mt-2" style={{ color: 'rgba(255,248,220,0.6)' }}>
+                  ✓ £{Number(selected.amount).toFixed(2)} per month
+                </p>
+              )}
+            </div>
+          )}
+
+          <button onClick={() => setStep('details')}
+            disabled={!selected || (customMode && !customAmountValid)}
             className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.99]"
             style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-            Continue — £{selected ? Number(selected.amount).toFixed(0) : '—'}/month →
+            Continue — £{selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month →
           </button>
 
           <p className="text-center text-xs mt-3" style={{ color: 'rgba(255,248,220,0.3)' }}>
