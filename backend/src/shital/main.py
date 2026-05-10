@@ -1308,6 +1308,38 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_event  ON sava_volunteers(event_date DESC)",
         "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_branch ON sava_volunteers(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_email  ON sava_volunteers(LOWER(email)) WHERE email != ''",
+        # ── Recurring giving: failure tracking + admin cancel audit ───────────
+        # Track payment failures (BILLING.SUBSCRIPTION.PAYMENT.FAILED webhooks)
+        # so we can surface "card needs updating" warnings in admin without
+        # forcing a round-trip to PayPal. cancel_reason / cancelled_by close
+        # the audit loop when a trustee cancels via /admin/giving/.../cancel.
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS failed_payment_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_at      TIMESTAMPTZ",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_reason  VARCHAR(500) NOT NULL DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancel_reason        VARCHAR(500) NOT NULL DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancelled_by         VARCHAR(255) NOT NULL DEFAULT ''",
+        # ── Webhook event audit log ───────────────────────────────────────────
+        # Every PayPal webhook gets stored here, idempotent on event_id, before
+        # we touch any business state. Lets us replay a failed handler without
+        # re-asking PayPal, and gives ops a paper trail when a donor disputes
+        # a charge. processed=false rows with non-null error are the work
+        # queue for retries.
+        """CREATE TABLE IF NOT EXISTS recurring_giving_webhook_events (
+            id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id          VARCHAR(100) UNIQUE NOT NULL,
+            event_type        VARCHAR(100) NOT NULL,
+            subscription_id   VARCHAR(100) NOT NULL DEFAULT '',
+            resource_id       VARCHAR(100) NOT NULL DEFAULT '',
+            payload           JSONB        NOT NULL,
+            processed         BOOLEAN      NOT NULL DEFAULT false,
+            processed_at      TIMESTAMPTZ,
+            error             TEXT         NOT NULL DEFAULT '',
+            retry_count       INTEGER      NOT NULL DEFAULT 0,
+            created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_rgwe_subscription ON recurring_giving_webhook_events(subscription_id)",
+        "CREATE INDEX IF NOT EXISTS idx_rgwe_type         ON recurring_giving_webhook_events(event_type)",
+        "CREATE INDEX IF NOT EXISTS idx_rgwe_unprocessed  ON recurring_giving_webhook_events(processed, created_at) WHERE processed = false",
         # ── DBS / safeguarding ────────────────────────────────────────────────
         # Volunteers without a current DBS certificate need one before they
         # can be approved for any role. Three states the volunteer can be

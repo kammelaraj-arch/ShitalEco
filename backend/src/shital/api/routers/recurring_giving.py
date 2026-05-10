@@ -522,18 +522,185 @@ async def _verify_paypal_webhook(
 
 
 async def _ensure_subscription_columns() -> None:
-    """Add tracking columns to recurring_giving_subscriptions if not present."""
+    """Add tracking columns to recurring_giving_subscriptions if not present.
+
+    Belt-and-braces: schema patches in main.py run on startup, but this is
+    called from the webhook path so a fresh deploy that receives a webhook
+    before main.py finishes won't 500. All ALTERs are IF NOT EXISTS so the
+    second call is a no-op.
+    """
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         for stmt in [
-            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_at    TIMESTAMPTZ",
-            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_amount NUMERIC(10,2)",
-            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS next_billing_date   DATE",
-            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS total_payments      INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_at      TIMESTAMPTZ",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_amount  NUMERIC(10,2)",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS next_billing_date    DATE",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS total_payments       INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS failed_payment_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_at      TIMESTAMPTZ",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_reason  VARCHAR(500) NOT NULL DEFAULT ''",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancel_reason        VARCHAR(500) NOT NULL DEFAULT ''",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancelled_by         VARCHAR(255) NOT NULL DEFAULT ''",
         ]:
             await db.execute(text(stmt))
+        await db.commit()
+
+
+async def _record_webhook_event(event: dict) -> tuple[str, bool]:
+    """Persist the raw webhook event idempotently. Returns (row_uuid, is_new).
+
+    Idempotent on PayPal's event id — if the same event is delivered twice
+    (which PayPal does on retries) the second insert is a no-op and we
+    skip processing. Stored before any business logic so a crash mid-handler
+    still leaves a record we can replay.
+    """
+    import json
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    event_id   = event.get("id") or f"local-{uuid.uuid4()}"
+    event_type = event.get("event_type", "")
+    resource   = event.get("resource", {}) or {}
+    sub_id     = resource.get("id", "") or resource.get("billing_agreement_id", "")
+    res_id     = resource.get("id", "")
+
+    new_uuid = str(uuid.uuid4())
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            INSERT INTO recurring_giving_webhook_events
+                (id, event_id, event_type, subscription_id, resource_id, payload)
+            VALUES
+                (:id, :eid, :etype, :sid, :rid, CAST(:payload AS jsonb))
+            ON CONFLICT (event_id) DO NOTHING
+            RETURNING id
+        """), {
+            "id": new_uuid, "eid": event_id, "etype": event_type,
+            "sid": sub_id, "rid": res_id,
+            "payload": json.dumps(event),
+        })
+        row = result.mappings().first()
+        await db.commit()
+        return (str(row["id"]) if row else new_uuid, row is not None)
+
+
+async def _mark_event_processed(event_id: str, error: str = "") -> None:
+    """Flag the event as processed (or store the error for retry)."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            UPDATE recurring_giving_webhook_events
+            SET    processed    = :ok,
+                   processed_at = CASE WHEN :ok THEN NOW() ELSE processed_at END,
+                   error        = :err,
+                   retry_count  = retry_count + CASE WHEN :ok THEN 0 ELSE 1 END
+            WHERE  event_id = :eid
+        """), {"ok": not error, "err": error, "eid": event_id})
+        await db.commit()
+
+
+async def _handle_payment_failed(resource: dict) -> None:
+    """BILLING.SUBSCRIPTION.PAYMENT.FAILED — donor's funding source declined.
+
+    PayPal will retry on its own schedule (typically 5/7/10 days). We bump
+    the counter + remember the reason so admin can see the decline streak
+    and reach out before PayPal auto-suspends after the final retry.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    sub_id = resource.get("id", "") or resource.get("billing_agreement_id", "")
+    if not sub_id:
+        return
+    reason = (resource.get("status_change_note", "")
+              or resource.get("reason", "")
+              or "Payment failed")[:500]
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET    failed_payment_count = COALESCE(failed_payment_count, 0) + 1,
+                   last_failure_at      = NOW(),
+                   last_failure_reason  = :reason,
+                   updated_at           = NOW()
+            WHERE  paypal_subscription_id = :sid
+        """), {"sid": sub_id, "reason": reason})
+        await db.commit()
+
+
+async def _handle_subscription_updated(resource: dict) -> None:
+    """BILLING.SUBSCRIPTION.UPDATED — donor changed amount/plan via PayPal.
+
+    PayPal lets subscribers edit the plan without our involvement; we sync
+    the new amount + plan id so the admin view doesn't lie.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    sub_id = resource.get("id", "")
+    if not sub_id:
+        return
+    plan_id = resource.get("plan_id", "")
+    billing = resource.get("billing_info", {}) or {}
+    last_payment = billing.get("last_payment", {}) or {}
+    next_billing = billing.get("next_billing_time", "") or ""
+    amount_str = last_payment.get("amount", {}).get("value")
+
+    next_billing_date = None
+    if next_billing:
+        try:
+            next_billing_date = datetime.fromisoformat(
+                next_billing.replace("Z", "+00:00")
+            ).date()
+        except Exception:
+            next_billing_date = None
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET    paypal_plan_id    = COALESCE(NULLIF(:plan,''), paypal_plan_id),
+                   amount            = COALESCE(:amount::DECIMAL, amount),
+                   next_billing_date = COALESCE(:next_billing, next_billing_date),
+                   updated_at        = NOW()
+            WHERE  paypal_subscription_id = :sid
+        """), {
+            "sid": sub_id, "plan": plan_id,
+            "amount": amount_str, "next_billing": next_billing_date,
+        })
+        await db.commit()
+
+
+async def _handle_sale_refund(resource: dict, event_type: str) -> None:
+    """PAYMENT.SALE.REFUNDED / REVERSED — flip the donation row to REFUNDED.
+
+    Doesn't touch the subscription itself (it stays ACTIVE — only this one
+    payment was reversed). Total_payments stays as-is so reporting still
+    reflects the original capture; finance reads donations.status to net out.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    parent_payment = resource.get("parent_payment", "") or resource.get("sale_id", "")
+    if not parent_payment:
+        return
+    status = "REFUNDED" if event_type == "PAYMENT.SALE.REFUNDED" else "REVERSED"
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            UPDATE donations
+            SET    status     = :status,
+                   updated_at = NOW()
+            WHERE  payment_ref = :pref
+              AND  payment_provider = 'paypal'
+        """), {"status": status, "pref": parent_payment})
         await db.commit()
 
 
@@ -639,10 +806,25 @@ async def _handle_subscription_status(sub_id: str, new_status: str, cancelled: b
 
 @router.post("/service/giving/webhook/paypal")
 async def paypal_giving_webhook(request: Request) -> dict[str, Any]:
-    """
-    PayPal webhook endpoint for recurring giving subscriptions.
-    Register this URL in PayPal Developer Dashboard → Webhooks.
-    Events: BILLING.SUBSCRIPTION.*, PAYMENT.SALE.COMPLETED
+    """PayPal webhook endpoint for recurring giving subscriptions.
+
+    Register this URL in PayPal Developer Dashboard → Webhooks. Subscribed
+    events (per developer.paypal.com/api/rest/webhooks/event-names):
+      • BILLING.SUBSCRIPTION.CREATED / ACTIVATED / UPDATED /
+        SUSPENDED / CANCELLED / EXPIRED / PAYMENT.FAILED
+      • PAYMENT.SALE.COMPLETED / REFUNDED / REVERSED
+
+    Pipeline:
+      1. Parse body (400 on garbage)
+      2. Verify signature against PAYPAL_WEBHOOK_ID (skip if unset, e.g. dev)
+      3. Persist the raw event to recurring_giving_webhook_events (idempotent
+         on PayPal's event id — duplicate retries become no-ops)
+      4. Dispatch to a handler. Errors are caught and logged on the event row
+         so a partial failure doesn't lose the event; the row stays
+         processed=false for manual replay.
+      5. Always return 200 once we've stored the event — PayPal retries on
+         non-2xx, so we'd rather take the event in and replay later than
+         get hammered by retries while we're broken.
     """
     import json
 
@@ -673,22 +855,305 @@ async def paypal_giving_webhook(request: Request) -> dict[str, Any]:
     await _ensure_subscription_columns()
 
     event_type = event.get("event_type", "")
-    resource   = event.get("resource", {})
+    event_id   = event.get("id", "")
+    resource   = event.get("resource", {}) or {}
     sub_id     = resource.get("id", "") or resource.get("billing_agreement_id", "")
 
-    if event_type in ("PAYMENT.SALE.COMPLETED", "BILLING.SUBSCRIPTION.PAYMENT.COMPLETED"):
-        await _handle_payment_completed(resource, event_type)
+    # Persist first — even if dispatch throws, we still have the raw event.
+    _row_id, is_new = await _record_webhook_event(event)
+    if not is_new:
+        # PayPal retried a delivery we already processed. Acknowledge silently.
+        return {"received": True, "event_type": event_type, "duplicate": True}
 
-    elif event_type in ("BILLING.SUBSCRIPTION.ACTIVATED", "BILLING.SUBSCRIPTION.RE-ACTIVATED"):
-        await _handle_subscription_status(sub_id, "ACTIVE")
+    err = ""
+    try:
+        if event_type in ("PAYMENT.SALE.COMPLETED", "BILLING.SUBSCRIPTION.PAYMENT.COMPLETED"):
+            await _handle_payment_completed(resource, event_type)
 
-    elif event_type == "BILLING.SUBSCRIPTION.CANCELLED":
-        await _handle_subscription_status(sub_id, "CANCELLED", cancelled=True)
+        elif event_type == "BILLING.SUBSCRIPTION.PAYMENT.FAILED":
+            await _handle_payment_failed(resource)
 
-    elif event_type == "BILLING.SUBSCRIPTION.SUSPENDED":
-        await _handle_subscription_status(sub_id, "SUSPENDED")
+        elif event_type in ("BILLING.SUBSCRIPTION.ACTIVATED", "BILLING.SUBSCRIPTION.RE-ACTIVATED"):
+            await _handle_subscription_status(sub_id, "ACTIVE")
 
-    elif event_type == "BILLING.SUBSCRIPTION.EXPIRED":
-        await _handle_subscription_status(sub_id, "EXPIRED", cancelled=True)
+        elif event_type == "BILLING.SUBSCRIPTION.CREATED":
+            # Donor approved the popup but webhook arrived before our /approve
+            # endpoint did. Leave status as PENDING_APPROVAL — the /approve
+            # call (or the next ACTIVATED webhook) will mark it ACTIVE.
+            pass
 
-    return {"received": True, "event_type": event_type}
+        elif event_type == "BILLING.SUBSCRIPTION.UPDATED":
+            await _handle_subscription_updated(resource)
+
+        elif event_type == "BILLING.SUBSCRIPTION.CANCELLED":
+            await _handle_subscription_status(sub_id, "CANCELLED", cancelled=True)
+
+        elif event_type == "BILLING.SUBSCRIPTION.SUSPENDED":
+            await _handle_subscription_status(sub_id, "SUSPENDED")
+
+        elif event_type == "BILLING.SUBSCRIPTION.EXPIRED":
+            await _handle_subscription_status(sub_id, "EXPIRED", cancelled=True)
+
+        elif event_type in ("PAYMENT.SALE.REFUNDED", "PAYMENT.SALE.REVERSED"):
+            await _handle_sale_refund(resource, event_type)
+
+        # Anything else (PAYMENT.SALE.PENDING/DENIED, etc.) is recorded but
+        # not actioned — surfaces in the audit log for ops review.
+    except Exception as e:  # noqa: BLE001 — we deliberately swallow to keep PayPal happy
+        err = f"{type(e).__name__}: {e}"[:1000]
+
+    if event_id:
+        await _mark_event_processed(event_id, err)
+
+    return {"received": True, "event_type": event_type, "error": err or None}
+
+
+# ── Admin: server-side cancel / suspend / reactivate ──────────────────────────
+# Lets trustees stop a donor's subscription without making them log into the
+# PayPal dashboard. Calls PayPal's REST API which is the source of truth —
+# the BILLING.SUBSCRIPTION.CANCELLED webhook will arrive ~seconds later and
+# update local state via the normal webhook path. We also pre-emptively mark
+# the row so the admin UI reflects the intent immediately.
+
+class _SubscriptionActionBody(BaseModel):
+    reason: str = "Cancelled by SHITAL administrator"
+
+
+async def _paypal_subscription_action(
+    paypal_sub_id: str, action: str, reason: str,
+) -> None:
+    """Call PayPal /v1/billing/subscriptions/{id}/{action} where action is
+    one of cancel|suspend|activate. PayPal returns 204 on success."""
+    if action not in {"cancel", "suspend", "activate"}:
+        raise HTTPException(400, detail=f"Unknown action: {action}")
+    token = await _token()
+    base  = await _base()
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.post(
+            f"{base}/v1/billing/subscriptions/{paypal_sub_id}/{action}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"reason": (reason or "")[:128] or "Action taken by SHITAL admin"},
+        )
+        if r.status_code not in (204, 422):
+            # 422 = "subscription already in target state" — not a real error
+            raise HTTPException(
+                status_code=502,
+                detail=f"PayPal {action} failed: HTTP {r.status_code} {r.text[:200]}",
+            )
+
+
+async def _lookup_paypal_sub_id(local_id: str) -> tuple[str, str]:
+    """Resolve our internal UUID → (paypal_subscription_id, current_status).
+    Raises 404 if not found."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("""
+                SELECT paypal_subscription_id, status
+                FROM   recurring_giving_subscriptions
+                WHERE  id::text = :id OR paypal_subscription_id = :id
+                LIMIT  1
+            """),
+            {"id": local_id},
+        )).mappings().first()
+    if not row or not row["paypal_subscription_id"]:
+        raise HTTPException(404, detail="Subscription not found")
+    return (row["paypal_subscription_id"], row["status"] or "")
+
+
+@router.post("/admin/giving/subscriptions/{sub_id}/cancel")
+async def admin_cancel_subscription(
+    sub_id: str, body: _SubscriptionActionBody, space: CurrentSpace,
+) -> dict[str, Any]:
+    """Trustee-initiated cancel. Hits PayPal's API + marks local row."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    paypal_id, _ = await _lookup_paypal_sub_id(sub_id)
+    await _paypal_subscription_action(paypal_id, "cancel", body.reason)
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET    status        = 'CANCELLED',
+                   cancelled_at  = NOW(),
+                   cancel_reason = :reason,
+                   cancelled_by  = :actor,
+                   updated_at    = NOW()
+            WHERE  paypal_subscription_id = :sid
+        """), {
+            "sid": paypal_id,
+            "reason": body.reason[:500],
+            "actor": getattr(space, "user_email", "admin") or "admin",
+        })
+        await db.commit()
+    return {"success": True, "action": "cancel", "paypal_subscription_id": paypal_id}
+
+
+@router.post("/admin/giving/subscriptions/{sub_id}/suspend")
+async def admin_suspend_subscription(
+    sub_id: str, body: _SubscriptionActionBody, space: CurrentSpace,
+) -> dict[str, Any]:
+    """Pause without cancelling — donor can be reactivated later."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    paypal_id, _ = await _lookup_paypal_sub_id(sub_id)
+    await _paypal_subscription_action(paypal_id, "suspend", body.reason)
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET    status     = 'SUSPENDED',
+                   updated_at = NOW()
+            WHERE  paypal_subscription_id = :sid
+        """), {"sid": paypal_id})
+        await db.commit()
+    return {"success": True, "action": "suspend", "paypal_subscription_id": paypal_id}
+
+
+@router.post("/admin/giving/subscriptions/{sub_id}/reactivate")
+async def admin_reactivate_subscription(
+    sub_id: str, body: _SubscriptionActionBody, space: CurrentSpace,
+) -> dict[str, Any]:
+    """Resume a previously suspended subscription. Cancelled subs cannot be
+    revived — donor must subscribe afresh."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    paypal_id, current_status = await _lookup_paypal_sub_id(sub_id)
+    if current_status == "CANCELLED":
+        raise HTTPException(
+            400,
+            detail="Cancelled subscriptions cannot be reactivated; ask the donor to subscribe again.",
+        )
+    await _paypal_subscription_action(paypal_id, "activate", body.reason)
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET    status     = 'ACTIVE',
+                   updated_at = NOW()
+            WHERE  paypal_subscription_id = :sid
+        """), {"sid": paypal_id})
+        await db.commit()
+    return {"success": True, "action": "reactivate", "paypal_subscription_id": paypal_id}
+
+
+# ── Admin: webhook event audit log ────────────────────────────────────────────
+
+@router.get("/admin/giving/webhook-events")
+async def admin_list_webhook_events(
+    space: CurrentSpace,
+    subscription_id: str = "", event_type: str = "",
+    only_unprocessed: bool = False,
+    limit: int = 100, offset: int = 0,
+) -> dict[str, Any]:
+    """Paginated audit log of every PayPal webhook we've received.
+
+    Supports filtering by subscription, event type, and unprocessed status
+    so ops can find stuck events that need replay.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    where: list[str] = []
+    params: dict[str, Any] = {
+        "limit": min(max(1, limit), 500),
+        "offset": max(0, offset),
+    }
+    if subscription_id.strip():
+        where.append("subscription_id = :sid")
+        params["sid"] = subscription_id.strip()
+    if event_type.strip():
+        where.append("event_type = :etype")
+        params["etype"] = event_type.strip()
+    if only_unprocessed:
+        where.append("processed = false")
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+
+    async with SessionLocal() as db:
+        rows = await db.execute(text(f"""
+            SELECT id, event_id, event_type, subscription_id, resource_id,
+                   processed, processed_at, error, retry_count, created_at
+            FROM   recurring_giving_webhook_events
+            {where_sql}
+            ORDER  BY created_at DESC
+            LIMIT  :limit OFFSET :offset
+        """), params)
+        items: list[dict[str, Any]] = []
+        for r in rows.mappings():
+            d = dict(r)
+            d["id"] = str(d["id"])
+            for k in ("created_at", "processed_at"):
+                if d.get(k):
+                    d[k] = d[k].isoformat()
+            items.append(d)
+
+        total = (await db.execute(
+            text(f"SELECT COUNT(*) AS c FROM recurring_giving_webhook_events {where_sql}"),
+            params,
+        )).mappings().one()
+
+    return {"items": items, "total": int(total["c"])}
+
+
+@router.post("/admin/giving/webhook-events/{event_id}/replay")
+async def admin_replay_webhook(event_id: str, space: CurrentSpace) -> dict[str, Any]:
+    """Re-dispatch a stored webhook event through the handler chain.
+
+    Used when a handler crashed (e.g. database was down) and the event is
+    still sitting in the audit table with processed=false. Reads the
+    payload from the audit row and routes it through the same dispatch
+    block as a live webhook — so the same idempotency guarantees apply
+    (donations.idempotency_key prevents double-credit).
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("SELECT payload, event_type FROM recurring_giving_webhook_events WHERE event_id = :eid"),
+            {"eid": event_id},
+        )).mappings().one_or_none()
+    if not row:
+        raise HTTPException(404, detail="Webhook event not found")
+
+    event = row["payload"]
+    if isinstance(event, str):
+        import json
+        event = json.loads(event)
+    event_type = event.get("event_type", "") or row["event_type"]
+    resource   = event.get("resource", {}) or {}
+    sub_id     = resource.get("id", "") or resource.get("billing_agreement_id", "")
+
+    err = ""
+    try:
+        if event_type in ("PAYMENT.SALE.COMPLETED", "BILLING.SUBSCRIPTION.PAYMENT.COMPLETED"):
+            await _handle_payment_completed(resource, event_type)
+        elif event_type == "BILLING.SUBSCRIPTION.PAYMENT.FAILED":
+            await _handle_payment_failed(resource)
+        elif event_type in ("BILLING.SUBSCRIPTION.ACTIVATED", "BILLING.SUBSCRIPTION.RE-ACTIVATED"):
+            await _handle_subscription_status(sub_id, "ACTIVE")
+        elif event_type == "BILLING.SUBSCRIPTION.UPDATED":
+            await _handle_subscription_updated(resource)
+        elif event_type == "BILLING.SUBSCRIPTION.CANCELLED":
+            await _handle_subscription_status(sub_id, "CANCELLED", cancelled=True)
+        elif event_type == "BILLING.SUBSCRIPTION.SUSPENDED":
+            await _handle_subscription_status(sub_id, "SUSPENDED")
+        elif event_type == "BILLING.SUBSCRIPTION.EXPIRED":
+            await _handle_subscription_status(sub_id, "EXPIRED", cancelled=True)
+        elif event_type in ("PAYMENT.SALE.REFUNDED", "PAYMENT.SALE.REVERSED"):
+            await _handle_sale_refund(resource, event_type)
+    except Exception as e:  # noqa: BLE001
+        err = f"{type(e).__name__}: {e}"[:1000]
+
+    await _mark_event_processed(event_id, err)
+    return {"success": not err, "event_type": event_type, "error": err or None}
