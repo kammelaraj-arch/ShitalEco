@@ -91,7 +91,12 @@ export function ConfirmationScreen() {
     setShowKeyboard(false)
   }
 
-  // Use Electron silent print when running in kiosk app; fall back to browser print
+  // Use Electron silent print when running in kiosk app; fall back to
+  // browser print. Electron's printReceipt triggers ESC/POS auto-cut
+  // through the OS printer driver and skips the dialog entirely. Browser
+  // window.print() ALWAYS shows the print preview — Chromium has a
+  // `--kiosk-printing` launch flag that bypasses it; the user has to
+  // configure that on the kiosk OS, we can't trigger it from JS.
   function handlePrint() {
     const api = (window as unknown as { kioskAPI?: { printReceipt: () => void } }).kioskAPI
     if (api?.printReceipt) {
@@ -100,6 +105,19 @@ export function ConfirmationScreen() {
       window.print()     // fallback for browser dev/web mode
     }
   }
+
+  // Auto-print once on mount in Electron mode — staff don't need to
+  // remember to tap "Print Receipt" after every order. In browser mode
+  // we DON'T auto-print; popping a dialog without warning is hostile.
+  // The button remains so a missed receipt can always be reprinted.
+  useEffect(() => {
+    const api = (window as unknown as { kioskAPI?: { printReceipt: () => void } }).kioskAPI
+    if (!api?.printReceipt) return
+    // Tiny delay so the confirmation animation can settle and the
+    // /version-style assets finish loading before the print snapshot.
+    const t = setTimeout(() => api.printReceipt(), 600)
+    return () => clearTimeout(t)
+  }, [])
 
   // Group basket items by their type (SERVICE / DONATION) and then by category
   // so the receipt prints "Puja  £X / Prasad £Y / Donations £Z" sub-totalled.
@@ -128,12 +146,35 @@ export function ConfirmationScreen() {
   return (
     <div className="w-full h-full flex flex-col bg-white" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
 
-      {/* ── Print styles ── */}
+      {/* ── Print styles ──
+          The previous CSS set width:80mm but never told the browser the
+          PAGE size — so Chrome printed onto a default A4 (210mm) sheet
+          and the thermal printer then cropped everything past 80mm,
+          truncating "Shital Temple" → "Shital Tem...", "GENERAL_DONATION"
+          → "GENERAL_DONATIO", names + footer URLs.
+          @page size:80mm fixes this — browser issues an 80mm-wide page
+          regardless of the user's A4 default. margin:0 strips Chrome's
+          default 12mm margins (which would have eaten the text again).
+          The browser's "Headers and footers" preference (URL/date at
+          top, page numbers) lives outside the @page rule; we can't kill
+          it from CSS. Print directly via Electron's silent-print API
+          (kioskAPI.printReceipt) to bypass the dialog entirely — see
+          handlePrint below. */}
       <style>{`
+        @page {
+          size: 80mm auto;
+          margin: 0;
+        }
         @media screen {
           .print-receipt { display: none; }
         }
         @media print {
+          html, body {
+            width: 80mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+          }
           body * { visibility: hidden !important; }
           .print-receipt { display: block !important; }
           .print-receipt, .print-receipt * { visibility: visible !important; }
@@ -141,10 +182,21 @@ export function ConfirmationScreen() {
             position: fixed !important;
             top: 0 !important; left: 0 !important;
             width: 80mm !important;
-            padding: 6mm !important;
-            font-family: 'Courier New', monospace !important;
-            font-size: 11pt !important;
+            box-sizing: border-box !important;
+            padding: 4mm !important;
+            font-family: 'Courier New', 'Courier', monospace !important;
+            font-size: 10pt !important;
+            line-height: 1.25 !important;
+            color: #000 !important;
             background: white !important;
+            /* Long names / order refs MUST wrap inside the column rather
+               than clip off the right edge. */
+            word-wrap: break-word !important;
+            overflow-wrap: anywhere !important;
+          }
+          .print-receipt * {
+            max-width: 100% !important;
+            box-sizing: border-box !important;
           }
         }
       `}</style>
