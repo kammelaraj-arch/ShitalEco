@@ -438,11 +438,6 @@ async def email_draft_link(body: EmailLinkBody) -> dict[str, Any]:
     """Email the resume link for a saved draft. Used when an applicant
     closes the tab and forgets to bookmark — they ask the form to email
     them, click the link in their inbox, resume on any device."""
-    import asyncio
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-
     from sqlalchemy import text
 
     from shital.core.fabrics.config import settings
@@ -482,9 +477,6 @@ async def email_draft_link(body: EmailLinkBody) -> dict[str, Any]:
             site = f"{scheme}://service.{host}"
     resume_url = f"{site}/?screen=volunteer#draft={body.token}"
 
-    if not settings.OFFICE365_PASSWORD:
-        raise HTTPException(503, detail="Email service not configured")
-
     subject = "Your SHITAL volunteer-application resume link"
     text_body = (
         "Hello,\n\n"
@@ -521,30 +513,28 @@ async def email_draft_link(body: EmailLinkBody) -> dict[str, Any]:
         </div>
     """
 
-    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
-    password = settings.OFFICE365_PASSWORD
-    to_email = body.email.strip()
+    # Route through the centralised audit/queue path. Same path as
+    # send_template() — failures land in /admin/email-templates/sent
+    # with related_type='volunteer_draft' so they're searchable + resendable.
+    from shital.api.routers.email_templates import (
+        RELATED_VOLUNTEER_DRAFT,
+        send_raw_email,
+    )
 
-    def _send() -> None:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = f"SHITAL Volunteers <{from_email}>"
-        msg["To"] = to_email
-        msg.attach(MIMEText(text_body, "plain", "utf-8"))
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
-        with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
-            srv.ehlo()
-            srv.starttls()
-            srv.login(from_email, password)
-            srv.sendmail(from_email, to_email, msg.as_string())
+    result = await send_raw_email(
+        to_email=body.email.strip(),
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body,
+        related_type=RELATED_VOLUNTEER_DRAFT,
+        related_id=body.token,
+    )
+    if not result.get("sent"):
+        # 502 keeps the existing contract (frontend treats !ok as a failure
+        # banner) but the audit row is already in place for ops to inspect.
+        raise HTTPException(502, detail=f"Email send failed: {result.get('error') or result.get('reason') or 'unknown'}")
 
-    try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _send)
-    except Exception as exc:
-        raise HTTPException(502, detail=f"Email send failed: {exc}") from exc
-
-    return {"ok": True, "sent_to": to_email}
+    return {"ok": True, "sent_to": body.email.strip(), "sent_email_id": result.get("sent_email_id")}
 
 
 @router.delete("/service/volunteers/draft/{token}")

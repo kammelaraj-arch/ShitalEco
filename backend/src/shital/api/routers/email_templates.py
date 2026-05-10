@@ -509,3 +509,61 @@ async def admin_resend_sent_email(sent_id: str) -> dict[str, Any]:
     except Exception as exc:
         await _record_result(new_id, False, str(exc))
         return {"sent": False, "error": str(exc), "sent_email_id": new_id}
+
+
+# ── Canonical entity reference types for sent_emails.related_type ─────────────
+# Use these constants when calling send_template / send_raw_email so admin
+# searches in /admin/email-templates/sent stay consistent. Add new entries
+# here as new email-emitting flows land — never use ad-hoc strings inline.
+RELATED_VOLUNTEER          = "volunteer"            # long-term volunteer registration
+RELATED_VOLUNTEER_DRAFT    = "volunteer_draft"      # in-progress wizard resume link
+RELATED_VOLUNTEER_REFERENCE = "volunteer_reference" # referee magic-link
+RELATED_SAVA_VOLUNTEER     = "sava_volunteer"       # one-day event signup
+RELATED_DONATION           = "donation"             # one-off donation receipt
+RELATED_KIOSK_ORDER        = "kiosk_order"          # kiosk basket receipt
+RELATED_SUBSCRIPTION       = "subscription"         # monthly giving lifecycle
+RELATED_BOARD_VOTE         = "board_vote"           # trustee magic-link voting
+RELATED_CONTACT            = "contact"              # CRM-driven outreach
+
+
+async def send_raw_email(
+    *, to_email: str, subject: str, html_body: str, text_body: str = "",
+    related_type: str = "", related_id: str = "", triggered_by: str = "",
+    template_key: str = "",
+) -> dict[str, Any]:
+    """Send a pre-rendered email through the same audit + retry path as
+    send_template().
+
+    Use for one-off emails that don't have a dedicated email_templates row
+    (eg. volunteer draft-resume link with embedded token, ad-hoc admin
+    notifications). Anything that DOES have a template should call
+    send_template() instead so the admin can edit the body without a deploy.
+
+    Both functions write to sent_emails the same way, so /admin/email-templates/sent
+    shows them side-by-side and /resend works against either.
+    """
+    from shital.core.fabrics.config import settings
+
+    if not to_email or "@" not in to_email:
+        return {"sent": False, "reason": "invalid to_email"}
+
+    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
+    password   = settings.OFFICE365_PASSWORD
+
+    row_id = await _record_pending(
+        template_key, to_email, from_email,
+        subject, html_body, text_body, {},
+        related_type=related_type, related_id=related_id, triggered_by=triggered_by,
+    )
+
+    if not password:
+        await _record_result(row_id, False, "OFFICE365_PASSWORD not set")
+        return {"sent": False, "reason": "OFFICE365_PASSWORD not set", "sent_email_id": row_id}
+
+    try:
+        await _smtp_send(from_email, password, to_email, subject, html_body, text_body)
+        await _record_result(row_id, True)
+        return {"sent": True, "to": to_email, "sent_email_id": row_id}
+    except Exception as exc:
+        await _record_result(row_id, False, str(exc))
+        return {"sent": False, "error": str(exc), "sent_email_id": row_id}
