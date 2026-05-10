@@ -8,19 +8,21 @@ name: Neuron Auto-Deploy
 # Required GitHub Actions secrets (set under
 #  Settings → Secrets and variables → Actions):
 #
-#   NEURON_DEPLOY_HOST   e.g. 192.248.147.205 or quickdonation.example.com
+#   NEURON_DEPLOY_HOST   e.g. 192.248.147.205
 #   NEURON_DEPLOY_USER   typically 'root'
-#   NEURON_DEPLOY_KEY    the PRIVATE half of an SSH key whose PUBLIC
-#                        half is in the VPS user's ~/.ssh/authorized_keys
+#   NEURON_DEPLOY_KEY    Ed25519 PRIVATE key (full -----BEGIN/END----- block).
+#                        Newlines are normalized automatically by
+#                        webfactory/ssh-agent so CRLF clipboard quirks
+#                        don't matter.
 #   NEURON_DEPLOY_PORT   optional, defaults to 22
 #
-# Generate a fresh deploy key on a workstation:
+# Generate the key on the VPS:
 #
-#   ssh-keygen -t ed25519 -C "neuron-deploy@github" -f ./neuron_deploy
-#   # paste neuron_deploy.pub onto the VPS:
-#   #   echo "<contents>" >> /root/.ssh/authorized_keys
-#   # paste neuron_deploy (the private half) into NEURON_DEPLOY_KEY secret
-#   shred -u neuron_deploy
+#   ssh-keygen -t ed25519 -C "neuron-deploy@github" -f /root/neuron_deploy -N ""
+#   cat /root/neuron_deploy.pub >> /root/.ssh/authorized_keys
+#   cat /root/neuron_deploy   # paste this whole block into the secret
+#   # After the workflow runs green:
+#   shred -u /root/neuron_deploy
 
 on:
   push:
@@ -30,11 +32,9 @@ on:
       - 'neuron-platform/**'
       - '.github/workflows/neuron-deploy.yml'
   workflow_dispatch:
-    # Manual trigger from the Actions tab — handy for forcing a redeploy
-    # after a config change that didn't touch neuron-platform/.
     inputs:
       skip_pull:
-        description: "Skip the deploy.sh git pull (use already-checked-out files)"
+        description: "Skip the deploy.sh git pull"
         type: boolean
         default: false
       skip_nginx:
@@ -43,8 +43,6 @@ on:
         default: false
 
 concurrency:
-  # Coalesce overlapping deploys. The latest push wins; in-flight ones
-  # are cancelled instead of stacking up.
   group: neuron-deploy
   cancel-in-progress: true
 
@@ -54,59 +52,96 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout (just for the SHA / branch info)
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Validate required secrets
+        env:
+          NEURON_DEPLOY_HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
+          NEURON_DEPLOY_USER: ${{ secrets.NEURON_DEPLOY_USER }}
+          NEURON_DEPLOY_KEY: ${{ secrets.NEURON_DEPLOY_KEY }}
         run: |
           missing=0
           for v in NEURON_DEPLOY_HOST NEURON_DEPLOY_USER NEURON_DEPLOY_KEY; do
             if [ -z "${!v}" ]; then echo "::error::Missing secret $v"; missing=1; fi
           done
-          if [ $missing -eq 1 ]; then
-            echo "::error::Set the secrets in Settings → Secrets and variables → Actions, then re-run."
+          [ $missing -eq 0 ]
+
+      # ── Pre-flight: confirm the secret content is a parseable SSH key ─────
+      # If this step fails, the issue is in the secret value (line endings,
+      # missing header, wrong file pasted). If it passes but the deploy still
+      # fails, the issue is on the VPS side (authorized_keys, port, etc.).
+      - name: Sanity-check NEURON_DEPLOY_KEY parses as an SSH key
+        env:
+          KEY: ${{ secrets.NEURON_DEPLOY_KEY }}
+        run: |
+          mkdir -p /tmp/.ssh
+          # Normalize line endings: CRLF → LF, ensure trailing newline.
+          printf '%s\n' "$KEY" | tr -d '\r' > /tmp/.ssh/test_key
+          chmod 600 /tmp/.ssh/test_key
+          echo "Key file byte count: $(wc -c < /tmp/.ssh/test_key)"
+          echo "Key file line count: $(wc -l < /tmp/.ssh/test_key)"
+          echo "First line: $(head -1 /tmp/.ssh/test_key)"
+          echo "Last  line: $(tail -1 /tmp/.ssh/test_key)"
+          if ssh-keygen -y -f /tmp/.ssh/test_key > /tmp/.ssh/test_key.pub 2>&1; then
+            echo "::notice::Private key parses OK."
+            echo "Derived public key:"
+            cat /tmp/.ssh/test_key.pub
+          else
+            echo "::error::Private key in NEURON_DEPLOY_KEY did not parse:"
+            ssh-keygen -y -f /tmp/.ssh/test_key 2>&1 | sed 's/^/  /'
+            echo "::error::Re-paste the full -----BEGIN-----…-----END----- block."
             exit 1
           fi
-        env:
-          NEURON_DEPLOY_HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
-          NEURON_DEPLOY_USER: ${{ secrets.NEURON_DEPLOY_USER }}
-          NEURON_DEPLOY_KEY: ${{ secrets.NEURON_DEPLOY_KEY }}
+          shred -u /tmp/.ssh/test_key /tmp/.ssh/test_key.pub 2>/dev/null || rm -f /tmp/.ssh/test_key*
 
-      - name: SSH + run neuron-platform/deploy.sh
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Set up ssh-agent with the deploy key
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.NEURON_DEPLOY_HOST }}
-          username: ${{ secrets.NEURON_DEPLOY_USER }}
-          key: ${{ secrets.NEURON_DEPLOY_KEY }}
-          port: ${{ secrets.NEURON_DEPLOY_PORT || 22 }}
-          command_timeout: 12m
-          script_stop: true
-          script: |
-            set -euo pipefail
-            cd /opt/shitaleco
-            FLAGS=""
-            if [ "${{ github.event.inputs.skip_pull || 'false' }}" = "true" ]; then
-              FLAGS="$FLAGS --no-pull"
-            fi
-            if [ "${{ github.event.inputs.skip_nginx || 'false' }}" = "true" ]; then
-              FLAGS="$FLAGS --no-nginx"
-            fi
-            echo "==> Triggered by ${{ github.event_name }} from SHA ${{ github.sha }}"
-            echo "==> Running: bash neuron-platform/deploy.sh $FLAGS"
-            bash neuron-platform/deploy.sh $FLAGS
+          ssh-private-key: ${{ secrets.NEURON_DEPLOY_KEY }}
+
+      - name: Trust the VPS host key (one-time per run)
+        env:
+          HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
+          PORT: ${{ secrets.NEURON_DEPLOY_PORT || 22 }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          echo "known_hosts entries:"
+          wc -l ~/.ssh/known_hosts
+
+      - name: Run neuron-platform/deploy.sh on the VPS
+        env:
+          HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
+          USER: ${{ secrets.NEURON_DEPLOY_USER }}
+          PORT: ${{ secrets.NEURON_DEPLOY_PORT || 22 }}
+          SKIP_PULL: ${{ github.event.inputs.skip_pull || 'false' }}
+          SKIP_NGINX: ${{ github.event.inputs.skip_nginx || 'false' }}
+        run: |
+          FLAGS=""
+          [ "$SKIP_PULL" = "true" ]  && FLAGS="$FLAGS --no-pull"
+          [ "$SKIP_NGINX" = "true" ] && FLAGS="$FLAGS --no-nginx"
+          echo "==> Triggered by ${{ github.event_name }} from ${{ github.sha }}"
+          echo "==> Running: bash neuron-platform/deploy.sh $FLAGS"
+          # -tt forces a TTY (better progress output for compose build),
+          # -o ConnectTimeout cuts the wait if the box is unreachable.
+          ssh -tt \
+              -o ConnectTimeout=10 \
+              -o ServerAliveInterval=30 \
+              -o BatchMode=yes \
+              -p "$PORT" "$USER@$HOST" \
+              "set -e; cd /opt/shitaleco && bash neuron-platform/deploy.sh $FLAGS"
 
       - name: Smoke test the live Master
+        env:
+          HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
         run: |
           set -e
-          # The healthz endpoint must come back 200 with the Neuron version.
-          # Retries a few times because nginx reload + container start can
-          # race the very first probe.
           for i in 1 2 3 4 5 6; do
-            if out=$(curl -fsS --max-time 8 "https://${{ secrets.NEURON_DEPLOY_HOST }}/healthz" 2>/dev/null) ||
+            if out=$(curl -fsS  --max-time 8 "https://${HOST}/healthz" 2>/dev/null) ||
                out=$(curl -fsSk --max-time 8 -H "Host: neuron.shital.org.uk" \
-                     "https://${{ secrets.NEURON_DEPLOY_HOST }}/healthz" 2>/dev/null); then
+                     "https://${HOST}/healthz" 2>/dev/null); then
               echo "healthz: $out"
               echo "$out" | grep -q '"status":"ok"' && exit 0
             fi
