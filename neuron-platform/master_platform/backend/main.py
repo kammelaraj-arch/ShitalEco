@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import secrets
@@ -105,7 +106,19 @@ async def lifespan(app: FastAPI):
     await init_db()
     load_catalog(force=True)
     await _bootstrap_admin_key_if_needed()
-    yield
+
+    # Periodic audit retention prune so SQLite doesn't grow unbounded.
+    from .security.audit_retention import retention_loop
+    stop_event = asyncio.Event()
+    retention_task = asyncio.create_task(retention_loop(stop_event))
+    try:
+        yield
+    finally:
+        stop_event.set()
+        try:
+            await asyncio.wait_for(retention_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            retention_task.cancel()
 
 
 app = FastAPI(

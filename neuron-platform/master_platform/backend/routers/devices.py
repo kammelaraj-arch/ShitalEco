@@ -516,6 +516,77 @@ class PromoteBody(BaseModel):
     rollback_allowed: bool = False
 
 
+@router.post("/{device_dna}/dry-run-promote")
+async def dry_run_promote(
+    device_dna: str,
+    body: PromoteBody,
+    session: AsyncSession = Depends(get_session),
+    _: APIKey = Depends(require_scopes("devices:read")),
+):
+    """Walk every promote gate without committing. Returns a structured
+    'verdict' showing which gates pass/fail, so an operator can preview a
+    promotion before issuing one."""
+    if body.channel not in _VALID_CHANNELS:
+        return {"ok": False, "reason": f"channel must be one of {_VALID_CHANNELS}"}
+    device = await session.get(Device, device_dna)
+    if device is None:
+        return {"ok": False, "reason": "device_not_found"}
+    release = await session.get(FirmwareRelease, body.release_id)
+    if release is None or release.device_dna != device.device_dna:
+        return {"ok": False, "reason": "release_not_found_for_device"}
+
+    manifest = release.manifest_json or {}
+    gates = []
+
+    # Gate 1: hardware revision
+    hw_supported = device.hardware_revision in (manifest.get("supported_hardware_revisions") or [])
+    gates.append({
+        "id": "hardware_revision", "ok": hw_supported,
+        "detail": f"device hw '{device.hardware_revision}' "
+                  f"{'in' if hw_supported else 'NOT in'} "
+                  f"supported {manifest.get('supported_hardware_revisions') or []}",
+    })
+
+    # Gate 2: signature presence
+    sig = manifest.get("signature") or {}
+    sig_ok = sig.get("alg") == "ed25519" and bool(sig.get("value"))
+    gates.append({
+        "id": "signature_present", "ok": sig_ok,
+        "detail": f"alg={sig.get('alg')} kid={sig.get('kid','')} "
+                  f"{'has value' if sig.get('value') else 'NO value'}",
+    })
+
+    # Gate 3: downgrade check
+    current = await session.get(FirmwareChannel, (device.device_dna, body.channel))
+    is_downgrade = False
+    downgrade_ok = True
+    cur_version = None
+    if current and current.active_release_id and current.active_release_id != release.id:
+        cur = await session.get(FirmwareRelease, current.active_release_id)
+        if cur:
+            cur_version = cur.app_bundle_version
+            if _semver(cur.app_bundle_version) > _semver(release.app_bundle_version):
+                is_downgrade = True
+                downgrade_ok = bool(body.rollback_allowed and manifest.get("rollback_allowed"))
+    gates.append({
+        "id": "downgrade", "ok": downgrade_ok,
+        "detail": (f"current={cur_version} target={release.app_bundle_version}"
+                   + (" (downgrade requires rollback_allowed=true on body AND manifest)"
+                      if is_downgrade and not downgrade_ok else "")),
+    })
+
+    all_ok = all(g["ok"] for g in gates)
+    return {
+        "ok": all_ok,
+        "device_dna": device_dna,
+        "channel": body.channel,
+        "release_id": release.id,
+        "target_app_bundle_version": release.app_bundle_version,
+        "gates": gates,
+        "would_promote": all_ok,
+    }
+
+
 @router.post("/{device_dna}/promote")
 async def promote_release(
     device_dna: str,
