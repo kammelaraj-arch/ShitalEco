@@ -232,3 +232,62 @@ async def fields(
                     "spec": meta[ch][name],
                 })
     return {"field": name, "occurrences": hits}
+
+
+@router.get("/widgets")
+async def widgets(
+    twin_control: str | None = None,
+    _: APIKey = Depends(require_scopes("library:read")),
+) -> dict:
+    """Every UI widget with its bindings + metadata. Optional
+    ``twin_control`` filter returns only widgets that bind to that twin
+    id — useful for clients that want 'what should I render given a
+    twin?' without hard-coding the widget map.
+    """
+    cat = load_catalog()
+    out: list[dict[str, Any]] = []
+    for w in cat.list_library("ui_controls_library"):
+        compat = (w.manifest.get("compatibility") or {}).get("twin_controls") or []
+        if twin_control and twin_control not in compat:
+            continue
+        out.append({
+            "stable_id": w.stable_id,
+            "name": w.name,
+            "category": w.category,
+            "version": w.version,
+            "image": w.manifest.get("image"),
+            "ui_bindings": w.manifest.get("ui_bindings") or [],
+            "compatible_twin_controls": compat,
+            "capabilities": w.manifest.get("capabilities") or [],
+            "metadata": w.manifest.get("metadata") or {},
+        })
+    return {"twin_control_filter": twin_control, "widgets": out, "count": len(out)}
+
+
+@router.get("/integrations")
+async def integrations(
+    _: APIKey = Depends(require_scopes("library:read")),
+) -> dict:
+    """Every api_library item with its drivers, preferred_path, and
+    fallback_only flag. Drives a 'pick an integration' UI that respects
+    the local-first / cloud-fallback principle (Tapo local LAN first,
+    Tapo cloud only as fallback)."""
+    cat = load_catalog()
+    out: list[dict[str, Any]] = []
+    for it in cat.list_library("api_library"):
+        meta = it.manifest.get("metadata") or {}
+        out.append({
+            "stable_id": it.stable_id,
+            "name": it.name,
+            "vendor": it.vendor,
+            "version": it.version,
+            "category": it.category,
+            "preferred_path": meta.get("preferred_path", "local"),
+            "fallback_only": bool(meta.get("fallback_only", False)),
+            "drivers": it.manifest.get("drivers") or [],
+            "config_fields": meta.get("config_fields") or {},
+            "compatibility": it.manifest.get("compatibility") or {},
+        })
+    # Local-first first, fallback-only last; alphabetical inside each group.
+    out.sort(key=lambda x: (x["fallback_only"], x["stable_id"]))
+    return {"integrations": out, "count": len(out)}
