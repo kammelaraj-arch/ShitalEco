@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, useTotal, useItemCount, LANGUAGE_META, type Language, t, SHITAL_LOGO_URL } from '../store'
 import { THEMES } from '../themes'
@@ -15,8 +15,24 @@ export function Header() {
   const setTheme     = useStore((s) => s.setTheme)
   const [showLang, setShowLang] = useState(false)
   const [showTheme, setShowTheme] = useState(false)
+  // Detect when the service portal is rendered inside an iframe (e.g.
+  // embedded by the kiosk MonthlyGivingScreen). The kiosk shell already
+  // shows its own header + QR code, so a second SHITAL header inside the
+  // iframe is wasted vertical space. Hide ourselves in that case.
+  const [isEmbedded, setIsEmbedded] = useState(false)
+  useEffect(() => {
+    try {
+      // Same-origin parent → window.self !== window.top throws if cross-
+      // origin; we treat any iframe (cross-origin or not) as "embedded".
+      setIsEmbedded(window.self !== window.top)
+    } catch {
+      setIsEmbedded(true)
+    }
+  }, [])
 
   const handleChangeBranch = () => { setBranch('main', '', false); setScreen('browse') }
+
+  if (isEmbedded) return null
 
   return (
     <header className="sticky top-0 z-40 backdrop-blur-md"
