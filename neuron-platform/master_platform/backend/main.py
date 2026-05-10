@@ -31,6 +31,7 @@ from .routers import (
     processes,
     recipes,
     secrets_ui,
+    sysops_ui,
     systems,
     twin_push,
     ui,
@@ -159,6 +160,7 @@ app.include_router(auth_ui.router)
 app.include_router(ui.router)
 app.include_router(secrets_ui.router)
 app.include_router(library_manage_ui.router)
+app.include_router(sysops_ui.router)
 
 # JSON API routers
 app.include_router(library.router)
