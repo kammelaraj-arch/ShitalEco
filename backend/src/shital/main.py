@@ -1009,6 +1009,14 @@ async def _patch_schema() -> None:
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_surname VARCHAR(255) DEFAULT ''",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_postcode VARCHAR(50) DEFAULT ''",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS donor_address VARCHAR(500) DEFAULT ''",
+        # ── Gift Aid declaration on the subscription ──────────────────────────
+        # When the donor ticks "I'd like to add Gift Aid" on the monthly-giving
+        # form, we capture the declaration here. The webhook handler that
+        # creates per-month donations rows reads this and copies the flag onto
+        # each donation, so the GASDS / Gift Aid claim picks up every recurring
+        # payment automatically.
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS gift_aid_declared BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS gift_aid_declared_at TIMESTAMPTZ",
         # PayPal capture transaction ID (different from the PayPal order ID)
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
         "ALTER TABLE orders    ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
@@ -2135,6 +2143,60 @@ _{{ branch_name }} — Registered UK Charity_"""
             ),
             "text_body": "",
             "variables": '["branch_name","donor_name","order_ref","date","items_html","total","payment_method","gift_aid_block","cut_margin_px"]',
+        },
+        # ── Recurring giving confirmation ───────────────────────────────────
+        # Sent to the donor immediately after they approve their PayPal
+        # subscription. Admin-editable like every other template — wording
+        # tweaks via Admin → Settings → Email Templates → recurring_giving_confirmation.
+        {
+            "key": "recurring_giving_confirmation",
+            "name": "Monthly Giving — Subscription Confirmation",
+            "subject": "Thank you for your monthly support of SHITAL",
+            "html_body": (
+                '<div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:auto;color:#222">'
+                '  <div style="text-align:center;margin-bottom:24px">'
+                '    <img src="{{ logo_url }}" alt="SHITAL" style="width:64px;height:64px;border-radius:12px"/>'
+                '    <h1 style="font-size:20px;margin:12px 0 4px;color:#9b1c1c">🙏 Thank you, {{ donor_first_name }}!</h1>'
+                '    <p style="font-size:13px;color:#666;margin:0">Your monthly support is now set up</p>'
+                '  </div>'
+                '  <div style="background:#fff8e8;border:1px solid #f0d99a;border-radius:12px;padding:16px;margin:20px 0">'
+                '    <p style="font-size:13px;color:#444;margin:0 0 8px"><strong>Amount:</strong> £{{ amount }} per {{ frequency }}</p>'
+                '    <p style="font-size:13px;color:#444;margin:0 0 8px"><strong>Tier:</strong> {{ tier_label }}</p>'
+                '    <p style="font-size:13px;color:#444;margin:0"><strong>Reference:</strong> {{ subscription_id }}</p>'
+                '    {% if gift_aid_declared %}<p style="font-size:13px;color:#22863a;margin:8px 0 0">'
+                '      ✓ Gift Aid declared — SHITAL will reclaim 25p extra for every £1.</p>{% endif %}'
+                '  </div>'
+                '  <p style="font-size:14px;line-height:1.6">'
+                '    Your generosity keeps the lamps lit, the prasad flowing, and the temple thriving '
+                '    for the community. Thank you for choosing to support us every month.'
+                '  </p>'
+                '  <p style="font-size:13px;color:#666">'
+                '    Manage or cancel anytime through your PayPal account: '
+                '    <a href="https://www.paypal.com/myaccount/autopay/">paypal.com/myaccount/autopay</a>'
+                '  </p>'
+                '  <p style="font-size:12px;color:#999;margin-top:24px;border-top:1px solid #eee;padding-top:12px">'
+                '    SHITAL — Shri Shirdi Saibaba Temple Association<br>'
+                '    Registered UK Charity No. {{ charity_number }}<br>'
+                '    <a href="https://shital.org.uk">shital.org.uk</a>'
+                '  </p>'
+                '</div>'
+            ),
+            "text_body": (
+                "🙏 Thank you, {{ donor_first_name }}!\n\n"
+                "Your monthly support of £{{ amount }} per {{ frequency }} ({{ tier_label }}) "
+                "is now set up.\n\n"
+                "Reference: {{ subscription_id }}\n"
+                "{% if gift_aid_declared %}✓ Gift Aid declared — SHITAL will reclaim 25p extra "
+                "for every £1.\n{% endif %}\n"
+                "Your generosity keeps the lamps lit, the prasad flowing, and the temple "
+                "thriving for the community. Thank you for choosing to support us every month.\n\n"
+                "You can manage or cancel anytime through your PayPal account:\n"
+                "https://www.paypal.com/myaccount/autopay/\n\n"
+                "— SHITAL\n"
+                "Shri Shirdi Saibaba Temple Association\n"
+                "Registered UK Charity No. {{ charity_number }}"
+            ),
+            "variables": '["donor_first_name","amount","frequency","tier_label","subscription_id","gift_aid_declared","logo_url","charity_number"]',
         },
         # ── Volunteer reference request ─────────────────────────────────────
         # Sent to ref1_email and ref2_email when the trustee clicks
