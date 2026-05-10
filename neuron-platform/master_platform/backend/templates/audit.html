@@ -1,17 +1,38 @@
 {% extends "base.html" %}
 {% block title %}Audit{% endblock %}
 {% block content %}
-  <header>
-    <h1 class="text-2xl font-semibold tracking-tight">Audit Log</h1>
-    <p class="text-slate-400 text-sm">Last 500 events — newest first.</p>
+  <header class="flex items-end justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Audit Log</h1>
+      <p class="text-slate-400 text-sm">Last 500 events — newest first.</p>
+    </div>
+    <a id="csv-link" href="/api/audit/export.csv"
+       class="rounded-lg border border-slate-700 px-3 py-1.5 text-sm hover:border-emerald-400 hover:text-emerald-300">Download CSV</a>
   </header>
 
-  <form method="get" class="mt-4 flex flex-wrap gap-2 text-sm">
+  <form id="filter" method="get" class="mt-4 flex flex-wrap gap-2 text-sm">
     <input name="actor_filter" value="{{ actor_filter }}" placeholder="actor (key id)" class="rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5">
     <input name="action_filter" value="{{ action_filter }}" placeholder="action (e.g. generate_dna)" class="rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5">
     <button class="rounded-md bg-slate-800 px-3 py-1.5 hover:bg-slate-700">Filter</button>
     <a href="/ui/audit" class="rounded-md border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Reset</a>
   </form>
+
+  <script>
+    // Wire the CSV button to the same filters as the on-page table.
+    (function () {
+      function update() {
+        const f = document.getElementById('filter');
+        const params = new URLSearchParams();
+        const actor = f.actor_filter.value.trim();
+        const action = f.action_filter.value.trim();
+        if (actor)  params.set('actor', actor);
+        if (action) params.set('action', action);
+        document.getElementById('csv-link').href = '/api/audit/export.csv?' + params.toString();
+      }
+      document.querySelectorAll('#filter input').forEach(el => el.addEventListener('input', update));
+      update();
+    })();
+  </script>
 
   <div class="mt-4 overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/40">
     <table class="min-w-full text-sm">
