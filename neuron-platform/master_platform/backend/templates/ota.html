@@ -60,13 +60,21 @@
             <td class="px-4 py-3 text-[11px]">{{ r.sig_alg }} · <span class="text-slate-500">{{ r.sig_kid }}</span></td>
             <td class="px-4 py-3 text-xs text-slate-500">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '—' }}</td>
             <td class="px-4 py-3">
-              <div class="flex justify-end gap-1">
+              <div class="flex justify-end gap-1 flex-wrap">
                 {% for ch in ['dev', 'beta', 'stable'] %}
-                  <form method="post" action="/ui/devices/{{ device.device_dna }}/promote">
-                    <input type="hidden" name="channel" value="{{ ch }}">
-                    <input type="hidden" name="release_id" value="{{ r.id }}">
-                    <button class="rounded-md border border-slate-700 px-2 py-1 text-[11px] hover:border-emerald-400 hover:text-emerald-300">→ {{ ch }}</button>
-                  </form>
+                  <div class="flex">
+                    <form method="post" action="/ui/devices/{{ device.device_dna }}/dry-run-promote">
+                      <input type="hidden" name="channel" value="{{ ch }}">
+                      <input type="hidden" name="release_id" value="{{ r.id }}">
+                      <button title="Preview the gates without committing"
+                              class="rounded-l-md border border-r-0 border-slate-700 px-1.5 py-1 text-[10px] hover:border-cyan-400 hover:text-cyan-300">?</button>
+                    </form>
+                    <form method="post" action="/ui/devices/{{ device.device_dna }}/promote">
+                      <input type="hidden" name="channel" value="{{ ch }}">
+                      <input type="hidden" name="release_id" value="{{ r.id }}">
+                      <button class="rounded-r-md border border-slate-700 px-2 py-1 text-[11px] hover:border-emerald-400 hover:text-emerald-300">→ {{ ch }}</button>
+                    </form>
+                  </div>
                 {% endfor %}
               </div>
             </td>

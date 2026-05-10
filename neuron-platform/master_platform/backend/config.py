@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     bind_host: str = "0.0.0.0"
     bind_port: int = 8080
     log_level: str = "info"
+    # Audit retention — events older than this many days are pruned hourly.
+    audit_keep_days: int = 90
 
 
 settings = Settings()

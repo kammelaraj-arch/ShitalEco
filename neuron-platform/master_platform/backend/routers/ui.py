@@ -528,6 +528,42 @@ async def ui_device_ota(
     )
 
 
+@router.post("/ui/devices/{device_dna}/dry-run-promote")
+async def ui_device_dry_run_promote(
+    device_dna: str,
+    request: Request,
+    channel: str = Form(...),
+    release_id: str = Form(...),
+    rollback_allowed: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+    _: APIKey = Depends(ui_require_login),
+):
+    """Walks the OTA gates without committing. The result is rendered as a
+    one-shot flash on the OTA page so the operator can preview before
+    clicking the real Promote button.
+    """
+    from .devices import dry_run_promote, PromoteBody
+    from ..models import APIKey as APIKeyModel
+    bogus_admin = APIKeyModel(
+        id="ui_session", owner="ui", tier="readonly",
+        scopes_json=["devices:read"], rate_per_minute=60, rate_burst=10,
+        hash_alg="argon2id", key_hash="x", status="active",
+    )
+    body = PromoteBody(channel=channel, release_id=release_id,
+                       rollback_allowed=bool(rollback_allowed))
+    verdict = await dry_run_promote(  # type: ignore[arg-type]
+        device_dna=device_dna, body=body, session=session, _=bogus_admin,
+    )
+    request.session["ota_last_action"] = {
+        "kind": "emerald" if verdict.get("ok") else "amber",
+        "message": ("Dry-run PASSED — every gate green. " if verdict.get("ok")
+                    else "Dry-run FAILED — ") + " · ".join(
+            f"{g['id']}={'✓' if g['ok'] else '✗'}" for g in verdict.get("gates", [])
+        ),
+    }
+    return RedirectResponse(f"/ui/devices/{device_dna}/ota", status_code=303)
+
+
 @router.post("/ui/devices/{device_dna}/promote")
 async def ui_device_promote(
     device_dna: str,
