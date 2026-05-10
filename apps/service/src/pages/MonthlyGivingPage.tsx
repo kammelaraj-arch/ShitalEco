@@ -499,9 +499,32 @@ export function MonthlyGivingPage() {
             Your monthly support of <strong className="text-gold-400">£{selected ? Number(selected.amount).toFixed(0) : '—'}</strong> has been set up.
             {donorEmail && ` A confirmation will be sent to ${donorEmail}.`}
           </p>
-          <p className="text-xs" style={{ color: 'rgba(255,248,220,0.35)' }}>
-            You can cancel anytime through your PayPal account.
-          </p>
+
+          {/* How to cancel / unsubscribe — surfaced prominently so donors
+              never feel locked-in. PayPal owns the subscription, so cancel
+              must happen on their side; we just point the way. */}
+          <div className="mt-6 mx-auto max-w-md text-left rounded-xl px-4 py-4"
+            style={{ background: 'rgba(212,175,55,0.06)', border: '1px solid rgba(212,175,55,0.2)' }}>
+            <p className="text-sm font-bold text-gold-400 mb-2">How to cancel or pause</p>
+            <ol className="text-xs space-y-1.5 list-decimal list-inside" style={{ color: 'rgba(255,248,220,0.7)' }}>
+              <li>Sign in at <a href="https://www.paypal.com/myaccount/autopay" target="_blank" rel="noopener noreferrer"
+                  className="underline text-gold-400">paypal.com/myaccount/autopay</a></li>
+              <li>Find <strong>SHITAL</strong> in your automatic payments list</li>
+              <li>Click <strong>Cancel</strong> — it stops immediately, no further charges</li>
+            </ol>
+            <p className="text-xs mt-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
+              Need help? Email <a href="mailto:info@shital.org.uk" className="underline text-gold-400">info@shital.org.uk</a> and we'll cancel for you.
+            </p>
+            <p className="text-xs mt-3 pt-3" style={{ color: 'rgba(255,248,220,0.5)', borderTop: '1px solid rgba(212,175,55,0.15)' }}>
+              <strong>Stop emails about this payment?</strong>
+            </p>
+            <ul className="text-xs mt-1 space-y-1 list-disc list-inside" style={{ color: 'rgba(255,248,220,0.5)' }}>
+              <li>From PayPal: <a href="https://www.paypal.com/myaccount/notifications" target="_blank" rel="noopener noreferrer"
+                  className="underline text-gold-400">paypal.com/myaccount/notifications</a> → uncheck subscription notifications.</li>
+              <li>From SHITAL: reply "unsubscribe" to any email and we'll remove you.</li>
+            </ul>
+          </div>
+
           <button onClick={() => setScreen('browse')}
             className="mt-4 px-6 py-3 rounded-xl font-bold text-sm"
             style={{ background: 'rgba(212,175,55,0.15)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.3)' }}>

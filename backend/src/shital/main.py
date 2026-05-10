@@ -1277,6 +1277,37 @@ async def _patch_schema() -> None:
         # literal 'remote' as a sentinel for online/remote-only. Distinct from
         # `branch_id` (which is the org branch that owns the application).
         "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_branches JSONB NOT NULL DEFAULT '[]'::jsonb",
+        # ── Sava (one-day event) volunteers ───────────────────────────────────
+        # Lighter-weight than the long-term Volunteer Registration. For
+        # devotees who want to help at a single event (Shila Pooja, Aarti,
+        # Langar) without going through references / DBS / health declaration.
+        # Mirrors the SHITAL Liability Event Volunteer Form V1.
+        """CREATE TABLE IF NOT EXISTS sava_volunteers (
+            id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            reference_number    VARCHAR(20)  UNIQUE NOT NULL,
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            full_name           VARCHAR(255) NOT NULL,
+            email               VARCHAR(255) NOT NULL DEFAULT '',
+            mobile              VARCHAR(50)  NOT NULL DEFAULT '',
+            postcode            VARCHAR(20)  NOT NULL DEFAULT '',
+            age_range           VARCHAR(20)  NOT NULL DEFAULT '',
+            event_name          VARCHAR(255) NOT NULL DEFAULT '',
+            event_date          DATE,
+            event_location      VARCHAR(255) NOT NULL DEFAULT '',
+            preferred_roles     JSONB        NOT NULL DEFAULT '[]'::jsonb,
+            additional_notes    TEXT         NOT NULL DEFAULT '',
+            agreement_signed_at TIMESTAMPTZ,
+            status              VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            contact_id          UUID         REFERENCES contacts(id) ON DELETE SET NULL,
+            submitted_ip        VARCHAR(45)  NOT NULL DEFAULT '',
+            user_agent          VARCHAR(500) NOT NULL DEFAULT '',
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_status ON sava_volunteers(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_event  ON sava_volunteers(event_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_branch ON sava_volunteers(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_email  ON sava_volunteers(LOWER(email)) WHERE email != ''",
         # ── DBS / safeguarding ────────────────────────────────────────────────
         # Volunteers without a current DBS certificate need one before they
         # can be approved for any role. Three states the volunteer can be
@@ -2329,6 +2360,7 @@ _mount("shital.api.routers.recurring_payments",   "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
+_mount("shital.api.routers.sava_volunteers",      "router")
 _mount("shital.api.routers.bank_accounts",         "router")
 _mount("shital.api.routers.bank_imports",          "router")
 _mount("shital.api.routers.board",                 "router")
