@@ -53,6 +53,11 @@ services:
       PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
       PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
       PAYPAL_ENV: ${PAYPAL_ENV:-live}
+      # Must match the value in the deployer service below; the admin
+      # System Ops panel sends this as the X-Deploy-Secret header when
+      # it calls the deployer webhook. Without it, the panel reports
+      # "DEPLOY_SECRET not configured" / "mismatch".
+      DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
     volumes:
       - /opt/shitaleco/backups:/opt/shitaleco/backups
     depends_on:
