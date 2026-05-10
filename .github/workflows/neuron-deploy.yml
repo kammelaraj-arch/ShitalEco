@@ -90,12 +90,19 @@ jobs:
           KEY_B64: ${{ secrets.NEURON_DEPLOY_KEY_B64 }}
         run: |
           mkdir -p /tmp/.ssh
+          # Length-only diagnostic (NEVER prints the actual values).
+          echo "NEURON_DEPLOY_KEY     length: ${#KEY}"
+          echo "NEURON_DEPLOY_KEY_B64 length: ${#KEY_B64}"
           if [ -n "$KEY_B64" ]; then
             echo "Source: NEURON_DEPLOY_KEY_B64"
             # Tolerate base64 with or without line wrapping.
             printf '%s' "$KEY_B64" | tr -d ' \n\r' | base64 -d > /tmp/.ssh/test_key
           else
             echo "Source: NEURON_DEPLOY_KEY (raw PEM)"
+            if [ -z "$KEY" ]; then
+              echo "::error::Both secrets are empty. Save NEURON_DEPLOY_KEY_B64 with the output of: base64 -w 0 /root/neuron_deploy"
+              exit 1
+            fi
             printf '%s\n' "$KEY" | tr -d '\r' > /tmp/.ssh/test_key
           fi
           chmod 600 /tmp/.ssh/test_key
