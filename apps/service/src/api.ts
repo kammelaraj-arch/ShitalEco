@@ -185,6 +185,8 @@ export const api = {
     donor_first_name: string; donor_surname: string; donor_email: string
     donor_postcode: string; donor_address: string
     donor_phone?: string
+    gift_aid_declared?: boolean
+    tier_label?: string
   }): Promise<{ success: boolean }> {
     const r = await fetch(`${API}/service/giving/subscription/approve`, {
       method: 'POST',

@@ -292,6 +292,13 @@ class ApproveBody(BaseModel):
     donor_phone: str = ""
     donor_postcode: str = ""
     donor_address: str = ""
+    # Gift Aid declaration on the subscription — when true, every recurring
+    # payment created via the PayPal webhook inherits the flag, so the
+    # GASDS / Gift Aid claim picks them up automatically without per-payment
+    # admin work.
+    gift_aid_declared: bool = False
+    # Optional: custom-amount tier label for the confirmation email subject.
+    tier_label: str = ""
 
 
 @router.post("/service/giving/subscription/approve")
@@ -351,33 +358,71 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                 })
 
         # ── Record subscription ─────────────────────────────────────────────
+        sub_uuid = str(uuid.uuid4())
         await db.execute(text("""
             INSERT INTO recurring_giving_subscriptions
                 (id, paypal_subscription_id, paypal_plan_id, tier_id, amount, frequency,
                  status, branch_id, donor_name, donor_email,
                  donor_first_name, donor_surname, donor_postcode, donor_address,
-                 contact_id, approved_at, created_at, updated_at)
+                 contact_id, approved_at,
+                 gift_aid_declared, gift_aid_declared_at,
+                 created_at, updated_at)
             VALUES
                 (:id, :sub_id, :plan_id, :tier_id, :amount, :freq,
                  'ACTIVE', :branch, :name, :email,
                  :first_name, :surname, :postcode, :address,
-                 :cid, :now, :now, :now)
+                 :cid, :now,
+                 :ga, :ga_at,
+                 :now, :now)
             ON CONFLICT (paypal_subscription_id) DO UPDATE
                 SET status = 'ACTIVE', approved_at = :now, updated_at = :now,
                     donor_name = :name, donor_email = :email,
                     donor_first_name = :first_name, donor_surname = :surname,
                     donor_postcode = :postcode, donor_address = :address,
+                    gift_aid_declared = :ga,
+                    gift_aid_declared_at = COALESCE(recurring_giving_subscriptions.gift_aid_declared_at, :ga_at),
                     contact_id = COALESCE(recurring_giving_subscriptions.contact_id, EXCLUDED.contact_id)
         """), {
-            "id": str(uuid.uuid4()), "sub_id": body.subscription_id,
+            "id": sub_uuid, "sub_id": body.subscription_id,
             "plan_id": body.plan_id, "tier_id": body.tier_id or None,
             "amount": body.amount, "freq": body.frequency,
             "branch": body.branch_id, "name": full_name, "email": body.donor_email,
             "first_name": body.donor_first_name, "surname": body.donor_surname,
             "postcode": body.donor_postcode, "address": body.donor_address,
             "cid": contact_id, "now": now,
+            "ga": body.gift_aid_declared,
+            "ga_at": now if body.gift_aid_declared else None,
         })
         await db.commit()
+
+    # ── Confirmation email ──────────────────────────────────────────────────
+    # Sent via the admin-editable `recurring_giving_confirmation` template.
+    # Failure is non-fatal — the subscription is set up regardless. The
+    # send is recorded in sent_emails so admins can resend from
+    # Admin → Settings → Sent Emails if needed.
+    if body.donor_email and "@" in body.donor_email:
+        try:
+            from shital.api.routers.email_templates import send_template
+            from shital.core.fabrics.config import settings
+            await send_template(
+                "recurring_giving_confirmation",
+                body.donor_email,
+                {
+                    "donor_first_name": body.donor_first_name or full_name or "Friend",
+                    "amount": f"{float(body.amount):.2f}",
+                    "frequency": body.frequency.lower(),
+                    "tier_label": body.tier_label or "Monthly Gift",
+                    "subscription_id": body.subscription_id,
+                    "gift_aid_declared": body.gift_aid_declared,
+                    "logo_url": "https://shirdisai.org.uk/Cnt/img/shital-logo-new.png",
+                    "charity_number": settings.CHARITY_NUMBER or "1138530",
+                },
+                related_type="recurring_giving_subscription",
+                related_id=sub_uuid,
+            )
+        except Exception:
+            pass  # confirmation email is non-fatal
+
     return {"success": True, "subscription_id": body.subscription_id}
 
 
