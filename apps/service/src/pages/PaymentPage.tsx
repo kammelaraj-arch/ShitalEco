@@ -113,42 +113,75 @@ export function PaymentPage() {
     ]).finally(() => setConfigLoading(false))
   }, [])
 
+  // PayPal hosted card-fields tokenization fails with
+  // "Window closed for postrobot_method before ack" when the
+  // PayPalCardFieldsProvider's createOrder/onApprove props change
+  // identity — every change re-renders the provider, which unmounts
+  // and remounts the iframes, and any in-flight postMessage to the
+  // iframe loses its target.
+  //
+  // Originally these were useCallback'd with all the billingFirst /
+  // billingLast / billingEmail / billingPhone / billingPostcode state
+  // in the dep array — so EVERY KEYSTROKE in any billing field rebuilt
+  // the function reference, remounted the iframes, and put the SDK
+  // into the broken postrobot state. By the time the user typed a card
+  // number and clicked Pay, the iframe was mid-remount and the submit
+  // failed with "Payment was interrupted".
+  //
+  // Fix: keep the callbacks identity-stable by reading mutable state
+  // through a ref. handleCreateOrder / handleApprove are recreated
+  // ONCE on mount and never again.
+  const billingRef = useRef({
+    billingFirst, billingLast, billingEmail, billingPhone, billingPostcode, billingAddress1,
+    contactInfo, giftAidDeclaration, items, total, branchId,
+  })
+  const basketIdRef = useRef(basketId)
+  useEffect(() => {
+    billingRef.current = {
+      billingFirst, billingLast, billingEmail, billingPhone, billingPostcode, billingAddress1,
+      contactInfo, giftAidDeclaration, items, total, branchId,
+    }
+    basketIdRef.current = basketId
+  })
+
   const handleCreateOrder = useCallback(async (): Promise<string> => {
-    const desc      = items.slice(0, 3).map(i => i.name).join(', ') || 'Shital Temple Donation'
-    const firstName = billingFirst || giftAidDeclaration?.firstName || contactInfo?.firstName || contactInfo?.name?.split(' ')[0] || ''
-    const surname   = billingLast  || giftAidDeclaration?.surname   || contactInfo?.surname   || contactInfo?.name?.split(' ').slice(1).join(' ') || ''
-    return api.paypalCreateOrder(total, desc, branchId, {
+    const s = billingRef.current
+    const desc      = s.items.slice(0, 3).map((i: { name: string }) => i.name).join(', ') || 'Shital Temple Donation'
+    const firstName = s.billingFirst || s.giftAidDeclaration?.firstName || s.contactInfo?.firstName || s.contactInfo?.name?.split(' ')[0] || ''
+    const surname   = s.billingLast  || s.giftAidDeclaration?.surname   || s.contactInfo?.surname   || s.contactInfo?.name?.split(' ').slice(1).join(' ') || ''
+    return api.paypalCreateOrder(s.total, desc, s.branchId, {
       contact_first_name: firstName,
       contact_surname:    surname,
-      contact_name:       firstName && surname ? `${firstName} ${surname}` : contactInfo?.name || '',
-      contact_email:      billingEmail || giftAidDeclaration?.contactEmail || contactInfo?.email || '',
-      contact_phone:      billingPhone || giftAidDeclaration?.contactPhone || contactInfo?.phone || '',
-      contact_postcode:   billingPostcode || giftAidDeclaration?.postcode  || contactInfo?.postcode || '',
-      contact_address:    giftAidDeclaration?.address || contactInfo?.address || '',
-      contact_uprn:       giftAidDeclaration?.uprn    || contactInfo?.uprn    || '',
+      contact_name:       firstName && surname ? `${firstName} ${surname}` : s.contactInfo?.name || '',
+      contact_email:      s.billingEmail || s.giftAidDeclaration?.contactEmail || s.contactInfo?.email || '',
+      contact_phone:      s.billingPhone || s.giftAidDeclaration?.contactPhone || s.contactInfo?.phone || '',
+      contact_postcode:   s.billingPostcode || s.giftAidDeclaration?.postcode  || s.contactInfo?.postcode || '',
+      contact_address:    s.giftAidDeclaration?.address || s.contactInfo?.address || '',
+      contact_uprn:       s.giftAidDeclaration?.uprn    || s.contactInfo?.uprn    || '',
     })
-  }, [total, branchId, items, contactInfo, giftAidDeclaration, billingFirst, billingLast, billingEmail, billingPhone, billingPostcode])
+  }, [])  // ← stable identity; reads via ref
 
   const handleApprove = useCallback(async (data: { orderID: string }) => {
     setCapturing(true)
     setError('')
     try {
-      const firstName = billingFirst || giftAidDeclaration?.firstName || contactInfo?.firstName || ''
-      const surname   = billingLast  || giftAidDeclaration?.surname   || contactInfo?.surname   || ''
-      const fullName  = firstName && surname ? `${firstName} ${surname}` : contactInfo?.name || ''
+      const s = billingRef.current
+      const firstName = s.billingFirst || s.giftAidDeclaration?.firstName || s.contactInfo?.firstName || ''
+      const surname   = s.billingLast  || s.giftAidDeclaration?.surname   || s.contactInfo?.surname   || ''
+      const fullName  = firstName && surname ? `${firstName} ${surname}` : s.contactInfo?.name || ''
       const result = await api.paypalCapture({
         paypal_order_id:    data.orderID,
-        amount:             total,
-        branch_id:          branchId,
+        amount:             s.total,
+        branch_id:          s.branchId,
         contact_name:       fullName,
         contact_first_name: firstName,
         contact_surname:    surname,
-        contact_email:      billingEmail || giftAidDeclaration?.contactEmail || contactInfo?.email || '',
-        contact_phone:      billingPhone || giftAidDeclaration?.contactPhone || contactInfo?.phone || '',
-        gift_aid:           giftAidDeclaration?.agreed ?? false,
-        gift_aid_postcode:  billingPostcode || giftAidDeclaration?.postcode || contactInfo?.postcode || '',
-        gift_aid_address:   giftAidDeclaration?.address || contactInfo?.address || '',
-        contact_uprn:       giftAidDeclaration?.uprn    || contactInfo?.uprn    || '',
+        contact_email:      s.billingEmail || s.giftAidDeclaration?.contactEmail || s.contactInfo?.email || '',
+        contact_phone:      s.billingPhone || s.giftAidDeclaration?.contactPhone || s.contactInfo?.phone || '',
+        gift_aid:           s.giftAidDeclaration?.agreed ?? false,
+        gift_aid_postcode:  s.billingPostcode || s.giftAidDeclaration?.postcode || s.contactInfo?.postcode || '',
+        gift_aid_address:   s.giftAidDeclaration?.address || s.contactInfo?.address || '',
+        contact_uprn:       s.giftAidDeclaration?.uprn    || s.contactInfo?.uprn    || '',
       })
       if (result.success) {
         setOrderResult({
@@ -156,15 +189,16 @@ export function PaymentPage() {
           order_ref:         result.order_ref,
           paypal_order_id:   data.orderID,
           paypal_capture_id: result.paypal_capture_id || '',
-          amount:            result.amount ?? total,
+          amount:            result.amount ?? s.total,
         })
-        if (contactInfo?.email && result.order_ref) {
+        if (s.contactInfo?.email && result.order_ref) {
           await api.sendReceipt({
-            basket_id: basketId || result.order_id,
-            email:     contactInfo.email,
-            name:      contactInfo.name,
-            total,
-            items: items.map((i) => ({ name: i.name, quantity: i.quantity, unit_price: i.unitPrice })),
+            basket_id: basketIdRef.current || result.order_id,
+            email:     s.contactInfo.email,
+            name:      s.contactInfo.name || '',
+            total:     s.total,
+            items: s.items.map((i: { name: string; quantity: number; unitPrice: number }) =>
+              ({ name: i.name, quantity: i.quantity, unit_price: i.unitPrice })),
           }).catch(() => {})
         }
         setScreen('confirmation')
@@ -176,7 +210,7 @@ export function PaymentPage() {
     } finally {
       setCapturing(false)
     }
-  }, [total, branchId, contactInfo, giftAidDeclaration, items, basketId, billingFirst, billingLast, billingEmail, billingPhone, billingPostcode])
+  }, [])  // ← stable identity; reads via billingRef
 
   const boost = giftAidTotal * 0.25
 
