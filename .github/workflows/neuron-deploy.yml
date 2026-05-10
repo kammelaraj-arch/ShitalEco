@@ -1,33 +1,18 @@
 name: Neuron Auto-Deploy
 
-# Auto-deploys the Neuron block to the production VPS the moment a
-# neuron-platform/** change lands on the deploy branch. Never touches
-# any ShitalEco service — calls neuron-platform/deploy.sh which is
-# fully isolated.
+# Auto-deploys the Neuron block to production by hitting the existing
+# ShitalEco webhook deployer at https://shital.org.uk/deploy/neuron.
+# That endpoint is served by the `deployer` container, which runs
+# /workspace/neuron-platform/deploy.sh in the background. This is the
+# same pattern the main ShitalEco workflow uses (deploy-vultr.yml),
+# so we no longer need SSH keys, hostnames, or username secrets.
 #
-# Required GitHub Actions secrets (set under
-#  Settings → Secrets and variables → Actions):
+# Required GitHub Actions secret:
 #
-#   NEURON_DEPLOY_HOST       e.g. 192.248.147.205
-#   NEURON_DEPLOY_USER       typically 'root'
+#   DEPLOY_SECRET   The X-Deploy-Secret header value the deployer
+#                   accepts. Already set for ShitalEco — Neuron reuses it.
 #
-# AND ONE of the following two — base64 is preferred because GitHub's
-# secret form sometimes mangles multi-line PEM whitespace:
-#
-#   NEURON_DEPLOY_KEY_B64    base64(private key file).  Single line.
-#                            Generate with:  base64 -w 0 /root/neuron_deploy
-#   NEURON_DEPLOY_KEY        raw -----BEGIN OPENSSH PRIVATE KEY-----…
-#                            -----END OPENSSH PRIVATE KEY----- block.
-#
-#   NEURON_DEPLOY_PORT       optional, defaults to 22
-#
-# Generate the key on the VPS:
-#
-#   ssh-keygen -t ed25519 -C "neuron-deploy@github" -f /root/neuron_deploy -N ""
-#   cat /root/neuron_deploy.pub >> /root/.ssh/authorized_keys
-#   cat /root/neuron_deploy   # paste this whole block into the secret
-#   # After the workflow runs green:
-#   shred -u /root/neuron_deploy
+# That's it. No SSH key, no NEURON_DEPLOY_HOST, no NEURON_DEPLOY_USER.
 
 on:
   push:
@@ -36,16 +21,7 @@ on:
     paths:
       - 'neuron-platform/**'
       - '.github/workflows/neuron-deploy.yml'
-  workflow_dispatch:
-    inputs:
-      skip_pull:
-        description: "Skip the deploy.sh git pull"
-        type: boolean
-        default: false
-      skip_nginx:
-        description: "Skip the nginx -s reload"
-        type: boolean
-        default: false
+  workflow_dispatch: {}
 
 concurrency:
   group: neuron-deploy
@@ -55,163 +31,39 @@ jobs:
   deploy:
     name: Deploy Neuron Master to VPS
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Validate required secrets
+      - name: Trigger Neuron webhook deployer
         env:
-          NEURON_DEPLOY_HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
-          NEURON_DEPLOY_USER: ${{ secrets.NEURON_DEPLOY_USER }}
-          NEURON_DEPLOY_KEY: ${{ secrets.NEURON_DEPLOY_KEY }}
-          NEURON_DEPLOY_KEY_B64: ${{ secrets.NEURON_DEPLOY_KEY_B64 }}
-        run: |
-          missing=0
-          for v in NEURON_DEPLOY_HOST NEURON_DEPLOY_USER; do
-            if [ -z "${!v}" ]; then echo "::error::Missing secret $v"; missing=1; fi
-          done
-          if [ -z "$NEURON_DEPLOY_KEY" ] && [ -z "$NEURON_DEPLOY_KEY_B64" ]; then
-            echo "::error::Set NEURON_DEPLOY_KEY (raw PEM) or NEURON_DEPLOY_KEY_B64 (base64). Base64 is preferred."
-            missing=1
-          fi
-          [ $missing -eq 0 ]
-
-      # ── Pre-flight: decode + sanity-check the SSH key ──────────────────────
-      # Prefers NEURON_DEPLOY_KEY_B64 (single line, paste-safe). Falls back
-      # to NEURON_DEPLOY_KEY (raw PEM) when the b64 secret isn't set.
-      # Either way, we end up with a normalised key file at /tmp/.ssh/test_key
-      # and assert it parses with ssh-keygen.
-      - name: Decode + sanity-check the deploy key
-        id: keycheck
-        env:
-          KEY:     ${{ secrets.NEURON_DEPLOY_KEY }}
-          KEY_B64: ${{ secrets.NEURON_DEPLOY_KEY_B64 }}
-        run: |
-          mkdir -p /tmp/.ssh
-          # Length-only diagnostic (NEVER prints the actual values).
-          echo "NEURON_DEPLOY_KEY     length: ${#KEY}"
-          echo "NEURON_DEPLOY_KEY_B64 length: ${#KEY_B64}"
-          if [ -n "$KEY_B64" ]; then
-            echo "Source: NEURON_DEPLOY_KEY_B64"
-            # Tolerate base64 with or without line wrapping.
-            printf '%s' "$KEY_B64" | tr -d ' \n\r' | base64 -d > /tmp/.ssh/test_key
-          else
-            echo "Source: NEURON_DEPLOY_KEY (raw PEM)"
-            if [ -z "$KEY" ]; then
-              echo "::error::Both secrets are empty. Save NEURON_DEPLOY_KEY_B64 with the output of: base64 -w 0 /root/neuron_deploy"
-              exit 1
-            fi
-            printf '%s\n' "$KEY" | tr -d '\r' > /tmp/.ssh/test_key
-          fi
-          chmod 600 /tmp/.ssh/test_key
-          echo "Key file byte count: $(wc -c < /tmp/.ssh/test_key)"
-          echo "Key file line count: $(wc -l < /tmp/.ssh/test_key)"
-          echo "First line:          $(head -1 /tmp/.ssh/test_key)"
-          echo "Last  line:          $(tail -1 /tmp/.ssh/test_key)"
-          if ssh-keygen -y -f /tmp/.ssh/test_key > /tmp/.ssh/test_key.pub 2>&1; then
-            echo "::notice::Private key parses OK."
-            echo "Derived public key (compare against /root/.ssh/authorized_keys on the VPS):"
-            cat /tmp/.ssh/test_key.pub
-          else
-            echo "::error::Private key did NOT parse:"
-            ssh-keygen -y -f /tmp/.ssh/test_key 2>&1 | sed 's/^/  /'
-            if [ -n "$KEY_B64" ]; then
-              echo "::error::Re-generate the b64 secret with: base64 -w 0 /root/neuron_deploy"
-            else
-              echo "::error::Switch to NEURON_DEPLOY_KEY_B64 — base64 -w 0 /root/neuron_deploy"
-            fi
-            exit 1
-          fi
-
-      - name: Set up ssh-agent with the deploy key
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          cp /tmp/.ssh/test_key ~/.ssh/id_neuron
-          chmod 600 ~/.ssh/id_neuron
-          eval "$(ssh-agent -s)"
-          ssh-add ~/.ssh/id_neuron
-          # Persist the agent socket for following steps.
-          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> $GITHUB_ENV
-          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> $GITHUB_ENV
-
-      - name: Trust the VPS host key (one-time per run)
-        env:
-          HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
-          PORT: ${{ secrets.NEURON_DEPLOY_PORT || 22 }}
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          echo "known_hosts entries:"
-          wc -l ~/.ssh/known_hosts
-
-      - name: Run neuron-platform/deploy.sh on the VPS
-        env:
-          HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
-          USER: ${{ secrets.NEURON_DEPLOY_USER }}
-          PORT: ${{ secrets.NEURON_DEPLOY_PORT || 22 }}
-          SKIP_PULL: ${{ github.event.inputs.skip_pull || 'false' }}
-          SKIP_NGINX: ${{ github.event.inputs.skip_nginx || 'false' }}
-        run: |
-          FLAGS=""
-          [ "$SKIP_PULL" = "true" ]  && FLAGS="$FLAGS --no-pull"
-          [ "$SKIP_NGINX" = "true" ] && FLAGS="$FLAGS --no-nginx"
-          echo "==> Triggered by ${{ github.event_name }} from ${{ github.sha }}"
-          echo "==> Running: bash neuron-platform/deploy.sh $FLAGS"
-          # Self-heal step: the deployer container has been wiping the
-          # /opt/shitaleco checkout intermittently, which means
-          # neuron-platform/deploy.sh sometimes isn't on disk when this
-          # workflow runs. Fetch + reset the deploy branch first so the
-          # file is guaranteed to exist before we invoke it. deploy.sh
-          # itself will then re-fetch + reset internally as well, but
-          # that's idempotent.
-          ssh -tt \
-              -o ConnectTimeout=10 \
-              -o ServerAliveInterval=30 \
-              -o BatchMode=yes \
-              -p "$PORT" "$USER@$HOST" \
-              bash -s -- "$FLAGS" <<'REMOTE'
-          set -euo pipefail
-          FLAGS="$1"
-          cd /opt/shitaleco
-
-          echo "[pre-flight] resetting checkout to origin/claude/shital-erp-platform-iR2UF"
-          git fetch origin claude/shital-erp-platform-iR2UF --quiet || {
-            echo "::error::git fetch failed on the VPS — is the repo at /opt/shitaleco?"
-            exit 1
-          }
-          # Force a clean checkout on the deploy branch even if the
-          # current branch was something else.
-          git checkout -B claude/shital-erp-platform-iR2UF \
-                       origin/claude/shital-erp-platform-iR2UF --quiet
-          git reset --hard origin/claude/shital-erp-platform-iR2UF --quiet
-
-          if [ ! -f neuron-platform/deploy.sh ]; then
-            echo "::error::neuron-platform/deploy.sh STILL missing after a hard reset."
-            echo "::error::The deploy branch tip may not contain neuron-platform/. Last commit:"
-            git log -1 --oneline
-            exit 1
-          fi
-
-          echo "[pre-flight] checkout is at $(git rev-parse --short HEAD), deploy.sh present"
-          bash neuron-platform/deploy.sh $FLAGS
-          REMOTE
-
-      - name: Smoke test the live Master
-        env:
-          HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
         run: |
           set -e
-          for i in 1 2 3 4 5 6; do
-            if out=$(curl -fsS  --max-time 8 "https://${HOST}/healthz" 2>/dev/null) ||
-               out=$(curl -fsSk --max-time 8 -H "Host: neuron.shital.org.uk" \
-                     "https://${HOST}/healthz" 2>/dev/null); then
-              echo "healthz: $out"
+          # Fall back to the same default the ShitalEco workflow uses
+          # if the secret is missing — keeps both stacks in lockstep.
+          SECRET="${DEPLOY_SECRET:-ShitalDeploy2026!}"
+          echo "==> POST https://shital.org.uk/deploy/neuron"
+          code=$(curl -s -o /tmp/body -w "%{http_code}" \
+            -X POST https://shital.org.uk/deploy/neuron \
+            -H "X-Deploy-Secret: ${SECRET}" \
+            --max-time 15 --retry 3 --retry-delay 5)
+          echo "HTTP ${code}"
+          cat /tmp/body || true
+          # 202 = accepted (deployer started in background)
+          [ "$code" = "202" ] || { echo "::error::deployer rejected the webhook"; exit 1; }
+
+      - name: Wait for the Master to come back up
+        run: |
+          set -e
+          # The deployer runs deploy.sh in the background, so we poll
+          # the live healthz until the new revision is up. ~3 min budget.
+          for i in $(seq 1 36); do
+            if out=$(curl -fsS --max-time 5 https://neuron.shital.org.uk/healthz 2>/dev/null); then
+              echo "attempt $i: $out"
               echo "$out" | grep -q '"status":"ok"' && exit 0
+            else
+              echo "attempt $i: not ready yet"
             fi
-            echo "attempt $i: waiting…"
             sleep 5
           done
-          echo "::error::healthz didn't return ok after 6 retries"
+          echo "::error::healthz didn't return ok within 3 minutes"
           exit 1

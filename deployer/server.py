@@ -5,10 +5,18 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "")
 
+# Map of webhook path → script to run inside the deployer container.
+# /workspace is the host's /opt/shitaleco bind-mount, so the Neuron
+# script is reachable as a normal file.
+DEPLOY_TARGETS = {
+    "/deploy":         "/app/deploy.sh",
+    "/deploy/neuron":  "/app/deploy_neuron.sh",
+}
 
-def run_deploy():
+
+def run_deploy(script_path: str):
     subprocess.Popen(
-        ["/bin/bash", "/app/deploy.sh"],
+        ["/bin/bash", script_path],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -19,8 +27,9 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        if self.path == "/deploy" and self.headers.get("X-Deploy-Secret") == DEPLOY_SECRET:
-            threading.Thread(target=run_deploy, daemon=True).start()
+        script = DEPLOY_TARGETS.get(self.path)
+        if script and self.headers.get("X-Deploy-Secret") == DEPLOY_SECRET:
+            threading.Thread(target=run_deploy, args=(script,), daemon=True).start()
             self.send_response(202)
             self.end_headers()
         else:
