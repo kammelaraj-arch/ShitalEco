@@ -1,0 +1,117 @@
+name: Neuron Auto-Deploy
+
+# Auto-deploys the Neuron block to the production VPS the moment a
+# neuron-platform/** change lands on the deploy branch. Never touches
+# any ShitalEco service — calls neuron-platform/deploy.sh which is
+# fully isolated.
+#
+# Required GitHub Actions secrets (set under
+#  Settings → Secrets and variables → Actions):
+#
+#   NEURON_DEPLOY_HOST   e.g. 192.248.147.205 or quickdonation.example.com
+#   NEURON_DEPLOY_USER   typically 'root'
+#   NEURON_DEPLOY_KEY    the PRIVATE half of an SSH key whose PUBLIC
+#                        half is in the VPS user's ~/.ssh/authorized_keys
+#   NEURON_DEPLOY_PORT   optional, defaults to 22
+#
+# Generate a fresh deploy key on a workstation:
+#
+#   ssh-keygen -t ed25519 -C "neuron-deploy@github" -f ./neuron_deploy
+#   # paste neuron_deploy.pub onto the VPS:
+#   #   echo "<contents>" >> /root/.ssh/authorized_keys
+#   # paste neuron_deploy (the private half) into NEURON_DEPLOY_KEY secret
+#   shred -u neuron_deploy
+
+on:
+  push:
+    branches:
+      - claude/shital-erp-platform-iR2UF
+    paths:
+      - 'neuron-platform/**'
+      - '.github/workflows/neuron-deploy.yml'
+  workflow_dispatch:
+    # Manual trigger from the Actions tab — handy for forcing a redeploy
+    # after a config change that didn't touch neuron-platform/.
+    inputs:
+      skip_pull:
+        description: "Skip the deploy.sh git pull (use already-checked-out files)"
+        type: boolean
+        default: false
+      skip_nginx:
+        description: "Skip the nginx -s reload"
+        type: boolean
+        default: false
+
+concurrency:
+  # Coalesce overlapping deploys. The latest push wins; in-flight ones
+  # are cancelled instead of stacking up.
+  group: neuron-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Neuron Master to VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (just for the SHA / branch info)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate required secrets
+        run: |
+          missing=0
+          for v in NEURON_DEPLOY_HOST NEURON_DEPLOY_USER NEURON_DEPLOY_KEY; do
+            if [ -z "${!v}" ]; then echo "::error::Missing secret $v"; missing=1; fi
+          done
+          if [ $missing -eq 1 ]; then
+            echo "::error::Set the secrets in Settings → Secrets and variables → Actions, then re-run."
+            exit 1
+          fi
+        env:
+          NEURON_DEPLOY_HOST: ${{ secrets.NEURON_DEPLOY_HOST }}
+          NEURON_DEPLOY_USER: ${{ secrets.NEURON_DEPLOY_USER }}
+          NEURON_DEPLOY_KEY: ${{ secrets.NEURON_DEPLOY_KEY }}
+
+      - name: SSH + run neuron-platform/deploy.sh
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.NEURON_DEPLOY_HOST }}
+          username: ${{ secrets.NEURON_DEPLOY_USER }}
+          key: ${{ secrets.NEURON_DEPLOY_KEY }}
+          port: ${{ secrets.NEURON_DEPLOY_PORT || 22 }}
+          command_timeout: 12m
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/shitaleco
+            FLAGS=""
+            if [ "${{ github.event.inputs.skip_pull || 'false' }}" = "true" ]; then
+              FLAGS="$FLAGS --no-pull"
+            fi
+            if [ "${{ github.event.inputs.skip_nginx || 'false' }}" = "true" ]; then
+              FLAGS="$FLAGS --no-nginx"
+            fi
+            echo "==> Triggered by ${{ github.event_name }} from SHA ${{ github.sha }}"
+            echo "==> Running: bash neuron-platform/deploy.sh $FLAGS"
+            bash neuron-platform/deploy.sh $FLAGS
+
+      - name: Smoke test the live Master
+        run: |
+          set -e
+          # The healthz endpoint must come back 200 with the Neuron version.
+          # Retries a few times because nginx reload + container start can
+          # race the very first probe.
+          for i in 1 2 3 4 5 6; do
+            if out=$(curl -fsS --max-time 8 "https://${{ secrets.NEURON_DEPLOY_HOST }}/healthz" 2>/dev/null) ||
+               out=$(curl -fsSk --max-time 8 -H "Host: neuron.shital.org.uk" \
+                     "https://${{ secrets.NEURON_DEPLOY_HOST }}/healthz" 2>/dev/null); then
+              echo "healthz: $out"
+              echo "$out" | grep -q '"status":"ok"' && exit 0
+            fi
+            echo "attempt $i: waiting…"
+            sleep 5
+          done
+          echo "::error::healthz didn't return ok after 6 retries"
+          exit 1
