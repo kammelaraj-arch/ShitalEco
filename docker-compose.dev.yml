@@ -53,6 +53,10 @@ services:
       MS_TENANT_ID: ${MS_TENANT_ID:-}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
       MS_REDIRECT_URI: https://dev.shital.org.uk/auth-callback
+      # Same secret the prod deployer uses — System Ops panel calls
+      # the prod deployer over the internal docker bridge for both
+      # envs, so dev's backend needs the same value to authenticate.
+      DEPLOY_SECRET: ${DEPLOY_SECRET:-shital-deploy-secret-change-me}
     depends_on:
       db-dev:
         condition: service_healthy
