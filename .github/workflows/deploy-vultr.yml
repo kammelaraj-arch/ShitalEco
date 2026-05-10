@@ -348,16 +348,30 @@ jobs:
             # Without this nginx serves a cert that doesn't cover the
             # subdomain, and Cloudflare reports
             # "remote connection failure ... TLS_error" → 503 to users.
+            #
+            # --cert-name shital.org.uk pins certbot to update the EXISTING
+            # cert directory (`/etc/letsencrypt/live/shital.org.uk/`) rather
+            # than create a parallel `live/shital.org.uk-0001/` when the SAN
+            # list changes. nginx config points at the un-suffixed path; if
+            # certbot creates -0001, nginx keeps serving the OLD cert with
+            # the OLD SAN list — exactly the failure mode that bit
+            # service.shital.org.uk earlier today.
+            #
+            # api.shital.org.uk added to the list because it was already in
+            # the live cert (set by an earlier manual certbot run) and we
+            # don't want a deploy to drop it.
             echo "=== Renewing SSL certs ==="
             docker run --rm \
               -v /var/www/certbot:/var/www/certbot \
               -v /etc/letsencrypt:/etc/letsencrypt \
               certbot/certbot certonly --webroot \
+              --cert-name shital.org.uk \
               --webroot-path /var/www/certbot \
               -d shital.org.uk -d www.shital.org.uk \
               -d admin.shital.org.uk -d kiosk.shital.org.uk \
               -d donate.shital.org.uk -d screen.shital.org.uk \
-              -d service.shital.org.uk -d dev.shital.org.uk \
+              -d api.shital.org.uk -d dev.shital.org.uk \
+              -d service.shital.org.uk \
               --expand --non-interactive --agree-tos \
               -m admin@shirdisai.org.uk \
               2>&1 | tail -10 || echo "certbot returned non-zero — non-fatal, certs may be unchanged"
