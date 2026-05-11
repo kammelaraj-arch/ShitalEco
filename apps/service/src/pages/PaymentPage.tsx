@@ -23,13 +23,23 @@ const PayPalCVVField         = _PayPalCVVField         as ComponentType<any>
 
 // ── Card submit button — must live inside PayPalCardFieldsProvider ─────────────
 function CardSubmitButton({
-  total, paying, setError, setCapturing, billingAddress,
+  total, paying, setError, setCapturing, billingAddress, cardholderName,
 }: {
   total: number
   paying: boolean
   setError: (e: string) => void
   setCapturing: (v: boolean) => void
-  billingAddress: { addressLine1: string; postalCode: string; countryCode: string }
+  // Match PayPal SDK shape: optional address_line_2 / admin_area_2 are passed
+  // when we have them. PayPal silently drops the entire address if any
+  // required field is missing OR malformed, so we validate before submit.
+  billingAddress: {
+    addressLine1: string
+    addressLine2?: string
+    adminArea2?: string
+    postalCode: string
+    countryCode: string
+  }
+  cardholderName: string
 }) {
   const { cardFieldsForm } = usePayPalCardFields()
 
@@ -37,7 +47,14 @@ function CardSubmitButton({
     setError('')
     setCapturing(true)
     try {
-      await (cardFieldsForm as any).submit({ billingAddress })
+      // PayPal Card Fields requires `cardholderName` for 3-D Secure on UK
+      // cards. Without it, the SDK either prompts the buyer mid-submit
+      // (kills the flow) or fails the SCA challenge silently. Compose
+      // first+last we already collected — never let an empty string slip
+      // through, the SDK throws "INVALID_PARAMETER_VALUE" on "".
+      const submitArgs: Record<string, unknown> = { billingAddress }
+      if (cardholderName.trim()) submitArgs.cardholderName = cardholderName.trim()
+      await (cardFieldsForm as any).submit(submitArgs)
     } catch (e: any) {
       const raw = e?.message || ''
       // Map PayPal SDK's noisy internal errors to actionable messages.
@@ -232,11 +249,29 @@ export function PaymentPage() {
   const hostedFieldClass = 'block relative bg-black/30 border border-white/10 rounded-xl px-3 overflow-hidden'
   const hostedFieldHeight = { height: 48 }
 
-  const billingAddressPayload = {
-    addressLine1: billingAddress1 || (giftAidDeclaration?.address || contactInfo?.address || '').split(',')[0]?.trim() || '',
-    postalCode:   billingPostcode,
-    countryCode:  'GB',
-  }
+  // PayPal Card Fields wants the address split into addressLine1, optional
+  // addressLine2, optional adminArea2 (city), postalCode, countryCode.
+  // Build it from whichever source has data — explicit billing fields beat
+  // gift-aid lookup beats raw contact form. PayPal silently drops the whole
+  // address if addressLine1 is empty, so we always make sure that's set.
+  const billingAddressPayload = (() => {
+    const sourceAddr = giftAidDeclaration?.address || contactInfo?.address || ''
+    const parts      = sourceAddr.split(',').map(p => p.trim()).filter(Boolean)
+    const line1      = (billingAddress1 || parts[0] || '').trim()
+    const line2      = parts[1] || ''
+    // Last comma-segment that doesn't look like a postcode is the city.
+    const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
+    const cityCandidates = parts.slice(1).filter(p => !ukPostRe.test(p))
+    const city = cityCandidates.length ? cityCandidates[cityCandidates.length - 1] : ''
+    return {
+      addressLine1: line1 || billingPostcode || '',
+      ...(line2 && line2 !== city ? { addressLine2: line2 } : {}),
+      ...(city ? { adminArea2: city } : {}),
+      postalCode:   billingPostcode.trim(),
+      countryCode:  'GB',
+    }
+  })()
+  const cardholderName = `${billingFirst.trim()} ${billingLast.trim()}`.trim()
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6 pb-32">
@@ -433,6 +468,7 @@ export function PaymentPage() {
                     setError={setError}
                     setCapturing={setCapturing}
                     billingAddress={billingAddressPayload}
+                    cardholderName={cardholderName}
                   />
                 </div>
               </PayPalCardFieldsProvider>

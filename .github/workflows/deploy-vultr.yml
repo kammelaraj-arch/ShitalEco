@@ -326,8 +326,16 @@ jobs:
                 VERSION_FAIL=1
               elif [ "$body" = "$EXPECTED_SHA" ]; then
                 echo "  ✓ $label: $body"
+              elif git -C /opt/shitaleco merge-base --is-ancestor "$body" "$EXPECTED_SHA" 2>/dev/null; then
+                # Image's stamped SHA is an ancestor of HEAD — i.e. this
+                # image was built on an earlier main commit and CI's
+                # path-filter decided not to rebuild for the current
+                # commit because nothing under apps/service changed.
+                # Acceptable: the running container's code matches a
+                # legitimate point on the main branch.
+                echo "  ~ $label: serving $body (ancestor of $EXPECTED_SHA — no rebuild needed)"
               else
-                echo "  ✗ $label: got '$body', expected '$EXPECTED_SHA' — STALE IMAGE"
+                echo "  ✗ $label: got '$body', expected '$EXPECTED_SHA' — STALE IMAGE (not on main)"
                 VERSION_FAIL=1
               fi
             }

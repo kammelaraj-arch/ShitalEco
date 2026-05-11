@@ -90,18 +90,50 @@ export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
 
   if (!popup) throw new Error('Popup was blocked. Please allow popups for this site.')
 
-  // Poll until the popup navigates back to our redirect URI with id_token in hash
+  // Get the id_token back from the popup. Two channels run in parallel:
+  //
+  //   (a) postMessage from the auth-callback page — works regardless of
+  //       host/subdomain mismatch (parent on shital.org.uk, popup on
+  //       admin.shital.org.uk hit a SecurityError on the polling path
+  //       and login appeared to hang silently).
+  //
+  //   (b) location.hash polling — fallback for the case where the popup
+  //       is on the SAME origin as the parent (the polling works) AND
+  //       the auth-callback page somehow didn't run its postMessage
+  //       (e.g. extension blocking, navigation error). Belt & braces.
+  //
+  // We accept whichever arrives first. The popup self-closes on either path.
   const idToken = await new Promise<string>((resolve, reject) => {
+    const cleanup = () => {
+      window.removeEventListener('message', onMessage)
+      clearInterval(timer)
+      clearTimeout(timeoutId)
+    }
+
+    const onMessage = (ev: MessageEvent) => {
+      // Ignore messages from anywhere except our popup. Don't restrict by
+      // origin — the popup may be on a different subdomain (admin.* vs root).
+      if (ev.source !== popup) return
+      const data = ev.data as { type?: string; id_token?: string; error?: string } | null
+      if (!data || data.type !== 'shital-auth') return
+      cleanup()
+      try { popup?.close() } catch { /* ignore */ }
+      if (data.error) reject(new Error(data.error))
+      else if (data.id_token) resolve(data.id_token)
+      else reject(new Error('No id_token in postMessage response.'))
+    }
+    window.addEventListener('message', onMessage)
+
     const timer = setInterval(() => {
       try {
         if (!popup || popup.closed) {
-          clearInterval(timer)
+          cleanup()
           reject(new Error('Sign-in popup was closed before completing.'))
           return
         }
         const hash = popup.location.hash
         if (hash && hash.includes('id_token=')) {
-          clearInterval(timer)
+          cleanup()
           popup.close()
           const params = new URLSearchParams(hash.substring(1))
           const token = params.get('id_token')
@@ -109,18 +141,23 @@ export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
           else reject(new Error('No id_token in redirect response.'))
         }
         if (hash && hash.includes('error=')) {
-          clearInterval(timer)
+          cleanup()
           popup.close()
           const params = new URLSearchParams(hash.substring(1))
           reject(new Error(params.get('error_description') || params.get('error') || 'Azure AD error'))
         }
       } catch {
-        // Cross-origin — keep polling until popup returns to our origin
+        // Cross-origin SecurityError. The postMessage channel above is the
+        // primary delivery path — keep polling silently in case the popup
+        // navigates back to our origin.
       }
     }, 400)
 
-    // Timeout after 3 minutes
-    setTimeout(() => { clearInterval(timer); popup?.close(); reject(new Error('Sign-in timed out.')) }, 180_000)
+    const timeoutId = setTimeout(() => {
+      cleanup()
+      popup?.close()
+      reject(new Error('Sign-in timed out.'))
+    }, 180_000)
   })
 
   // Exchange id_token with backend

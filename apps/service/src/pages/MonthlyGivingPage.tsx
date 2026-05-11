@@ -433,30 +433,47 @@ export function MonthlyGivingPage() {
                 // payer_id are). PayPal silently drops unknown fields, which
                 // is why a previous attempt to pre-fill phone via that path
                 // had no effect — leaving it out keeps the payload clean.
+                // Defensive parse — PayPal silently drops the entire payer /
+                // subscriber block if any sub-field is malformed, so we
+                // omit > submit-with-junk.
                 const trimmedAddr = selectedAddress.trim()
                 const parts = trimmedAddr.split(',').map(p => p.trim()).filter(Boolean)
-                // Last comma-segment matching a UK postcode pattern is the
-                // postcode line; the one before it is the city. Everything
-                // else collapses into address_line_1.
                 const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
-                const last      = parts[parts.length - 1] ?? ''
-                const isPost    = ukPostRe.test(last)
-                const cityIdx   = isPost ? parts.length - 2 : parts.length - 1
-                const city      = (cityIdx >= 0 ? parts[cityIdx] : '') || ''
-                const lineEnd   = isPost ? parts.length - 2 : parts.length - 1
-                const addressL1 = parts.slice(0, Math.max(1, lineEnd)).join(', ') || trimmedAddr || postcode.trim()
+                const nonPcParts = parts.filter(p => !ukPostRe.test(p))
+                const addressL1 = nonPcParts[0] || ''
+                const city      = nonPcParts.length >= 2 ? nonPcParts[nonPcParts.length - 1] : ''
+                const addressL2 = nonPcParts.length >= 3 ? nonPcParts[1] : ''
 
-                const fullName = `${firstName.trim()} ${surname.trim()}`.trim()
-                const addressBlock = {
+                const givenName  = firstName.trim()
+                const familyName = surname.trim()
+                const haveName   = !!(givenName && familyName)
+                const havePostcode = !!postcode.trim()
+                const haveAddress  = !!(addressL1 && havePostcode)  // postcode-only is useless to PayPal
+                const fullName     = haveName ? `${givenName} ${familyName}` : ''
+
+                // Email validation — PayPal returns 422 on "user@" without TLD.
+                const email = donorEmail.trim()
+                const haveEmail = !!email && email.includes('@') && email.split('@')[1].includes('.')
+
+                // Phone: strip everything non-digit, drop +44/0 prefix, keep
+                // 9-11 digits. Anything else PayPal rejects with INVALID_PARAMETER_VALUE.
+                let phoneDigits = donorPhone.replace(/\D/g, '')
+                if (phoneDigits.startsWith('44') && phoneDigits.length >= 12) phoneDigits = phoneDigits.slice(2)
+                if (phoneDigits.startsWith('0')) phoneDigits = phoneDigits.slice(1)
+                const havePhone = phoneDigits.length >= 9 && phoneDigits.length <= 11
+
+                const addressBlock = haveAddress ? {
                   address_line_1: addressL1,
+                  ...(addressL2 && addressL2 !== city && { address_line_2: addressL2 }),
                   ...(city && { admin_area_2: city }),
-                  ...(postcode.trim() && { postal_code: postcode.trim() }),
+                  postal_code: postcode.trim(),
                   country_code: 'GB',
-                }
+                } : null
+
                 const subscriber: Record<string, unknown> = {
-                  name: { given_name: firstName.trim(), surname: surname.trim() },
-                  ...(donorEmail.trim() && { email_address: donorEmail.trim() }),
-                  ...((addressL1 || postcode.trim()) && {
+                  ...(haveName  && { name: { given_name: givenName, surname: familyName } }),
+                  ...(haveEmail && { email_address: email }),
+                  ...(addressBlock && {
                     shipping_address: {
                       ...(fullName && { name: { full_name: fullName } }),
                       address: addressBlock,
@@ -464,27 +481,22 @@ export function MonthlyGivingPage() {
                   }),
                 }
                 // Belt-and-braces pre-fill. PayPal Live's Guest Card form is
-                // unreliable about reading subscriber.shipping_address — third
-                // and fourth attempts (#29, #33) didn't move the needle on
-                // production. Final attempt: send the same identity in MULTIPLE
-                // shapes so PayPal's checkout state machine picks at least one:
+                // unreliable about reading subscriber.shipping_address —
+                // (#29, #33). Send the same identity in MULTIPLE shapes so
+                // PayPal's checkout state machine picks at least one:
                 //   (a) `subscriber` (subscriptions API canonical)
                 //   (b) `payer` (orders API shape — Smart Buttons forwards)
-                //   (c) `application_context.landing_page='BILLING'` to open
-                //       directly on the Guest Card form (skip PayPal-account
-                //       upsell page where the prefill is dropped on the way).
-                // Phone goes only on `payer` (subscriber.phone is documented
-                // as ignored).
+                //   (c) `application_context.landing_page='BILLING'`
                 const payer: Record<string, unknown> = {
-                  name: { given_name: firstName.trim(), surname: surname.trim() },
-                  ...(donorEmail.trim() && { email_address: donorEmail.trim() }),
-                  ...(donorPhone.trim() && {
+                  ...(haveName  && { name: { given_name: givenName, surname: familyName } }),
+                  ...(haveEmail && { email_address: email }),
+                  ...(havePhone && {
                     phone: {
                       phone_type: 'MOBILE',
-                      phone_number: { national_number: donorPhone.trim().replace(/\D/g, '') },
+                      phone_number: { national_number: phoneDigits },
                     },
                   }),
-                  ...((addressL1 || postcode.trim()) && { address: addressBlock }),
+                  ...(addressBlock && { address: addressBlock }),
                 }
                 // `payer` isn't in @paypal subscriptions typings but Smart
                 // Buttons forwards unknown fields onto the checkout context
@@ -497,7 +509,9 @@ export function MonthlyGivingPage() {
                   application_context: {
                     brand_name:          'Shital Temple',
                     locale:              'en-GB',
-                    shipping_preference: 'SET_PROVIDED_ADDRESS',
+                    // SET_PROVIDED_ADDRESS only when we actually provided one,
+                    // otherwise PayPal returns 422 SHIPPING_ADDRESS_INVALID.
+                    shipping_preference: addressBlock ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
                     user_action:         'SUBSCRIBE_NOW',
                     landing_page:        'BILLING',
                     return_url: `${window.location.origin}/?screen=monthly-giving&status=approved`,
@@ -544,9 +558,30 @@ export function MonthlyGivingPage() {
             </p>
           )}
 
-          <p className="text-xs" style={{ color: 'rgba(255,248,220,0.35)' }}>
-            You can cancel or change the amount any time via your PayPal account.
-          </p>
+          {/* How to cancel / unsubscribe — surfaced prominently so donors
+              never feel locked-in. PayPal owns the subscription, so cancel
+              must happen on their side; we just point the way. */}
+          <div className="mt-6 mx-auto max-w-md text-left rounded-xl px-4 py-4"
+            style={{ background: 'rgba(212,175,55,0.06)', border: '1px solid rgba(212,175,55,0.2)' }}>
+            <p className="text-sm font-bold text-gold-400 mb-2">How to cancel or pause</p>
+            <ol className="text-xs space-y-1.5 list-decimal list-inside" style={{ color: 'rgba(255,248,220,0.7)' }}>
+              <li>Sign in at <a href="https://www.paypal.com/myaccount/autopay" target="_blank" rel="noopener noreferrer"
+                  className="underline text-gold-400">paypal.com/myaccount/autopay</a></li>
+              <li>Find <strong>SHITAL</strong> in your automatic payments list</li>
+              <li>Click <strong>Cancel</strong> — it stops immediately, no further charges</li>
+            </ol>
+            <p className="text-xs mt-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
+              Need help? Email <a href="mailto:info@shital.org.uk" className="underline text-gold-400">info@shital.org.uk</a> and we'll cancel for you.
+            </p>
+            <p className="text-xs mt-3 pt-3" style={{ color: 'rgba(255,248,220,0.5)', borderTop: '1px solid rgba(212,175,55,0.15)' }}>
+              <strong>Stop emails about this payment?</strong>
+            </p>
+            <ul className="text-xs mt-1 space-y-1 list-disc list-inside" style={{ color: 'rgba(255,248,220,0.5)' }}>
+              <li>From PayPal: <a href="https://www.paypal.com/myaccount/notifications" target="_blank" rel="noopener noreferrer"
+                  className="underline text-gold-400">paypal.com/myaccount/notifications</a> → uncheck subscription notifications.</li>
+              <li>From SHITAL: reply "unsubscribe" to any email and we'll remove you.</li>
+            </ul>
+          </div>
 
           <div className="flex gap-2 justify-center mt-4">
             <button onClick={() => setScreen('browse')}

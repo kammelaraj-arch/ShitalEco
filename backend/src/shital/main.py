@@ -616,6 +616,38 @@ async def _patch_schema() -> None:
             updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_email_templates_key ON email_templates(template_key)",
+        # ── Outgoing email audit log ──────────────────────────────────────────
+        # Every email rendered by send_template() lands here BEFORE the SMTP
+        # call, so a crash mid-send still leaves a paper trail. Status
+        # transitions: PENDING → SENT (success) or FAILED (error captured).
+        # variables is stored verbatim so /admin/sent-emails/{id}/resend can
+        # re-render against the current template and retry without the
+        # caller having to remember what context to pass.
+        """CREATE TABLE IF NOT EXISTS sent_emails (
+            id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            template_key    VARCHAR(100) NOT NULL DEFAULT '',
+            to_email        VARCHAR(255) NOT NULL,
+            from_email      VARCHAR(255) NOT NULL DEFAULT '',
+            subject         TEXT         NOT NULL DEFAULT '',
+            html_body       TEXT         NOT NULL DEFAULT '',
+            text_body       TEXT         NOT NULL DEFAULT '',
+            variables       JSONB        NOT NULL DEFAULT '{}'::jsonb,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            error           TEXT         NOT NULL DEFAULT '',
+            attempts        INTEGER      NOT NULL DEFAULT 0,
+            last_attempt_at TIMESTAMPTZ,
+            sent_at         TIMESTAMPTZ,
+            related_type    VARCHAR(50)  NOT NULL DEFAULT '',
+            related_id      VARCHAR(100) NOT NULL DEFAULT '',
+            triggered_by    VARCHAR(255) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_status   ON sent_emails(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_to       ON sent_emails(LOWER(to_email))",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_template ON sent_emails(template_key)",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_related  ON sent_emails(related_type, related_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_failed   ON sent_emails(created_at DESC) WHERE status = 'FAILED'",
         # ── Temple Services ───────────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS temple_services (
             id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1285,31 +1317,69 @@ async def _patch_schema() -> None:
         # literal 'remote' as a sentinel for online/remote-only. Distinct from
         # `branch_id` (which is the org branch that owns the application).
         "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_branches JSONB NOT NULL DEFAULT '[]'::jsonb",
-        # ── Sent emails log (audit + resend) ──────────────────────────────────
-        # Every templated email send goes through send_template() which also
-        # writes a row here. Trustees can view the full history per recipient
-        # in Admin → Settings → Sent Emails and click "Resend" to fire the
-        # exact same template + variables again — useful when a donor says
-        # "I never got my receipt" or a referee never received the magic link.
-        """CREATE TABLE IF NOT EXISTS sent_emails (
-            id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-            template_key  VARCHAR(100) NOT NULL DEFAULT '',
-            to_email      VARCHAR(255) NOT NULL,
-            subject       VARCHAR(500) NOT NULL DEFAULT '',
-            html_body     TEXT         NOT NULL DEFAULT '',
-            text_body     TEXT         NOT NULL DEFAULT '',
-            variables     JSONB        NOT NULL DEFAULT '{}'::jsonb,
-            related_type  VARCHAR(50)  NOT NULL DEFAULT '',
-            related_id    UUID,
-            status        VARCHAR(20)  NOT NULL DEFAULT 'sent',
-            error         TEXT         NOT NULL DEFAULT '',
-            sent_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-            created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        # ── Sava (one-day event) volunteers ───────────────────────────────────
+        # Lighter-weight than the long-term Volunteer Registration. For
+        # devotees who want to help at a single event (Shila Pooja, Aarti,
+        # Langar) without going through references / DBS / health declaration.
+        # Mirrors the SHITAL Liability Event Volunteer Form V1.
+        """CREATE TABLE IF NOT EXISTS sava_volunteers (
+            id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            reference_number    VARCHAR(20)  UNIQUE NOT NULL,
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            full_name           VARCHAR(255) NOT NULL,
+            email               VARCHAR(255) NOT NULL DEFAULT '',
+            mobile              VARCHAR(50)  NOT NULL DEFAULT '',
+            postcode            VARCHAR(20)  NOT NULL DEFAULT '',
+            age_range           VARCHAR(20)  NOT NULL DEFAULT '',
+            event_name          VARCHAR(255) NOT NULL DEFAULT '',
+            event_date          DATE,
+            event_location      VARCHAR(255) NOT NULL DEFAULT '',
+            preferred_roles     JSONB        NOT NULL DEFAULT '[]'::jsonb,
+            additional_notes    TEXT         NOT NULL DEFAULT '',
+            agreement_signed_at TIMESTAMPTZ,
+            status              VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            contact_id          UUID         REFERENCES contacts(id) ON DELETE SET NULL,
+            submitted_ip        VARCHAR(45)  NOT NULL DEFAULT '',
+            user_agent          VARCHAR(500) NOT NULL DEFAULT '',
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
         )""",
-        "CREATE INDEX IF NOT EXISTS idx_sent_emails_to        ON sent_emails(LOWER(to_email))",
-        "CREATE INDEX IF NOT EXISTS idx_sent_emails_template  ON sent_emails(template_key)",
-        "CREATE INDEX IF NOT EXISTS idx_sent_emails_sent_at   ON sent_emails(sent_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_sent_emails_related   ON sent_emails(related_type, related_id) WHERE related_id IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_status ON sava_volunteers(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_event  ON sava_volunteers(event_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_branch ON sava_volunteers(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_email  ON sava_volunteers(LOWER(email)) WHERE email != ''",
+        # ── Recurring giving: failure tracking + admin cancel audit ───────────
+        # Track payment failures (BILLING.SUBSCRIPTION.PAYMENT.FAILED webhooks)
+        # so we can surface "card needs updating" warnings in admin without
+        # forcing a round-trip to PayPal. cancel_reason / cancelled_by close
+        # the audit loop when a trustee cancels via /admin/giving/.../cancel.
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS failed_payment_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_at      TIMESTAMPTZ",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_reason  VARCHAR(500) NOT NULL DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancel_reason        VARCHAR(500) NOT NULL DEFAULT ''",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancelled_by         VARCHAR(255) NOT NULL DEFAULT ''",
+        # ── Webhook event audit log ───────────────────────────────────────────
+        # Every PayPal webhook gets stored here, idempotent on event_id, before
+        # we touch any business state. Lets us replay a failed handler without
+        # re-asking PayPal, and gives ops a paper trail when a donor disputes
+        # a charge. processed=false rows with non-null error are the work
+        # queue for retries.
+        """CREATE TABLE IF NOT EXISTS recurring_giving_webhook_events (
+            id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id          VARCHAR(100) UNIQUE NOT NULL,
+            event_type        VARCHAR(100) NOT NULL,
+            subscription_id   VARCHAR(100) NOT NULL DEFAULT '',
+            resource_id       VARCHAR(100) NOT NULL DEFAULT '',
+            payload           JSONB        NOT NULL,
+            processed         BOOLEAN      NOT NULL DEFAULT false,
+            processed_at      TIMESTAMPTZ,
+            error             TEXT         NOT NULL DEFAULT '',
+            retry_count       INTEGER      NOT NULL DEFAULT 0,
+            created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_rgwe_subscription ON recurring_giving_webhook_events(subscription_id)",
+        "CREATE INDEX IF NOT EXISTS idx_rgwe_type         ON recurring_giving_webhook_events(event_type)",
+        "CREATE INDEX IF NOT EXISTS idx_rgwe_unprocessed  ON recurring_giving_webhook_events(processed, created_at) WHERE processed = false",
         # ── DBS / safeguarding ────────────────────────────────────────────────
         # Volunteers without a current DBS certificate need one before they
         # can be approved for any role. Three states the volunteer can be
@@ -2191,13 +2261,28 @@ _{{ branch_name }} — Registered UK Charity_"""
     async with SessionLocal() as db:
         for t in templates:
             try:
+                # On conflict we keep any admin edits to subject/body but
+                # ALWAYS re-activate. Without this an accidentally-disabled
+                # template (or an earlier failed seed that left the row in
+                # a half-baked state) silently breaks features that depend
+                # on it (eg. volunteer_reference_request bug from PR #N+1).
                 await db.execute(text("""
                     INSERT INTO email_templates (template_key, name, subject, html_body, text_body, variables, is_active)
                     VALUES (:key, :name, :subject, :html_body, :text_body, :variables::jsonb, true)
-                    ON CONFLICT (template_key) DO NOTHING
+                    ON CONFLICT (template_key) DO UPDATE
+                        SET is_active  = true,
+                            -- Heal any rows that ended up with empty bodies
+                            -- (eg. seed crashed mid-row on first deploy).
+                            subject    = CASE WHEN email_templates.subject   = '' THEN EXCLUDED.subject   ELSE email_templates.subject   END,
+                            html_body  = CASE WHEN email_templates.html_body = '' THEN EXCLUDED.html_body ELSE email_templates.html_body END,
+                            text_body  = CASE WHEN email_templates.text_body = '' THEN EXCLUDED.text_body ELSE email_templates.text_body END,
+                            updated_at = NOW()
                 """), t)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Don't swallow silently — these are critical for volunteer +
+                # donation flows. Log loud, keep going so one bad template
+                # doesn't block the others.
+                logger.error("email_template_seed_failed", template_key=t.get("key"), error=str(exc))
         await db.commit()
     logger.info("email_templates_seeded")
 
@@ -2416,6 +2501,7 @@ _mount("shital.api.routers.recurring_payments",   "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
+_mount("shital.api.routers.sava_volunteers",      "router")
 _mount("shital.api.routers.bank_accounts",         "router")
 _mount("shital.api.routers.bank_imports",          "router")
 _mount("shital.api.routers.board",                 "router")
