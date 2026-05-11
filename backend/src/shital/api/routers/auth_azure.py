@@ -260,8 +260,9 @@ async def verify_azure_token(body: VerifyTokenInput):
         raise HTTPException(status_code=403, detail="Account is deactivated. Contact your administrator.")
 
     # ── 6. Issue our own JWT ──────────────────────────────────────────────────
-    access = _create_access_token(user["id"], user["email"], user["role"], user["branch_id"])
-    refresh = _create_refresh_token(user["id"])
+    user_id_str = str(user["id"])
+    access = _create_access_token(user_id_str, user["email"], user["role"], user["branch_id"])
+    refresh = _create_refresh_token(user_id_str)
 
     return {
         "access_token": access,
@@ -269,7 +270,7 @@ async def verify_azure_token(body: VerifyTokenInput):
         "token_type": "bearer",
         "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         "user": {
-            "id": user["id"],
+            "id": user_id_str,
             "email": user["email"],
             "name": user["name"],
             "role": user["role"],
