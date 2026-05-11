@@ -21,6 +21,8 @@
   "dependencies": {
     "@capacitor/android": "^6.0.0",
     "@capacitor/core": "^6.0.0",
+    "@shital/giving-sdk": "workspace:*",
+    "@shital/volunteer-sdk": "workspace:*",
     "framer-motion": "^11.3.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

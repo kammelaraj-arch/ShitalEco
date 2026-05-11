@@ -93,6 +93,12 @@ importers:
       '@capacitor/core':
         specifier: ^6.0.0
         version: 6.2.1
+      '@shital/giving-sdk':
+        specifier: workspace:*
+        version: link:../../packages/giving-sdk
+      '@shital/volunteer-sdk':
+        specifier: workspace:*
+        version: link:../../packages/volunteer-sdk
       '@stripe/react-stripe-js':
         specifier: ^2.7.0
         version: 2.9.0(@stripe/stripe-js@4.10.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -206,6 +212,12 @@ importers:
       '@paypal/react-paypal-js':
         specifier: ^8.7.0
         version: 8.9.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@shital/giving-sdk':
+        specifier: workspace:*
+        version: link:../../packages/giving-sdk
+      '@shital/volunteer-sdk':
+        specifier: workspace:*
+        version: link:../../packages/volunteer-sdk
       framer-motion:
         specifier: ^11.3.0
         version: 11.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -385,6 +397,21 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.37)
 
+  packages/giving-sdk:
+    devDependencies:
+      '@types/react':
+        specifier: ^18.0.0
+        version: 18.3.28
+      react:
+        specifier: ^18.0.0
+        version: 18.3.1
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.37)
+
   packages/hr:
     dependencies:
       '@shital/config':
@@ -509,6 +536,21 @@ importers:
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
+
+  packages/volunteer-sdk:
+    devDependencies:
+      '@types/react':
+        specifier: ^18.0.0
+        version: 18.3.28
+      react:
+        specifier: ^18.0.0
+        version: 18.3.1
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.37)
 
 packages:
 
