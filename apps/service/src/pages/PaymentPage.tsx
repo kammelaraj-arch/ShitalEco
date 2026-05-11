@@ -29,9 +29,6 @@ function CardSubmitButton({
   paying: boolean
   setError: (e: string) => void
   setCapturing: (v: boolean) => void
-  // Match PayPal SDK shape: optional address_line_2 / admin_area_2 are passed
-  // when we have them. PayPal silently drops the entire address if any
-  // required field is missing OR malformed, so we validate before submit.
   billingAddress: {
     addressLine1: string
     addressLine2?: string
@@ -47,17 +44,11 @@ function CardSubmitButton({
     setError('')
     setCapturing(true)
     try {
-      // PayPal Card Fields requires `cardholderName` for 3-D Secure on UK
-      // cards. Without it, the SDK either prompts the buyer mid-submit
-      // (kills the flow) or fails the SCA challenge silently. Compose
-      // first+last we already collected — never let an empty string slip
-      // through, the SDK throws "INVALID_PARAMETER_VALUE" on "".
       const submitArgs: Record<string, unknown> = { billingAddress }
       if (cardholderName.trim()) submitArgs.cardholderName = cardholderName.trim()
       await (cardFieldsForm as any).submit(submitArgs)
     } catch (e: any) {
       const raw = e?.message || ''
-      // Map PayPal SDK's noisy internal errors to actionable messages.
       let msg = raw
       if (raw.includes('postrobot') || raw.includes('Window closed')) {
         msg = 'Payment was interrupted. Please refresh the page and try again.'
@@ -97,7 +88,6 @@ export function PaymentPage() {
   const [capturing, setCapturing]           = useState(false)
   const [cardFieldsReady, setCardFieldsReady] = useState(true)
 
-  // Billing fields — pre-filled from Gift Aid / contact info
   const [billingFirst,    setBillingFirst]    = useState(giftAidDeclaration?.firstName  || contactInfo?.firstName  || contactInfo?.name?.split(' ')[0] || '')
   const [billingLast,     setBillingLast]     = useState(giftAidDeclaration?.surname    || contactInfo?.surname    || contactInfo?.name?.split(' ').slice(1).join(' ') || '')
   const [billingPostcode, setBillingPostcode] = useState(giftAidDeclaration?.postcode   || contactInfo?.postcode   || '')
@@ -130,24 +120,6 @@ export function PaymentPage() {
     ]).finally(() => setConfigLoading(false))
   }, [])
 
-  // PayPal hosted card-fields tokenization fails with
-  // "Window closed for postrobot_method before ack" when the
-  // PayPalCardFieldsProvider's createOrder/onApprove props change
-  // identity — every change re-renders the provider, which unmounts
-  // and remounts the iframes, and any in-flight postMessage to the
-  // iframe loses its target.
-  //
-  // Originally these were useCallback'd with all the billingFirst /
-  // billingLast / billingEmail / billingPhone / billingPostcode state
-  // in the dep array — so EVERY KEYSTROKE in any billing field rebuilt
-  // the function reference, remounted the iframes, and put the SDK
-  // into the broken postrobot state. By the time the user typed a card
-  // number and clicked Pay, the iframe was mid-remount and the submit
-  // failed with "Payment was interrupted".
-  //
-  // Fix: keep the callbacks identity-stable by reading mutable state
-  // through a ref. handleCreateOrder / handleApprove are recreated
-  // ONCE on mount and never again.
   const billingRef = useRef({
     billingFirst, billingLast, billingEmail, billingPhone, billingPostcode, billingAddress1,
     contactInfo, giftAidDeclaration, items, total, branchId,
@@ -176,7 +148,7 @@ export function PaymentPage() {
       contact_address:    s.giftAidDeclaration?.address || s.contactInfo?.address || '',
       contact_uprn:       s.giftAidDeclaration?.uprn    || s.contactInfo?.uprn    || '',
     })
-  }, [])  // ← stable identity; reads via ref
+  }, [])
 
   const handleApprove = useCallback(async (data: { orderID: string }) => {
     setCapturing(true)
@@ -227,39 +199,47 @@ export function PaymentPage() {
     } finally {
       setCapturing(false)
     }
-  }, [])  // ← stable identity; reads via billingRef
+  }, [])
+
+  // PayPalCardFieldsProvider's `onError` prop must also have stable identity
+  // (same Object.is dance as the script provider options + createOrder /
+  // onApprove). An inline arrow function = fresh identity every render =
+  // provider remount on every keystroke in any billing field = iframe rebuild
+  // mid-typing = "Window closed for postrobot_method before ack" on submit.
+  // useState setters are identity-stable by React's contract.
+  const handleCardFieldsError = useCallback((e: { message?: string } | null | undefined) => {
+    const msg = e?.message || ''
+    if (msg.includes('card_fields') || msg.includes('not eligible')) {
+      setCardFieldsReady(false)
+    } else {
+      setError(msg || 'Card payment failed. Please try again.')
+    }
+    setCapturing(false)
+  }, [])
+
+  // Same story for the PayPalButtons wallet path.
+  const handlePayPalButtonsError = useCallback((err: unknown) => {
+    console.error('PayPal error', err)
+    setError('PayPal encountered an error. Please try again.')
+  }, [])
+  const handlePayPalButtonsCancel = useCallback(() => setError(''), [])
 
   const boost = giftAidTotal * 0.25
 
   const fieldStyle = 'w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-ivory-200 text-sm outline-none focus:border-amber-700/40 placeholder:text-white/20'
   const labelStyle = 'block text-xs font-bold uppercase tracking-wider mb-1 text-white/40'
-  // Style for the input INSIDE PayPal's hosted-field iframe (passed to the
-  // SDK as JSON CSS — quoted property names are mandatory).
   const hostedFieldStyle = {
     input: { color: '#f5f0dc', 'font-size': '14px', 'font-family': 'inherit', background: 'transparent', height: '100%' },
     '.invalid': { color: '#f87171' },
   }
-  // Wrapper around PayPal's hosted-card iframe. Combines fixes from PR #42
-  // (the kiosk monthly-giving Guest Card flow) and PR #47 (the basket
-  // payment page):
-  //   - relative + overflow-hidden + explicit height (48px) lets the iframe
-  //     size correctly across browsers without spilling into siblings
-  //   - horizontal padding only — vertical padding squeezed the iframe to
-  //     20px and made the Pay button slide up over the expiry/CVV row
   const hostedFieldClass = 'block relative bg-black/30 border border-white/10 rounded-xl px-3 overflow-hidden'
   const hostedFieldHeight = { height: 48 }
 
-  // PayPal Card Fields wants the address split into addressLine1, optional
-  // addressLine2, optional adminArea2 (city), postalCode, countryCode.
-  // Build it from whichever source has data — explicit billing fields beat
-  // gift-aid lookup beats raw contact form. PayPal silently drops the whole
-  // address if addressLine1 is empty, so we always make sure that's set.
   const billingAddressPayload = (() => {
     const sourceAddr = giftAidDeclaration?.address || contactInfo?.address || ''
     const parts      = sourceAddr.split(',').map(p => p.trim()).filter(Boolean)
     const line1      = (billingAddress1 || parts[0] || '').trim()
     const line2      = parts[1] || ''
-    // Last comma-segment that doesn't look like a postcode is the city.
     const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
     const cityCandidates = parts.slice(1).filter(p => !ukPostRe.test(p))
     const city = cityCandidates.length ? cityCandidates[cityCandidates.length - 1] : ''
@@ -273,17 +253,6 @@ export function PaymentPage() {
   })()
   const cardholderName = `${billingFirst.trim()} ${billingLast.trim()}`.trim()
 
-  // PayPalScriptProvider's `options` prop must keep the same object
-  // identity across renders. The SDK uses Object.is to decide whether to
-  // reload the JS bundle; a fresh `{ clientId, ... }` literal on every
-  // render makes it tear down and re-mount the script + iframes on every
-  // keystroke. Net effect: "Window closed for postrobot_method before
-  // ack" when the user finally clicks Pay, surfaced as our friendly
-  // "Payment was interrupted" toast.
-  //
-  // PR #77 stabilised createOrder/onApprove via refs but missed this
-  // object literal. Memoize on the only meaningful key — the client id —
-  // so changing donor inputs upstream no longer reloads the SDK.
   const paypalScriptOptions = useMemo(() => ({
     clientId: paypalClientId,
     currency: 'GBP',
@@ -306,7 +275,6 @@ export function PaymentPage() {
         Pay securely via PayPal. No account required — pay with card too.
       </p>
 
-      {/* Order Summary */}
       <div className="temple-card p-4 mb-5 space-y-2">
         {items.map((item) => (
           <div key={item.id} className="flex justify-between text-sm">
@@ -331,7 +299,6 @@ export function PaymentPage() {
         </div>
       </div>
 
-      {/* Gift Aid Declaration Summary */}
       {giftAidDeclaration?.agreed && (
         <div className="rounded-2xl p-4 mb-5"
           style={{ background: 'linear-gradient(135deg,rgba(22,163,74,0.15),rgba(15,107,50,0.08))', border: '1px solid rgba(74,222,128,0.35)' }}>
@@ -352,7 +319,6 @@ export function PaymentPage() {
         </div>
       )}
 
-      {/* Payment */}
       {configLoading ? (
         <div className="flex flex-col items-center py-12 gap-4">
           <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }} className="text-5xl">🕉</motion.div>
@@ -379,43 +345,28 @@ export function PaymentPage() {
       ) : (
         <PayPalScriptProvider options={paypalScriptOptions}>
           <div className="space-y-4">
-            {/* PayPal wallet button */}
             <PayPalButtons
               style={{ layout: 'horizontal', color: 'gold', shape: 'rect', label: 'paypal', height: 48, tagline: false }}
               fundingSource="paypal"
               createOrder={handleCreateOrder}
               onApprove={handleApprove}
-              onError={(err) => {
-                console.error('PayPal error', err)
-                setError('PayPal encountered an error. Please try again.')
-              }}
-              onCancel={() => setError('')}
+              onError={handlePayPalButtonsError}
+              onCancel={handlePayPalButtonsCancel}
             />
 
-            {/* Divider */}
             <div className="flex items-center gap-3">
               <div className="flex-1 h-px" style={{ background: 'rgba(255,248,220,0.1)' }} />
               <span className="text-xs font-semibold" style={{ color: 'rgba(255,248,220,0.3)' }}>or pay by card</span>
               <div className="flex-1 h-px" style={{ background: 'rgba(255,248,220,0.1)' }} />
             </div>
 
-            {/* Card form with pre-filled billing details */}
             {cardFieldsReady && (
               <PayPalCardFieldsProvider
                 createOrder={handleCreateOrder}
                 onApprove={handleApprove}
-                onError={(e: any) => {
-                  const msg = e?.message || ''
-                  if (msg.includes('card_fields') || msg.includes('not eligible')) {
-                    setCardFieldsReady(false)
-                  } else {
-                    setError(msg || 'Card payment failed. Please try again.')
-                  }
-                  setCapturing(false)
-                }}
+                onError={handleCardFieldsError}
               >
                 <div className="temple-card p-5 space-y-4 relative">
-                  {/* Billing name */}
                   <div className="flex gap-3">
                     <div className="flex-1">
                       <label className={labelStyle}>First name</label>
@@ -427,7 +378,6 @@ export function PaymentPage() {
                     </div>
                   </div>
 
-                  {/* Email + Phone */}
                   <div className="flex gap-3">
                     <div className="flex-1">
                       <label className={labelStyle}>Email</label>
@@ -439,7 +389,6 @@ export function PaymentPage() {
                     </div>
                   </div>
 
-                  {/* Address + Postcode */}
                   <div className="flex gap-3">
                     <div className="flex-1">
                       <label className={labelStyle}>Address</label>
@@ -451,9 +400,6 @@ export function PaymentPage() {
                     </div>
                   </div>
 
-                  {/* PayPal hosted card fields. Each field is an iframe — we
-                      wrap with a fixed-height div so the iframe renders at the
-                      right height and doesn't overflow into siblings. */}
                   <div>
                     <label className={labelStyle}>Card number</label>
                     <div className={hostedFieldClass} style={hostedFieldHeight}>
@@ -487,7 +433,6 @@ export function PaymentPage() {
               </PayPalCardFieldsProvider>
             )}
 
-            {/* Fallback if card fields not supported by this PayPal account */}
             {!cardFieldsReady && (
               <div className="temple-card p-4 text-center text-xs" style={{ color: 'rgba(255,248,220,0.4)' }}>
                 Use the PayPal button above to pay — choose "Debit or Credit Card" inside PayPal.
