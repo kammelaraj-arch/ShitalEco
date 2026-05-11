@@ -62,6 +62,10 @@ services:
         condition: service_healthy
     networks:
       - dev-internal
+      # Also join the prod stack network so the dev backend can reach
+      # the shared deployer container at http://deployer:9000 — the
+      # System Ops panel proxies through it.
+      - shared-with-prod
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -152,3 +156,11 @@ volumes:
 networks:
   dev-internal:
     driver: bridge
+  # Reference the prod stack's network as external — dev backend joins
+  # it so it can reach the shared deployer. The prod stack creates this
+  # network as 'shitaleco_internal'; without `external: true` compose
+  # would try to manage it from this file and conflict with the prod
+  # stack's ownership.
+  shared-with-prod:
+    name: shitaleco_internal
+    external: true
