@@ -149,13 +149,14 @@ jobs:
             # aborts mid-rollout. Force-remove by name first so compose has
             # a clean slot to land into. -f ignores "not found" so the call
             # is safe to run unconditionally.
-            echo "=== Pre-clean: drop stale dev containers by name ==="
+            echo "=== Pre-clean: full compose-down + drop stale container IDs ==="
+            docker compose -f docker-compose.dev.yml down --remove-orphans 2>/dev/null || true
             for c in db backend admin quick-donation kiosk screen nginx; do
               docker rm -f "shitaleco-dev-${c}-dev-1" 2>/dev/null || true
             done
-
-            echo "=== Recreating dev containers ==="
-            docker compose -f docker-compose.dev.yml up -d --force-recreate --remove-orphans
+            
+            echo "=== Bring dev stack up ==="
+            docker compose -f docker-compose.dev.yml up -d --remove-orphans
 
             # ── Backend health check ────────────────────────────────────────────
             # 48 × 5s = 240s. The backend's startup syncs ~30 function_registry
