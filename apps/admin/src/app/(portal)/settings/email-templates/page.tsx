@@ -37,12 +37,30 @@ export default function EmailTemplatesPage() {
       .catch(() => setLoading(false))
   }, [])
 
-  const selectTemplate = (t: Template) => {
+  const selectTemplate = async (t: Template) => {
+    // The list endpoint omits html_body / text_body to keep the payload
+    // small (one row per template; bodies are several KB each). Fetch the
+    // full row on selection so the editor shows real content instead of
+    // a blank textarea.
     setSelected(t)
-    setDraft({ subject: t.subject, html_body: t.html_body, text_body: t.text_body, name: t.name })
+    setDraft({ subject: t.subject, html_body: '', text_body: '', name: t.name })
     setTab(0)
     setError('')
     setSuccess('')
+    try {
+      const res = await fetch(`${API}/admin/email-templates/${encodeURIComponent(t.template_key)}`)
+      if (!res.ok) throw new Error(await res.text())
+      const full = (await res.json()) as Template
+      setSelected(full)
+      setDraft({
+        subject:   full.subject   || '',
+        html_body: full.html_body || '',
+        text_body: full.text_body || '',
+        name:      full.name      || '',
+      })
+    } catch (e) {
+      setError(`Could not load template body: ${String(e)}`)
+    }
   }
 
   const save = async () => {
