@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, type ComponentType } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, type ComponentType } from 'react'
 import { motion } from 'framer-motion'
 import {
   PayPalScriptProvider as _PPP,
@@ -158,6 +158,15 @@ export function MonthlyGivingPage() {
     }).catch(() => {})
     setStep('done')
   }, [])  // ← stable identity; reads via approveRef
+
+  // PayPalScriptProvider's `options` prop must keep the same object
+  // identity across renders or the SDK keeps tearing down + remounting
+  // the buttons iframe — the user sees "Payment was interrupted" the
+  // moment they finally click Subscribe. PR #77 stabilised the
+  // callbacks but missed this object literal.
+  const paypalScriptOptions = useMemo(() => ({
+    clientId, vault: true, intent: 'subscription', currency: 'GBP',
+  }), [clientId])
 
   if (loading) {
     return (
@@ -411,7 +420,7 @@ export function MonthlyGivingPage() {
             <button onClick={() => setStep('details')} className="text-xs font-bold mt-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Change details</button>
           </div>
 
-          <PayPalScriptProvider options={{ clientId, vault: true, intent: 'subscription', currency: 'GBP' }}>
+          <PayPalScriptProvider options={paypalScriptOptions}>
             <PayPalButtons
               style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }}
               createSubscription={(_data, actions) => {
