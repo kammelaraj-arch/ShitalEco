@@ -22,7 +22,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "")
-WORKSPACE = os.environ.get("WORKSPACE", "/workspace")
+WORKSPACE     = os.environ.get("WORKSPACE",     "/workspace")
+WORKSPACE_DEV = os.environ.get("WORKSPACE_DEV", "/workspace-dev")
 
 # Container names that represent "is the env up?" for the panel.
 PROD_BACKEND = "shitaleco-backend-1"
@@ -58,8 +59,8 @@ def _container_image_id(name: str) -> str:
     return _docker("inspect", "-f", "{{.Image}}", name)[:19]  # sha256:xxxxxxxxxxxxx
 
 
-def _git_commit(short: bool = True) -> str:
-    args = ["git", "-C", WORKSPACE, "rev-parse"]
+def _git_commit(repo_path: str, short: bool = True) -> str:
+    args = ["git", "-C", repo_path, "rev-parse"]
     if short:
         args.append("--short")
     args.append("HEAD")
@@ -70,17 +71,16 @@ def _git_commit(short: bool = True) -> str:
 
 
 def collect_status() -> dict:
-    commit = _git_commit()
     return {
         "environments": {
             "prod": {
                 "status": "up" if _container_running(PROD_BACKEND) else "down",
-                "commit": commit,
+                "commit": _git_commit(WORKSPACE),
                 "container": PROD_BACKEND,
             },
             "dev": {
                 "status": "up" if _container_running(DEV_BACKEND) else "down",
-                "commit": commit,
+                "commit": _git_commit(WORKSPACE_DEV),
                 "container": DEV_BACKEND,
             },
         }
