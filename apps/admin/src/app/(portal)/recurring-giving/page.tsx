@@ -74,24 +74,24 @@ export default function RecurringGivingPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="space-y-5 animate-fade-in">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Monthly Giving</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Configure recurring donation tiers for the service portal</p>
+          <h1 className="text-3xl font-black text-white">Monthly Giving</h1>
+          <p className="text-sm text-white/50 mt-1">Configure recurring donation tiers for the service portal</p>
         </div>
         <button onClick={openNew}
-          className="px-4 py-2 rounded-lg font-semibold text-sm"
-          style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
+          className="px-4 py-2.5 rounded-xl text-white text-sm font-bold transition-all hover:scale-[1.02] active:scale-[0.98]"
+          style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
           + New Tier
         </button>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b border-white/10">
+      <div className="flex gap-2 border-b border-white/10">
         {(['tiers', 'subs'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${tab === t ? 'border-yellow-400 text-yellow-400' : 'border-transparent text-gray-400'}`}>
+            className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${tab === t ? 'border-saffron-400 text-saffron-400' : 'border-transparent text-white/50 hover:text-white/80'}`}>
             {t === 'tiers' ? `Donation Tiers (${tiers.length})` : `Subscriptions (${subs.length})`}
           </button>
         ))}
@@ -100,20 +100,20 @@ export default function RecurringGivingPage() {
       {/* Tiers tab */}
       {tab === 'tiers' && (
         <div className="space-y-3">
-          {tiers.length === 0 && <p className="text-gray-500 text-sm">No tiers configured.</p>}
+          {tiers.length === 0 && <p className="text-white/40 text-sm">No tiers configured.</p>}
           {tiers.map(tier => (
             <div key={tier.id} className="rounded-xl p-4 flex items-center gap-4"
               style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', opacity: tier.is_active ? 1 : 0.5 }}>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-black text-xl text-yellow-400">£{Number(tier.amount).toFixed(0)}</span>
-                  <span className="text-xs font-semibold text-gray-400">/{tier.frequency.toLowerCase()}</span>
+                  <span className="font-black text-xl text-saffron-400">£{Number(tier.amount).toFixed(0)}</span>
+                  <span className="text-xs font-semibold text-white/50">/{tier.frequency.toLowerCase()}</span>
                   {tier.is_default && <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: 'rgba(212,175,55,0.2)', color: '#D4AF37' }}>Default</span>}
                   {!tier.is_active && <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-900/40 text-red-400">Inactive</span>}
                 </div>
                 <p className="font-semibold text-white text-sm mt-0.5">{tier.label}</p>
-                {tier.description && <p className="text-xs text-gray-400 mt-0.5">{tier.description}</p>}
-                <div className="flex gap-3 mt-1.5 text-xs text-gray-500">
+                {tier.description && <p className="text-xs text-white/50 mt-0.5">{tier.description}</p>}
+                <div className="flex gap-3 mt-1.5 text-xs text-white/40">
                   <span>👥 {tier.active_subscribers} active</span>
                   {tier.paypal_plan_id && <span>✅ Plan ready</span>}
                   {!tier.paypal_plan_id && <span>⏳ Plan created on first subscription</span>}
@@ -131,7 +131,7 @@ export default function RecurringGivingPage() {
       {/* Subscriptions tab */}
       {tab === 'subs' && (
         <div className="space-y-2">
-          {subs.length === 0 && <p className="text-gray-500 text-sm">No subscriptions yet.</p>}
+          {subs.length === 0 && <p className="text-white/40 text-sm">No subscriptions yet.</p>}
           {subs.map(s => (
             <div key={s.id} className="rounded-xl p-4 flex items-center gap-4"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -139,12 +139,12 @@ export default function RecurringGivingPage() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-bold text-white">£{Number(s.amount).toFixed(0)}/{s.frequency.toLowerCase()}</span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: `${STATUS_COLOURS[s.status] || '#94a3b8'}20`, color: STATUS_COLOURS[s.status] || '#94a3b8' }}>{s.status}</span>
-                  {s.tier_label && <span className="text-xs text-gray-400">{s.tier_label}</span>}
+                  {s.tier_label && <span className="text-xs text-white/50">{s.tier_label}</span>}
                 </div>
-                <p className="text-sm text-gray-300 mt-0.5">{s.donor_name || 'Anonymous'}{s.donor_email && ` · ${s.donor_email}`}</p>
-                <p className="text-xs text-gray-500 mt-0.5">PayPal: {s.paypal_subscription_id} · {s.branch_id}</p>
+                <p className="text-sm text-white/70 mt-0.5">{s.donor_name || 'Anonymous'}{s.donor_email && ` · ${s.donor_email}`}</p>
+                <p className="text-xs text-white/40 mt-0.5">PayPal: {s.paypal_subscription_id} · {s.branch_id}</p>
               </div>
-              <div className="text-right text-xs text-gray-500 flex-shrink-0">
+              <div className="text-right text-xs text-white/40 flex-shrink-0">
                 <p>{s.approved_at ? new Date(s.approved_at).toLocaleDateString('en-GB') : 'Pending'}</p>
               </div>
             </div>
@@ -156,17 +156,17 @@ export default function RecurringGivingPage() {
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
           <div className="w-full max-w-md rounded-2xl p-6 space-y-4" style={{ background: '#1a0a00', border: '1px solid rgba(212,175,55,0.3)' }}>
-            <h2 className="font-bold text-lg text-yellow-400">{editId ? 'Edit Tier' : 'New Tier'}</h2>
+            <h2 className="font-bold text-lg text-saffron-400">{editId ? 'Edit Tier' : 'New Tier'}</h2>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-400 mb-1">Amount (£) *</label>
+                <label className="block text-xs font-semibold text-white/50 mb-1">Amount (£) *</label>
                 <input type="number" min="1" step="0.01" value={form.amount}
                   onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))}
                   className="w-full px-3 py-2 rounded-lg bg-white/10 text-white text-sm border border-white/20 focus:border-yellow-400 outline-none" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-400 mb-1">Frequency</label>
+                <label className="block text-xs font-semibold text-white/50 mb-1">Frequency</label>
                 <select value={form.frequency} onChange={e => setForm(f => ({ ...f, frequency: e.target.value }))}
                   className="w-full px-3 py-2 rounded-lg bg-white/10 text-white text-sm border border-white/20 focus:border-yellow-400 outline-none">
                   <option value="MONTH">Monthly</option>
@@ -177,14 +177,14 @@ export default function RecurringGivingPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-1">Label *</label>
+              <label className="block text-xs font-semibold text-white/50 mb-1">Label *</label>
               <input type="text" value={form.label} placeholder="e.g. Prasad Patron"
                 onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg bg-white/10 text-white text-sm border border-white/20 focus:border-yellow-400 outline-none" />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-1">Description</label>
+              <label className="block text-xs font-semibold text-white/50 mb-1">Description</label>
               <input type="text" value={form.description} placeholder="Short description shown to donors"
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg bg-white/10 text-white text-sm border border-white/20 focus:border-yellow-400 outline-none" />
@@ -192,7 +192,7 @@ export default function RecurringGivingPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-400 mb-1">Display Order</label>
+                <label className="block text-xs font-semibold text-white/50 mb-1">Display Order</label>
                 <input type="number" min="0" value={form.display_order}
                   onChange={e => setForm(f => ({ ...f, display_order: Number(e.target.value) }))}
                   className="w-full px-3 py-2 rounded-lg bg-white/10 text-white text-sm border border-white/20 focus:border-yellow-400 outline-none" />
@@ -200,12 +200,12 @@ export default function RecurringGivingPage() {
               <div className="flex flex-col gap-2 pt-5">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={form.is_default} onChange={e => setForm(f => ({ ...f, is_default: e.target.checked }))}
-                    className="rounded" style={{ accentColor: '#D4AF37' }} />
+                    className="rounded" style={{ accentColor: '#FF9933' }} />
                   <span className="text-sm text-white">Set as default</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={form.is_active} onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))}
-                    className="rounded" style={{ accentColor: '#D4AF37' }} />
+                    className="rounded" style={{ accentColor: '#FF9933' }} />
                   <span className="text-sm text-white">Active</span>
                 </label>
               </div>
@@ -216,8 +216,8 @@ export default function RecurringGivingPage() {
             <div className="flex gap-3 pt-2">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-lg font-semibold text-sm bg-white/10 text-white">Cancel</button>
               <button onClick={save} disabled={saving}
-                className="flex-1 py-2.5 rounded-lg font-bold text-sm disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
+                className="flex-1 py-2.5 rounded-xl font-bold text-sm text-white disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
                 {saving ? 'Saving…' : 'Save'}
               </button>
             </div>

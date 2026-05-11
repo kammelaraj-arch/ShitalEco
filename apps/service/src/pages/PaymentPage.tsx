@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, type ComponentType } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, type ComponentType } from 'react'
 import { motion } from 'framer-motion'
 import {
   PayPalScriptProvider as _PayPalScriptProvider,
@@ -273,6 +273,24 @@ export function PaymentPage() {
   })()
   const cardholderName = `${billingFirst.trim()} ${billingLast.trim()}`.trim()
 
+  // PayPalScriptProvider's `options` prop must keep the same object
+  // identity across renders. The SDK uses Object.is to decide whether to
+  // reload the JS bundle; a fresh `{ clientId, ... }` literal on every
+  // render makes it tear down and re-mount the script + iframes on every
+  // keystroke. Net effect: "Window closed for postrobot_method before
+  // ack" when the user finally clicks Pay, surfaced as our friendly
+  // "Payment was interrupted" toast.
+  //
+  // PR #77 stabilised createOrder/onApprove via refs but missed this
+  // object literal. Memoize on the only meaningful key — the client id —
+  // so changing donor inputs upstream no longer reloads the SDK.
+  const paypalScriptOptions = useMemo(() => ({
+    clientId: paypalClientId,
+    currency: 'GBP',
+    intent: 'capture',
+    components: 'buttons,card-fields',
+  }), [paypalClientId])
+
   return (
     <div className="max-w-lg mx-auto px-4 py-6 pb-32">
       <button
@@ -359,12 +377,7 @@ export function PaymentPage() {
           </button>
         </div>
       ) : (
-        <PayPalScriptProvider options={{
-          clientId: paypalClientId,
-          currency: 'GBP',
-          intent: 'capture',
-          components: 'buttons,card-fields',
-        }}>
+        <PayPalScriptProvider options={paypalScriptOptions}>
           <div className="space-y-4">
             {/* PayPal wallet button */}
             <PayPalButtons

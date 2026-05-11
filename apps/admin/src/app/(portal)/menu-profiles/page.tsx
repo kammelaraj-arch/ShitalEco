@@ -110,15 +110,16 @@ export default function MenuProfilesPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="space-y-5 animate-fade-in">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Menu Profiles</h1>
+          <h1 className="text-3xl font-black text-white">Menu Profiles</h1>
           <p className="text-white/50 text-sm mt-1">Reusable menu bundles assigned to kiosk devices.</p>
         </div>
         <button
           onClick={openCreate}
-          className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm transition-colors"
+          className="px-4 py-2.5 rounded-xl text-white text-sm font-bold transition-all hover:scale-[1.02] active:scale-[0.98]"
+          style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}
         >+ New Profile</button>
       </div>
 
