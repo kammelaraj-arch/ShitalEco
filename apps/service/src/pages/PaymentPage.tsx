@@ -229,6 +229,22 @@ export function PaymentPage() {
     }
   }, [])  // ← stable identity; reads via billingRef
 
+
+  const handleCardFieldsError = useCallback((e: { message?: string } | null | undefined) => {
+    const msg = e?.message || ''
+    if (msg.includes('card_fields') || msg.includes('not eligible')) {
+      setCardFieldsReady(false)
+    } else {
+      setError(msg || 'Card payment failed. Please try again.')
+    }
+    setCapturing(false)
+  }, [])
+  const handlePayPalButtonsError = useCallback((err: unknown) => {
+    console.error('PayPal error', err)
+    setError('PayPal encountered an error. Please try again.')
+  }, [])
+  const handlePayPalButtonsCancel = useCallback(() => setError(''), [])
+
   const boost = giftAidTotal * 0.25
 
   const fieldStyle = 'w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-ivory-200 text-sm outline-none focus:border-amber-700/40 placeholder:text-white/20'
@@ -385,11 +401,8 @@ export function PaymentPage() {
               fundingSource="paypal"
               createOrder={handleCreateOrder}
               onApprove={handleApprove}
-              onError={(err) => {
-                console.error('PayPal error', err)
-                setError('PayPal encountered an error. Please try again.')
-              }}
-              onCancel={() => setError('')}
+              onError={handlePayPalButtonsError}
+              onCancel={handlePayPalButtonsCancel}
             />
 
             {/* Divider */}

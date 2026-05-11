@@ -168,6 +168,14 @@ export function MonthlyGivingPage() {
     clientId, vault: true, intent: 'subscription', currency: 'GBP',
   }), [clientId])
 
+
+  const handleOnApprove = useCallback((data: unknown) => {
+    const d = data as { subscriptionID?: string } | null
+    return handleApprove({ subscriptionID: d?.subscriptionID })
+  }, [handleApprove])
+  const handlePayPalError = useCallback(() => setError('PayPal encountered an error. Please try again.'), [])
+  const handlePayPalCancel = useCallback(() => setStep('details'), [])
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4">
@@ -528,9 +536,9 @@ export function MonthlyGivingPage() {
                   },
                 } as Parameters<typeof actions.subscription.create>[0])
               }}
-              onApprove={(data) => handleApprove({ subscriptionID: (data as { subscriptionID?: string }).subscriptionID })}
-              onError={() => setError('PayPal encountered an error. Please try again.')}
-              onCancel={() => setStep('details')}
+              onApprove={handleOnApprove}
+              onError={handlePayPalError}
+              onCancel={handlePayPalCancel}
             />
           </PayPalScriptProvider>
 
