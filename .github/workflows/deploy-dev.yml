@@ -142,6 +142,18 @@ jobs:
             docker compose -f docker-compose.dev.yml pull
 
             # ── Recreate everything (DB stays put — just restarts) ──────────────
+            # Pre-clean: compose occasionally retains references to container
+            # IDs that no longer exist in the docker engine (eg. after a host
+            # reboot or daemon restart). Subsequent `up --force-recreate`
+            # then 500s with "No such container: <stale-id>" and the deploy
+            # aborts mid-rollout. Force-remove by name first so compose has
+            # a clean slot to land into. -f ignores "not found" so the call
+            # is safe to run unconditionally.
+            echo "=== Pre-clean: drop stale dev containers by name ==="
+            for c in db backend admin quick-donation kiosk screen nginx; do
+              docker rm -f "shitaleco-dev-${c}-dev-1" 2>/dev/null || true
+            done
+
             echo "=== Recreating dev containers ==="
             docker compose -f docker-compose.dev.yml up -d --force-recreate --remove-orphans
 
