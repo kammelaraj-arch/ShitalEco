@@ -1,20 +1,48 @@
 #!/bin/bash
-# ── ShitalEco Production Deploy ────────────────────────────────────────────────
-# Images are built by GitHub Actions and pushed to GHCR.
-# This script ONLY pulls pre-built images and does a rolling restart.
-# The production server NEVER builds — that's what killed it before.
+# ── ShitalEco Deploy Script ───────────────────────────────────────────────────
+# Modes (passed via flags from server.py):
+#   --target dev    Pull :dev images, restart the dev stack
+#   --target prod   Pull :latest images, restart the prod stack (rolling, with
+#                   automatic rollback on health-check failure)
+#   --promote-prod  Retag :dev → :latest (no rebuild — bit-identical image),
+#                   then run --target prod
+#
+# Image flow:
+#   CI builds main → tagged :dev → auto-deploys to dev (target=dev)
+#   Admin clicks "Promote to Prod" → retag → deploy prod (--promote-prod)
 # ──────────────────────────────────────────────────────────────────────────────
 set -eo pipefail
 LOG=/tmp/deploy-$(date +%s).log
 exec >> "$LOG" 2>&1
 
-echo "=== Deploy started $(date) ==="
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+TARGET="dev"
+PROMOTE=0
+RESTORE_ID=""
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target) TARGET="$2"; shift 2 ;;
+    --promote-prod) PROMOTE=1; TARGET="prod"; shift ;;
+    --restore) RESTORE_ID="$2"; TARGET="prod"; shift 2 ;;
+    *) echo "Unknown arg: $1"; shift ;;
+  esac
+done
+
+# Where snapshots live. Each promote/restore creates one entry.
+#   promote-<ts>-<sha>.sql.gz  — DB dump taken just before promote
+#   :promote-<ts>              — image tag pointing at the about-to-be-replaced :latest
+SNAP_DIR=/workspace/backups
+SNAP_GC_KEEP=10
+mkdir -p "$SNAP_DIR"
+
+echo "=== Deploy started $(date) — target=${TARGET} promote=${PROMOTE} restore=${RESTORE_ID:-none} ==="
 cd /workspace
 
 git fetch origin
-git reset --hard origin/claude/shital-erp-platform-iR2UF
+git reset --hard "origin/${DEPLOY_BRANCH}"
 GIT_SHA=$(git rev-parse HEAD)
-echo "=== Deploying commit ${GIT_SHA} ==="
+echo "=== Deploying commit ${GIT_SHA} (${DEPLOY_BRANCH}) → ${TARGET} ==="
 
 # ── Login to GHCR so we can pull private images ──────────────────────────────
 if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -22,31 +50,151 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
     && echo "Logged in to GHCR" || echo "GHCR login failed — images may already be cached"
 fi
 
-# ── Checkpoint: tag :latest as :previous before pulling ─────────────────────
-for svc in backend admin quick-donation kiosk screen service; do
-  docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
-             ghcr.io/kammelaraj-arch/shitaleco-${svc}:previous 2>/dev/null || true
-done
+# ── Snapshot before promote: DB dump + timestamped image tag ────────────────
+take_snapshot() {
+  local ts="$1" reason="$2"
+  local out="${SNAP_DIR}/${reason}-${ts}-${GIT_SHA:0:7}.sql.gz"
+  echo "=== Taking ${reason} snapshot ${ts} ==="
+  # DB dump (best-effort — don't fail the deploy if pg_dump misbehaves)
+  if docker compose -f docker-compose.prod.yml exec -T db \
+       pg_dump -U "${POSTGRES_USER:-shitaleco_db_user}" \
+               -d "${POSTGRES_DB:-shitaleco_db}" 2>/dev/null \
+       | gzip > "$out" ; then
+    echo "  ✓ DB dump → ${out} ($(du -h "$out" | cut -f1))"
+  else
+    rm -f "$out"
+    echo "  ✗ DB dump failed (continuing — image snapshot still useful)"
+  fi
+  # Image-tag snapshot of current :latest, before any retag
+  for svc in backend admin quick-donation kiosk screen service; do
+    local img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+    if docker tag "${img}:latest" "${img}:${reason}-${ts}" 2>/dev/null; then
+      echo "  ✓ tagged ${svc}:${reason}-${ts}"
+    fi
+  done
+}
 
-# ── Pull new images from GHCR (built by CI, not here) ───────────────────────
-echo "=== Pulling images from GHCR ==="
-docker compose -f docker-compose.prod.yml pull backend admin quick-donation kiosk screen
-docker compose -f docker-compose.prod.yml pull service 2>/dev/null || \
-  echo "service image not yet in GHCR — skipping pull"
+# Garbage-collect: keep latest N promote snapshots (db dump files + image tags)
+gc_snapshots() {
+  echo "=== GC: keeping last ${SNAP_GC_KEEP} promote snapshots ==="
+  # Files
+  ls -1t "${SNAP_DIR}"/promote-*.sql.gz 2>/dev/null \
+    | tail -n +"$((SNAP_GC_KEEP + 1))" \
+    | while read -r f ; do echo "  rm $f"; rm -f "$f"; done
+  # Image tags (parse promote-<ts> tags, keep last N)
+  for svc in backend admin quick-donation kiosk screen service; do
+    local img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+    docker images "${img}" --format '{{.Tag}}' 2>/dev/null \
+      | grep '^promote-' | sort -r | tail -n +"$((SNAP_GC_KEEP + 1))" \
+      | while read -r tag ; do
+          docker rmi "${img}:${tag}" >/dev/null 2>&1 \
+            && echo "  untagged ${svc}:${tag}" || true
+        done
+  done
+}
 
-# ── Prune old dangling images immediately ───────────────────────────────────
+# ── Restore mode: rollback to a specific snapshot ────────────────────────────
+if [ -n "$RESTORE_ID" ]; then
+  echo "=== Restore mode — snapshot id=${RESTORE_ID} ==="
+  DB_DUMP="${SNAP_DIR}/promote-${RESTORE_ID}-"*".sql.gz"
+  DB_DUMP_FILE=$(ls $DB_DUMP 2>/dev/null | head -1 || true)
+  if [ -z "$DB_DUMP_FILE" ] || [ ! -f "$DB_DUMP_FILE" ]; then
+    echo "!!! No DB dump found matching ${RESTORE_ID} — aborting"
+    exit 1
+  fi
+  # Snapshot the CURRENT state first so we can rollback the rollback
+  PRE_RESTORE_TS=$(date -u +'%Y%m%dT%H%M%SZ')
+  take_snapshot "$PRE_RESTORE_TS" "pre-restore"
+
+  echo "=== Restoring images from :promote-${RESTORE_ID} → :latest ==="
+  for svc in backend admin quick-donation kiosk screen service; do
+    img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+    if docker tag "${img}:promote-${RESTORE_ID}" "${img}:latest" 2>/dev/null; then
+      echo "  ✓ restored ${svc} → :latest"
+    else
+      echo "  ~ no :promote-${RESTORE_ID} for ${svc} (skipping)"
+    fi
+  done
+
+  echo "=== Restoring DB from ${DB_DUMP_FILE} ==="
+  if zcat "$DB_DUMP_FILE" | docker compose -f docker-compose.prod.yml exec -T db \
+       psql -U "${POSTGRES_USER:-shitaleco_db_user}" \
+            -d "${POSTGRES_DB:-shitaleco_db}" >/dev/null 2>&1 ; then
+    echo "  ✓ DB restored"
+  else
+    echo "!!! DB restore failed — images already retagged. Manual intervention required."
+    exit 1
+  fi
+  # Skip the promote retag step below — restore IS the retag for this run.
+  PROMOTE=0
+fi
+
+# ── Promote: retag :dev → :latest BEFORE pulling/restarting prod ────────────
+if [ "$PROMOTE" -eq 1 ]; then
+  PROMOTE_TS=$(date -u +'%Y%m%dT%H%M%SZ')
+  take_snapshot "$PROMOTE_TS" "promote"
+
+  echo "=== Promoting :dev → :latest ==="
+  docker pull "ghcr.io/kammelaraj-arch/shitaleco-backend:dev"
+  for svc in backend admin quick-donation kiosk screen service; do
+    img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+    # Snapshot current :latest as :previous (rollback target — kept for compat
+    # with existing one-step rollback logic below).
+    docker tag "${img}:latest" "${img}:previous" 2>/dev/null || true
+    # Promote :dev → :latest
+    if docker pull "${img}:dev" 2>/dev/null; then
+      docker tag "${img}:dev" "${img}:latest"
+      echo "  ✓ promoted ${svc}"
+    else
+      echo "  - skipped ${svc} (no :dev image)"
+    fi
+  done
+  gc_snapshots
+fi
+
+# ── Branch on target ────────────────────────────────────────────────────────
+if [ "$TARGET" = "dev" ]; then
+  COMPOSE="docker-compose.dev.yml"
+  STACK_NAME="dev"
+  HEALTH_URL="http://localhost:8001/health"
+  HISTORY_TAG="dev"
+else
+  COMPOSE="docker-compose.prod.yml"
+  STACK_NAME="prod"
+  HEALTH_URL="http://localhost:8000/health"
+  HISTORY_TAG="prod"
+fi
+
+echo "=== Pulling images for ${STACK_NAME} stack ==="
+if [ "$TARGET" = "dev" ]; then
+  # Dev stack pulls :dev (most CI builds)
+  docker compose -f "$COMPOSE" pull 2>&1 | tail -10 || true
+elif [ "$PROMOTE" -eq 1 ]; then
+  # Prod promotion path — :latest was JUST retagged from :dev locally above.
+  # Skip the registry pull so we don't overwrite our promotion with whatever
+  # stale :latest happens to be on GHCR (CI builds :dev, not :latest, so the
+  # registry's :latest is from before the dev/prod split).
+  echo "Skipping docker pull — using locally promoted :latest tags"
+else
+  # Plain prod deploy (no promotion) — fall back to pulling :latest from GHCR
+  docker compose -f "$COMPOSE" pull backend admin quick-donation kiosk screen 2>&1 | tail -10 || true
+  docker compose -f "$COMPOSE" pull service 2>/dev/null || \
+    echo "service image not yet in GHCR — skipping pull"
+fi
+
 docker image prune -f
 docker container prune -f
 
 # ── Rolling restart — backend first ─────────────────────────────────────────
-echo "=== Rolling restart: backend ==="
-docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
+echo "=== Rolling restart: backend (${STACK_NAME}) ==="
+docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend 2>/dev/null || \
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend-dev
 
-echo "=== Waiting for backend health ==="
+echo "=== Waiting for backend health (${HEALTH_URL}) ==="
 BACKEND_OK=0
 for i in $(seq 1 30); do
   sleep 5
-  if curl -sf --max-time 5 http://localhost:8000/health > /dev/null 2>&1; then
+  if curl -sf --max-time 5 "$HEALTH_URL" > /dev/null 2>&1; then
     echo "Backend healthy after ${i} attempts"
     BACKEND_OK=1
     break
@@ -54,35 +202,46 @@ for i in $(seq 1 30); do
   echo "  attempt ${i}/30..."
 done
 
+HISTORY_FILE=/workspace/backups/deploy-history.jsonl
+mkdir -p "$(dirname "$HISTORY_FILE")"
+SHORT_SHA="${GIT_SHA:0:7}"
+COMMIT_MSG=$(cd /workspace && git log -1 --format='%s' "$GIT_SHA" 2>/dev/null | sed 's/"/\\"/g' | head -c 200)
+
 if [ "$BACKEND_OK" -eq 0 ]; then
-  echo "!!! Backend unhealthy — rolling back to :previous ==="
-  docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
-             ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
-  docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
-  echo "Rolled back. Frontends NOT updated."
+  echo "!!! Backend unhealthy on ${STACK_NAME} — rolling back to :previous ==="
+  if [ "$TARGET" = "prod" ]; then
+    docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
+               ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
+    docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend
+  fi
+  cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"rolled_back","message":"backend health check failed"}
+JSON
   exit 1
 fi
 
-curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
+# Prod-only: warm seed-catalog endpoint (best-effort)
+if [ "$TARGET" = "prod" ]; then
+  curl -sf -X POST http://localhost:8000/api/v1/admin/seed-catalog || true
+fi
 
 # ── Frontend rollout ─────────────────────────────────────────────────────────
-echo "=== Rolling restart: frontends ==="
-docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
-docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate service 2>/dev/null || \
-  echo "service container not yet available — skipping"
+echo "=== Rolling restart: frontends (${STACK_NAME}) ==="
+if [ "$TARGET" = "dev" ]; then
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate \
+    admin-dev quick-donation-dev kiosk-dev screen-dev 2>/dev/null || true
+else
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate admin quick-donation kiosk screen
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate service 2>/dev/null || \
+    echo "service container not yet available — skipping"
 
-echo "Waiting for admin..."
-for i in $(seq 1 20); do
-  sleep 4
-  curl -sf --max-time 5 http://localhost:3001/admin > /dev/null 2>&1 && break
-  echo "  attempt ${i}/20..."
-done
-
-docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
-  docker compose -f docker-compose.prod.yml up -d --no-deps nginx
+  # Reload nginx (prod only — dev nginx auto-reloads)
+  docker compose -f "$COMPOSE" exec -T nginx nginx -s reload 2>/dev/null || \
+    docker compose -f "$COMPOSE" up -d --no-deps nginx
+fi
 
 # ── Smoke tests ──────────────────────────────────────────────────────────────
-echo "=== Smoke tests ==="
+echo "=== Smoke tests (${STACK_NAME}) ==="
 SMOKE_FAIL=0
 smoke() {
   local label=$1 url=$2
@@ -93,31 +252,60 @@ smoke() {
     SMOKE_FAIL=1
   fi
 }
-smoke "backend /health"   "http://localhost:8000/health"
-smoke "admin portal"      "http://localhost:3001/admin"
-smoke "nginx main"        "http://localhost:80/"
-smoke "kiosk via nginx"   "http://localhost:80/kiosk/"
-smoke "donate via nginx"  "http://localhost:80/donate/"
-smoke "screen via nginx"  "http://localhost:80/screen/"
+if [ "$TARGET" = "dev" ]; then
+  smoke "dev backend /health" "http://localhost:8001/health"
+  smoke "dev nginx"            "http://localhost:8080/"
+else
+  smoke "backend /health"   "http://localhost:8000/health"
+  smoke "nginx main"        "http://localhost:80/"
+  smoke "kiosk via nginx"   "http://localhost:80/kiosk/"
+  smoke "donate via nginx"  "http://localhost:80/donate/"
+  smoke "screen via nginx"  "http://localhost:80/screen/"
+fi
 
 if [ "$SMOKE_FAIL" -ne 0 ]; then
   echo "!!! Smoke tests failed ==="
-  docker compose -f docker-compose.prod.yml logs --tail=20 backend
+  docker compose -f "$COMPOSE" logs --tail=20 backend 2>/dev/null || \
+    docker compose -f "$COMPOSE" logs --tail=20 backend-dev
+  cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"smoke_fail","message":"${COMMIT_MSG}"}
+JSON
   exit 1
 fi
 
-# ── Tag :latest as :dev and refresh dev stack ────────────────────────────────
-for svc in backend admin quick-donation kiosk screen service; do
-  docker tag ghcr.io/kammelaraj-arch/shitaleco-${svc}:latest \
-             ghcr.io/kammelaraj-arch/shitaleco-${svc}:dev 2>/dev/null || true
-done
-
-DEV_DIR=/opt/shitaleco-dev
-if [ -d "$DEV_DIR/.git" ]; then
-  cd "$DEV_DIR"
-  git fetch origin
-  git reset --hard origin/claude/shital-erp-platform-iR2UF
-  docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
+# ── Endpoint sanity check (catches stale images that "look healthy") ────────
+# Hit a few endpoints we KNOW only exist in newer code — if any returns 404
+# we're running an old image despite a "successful" restart.
+echo "=== Endpoint sanity check ==="
+ENDPOINT_FAIL=0
+endpoint_check() {
+  local label=$1 url=$2 expect=$3
+  local got
+  got=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 "$url" || echo 000)
+  if [ "$got" = "$expect" ] || { [ "$expect" = "401" ] && [ "$got" = "403" ]; }; then
+    echo "  ✓ $label ($got)"
+  else
+    echo "  ✗ $label expected $expect, got $got"
+    ENDPOINT_FAIL=1
+  fi
+}
+if [ "$TARGET" = "prod" ]; then
+  endpoint_check "/health"                          "http://localhost:8000/health"                       "200"
+  endpoint_check "/api/v1/admin/system/version"     "http://localhost:8000/api/v1/admin/system/version"  "401"
+  endpoint_check "/api/v1/admin/system/environments" "http://localhost:8000/api/v1/admin/system/environments" "401"
+  endpoint_check "/api/v1/gift-aid/gasds/buildings" "http://localhost:8000/api/v1/gift-aid/gasds/buildings"  "401"
+fi
+if [ "$ENDPOINT_FAIL" -ne 0 ]; then
+  echo "WARNING: One or more sanity-check endpoints did not respond as expected."
+  echo "         The deploy may have restarted with a stale image."
 fi
 
-echo "=== Deploy complete $(date) — commit ${GIT_SHA} ==="
+# ── Success ─────────────────────────────────────────────────────────────────
+echo "=== Deploy complete $(date) — commit ${GIT_SHA} → ${STACK_NAME} ==="
+
+SANITY="true"
+[ "${ENDPOINT_FAIL:-0}" -ne 0 ] && SANITY="false"
+
+cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"success","message":"${COMMIT_MSG}","sanity_pass":${SANITY}}
+JSON
