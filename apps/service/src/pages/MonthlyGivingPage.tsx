@@ -27,7 +27,6 @@ export function MonthlyGivingPage() {
   const [loading, setLoading]       = useState(true)
   const [planId, setPlanId]         = useState('')
 
-  // Donor details
   const [firstName, setFirstName]   = useState('')
   const [surname, setSurname]       = useState('')
   const [donorEmail, setDonorEmail] = useState('')
@@ -41,16 +40,8 @@ export function MonthlyGivingPage() {
   const [step, setStep]             = useState<'pick' | 'details' | 'pay' | 'done'>('pick')
   const [error, setError]           = useState('')
 
-  // Gift Aid declaration — when ticked, the SHITAL trustees can claim 25p
-  // back from HMRC for every £1 the donor gives. UK taxpayers + own funds +
-  // not claiming the gift back are the legal requirements; we surface a
-  // brief reminder under the checkbox so donors can self-disqualify.
   const [giftAidDeclared, setGiftAidDeclared] = useState(false)
 
-  // Custom amount path — devotee picks their own £/month value when none of
-  // the preset tiers feel right. Built as a synthetic GivingTier with a
-  // sentinel id so the rest of the flow (subscribe → approve → confirm)
-  // doesn't need to special-case it.
   const [customMode, setCustomMode] = useState(false)
   const [customAmount, setCustomAmount] = useState('')
   const customAmountValid = (() => {
@@ -119,13 +110,6 @@ export function MonthlyGivingPage() {
     }
   }
 
-  // PayPalButtons.onApprove must be identity-stable: if its reference
-  // changes between when the user opens the popup and when they approve,
-  // the SDK fires a stale callback and the subscription never gets
-  // recorded server-side (same root cause as PR #77 for PaymentPage).
-  // Read mutable state through approveRef so handleApprove never changes
-  // identity. giftAidDeclared lives in the ref too so the approve call
-  // sends the donor's Gift Aid choice through to the backend.
   const approveRef = useRef({
     selected, planId, branchId, firstName, surname,
     donorEmail, donorPhone, postcode, selectedAddress, giftAidDeclared,
@@ -157,7 +141,7 @@ export function MonthlyGivingPage() {
       tier_label: s.selected.label,
     }).catch(() => {})
     setStep('done')
-  }, [])  // ← stable identity; reads via approveRef
+  }, [])
 
   // PayPalScriptProvider's `options` prop must keep the same object
   // identity across renders or the SDK keeps tearing down + remounting
@@ -167,6 +151,17 @@ export function MonthlyGivingPage() {
   const paypalScriptOptions = useMemo(() => ({
     clientId, vault: true, intent: 'subscription', currency: 'GBP',
   }), [clientId])
+
+  // Identity-stable PayPalButtons callbacks. Inline arrow functions =
+  // fresh reference every keystroke in the donor fields, which made the
+  // SDK remount the Subscribe button mid-typing — next click then failed
+  // with the postrobot interrupted error.
+  const handleOnApprove = useCallback((data: unknown) => {
+    const d = data as { subscriptionID?: string } | null
+    return handleApprove({ subscriptionID: d?.subscriptionID })
+  }, [handleApprove])
+  const handlePayPalError = useCallback(() => setError('PayPal encountered an error. Please try again.'), [])
+  const handlePayPalCancel = useCallback(() => setStep('details'), [])
 
   if (loading) {
     return (
@@ -183,7 +178,6 @@ export function MonthlyGivingPage() {
         style={{ color: 'rgba(255,248,220,0.4)' }}>← Back
       </button>
 
-      {/* Header */}
       <div className="text-center mb-6">
         <div className="text-4xl mb-2">🕉</div>
         <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">Monthly Temple Support</h1>
@@ -192,7 +186,6 @@ export function MonthlyGivingPage() {
         </p>
       </div>
 
-      {/* Step: Pick amount */}
       {step === 'pick' && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'rgba(212,175,55,0.6)' }}>
@@ -218,7 +211,6 @@ export function MonthlyGivingPage() {
               </button>
             ))}
 
-            {/* Custom amount tile — toggles to an input box when tapped */}
             <button onClick={pickCustom}
               className="rounded-2xl p-4 text-left transition-all active:scale-[0.98] col-span-2"
               style={{
@@ -288,7 +280,6 @@ export function MonthlyGivingPage() {
         </motion.div>
       )}
 
-      {/* Step: Contact details */}
       {step === 'details' && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
           <div className="temple-card p-4 flex items-center justify-between">
@@ -300,7 +291,6 @@ export function MonthlyGivingPage() {
             <button onClick={() => setStep('pick')} className="text-xs font-bold" style={{ color: 'rgba(212,175,55,0.6)' }}>Change</button>
           </div>
 
-          {/* Name — split fields */}
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>First Name *</label>
@@ -314,7 +304,6 @@ export function MonthlyGivingPage() {
             </div>
           </div>
 
-          {/* Email */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Email *</label>
             <input type="email" value={donorEmail} onChange={e => setDonorEmail(e.target.value)}
@@ -322,7 +311,6 @@ export function MonthlyGivingPage() {
             {donorEmail && <p className="text-xs mt-1 ml-1" style={{ color: '#60a5fa' }}>📧 Subscription confirmation sent here</p>}
           </div>
 
-          {/* Phone */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Phone</label>
             <input type="tel" value={donorPhone} onChange={e => setDonorPhone(e.target.value)}
@@ -331,7 +319,6 @@ export function MonthlyGivingPage() {
             <p className="text-xs mt-1 ml-1" style={{ color: 'rgba(255,248,220,0.4)' }}>Optional — speeds up PayPal checkout</p>
           </div>
 
-          {/* Postcode lookup */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>UK Postcode *</label>
             <div className="flex gap-2">
@@ -351,7 +338,6 @@ export function MonthlyGivingPage() {
             {addressError && <p className="text-xs mt-1" style={{ color: '#f87171' }}>{addressError}</p>}
           </div>
 
-          {/* Address dropdown */}
           {addresses.length > 0 && (
             <div>
               <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(212,175,55,0.6)' }}>Select Address *</label>
@@ -368,7 +354,6 @@ export function MonthlyGivingPage() {
             </div>
           )}
 
-          {/* ── Gift Aid declaration ── */}
           <button type="button" onClick={() => setGiftAidDeclared(v => !v)}
             className="w-full text-left rounded-2xl p-4 transition-all"
             style={{
@@ -410,7 +395,6 @@ export function MonthlyGivingPage() {
         </motion.div>
       )}
 
-      {/* Step: PayPal subscription */}
       {step === 'pay' && planId && clientId && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <div className="temple-card p-4 mb-4">
@@ -424,27 +408,6 @@ export function MonthlyGivingPage() {
             <PayPalButtons
               style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }}
               createSubscription={(_data, actions) => {
-                // Pre-fill PayPal checkout (debit/credit card form) with the
-                // donor details we already collected.
-                //
-                // Pre-fill behavior of /v1/billing/subscriptions:
-                //   - subscriber.name → cardholder name on Guest Card form
-                //   - subscriber.email_address → email field
-                //   - subscriber.shipping_address → shipping AND billing
-                //     address (when SET_PROVIDED_ADDRESS); also drives the
-                //     country dial-code default on the phone field
-                //   - application_context.brand_name + locale → required for
-                //     reliable Guest Card pre-fill (without locale, PayPal
-                //     falls back to browser language and may suppress some
-                //     pre-fill paths)
-                // Note: subscriber.phone is NOT documented in the v1 subscriber
-                // schema (only name / email_address / shipping_address /
-                // payer_id are). PayPal silently drops unknown fields, which
-                // is why a previous attempt to pre-fill phone via that path
-                // had no effect — leaving it out keeps the payload clean.
-                // Defensive parse — PayPal silently drops the entire payer /
-                // subscriber block if any sub-field is malformed, so we
-                // omit > submit-with-junk.
                 const trimmedAddr = selectedAddress.trim()
                 const parts = trimmedAddr.split(',').map(p => p.trim()).filter(Boolean)
                 const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
@@ -457,15 +420,12 @@ export function MonthlyGivingPage() {
                 const familyName = surname.trim()
                 const haveName   = !!(givenName && familyName)
                 const havePostcode = !!postcode.trim()
-                const haveAddress  = !!(addressL1 && havePostcode)  // postcode-only is useless to PayPal
+                const haveAddress  = !!(addressL1 && havePostcode)
                 const fullName     = haveName ? `${givenName} ${familyName}` : ''
 
-                // Email validation — PayPal returns 422 on "user@" without TLD.
                 const email = donorEmail.trim()
                 const haveEmail = !!email && email.includes('@') && email.split('@')[1].includes('.')
 
-                // Phone: strip everything non-digit, drop +44/0 prefix, keep
-                // 9-11 digits. Anything else PayPal rejects with INVALID_PARAMETER_VALUE.
                 let phoneDigits = donorPhone.replace(/\D/g, '')
                 if (phoneDigits.startsWith('44') && phoneDigits.length >= 12) phoneDigits = phoneDigits.slice(2)
                 if (phoneDigits.startsWith('0')) phoneDigits = phoneDigits.slice(1)
@@ -489,13 +449,6 @@ export function MonthlyGivingPage() {
                     },
                   }),
                 }
-                // Belt-and-braces pre-fill. PayPal Live's Guest Card form is
-                // unreliable about reading subscriber.shipping_address —
-                // (#29, #33). Send the same identity in MULTIPLE shapes so
-                // PayPal's checkout state machine picks at least one:
-                //   (a) `subscriber` (subscriptions API canonical)
-                //   (b) `payer` (orders API shape — Smart Buttons forwards)
-                //   (c) `application_context.landing_page='BILLING'`
                 const payer: Record<string, unknown> = {
                   ...(haveName  && { name: { given_name: givenName, surname: familyName } }),
                   ...(haveEmail && { email_address: email }),
@@ -507,10 +460,6 @@ export function MonthlyGivingPage() {
                   }),
                   ...(addressBlock && { address: addressBlock }),
                 }
-                // `payer` isn't in @paypal subscriptions typings but Smart
-                // Buttons forwards unknown fields onto the checkout context
-                // — required to coax PayPal Live into pre-filling the Guest
-                // Card billing-address form. Cast the whole thing.
                 return actions.subscription.create({
                   plan_id: planId,
                   subscriber,
@@ -518,8 +467,6 @@ export function MonthlyGivingPage() {
                   application_context: {
                     brand_name:          'Shital Temple',
                     locale:              'en-GB',
-                    // SET_PROVIDED_ADDRESS only when we actually provided one,
-                    // otherwise PayPal returns 422 SHIPPING_ADDRESS_INVALID.
                     shipping_preference: addressBlock ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
                     user_action:         'SUBSCRIBE_NOW',
                     landing_page:        'BILLING',
@@ -528,9 +475,9 @@ export function MonthlyGivingPage() {
                   },
                 } as Parameters<typeof actions.subscription.create>[0])
               }}
-              onApprove={(data) => handleApprove({ subscriptionID: (data as { subscriptionID?: string }).subscriptionID })}
-              onError={() => setError('PayPal encountered an error. Please try again.')}
-              onCancel={() => setStep('details')}
+              onApprove={handleOnApprove}
+              onError={handlePayPalError}
+              onCancel={handlePayPalCancel}
             />
           </PayPalScriptProvider>
 
@@ -543,7 +490,6 @@ export function MonthlyGivingPage() {
         </motion.div>
       )}
 
-      {/* Step: Done */}
       {step === 'done' && (
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-8 space-y-4">
           <div className="text-6xl">🙏</div>
@@ -567,9 +513,6 @@ export function MonthlyGivingPage() {
             </p>
           )}
 
-          {/* How to cancel / unsubscribe — surfaced prominently so donors
-              never feel locked-in. PayPal owns the subscription, so cancel
-              must happen on their side; we just point the way. */}
           <div className="mt-6 mx-auto max-w-md text-left rounded-xl px-4 py-4"
             style={{ background: 'rgba(212,175,55,0.06)', border: '1px solid rgba(212,175,55,0.2)' }}>
             <p className="text-sm font-bold text-gold-400 mb-2">How to cancel or pause</p>
