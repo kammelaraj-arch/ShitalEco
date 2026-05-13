@@ -227,6 +227,7 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
     # the upsert. Wrapped in its own try so a CRM hiccup never blocks the
     # plan_id response (PayPal flow must continue regardless).
     email_key = body.donor_email.strip().lower() if body.donor_email.strip() else None
+    contact_id: str | None = None
     if email_key:
         try:
             full_name = f"{body.donor_first_name} {body.donor_surname}".strip()
@@ -271,6 +272,45 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
                 await db.commit()
         except Exception:
             pass  # CRM upsert must never block the PayPal plan response
+
+    # Audit row: record a PENDING_APPROVAL subscription so trustees see the
+    # attempt in the admin list even when the donor abandons PayPal or the
+    # subsequent /approve call fails. paypal_subscription_id is NULL here;
+    # PostgreSQL allows multiple NULLs in a UNIQUE column so concurrent
+    # attempts don't collide. /approve then upgrades the most recent
+    # matching PENDING row to ACTIVE.
+    try:
+        now = datetime.utcnow()
+        full_name = f"{body.donor_first_name} {body.donor_surname}".strip()
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                INSERT INTO recurring_giving_subscriptions
+                    (id, paypal_subscription_id, paypal_plan_id, tier_id, amount, frequency,
+                     status, branch_id, donor_name, donor_email,
+                     donor_first_name, donor_surname, donor_postcode, donor_address,
+                     contact_id, created_at, updated_at)
+                VALUES
+                    (:id, NULL, :plan_id, :tier_id, :amount, :freq,
+                     'PENDING_APPROVAL', :branch, :name, :email,
+                     :first_name, :surname, :postcode, :address,
+                     :cid, :now, :now)
+            """), {
+                "id": str(uuid.uuid4()),
+                "plan_id": plan_id,
+                # tier_id is a UUID FK; the custom path uses tier_id='custom'
+                # which isn't a UUID, so store NULL for custom subscriptions.
+                "tier_id": None if body.tier_id == "custom" else body.tier_id,
+                "amount": float(tier["amount"]),  # type: ignore[arg-type]
+                "freq": str(tier["frequency"]),
+                "branch": body.branch_id,
+                "name": full_name, "email": body.donor_email,
+                "first_name": body.donor_first_name, "surname": body.donor_surname,
+                "postcode": body.donor_postcode, "address": body.donor_address,
+                "cid": contact_id, "now": now,
+            })
+            await db.commit()
+    except Exception as exc:
+        print(f"[giving/subscribe] PENDING_APPROVAL insert failed (non-fatal): {exc}")
 
     return {
         "plan_id": plan_id,
@@ -358,41 +398,100 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                 })
 
         # ── Record subscription ─────────────────────────────────────────────
-        sub_uuid = str(uuid.uuid4())
-        await db.execute(text("""
-            INSERT INTO recurring_giving_subscriptions
-                (id, paypal_subscription_id, paypal_plan_id, tier_id, amount, frequency,
-                 status, branch_id, donor_name, donor_email,
-                 donor_first_name, donor_surname, donor_postcode, donor_address,
-                 contact_id, approved_at,
-                 gift_aid_declared, gift_aid_declared_at,
-                 created_at, updated_at)
-            VALUES
-                (:id, :sub_id, :plan_id, :tier_id, :amount, :freq,
-                 'ACTIVE', :branch, :name, :email,
-                 :first_name, :surname, :postcode, :address,
-                 :cid, :now,
-                 :ga, :ga_at,
-                 :now, :now)
-            ON CONFLICT (paypal_subscription_id) DO UPDATE
-                SET status = 'ACTIVE', approved_at = :now, updated_at = :now,
-                    donor_name = :name, donor_email = :email,
-                    donor_first_name = :first_name, donor_surname = :surname,
-                    donor_postcode = :postcode, donor_address = :address,
-                    gift_aid_declared = :ga,
-                    gift_aid_declared_at = COALESCE(recurring_giving_subscriptions.gift_aid_declared_at, :ga_at),
-                    contact_id = COALESCE(recurring_giving_subscriptions.contact_id, EXCLUDED.contact_id)
-        """), {
-            "id": sub_uuid, "sub_id": body.subscription_id,
-            "plan_id": body.plan_id, "tier_id": body.tier_id or None,
-            "amount": body.amount, "freq": body.frequency,
-            "branch": body.branch_id, "name": full_name, "email": body.donor_email,
-            "first_name": body.donor_first_name, "surname": body.donor_surname,
-            "postcode": body.donor_postcode, "address": body.donor_address,
-            "cid": contact_id, "now": now,
-            "ga": body.gift_aid_declared,
-            "ga_at": now if body.gift_aid_declared else None,
-        })
+        # Prefer claiming the PENDING_APPROVAL row created at /subscribe time
+        # (matched by contact_id + paypal_plan_id) so we preserve its id and
+        # created_at and don't leave a stranded audit row. Falls through to
+        # the existing INSERT/ON-CONFLICT if no PENDING row matched (e.g. the
+        # PENDING insert failed, or the donor had no email at /subscribe time
+        # and so we couldn't link the rows).
+        # tier_id column is a UUID; the custom path's "custom" sentinel isn't
+        # a valid UUID, so coerce it to NULL before binding.
+        tier_id_param = None if body.tier_id in ("custom", "") else body.tier_id
+
+        sub_uuid: str
+        updated_id: str | None = None
+        if contact_id:
+            upd = await db.execute(text("""
+                WITH candidate AS (
+                    SELECT id FROM recurring_giving_subscriptions
+                    WHERE contact_id = :cid
+                      AND paypal_plan_id = :plan_id
+                      AND status = 'PENDING_APPROVAL'
+                      AND paypal_subscription_id IS NULL
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
+                UPDATE recurring_giving_subscriptions s
+                SET paypal_subscription_id = :sub_id,
+                    status                 = 'ACTIVE',
+                    approved_at            = :now,
+                    updated_at             = :now,
+                    donor_name             = :name,
+                    donor_email            = :email,
+                    donor_first_name       = :first_name,
+                    donor_surname          = :surname,
+                    donor_postcode         = :postcode,
+                    donor_address          = :address,
+                    amount                 = :amount,
+                    frequency              = :freq,
+                    tier_id                = COALESCE(s.tier_id, :tier_id::uuid),
+                    gift_aid_declared      = :ga,
+                    gift_aid_declared_at   = COALESCE(s.gift_aid_declared_at, :ga_at)
+                FROM candidate
+                WHERE s.id = candidate.id
+                RETURNING s.id
+            """), {
+                "cid": contact_id, "plan_id": body.plan_id,
+                "sub_id": body.subscription_id, "now": now,
+                "name": full_name, "email": body.donor_email,
+                "first_name": body.donor_first_name, "surname": body.donor_surname,
+                "postcode": body.donor_postcode, "address": body.donor_address,
+                "amount": body.amount, "freq": body.frequency,
+                "tier_id": tier_id_param,
+                "ga": body.gift_aid_declared,
+                "ga_at": now if body.gift_aid_declared else None,
+            })
+            updated_row = upd.mappings().first()
+            updated_id = str(updated_row["id"]) if updated_row else None
+
+        if updated_id:
+            sub_uuid = updated_id
+        else:
+            sub_uuid = str(uuid.uuid4())
+            await db.execute(text("""
+                INSERT INTO recurring_giving_subscriptions
+                    (id, paypal_subscription_id, paypal_plan_id, tier_id, amount, frequency,
+                     status, branch_id, donor_name, donor_email,
+                     donor_first_name, donor_surname, donor_postcode, donor_address,
+                     contact_id, approved_at,
+                     gift_aid_declared, gift_aid_declared_at,
+                     created_at, updated_at)
+                VALUES
+                    (:id, :sub_id, :plan_id, :tier_id, :amount, :freq,
+                     'ACTIVE', :branch, :name, :email,
+                     :first_name, :surname, :postcode, :address,
+                     :cid, :now,
+                     :ga, :ga_at,
+                     :now, :now)
+                ON CONFLICT (paypal_subscription_id) DO UPDATE
+                    SET status = 'ACTIVE', approved_at = :now, updated_at = :now,
+                        donor_name = :name, donor_email = :email,
+                        donor_first_name = :first_name, donor_surname = :surname,
+                        donor_postcode = :postcode, donor_address = :address,
+                        gift_aid_declared = :ga,
+                        gift_aid_declared_at = COALESCE(recurring_giving_subscriptions.gift_aid_declared_at, :ga_at),
+                        contact_id = COALESCE(recurring_giving_subscriptions.contact_id, EXCLUDED.contact_id)
+            """), {
+                "id": sub_uuid, "sub_id": body.subscription_id,
+                "plan_id": body.plan_id, "tier_id": tier_id_param,
+                "amount": body.amount, "freq": body.frequency,
+                "branch": body.branch_id, "name": full_name, "email": body.donor_email,
+                "first_name": body.donor_first_name, "surname": body.donor_surname,
+                "postcode": body.donor_postcode, "address": body.donor_address,
+                "cid": contact_id, "now": now,
+                "ga": body.gift_aid_declared,
+                "ga_at": now if body.gift_aid_declared else None,
+            })
         await db.commit()
 
     # ── Confirmation email ──────────────────────────────────────────────────
