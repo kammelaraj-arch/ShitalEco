@@ -191,15 +191,19 @@ docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend 2>/dev/nul
   docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend-dev
 
 echo "=== Waiting for backend health (${HEALTH_URL}) ==="
+# 60 × 5s = 300s. Lifespan runs _patch_schema() + sync_from_digital_dna()
+# (~30 capability rows) before /health serves; deploy-dev.yml's comment
+# pegs cold start at 90-150s, so the old 150s window sat right on the
+# edge and rolled back every deploy as "backend health check failed".
 BACKEND_OK=0
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
   sleep 5
   if curl -sf --max-time 5 "$HEALTH_URL" > /dev/null 2>&1; then
     echo "Backend healthy after ${i} attempts"
     BACKEND_OK=1
     break
   fi
-  echo "  attempt ${i}/30..."
+  echo "  attempt ${i}/60..."
 done
 
 HISTORY_FILE=/workspace/backups/deploy-history.jsonl
