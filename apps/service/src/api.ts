@@ -144,7 +144,26 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     })
-    if (!r.ok) throw new Error(`PayPal capture failed: ${r.status}`)
+    if (!r.ok) {
+      // Backend's HTTPException with structured detail: surface the PayPal
+      // references so PaymentPage can show the donor what to email us with.
+      // FastAPI wraps `detail` in {detail: {...}}; tolerate plain-string too.
+      let body: any = null
+      try { body = await r.json() } catch { /* not JSON */ }
+      const detail = body?.detail
+      const err: any = new Error(
+        typeof detail === 'string'
+          ? detail
+          : detail?.message || `PayPal capture failed: ${r.status}`,
+      )
+      if (detail && typeof detail === 'object') {
+        err.paypal_order_id   = detail.paypal_order_id
+        err.paypal_capture_id = detail.paypal_capture_id
+        err.amount            = detail.amount
+      }
+      err.status = r.status
+      throw err
+    }
     return r.json()
   },
 
