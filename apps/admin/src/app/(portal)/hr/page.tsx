@@ -153,7 +153,6 @@ const EMPTY_FORM: EmployeeForm = {
 }
 
 const RTW_TYPES = ['British Citizen', 'ILR / Settled Status', 'Pre-Settled Status', 'Skilled Worker Visa', 'Student Visa', 'Graduate Visa', 'Spouse Visa', 'Other']
-const BRANCHES = ['main', 'wembley', 'wembley_main']  // TODO: wire to /branches API once exposed publicly
 const DEPARTMENTS = ['Admin', 'Finance', 'Religious', 'Operations', 'Community', 'IT', 'HR']
 const EMP_TYPES = ['FULL_TIME', 'PART_TIME', 'CONTRACTOR', 'VOLUNTEER']
 const GENDERS = ['', 'M', 'F', 'X', 'PREFER_NOT_SAY']
@@ -171,8 +170,11 @@ const TYPE_COLORS: Record<string, string> = {
 const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50'
 const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5'
 
+interface Branch { branch_id: string; name: string; is_active?: boolean }
+
 export default function HRPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeView, setActiveView] = useState<'active' | 'inactive'>('active')
@@ -201,6 +203,16 @@ export default function HRPage() {
   }, [activeView])
 
   useEffect(() => { load() }, [load])
+
+  // Source-of-truth branches list. Replaces a previous hardcoded
+  // ['main', 'wembley', 'wembley_main'] array that put the bogus
+  // 'wembley_main' value into employees.branch_id rows. Branch options
+  // and any branch_id → display name resolution must come from here.
+  useEffect(() => {
+    apiFetch<{ branches: Branch[] }>('/branches')
+      .then(d => setBranches((d.branches || []).filter(b => b.is_active !== false)))
+      .catch(() => setBranches([]))
+  }, [])
 
   useEffect(() => {
     if (!mgrSearch.trim()) { setMgrResults([]); return }
@@ -594,7 +606,13 @@ export default function HRPage() {
                   <div>
                     <label className={lbl}>Branch *</label>
                     <select value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))} className={inp}>
-                      {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                      {/* If the saved branch_id isn't in the active branches list (legacy
+                          rows like 'wembley_main'), surface it as a disabled marker so the
+                          admin can see + correct it without losing the value silently. */}
+                      {form.branch_id && !branches.some(b => b.branch_id === form.branch_id) && (
+                        <option value={form.branch_id} disabled>{form.branch_id} (unknown — please reselect)</option>
+                      )}
+                      {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
                     </select>
                   </div>
                   <div>
