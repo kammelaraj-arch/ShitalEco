@@ -450,15 +450,15 @@ async def paypal_capture_webhook(request: Request) -> dict[str, Any]:
     """
     import json
 
-    from sqlalchemy import text
-
-    from shital.core.fabrics.database import SessionLocal
-    from shital.core.fabrics.secrets import SecretsManager
-    # Reuse the verify helper from the recurring-giving webhook. It's
+    # Reuse _verify_paypal_webhook from the recurring-giving webhook. It's
     # generic (takes a webhook_id + event payload) and a third copy of
     # PayPal's verify-webhook-signature call would just rot. Long-term
     # this belongs in a shared paypal_utils module — out of scope here.
+    from sqlalchemy import text
+
     from shital.api.routers.recurring_giving import _verify_paypal_webhook
+    from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
 
     body_bytes = await request.body()
     try:
