@@ -133,6 +133,57 @@ async def _ensure_plan(tier_id: str, amount: float, label: str, frequency: str) 
     return plan_id
 
 
+# ── PayPal subscription verification ──────────────────────────────────────────
+
+# PayPal subscription status → our recurring_giving_subscriptions.status.
+# Per https://developer.paypal.com/docs/api/subscriptions/v1/ the buyer's
+# `onApprove` callback fires while the subscription is typically still in
+# APPROVAL_PENDING (vault setup pending) or APPROVED (vaulted, first charge
+# imminent); ACTIVE only after PayPal triggers the first billing cycle.
+# We therefore write PENDING_APPROVAL for those intermediate states and
+# rely on the existing BILLING.SUBSCRIPTION.ACTIVATED webhook to flip the
+# row to ACTIVE. This stops us from claiming "ACTIVE" on rows that PayPal
+# may never actually activate (donor abandons during vault auth, card
+# decline at first charge, etc.).
+_PAYPAL_TO_DB_STATUS = {
+    "ACTIVE":           "ACTIVE",
+    "APPROVAL_PENDING": "PENDING_APPROVAL",
+    "APPROVED":         "PENDING_APPROVAL",
+    "SUSPENDED":        "SUSPENDED",
+    "CANCELLED":        "CANCELLED",
+    "EXPIRED":          "EXPIRED",
+}
+
+
+async def _get_subscription_status(sub_id: str) -> tuple[str | None, bool]:
+    """Verify a subscription_id with PayPal via `GET /v1/billing/subscriptions/{id}`.
+
+    Returns (paypal_status, verified). `verified=True` means we got a real
+    answer from PayPal. `verified=False` + `paypal_status=None` means the
+    PayPal API call itself failed (network, token, etc.) — caller should
+    fall back to optimistic 'ACTIVE' so a transient PayPal hiccup doesn't
+    break the donor's flow; the webhook will reconcile.
+
+    A 404 from PayPal returns ('NOT_FOUND', True) so the caller can reject
+    a forged subscription_id.
+    """
+    try:
+        token = await _token()
+        base  = await _base()
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(
+                f"{base}/v1/billing/subscriptions/{sub_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code == 404:
+                return ("NOT_FOUND", True)
+            r.raise_for_status()
+            return (r.json().get("status", ""), True)
+    except Exception as exc:
+        print(f"[giving/approve] PayPal subscription lookup failed (non-fatal): {exc}")
+        return (None, False)
+
+
 # ── Public endpoints ─────────────────────────────────────────────────────────
 
 @router.get("/service/giving/tiers")
@@ -343,11 +394,37 @@ class ApproveBody(BaseModel):
 
 @router.post("/service/giving/subscription/approve")
 async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
-    """Record a donor-approved PayPal subscription in the database."""
+    """Record a donor-approved PayPal subscription in the database.
+
+    Verifies the subscription with PayPal first (`GET /v1/billing/subscriptions/{id}`)
+    so we (a) reject forged subscription_ids and (b) write the correct status
+    rather than blindly hardcoding 'ACTIVE'. If verification itself fails
+    (PayPal API down, etc.), we optimistically write 'ACTIVE' and trust the
+    BILLING.SUBSCRIPTION.ACTIVATED webhook to reconcile — so a transient
+    PayPal outage never breaks the donor's flow.
+    """
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+
+    # ── Verify subscription with PayPal ─────────────────────────────────────
+    paypal_status, verified = await _get_subscription_status(body.subscription_id)
+    if verified and paypal_status == "NOT_FOUND":
+        raise HTTPException(404, detail="Subscription not found at PayPal")
+    if verified and paypal_status in ("CANCELLED", "EXPIRED"):
+        raise HTTPException(
+            409,
+            detail=f"Subscription is {paypal_status.lower()} at PayPal; please start over.",
+        )
+    # Map PayPal → our DB status. Unverified or unknown PayPal statuses fall
+    # back to ACTIVE (optimistic) — webhook will correct if wrong.
+    db_status = _PAYPAL_TO_DB_STATUS.get(paypal_status or "", "ACTIVE") if verified else "ACTIVE"
+
     now = datetime.utcnow()
+    # approved_at represents the moment the donor consented in the PayPal UI
+    # (i.e. now, regardless of whether PayPal has activated the subscription
+    # yet). Status reflects PayPal's billing state separately.
+    approved_at = now
     full_name = f"{body.donor_first_name} {body.donor_surname}".strip()
     email_key = body.donor_email.strip().lower() if body.donor_email.strip() else None
 
@@ -423,8 +500,8 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                 )
                 UPDATE recurring_giving_subscriptions s
                 SET paypal_subscription_id = :sub_id,
-                    status                 = 'ACTIVE',
-                    approved_at            = :now,
+                    status                 = :db_status,
+                    approved_at            = :approved_at,
                     updated_at             = :now,
                     donor_name             = :name,
                     donor_email            = :email,
@@ -443,6 +520,7 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
             """), {
                 "cid": contact_id, "plan_id": body.plan_id,
                 "sub_id": body.subscription_id, "now": now,
+                "db_status": db_status, "approved_at": approved_at,
                 "name": full_name, "email": body.donor_email,
                 "first_name": body.donor_first_name, "surname": body.donor_surname,
                 "postcode": body.donor_postcode, "address": body.donor_address,
@@ -468,13 +546,13 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                      created_at, updated_at)
                 VALUES
                     (:id, :sub_id, :plan_id, :tier_id, :amount, :freq,
-                     'ACTIVE', :branch, :name, :email,
+                     :db_status, :branch, :name, :email,
                      :first_name, :surname, :postcode, :address,
-                     :cid, :now,
+                     :cid, :approved_at,
                      :ga, :ga_at,
                      :now, :now)
                 ON CONFLICT (paypal_subscription_id) DO UPDATE
-                    SET status = 'ACTIVE', approved_at = :now, updated_at = :now,
+                    SET status = :db_status, approved_at = :approved_at, updated_at = :now,
                         donor_name = :name, donor_email = :email,
                         donor_first_name = :first_name, donor_surname = :surname,
                         donor_postcode = :postcode, donor_address = :address,
@@ -485,6 +563,7 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                 "id": sub_uuid, "sub_id": body.subscription_id,
                 "plan_id": body.plan_id, "tier_id": tier_id_param,
                 "amount": body.amount, "freq": body.frequency,
+                "db_status": db_status, "approved_at": approved_at,
                 "branch": body.branch_id, "name": full_name, "email": body.donor_email,
                 "first_name": body.donor_first_name, "surname": body.donor_surname,
                 "postcode": body.donor_postcode, "address": body.donor_address,
@@ -522,7 +601,12 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
         except Exception:
             pass  # confirmation email is non-fatal
 
-    return {"success": True, "subscription_id": body.subscription_id}
+    return {
+        "success": True,
+        "subscription_id": body.subscription_id,
+        "status": db_status,
+        "paypal_status": paypal_status if verified else None,
+    }
 
 
 # ── Admin endpoints ──────────────────────────────────────────────────────────
