@@ -124,23 +124,35 @@ export function MonthlyGivingPage() {
   const handleApprove = useCallback(async (data: { subscriptionID?: string }) => {
     const s = approveRef.current
     if (!data.subscriptionID || !s.selected || !s.planId) return
-    await api.givingApprove({
-      subscription_id: data.subscriptionID,
-      plan_id: s.planId,
-      tier_id: s.selected.id,
-      amount: s.selected.amount,
-      frequency: s.selected.frequency,
-      branch_id: s.branchId,
-      donor_first_name: s.firstName.trim(),
-      donor_surname: s.surname.trim(),
-      donor_email: s.donorEmail.trim(),
-      donor_phone: s.donorPhone.trim(),
-      donor_postcode: s.postcode.trim(),
-      donor_address: s.selectedAddress,
-      gift_aid_declared: s.giftAidDeclared,
-      tier_label: s.selected.label,
-    }).catch(() => {})
-    setStep('done')
+    setError('')
+    try {
+      await api.givingApprove({
+        subscription_id: data.subscriptionID,
+        plan_id: s.planId,
+        tier_id: s.selected.id,
+        amount: s.selected.amount,
+        frequency: s.selected.frequency,
+        branch_id: s.branchId,
+        donor_first_name: s.firstName.trim(),
+        donor_surname: s.surname.trim(),
+        donor_email: s.donorEmail.trim(),
+        donor_phone: s.donorPhone.trim(),
+        donor_postcode: s.postcode.trim(),
+        donor_address: s.selectedAddress,
+        gift_aid_declared: s.giftAidDeclared,
+        tier_label: s.selected.label,
+      })
+      setStep('done')
+    } catch {
+      // The donor's PayPal subscription is already active at this point — we
+      // failed only to record it server-side. Surface the subscription ID so
+      // they can email it to us; never silently advance to 'done' or they'll
+      // think everything's fine and we'll have a phantom charge with no DB row.
+      setError(
+        `Your PayPal subscription (${data.subscriptionID}) is active, but we couldn't record it on our side. ` +
+        `Please email info@shital.org.uk with this reference so we can confirm your monthly support and send your receipt.`,
+      )
+    }
   }, [])
 
   // PayPalScriptProvider's `options` prop must keep the same object
