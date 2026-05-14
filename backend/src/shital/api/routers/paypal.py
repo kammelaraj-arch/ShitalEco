@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/service/paypal", tags=["service-paypal"])
@@ -193,6 +193,11 @@ async def create_paypal_order(body: CreateOrderBody) -> dict[str, str]:
     purchase_unit: dict = {
         "amount": {"currency_code": "GBP", "value": f"{body.amount:.2f}"},
         "description": body.description[:127],
+        # custom_id propagates through to the capture resource on the
+        # PAYMENT.CAPTURE.COMPLETED webhook, so the webhook handler can
+        # recover branch_id when /capture's synchronous DB write failed
+        # and only the webhook backstop runs. 127 char limit, ASCII-safe.
+        "custom_id": (body.branch_id or "main")[:127],
     }
     # purchase_units.shipping.address is the OTHER lever PayPal reads for
     # the Guest Card billing-address prefill (alongside payer.address). For
@@ -414,4 +419,206 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
         "paypal_order_id": body.paypal_order_id,
         "paypal_capture_id": capture_id,
         "amount": captured_amount,
+    }
+
+
+@router.post("/webhook")
+async def paypal_capture_webhook(request: Request) -> dict[str, Any]:
+    """PayPal webhook backstop for one-off donation captures.
+
+    Belt-and-braces companion to /capture, which writes the donation row
+    synchronously when the donor clicks Pay. If that synchronous write
+    fails for any reason — DB blip, schema drift, transient connection
+    — the donor's payment is already complete on PayPal's side, but our
+    DB has no record. PayPal then fires PAYMENT.CAPTURE.COMPLETED to
+    this endpoint (typically within seconds) and we write the row here.
+
+    Idempotency: uses the same idempotency_key as /capture
+    (`paypal-<order_id>` for donations, `paypal-order-<order_id>` for
+    orders), so when both /capture and the webhook race only one wins
+    via the existing ON CONFLICT DO NOTHING constraints. No event-level
+    dedup table needed — PayPal retries hit the same unique key.
+
+    Configure in PayPal Developer Dashboard → Webhooks → URL
+    `https://service.shital.org.uk/api/v1/service/paypal/webhook` with
+    event PAYMENT.CAPTURE.COMPLETED subscribed. Signature verification
+    reuses PAYPAL_WEBHOOK_ID (the same secret the subscription webhook
+    in recurring_giving.py uses, if both endpoints share one webhook
+    config in PayPal; otherwise create a separate webhook config and
+    point both at the same secret — PayPal's verify endpoint accepts
+    the id we send).
+    """
+    import json
+
+    # Reuse _verify_paypal_webhook from the recurring-giving webhook. It's
+    # generic (takes a webhook_id + event payload) and a third copy of
+    # PayPal's verify-webhook-signature call would just rot. Long-term
+    # this belongs in a shared paypal_utils module — out of scope here.
+    from sqlalchemy import text
+
+    from shital.api.routers.recurring_giving import _verify_paypal_webhook
+    from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
+
+    body_bytes = await request.body()
+    try:
+        event = json.loads(body_bytes)
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON payload")
+
+    webhook_id = await SecretsManager.get("PAYPAL_WEBHOOK_ID") or ""
+    if webhook_id:
+        valid = await _verify_paypal_webhook(
+            transmission_id  = request.headers.get("paypal-transmission-id", ""),
+            transmission_time= request.headers.get("paypal-transmission-time", ""),
+            auth_algo        = request.headers.get("paypal-auth-algo", ""),
+            cert_url         = request.headers.get("paypal-cert-url", ""),
+            transmission_sig = request.headers.get("paypal-transmission-sig", ""),
+            webhook_id       = webhook_id,
+            event            = event,
+        )
+        if not valid:
+            raise HTTPException(401, detail="Webhook signature verification failed")
+
+    event_type = event.get("event_type", "")
+    event_id   = event.get("id", "")
+
+    # Ignore every event type except CAPTURE.COMPLETED. Subscription
+    # events live on the /service/giving/webhook/paypal route; if PayPal
+    # is misconfigured to send them here we still 200 so it doesn't
+    # hammer us with retries.
+    if event_type != "PAYMENT.CAPTURE.COMPLETED":
+        return {"received": True, "event_type": event_type, "handled": False}
+
+    resource     = event.get("resource", {}) or {}
+    capture_id   = resource.get("id", "")
+    amount_obj   = resource.get("amount", {}) or {}
+    try:
+        captured_amount = float(amount_obj.get("value", "0") or 0)
+    except (TypeError, ValueError):
+        captured_amount = 0.0
+
+    # supplementary_data.related_ids.order_id is the v2 checkout order id
+    # — the same id /capture wrote with, so our idempotency keys collide
+    # harmlessly when both paths run.
+    paypal_order_id = (
+        ((resource.get("supplementary_data") or {}).get("related_ids") or {}).get("order_id", "")
+    )
+
+    # custom_id was stashed by /order (this PR) to body.branch_id. Fall
+    # back to 'main' if absent (older orders created before this PR).
+    branch_id = (resource.get("custom_id") or "main").strip() or "main"
+
+    payer          = resource.get("payer") or {}
+    payer_email    = (payer.get("email_address") or "").strip().lower() or None
+    payer_name_obj = payer.get("name") or {}
+    given          = (payer_name_obj.get("given_name") or "").strip()
+    surname        = (payer_name_obj.get("surname")    or "").strip()
+    full_name      = f"{given} {surname}".strip()
+
+    if not paypal_order_id or not capture_id:
+        structlog.get_logger().error(
+            "paypal_webhook_capture_missing_ids",
+            event_id=event_id, capture_id=capture_id, order_id=paypal_order_id,
+        )
+        return {"received": True, "event_type": event_type, "handled": False}
+
+    now           = datetime.utcnow()
+    order_uuid    = str(uuid.uuid4())
+    order_ref     = f"SH{int(now.timestamp())}"
+    donation_uuid = str(uuid.uuid4())
+
+    try:
+        async with SessionLocal() as db:
+            contact_id: str | None = None
+            if payer_email:
+                contact_uuid = str(uuid.uuid4())
+                c_result = await db.execute(text("""
+                    INSERT INTO contacts
+                        (id, email, first_name, surname, full_name,
+                         gdpr_consent, gdpr_consented_at, tac_consent, tac_consented_at,
+                         first_source, first_branch_id, created_at, updated_at)
+                    VALUES
+                        (:id, :email, :first, :surname, :name,
+                         true, :now, true, :now,
+                         'paypal-webhook', :branch, :now, :now)
+                    ON CONFLICT (email) DO UPDATE SET
+                        first_name = COALESCE(NULLIF(EXCLUDED.first_name,''), contacts.first_name),
+                        surname    = COALESCE(NULLIF(EXCLUDED.surname,''),    contacts.surname),
+                        full_name  = COALESCE(NULLIF(EXCLUDED.full_name,''),  contacts.full_name),
+                        updated_at = EXCLUDED.updated_at
+                    RETURNING id
+                """), {
+                    "id": contact_uuid, "email": payer_email,
+                    "first": given, "surname": surname, "name": full_name,
+                    "branch": branch_id, "now": now,
+                })
+                row = c_result.mappings().first()
+                contact_id = str(row["id"]) if row else contact_uuid
+
+            await db.execute(text("""
+                INSERT INTO donations
+                    (id, branch_id, amount, currency, gift_aid_eligible,
+                     purpose, reference, payment_provider, payment_ref, paypal_capture_id,
+                     status, source, contact_id, idempotency_key, created_at, updated_at)
+                VALUES (:id,:branch,:amount,'GBP',false,
+                        'Service Portal',:ref,'paypal',:paypal_id,:capture_id,
+                        'COMPLETED','paypal-webhook',:cid,:idem,:now,:now)
+                ON CONFLICT (idempotency_key) DO NOTHING
+            """), {
+                "id": donation_uuid, "branch": branch_id, "amount": captured_amount,
+                "ref": order_ref, "paypal_id": paypal_order_id, "capture_id": capture_id,
+                "cid": contact_id, "idem": f"paypal-{paypal_order_id}", "now": now,
+            })
+
+            await db.execute(text("""
+                INSERT INTO orders
+                    (id, branch_id, reference, status, total_amount, currency,
+                     payment_provider, payment_ref, paypal_capture_id,
+                     customer_name, customer_email,
+                     contact_id, idempotency_key, created_at, updated_at)
+                VALUES (:id,:branch,:ref,'COMPLETED',:amount,'GBP',
+                        'paypal',:paypal_id,:capture_id,:name,:email,
+                        :cid,:idem,:now,:now)
+                ON CONFLICT (idempotency_key) DO NOTHING
+            """), {
+                "id": order_uuid, "branch": branch_id, "ref": order_ref,
+                "amount": captured_amount,
+                "paypal_id": paypal_order_id, "capture_id": capture_id,
+                "name": full_name, "email": payer_email,
+                "cid": contact_id, "idem": f"paypal-order-{paypal_order_id}", "now": now,
+            })
+
+            await db.commit()
+    except Exception as exc:
+        # Log + 200. Returning 500 would have PayPal retry this event up
+        # to ~25 times over 3 days — same DB problem will recur each
+        # time. Better to surface in our logs and let trustees reconcile
+        # via the PayPal dashboard using capture_id / order_id below.
+        structlog.get_logger().error(
+            "paypal_webhook_capture_record_failed",
+            error=str(exc), event_id=event_id,
+            paypal_order_id=paypal_order_id, paypal_capture_id=capture_id,
+            amount=captured_amount, branch_id=branch_id,
+        )
+        return {
+            "received": True, "event_type": event_type, "handled": False,
+            "error": str(exc)[:200],
+            "paypal_order_id": paypal_order_id, "paypal_capture_id": capture_id,
+        }
+
+    structlog.get_logger().info(
+        "paypal_webhook_capture_recorded",
+        event_id=event_id, paypal_order_id=paypal_order_id,
+        paypal_capture_id=capture_id, amount=captured_amount,
+        branch_id=branch_id,
+    )
+
+    return {
+        "received": True,
+        "event_type": event_type,
+        "handled": True,
+        "paypal_order_id":   paypal_order_id,
+        "paypal_capture_id": capture_id,
+        "amount":            captured_amount,
     }
