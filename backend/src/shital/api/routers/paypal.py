@@ -409,8 +409,33 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
             })
             await db.commit()
     except Exception as exc:
+        # Donor's PayPal payment SUCCEEDED — only our DB recording failed.
+        # Surface this to the frontend so the donor sees the PayPal references
+        # (not a fake confirmation screen). PayPal is the source of truth and
+        # the funds are already captured; trustees can reconcile via capture_id,
+        # and a future PAYMENT.CAPTURE.COMPLETED webhook handler (PR #90) will
+        # write the row idempotently as belt-and-braces.
         import structlog
-        structlog.get_logger().error("paypal_capture_record_failed", error=str(exc))
+        structlog.get_logger().error(
+            "paypal_capture_record_failed",
+            error=str(exc),
+            paypal_order_id=body.paypal_order_id,
+            paypal_capture_id=capture_id,
+            amount=captured_amount,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": (
+                    "Your PayPal payment was successful but we couldn't record it on our side. "
+                    "Please email info@shital.org.uk with the references below so we can confirm your donation."
+                ),
+                "paypal_order_id":   body.paypal_order_id,
+                "paypal_capture_id": capture_id,
+                "amount":            captured_amount,
+                "error":             str(exc)[:200],
+            },
+        )
 
     return {
         "success": True,

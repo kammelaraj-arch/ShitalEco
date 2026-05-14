@@ -194,8 +194,24 @@ export function PaymentPage() {
       } else {
         setError('Payment could not be confirmed. Please contact the temple.')
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Payment failed. Please try again.')
+    } catch (e: any) {
+      // Backend throws a structured error when PayPal succeeded but our DB
+      // recording failed (api.paypalCapture parses detail.{paypal_order_id,
+      // paypal_capture_id, amount} from the 500 body). Show the donor the
+      // exact references so they can email us — never advance to the
+      // confirmation screen on this path or they'll think everything's fine
+      // and we'll have a phantom charge with no DB row.
+      const captureId = e?.paypal_capture_id
+      const orderRef  = e?.paypal_order_id || data.orderID
+      if (captureId || e?.status === 500) {
+        setError(
+          (e?.message || 'Payment could not be recorded.') +
+          (captureId ? ` PayPal capture: ${captureId}.` : '') +
+          ` PayPal order: ${orderRef}.`,
+        )
+      } else {
+        setError(e instanceof Error ? e.message : 'Payment failed. Please try again.')
+      }
     } finally {
       setCapturing(false)
     }
