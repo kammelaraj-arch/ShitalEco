@@ -3,76 +3,14 @@ import { motion } from 'framer-motion'
 import {
   PayPalScriptProvider as _PayPalScriptProvider,
   PayPalButtons as _PayPalButtons,
-  PayPalCardFieldsProvider as _PayPalCardFieldsProvider,
-  PayPalNumberField as _PayPalNumberField,
-  PayPalExpiryField as _PayPalExpiryField,
-  PayPalCVVField as _PayPalCVVField,
-  usePayPalCardFields,
   type PayPalButtonsComponentProps,
   type ReactPayPalScriptOptions,
 } from '@paypal/react-paypal-js'
 import { useStore, useTotal, useGiftAidTotal, t } from '../store'
 import { api } from '../api'
 
-const PayPalScriptProvider   = _PayPalScriptProvider   as ComponentType<{ options: ReactPayPalScriptOptions; children: React.ReactNode }>
-const PayPalButtons          = _PayPalButtons          as ComponentType<PayPalButtonsComponentProps>
-const PayPalCardFieldsProvider = _PayPalCardFieldsProvider as ComponentType<any>
-const PayPalNumberField      = _PayPalNumberField      as ComponentType<any>
-const PayPalExpiryField      = _PayPalExpiryField      as ComponentType<any>
-const PayPalCVVField         = _PayPalCVVField         as ComponentType<any>
-
-// ── Card submit button — must live inside PayPalCardFieldsProvider ─────────────
-function CardSubmitButton({
-  total, paying, setError, setCapturing, billingAddress, cardholderName,
-}: {
-  total: number
-  paying: boolean
-  setError: (e: string) => void
-  setCapturing: (v: boolean) => void
-  billingAddress: {
-    addressLine1: string
-    addressLine2?: string
-    adminArea2?: string
-    postalCode: string
-    countryCode: string
-  }
-  cardholderName: string
-}) {
-  const { cardFieldsForm } = usePayPalCardFields()
-
-  async function handlePay() {
-    setError('')
-    setCapturing(true)
-    try {
-      const submitArgs: Record<string, unknown> = { billingAddress }
-      if (cardholderName.trim()) submitArgs.cardholderName = cardholderName.trim()
-      await (cardFieldsForm as any).submit(submitArgs)
-    } catch (e: any) {
-      const raw = e?.message || ''
-      let msg = raw
-      if (raw.includes('postrobot') || raw.includes('Window closed')) {
-        msg = 'Payment was interrupted. Please refresh the page and try again.'
-      } else if (raw.toLowerCase().includes('declin')) {
-        msg = 'Card was declined. Please try another card or contact your bank.'
-      } else if (!raw) {
-        msg = 'Card payment failed. Please check your details and try again.'
-      }
-      setError(msg)
-      setCapturing(false)
-    }
-  }
-
-  return (
-    <button
-      onClick={handlePay}
-      disabled={paying}
-      className="w-full py-4 rounded-2xl font-black text-base text-white disabled:opacity-50 transition-opacity"
-      style={{ background: paying ? 'rgba(212,175,55,0.4)' : 'linear-gradient(135deg,#b45309,#92400e)' }}
-    >
-      {paying ? 'Processing…' : `Pay £${total.toFixed(2)}`}
-    </button>
-  )
-}
+const PayPalScriptProvider = _PayPalScriptProvider as ComponentType<{ options: ReactPayPalScriptOptions; children: React.ReactNode }>
+const PayPalButtons        = _PayPalButtons        as ComponentType<PayPalButtonsComponentProps>
 
 export function PaymentPage() {
   const {
@@ -86,17 +24,6 @@ export function PaymentPage() {
   const [configLoading, setConfigLoading]   = useState(true)
   const [error, setError]                   = useState('')
   const [capturing, setCapturing]           = useState(false)
-  const [cardFieldsReady, setCardFieldsReady] = useState(true)
-
-  const [billingFirst,    setBillingFirst]    = useState(giftAidDeclaration?.firstName  || contactInfo?.firstName  || contactInfo?.name?.split(' ')[0] || '')
-  const [billingLast,     setBillingLast]     = useState(giftAidDeclaration?.surname    || contactInfo?.surname    || contactInfo?.name?.split(' ').slice(1).join(' ') || '')
-  const [billingPostcode, setBillingPostcode] = useState(giftAidDeclaration?.postcode   || contactInfo?.postcode   || '')
-  const [billingEmail,    setBillingEmail]    = useState(giftAidDeclaration?.contactEmail || contactInfo?.email   || '')
-  const [billingPhone,    setBillingPhone]    = useState(giftAidDeclaration?.contactPhone || contactInfo?.phone   || '')
-  const [billingAddress1, setBillingAddress1] = useState(() => {
-    const addr = giftAidDeclaration?.address || contactInfo?.address || ''
-    return addr.split(',')[0]?.trim() || ''
-  })
 
   useEffect(() => {
     Promise.all([
@@ -120,33 +47,32 @@ export function PaymentPage() {
     ]).finally(() => setConfigLoading(false))
   }, [])
 
-  const billingRef = useRef({
-    billingFirst, billingLast, billingEmail, billingPhone, billingPostcode, billingAddress1,
-    contactInfo, giftAidDeclaration, items, total, branchId,
-  })
+  // PayPal hosts both wallet and "Debit or Credit Card" entry in its own
+  // overlay now, so we no longer collect billing inputs on this page —
+  // donor identity comes from earlier contact / Gift Aid steps. handleCreateOrder
+  // and handleApprove pull straight from the upstream store via the ref below
+  // (refs keep callbacks identity-stable so the SDK doesn't remount buttons).
+  const billingRef = useRef({ contactInfo, giftAidDeclaration, items, total, branchId })
   const basketIdRef = useRef(basketId)
   useEffect(() => {
-    billingRef.current = {
-      billingFirst, billingLast, billingEmail, billingPhone, billingPostcode, billingAddress1,
-      contactInfo, giftAidDeclaration, items, total, branchId,
-    }
+    billingRef.current = { contactInfo, giftAidDeclaration, items, total, branchId }
     basketIdRef.current = basketId
   })
 
   const handleCreateOrder = useCallback(async (): Promise<string> => {
     const s = billingRef.current
     const desc      = s.items.slice(0, 3).map((i: { name: string }) => i.name).join(', ') || 'Shital Temple Donation'
-    const firstName = s.billingFirst || s.giftAidDeclaration?.firstName || s.contactInfo?.firstName || s.contactInfo?.name?.split(' ')[0] || ''
-    const surname   = s.billingLast  || s.giftAidDeclaration?.surname   || s.contactInfo?.surname   || s.contactInfo?.name?.split(' ').slice(1).join(' ') || ''
+    const firstName = s.giftAidDeclaration?.firstName || s.contactInfo?.firstName || s.contactInfo?.name?.split(' ')[0] || ''
+    const surname   = s.giftAidDeclaration?.surname   || s.contactInfo?.surname   || s.contactInfo?.name?.split(' ').slice(1).join(' ') || ''
     return api.paypalCreateOrder(s.total, desc, s.branchId, {
       contact_first_name: firstName,
       contact_surname:    surname,
       contact_name:       firstName && surname ? `${firstName} ${surname}` : s.contactInfo?.name || '',
-      contact_email:      s.billingEmail || s.giftAidDeclaration?.contactEmail || s.contactInfo?.email || '',
-      contact_phone:      s.billingPhone || s.giftAidDeclaration?.contactPhone || s.contactInfo?.phone || '',
-      contact_postcode:   s.billingPostcode || s.giftAidDeclaration?.postcode  || s.contactInfo?.postcode || '',
-      contact_address:    s.giftAidDeclaration?.address || s.contactInfo?.address || '',
-      contact_uprn:       s.giftAidDeclaration?.uprn    || s.contactInfo?.uprn    || '',
+      contact_email:      s.giftAidDeclaration?.contactEmail || s.contactInfo?.email || '',
+      contact_phone:      s.giftAidDeclaration?.contactPhone || s.contactInfo?.phone || '',
+      contact_postcode:   s.giftAidDeclaration?.postcode     || s.contactInfo?.postcode || '',
+      contact_address:    s.giftAidDeclaration?.address      || s.contactInfo?.address  || '',
+      contact_uprn:       s.giftAidDeclaration?.uprn         || s.contactInfo?.uprn     || '',
     })
   }, [])
 
@@ -155,8 +81,8 @@ export function PaymentPage() {
     setError('')
     try {
       const s = billingRef.current
-      const firstName = s.billingFirst || s.giftAidDeclaration?.firstName || s.contactInfo?.firstName || ''
-      const surname   = s.billingLast  || s.giftAidDeclaration?.surname   || s.contactInfo?.surname   || ''
+      const firstName = s.giftAidDeclaration?.firstName || s.contactInfo?.firstName || ''
+      const surname   = s.giftAidDeclaration?.surname   || s.contactInfo?.surname   || ''
       const fullName  = firstName && surname ? `${firstName} ${surname}` : s.contactInfo?.name || ''
       const result = await api.paypalCapture({
         paypal_order_id:    data.orderID,
@@ -165,12 +91,12 @@ export function PaymentPage() {
         contact_name:       fullName,
         contact_first_name: firstName,
         contact_surname:    surname,
-        contact_email:      s.billingEmail || s.giftAidDeclaration?.contactEmail || s.contactInfo?.email || '',
-        contact_phone:      s.billingPhone || s.giftAidDeclaration?.contactPhone || s.contactInfo?.phone || '',
+        contact_email:      s.giftAidDeclaration?.contactEmail || s.contactInfo?.email || '',
+        contact_phone:      s.giftAidDeclaration?.contactPhone || s.contactInfo?.phone || '',
         gift_aid:           s.giftAidDeclaration?.agreed ?? false,
-        gift_aid_postcode:  s.billingPostcode || s.giftAidDeclaration?.postcode || s.contactInfo?.postcode || '',
-        gift_aid_address:   s.giftAidDeclaration?.address || s.contactInfo?.address || '',
-        contact_uprn:       s.giftAidDeclaration?.uprn    || s.contactInfo?.uprn    || '',
+        gift_aid_postcode:  s.giftAidDeclaration?.postcode || s.contactInfo?.postcode || '',
+        gift_aid_address:   s.giftAidDeclaration?.address  || s.contactInfo?.address  || '',
+        contact_uprn:       s.giftAidDeclaration?.uprn     || s.contactInfo?.uprn     || '',
       })
       if (result.success) {
         setOrderResult({
@@ -217,23 +143,10 @@ export function PaymentPage() {
     }
   }, [])
 
-  // PayPalCardFieldsProvider's `onError` prop must also have stable identity
-  // (same Object.is dance as the script provider options + createOrder /
-  // onApprove). An inline arrow function = fresh identity every render =
-  // provider remount on every keystroke in any billing field = iframe rebuild
-  // mid-typing = "Window closed for postrobot_method before ack" on submit.
-  // useState setters are identity-stable by React's contract.
-  const handleCardFieldsError = useCallback((e: { message?: string } | null | undefined) => {
-    const msg = e?.message || ''
-    if (msg.includes('card_fields') || msg.includes('not eligible')) {
-      setCardFieldsReady(false)
-    } else {
-      setError(msg || 'Card payment failed. Please try again.')
-    }
-    setCapturing(false)
-  }, [])
-
-  // Same story for the PayPalButtons wallet path.
+  // Stable identity required — both PayPalButtons components compare style /
+  // callback props by identity and remount their iframes when identity flips,
+  // which races any in-flight postMessage as "Window closed for postrobot_method
+  // before ack" and surfaces as "Payment was interrupted".
   const handlePayPalButtonsError = useCallback((err: unknown) => {
     console.error('PayPal error', err)
     setError('PayPal encountered an error. Please try again.')
@@ -242,54 +155,18 @@ export function PaymentPage() {
 
   const boost = giftAidTotal * 0.25
 
-  const fieldStyle = 'w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-ivory-200 text-sm outline-none focus:border-amber-700/40 placeholder:text-white/20'
-  const labelStyle = 'block text-xs font-bold uppercase tracking-wider mb-1 text-white/40'
-  // PayPal SDK iframe components (PayPalNumberField / ExpiryField / CVVField
-  // and PayPalButtons) compare their `style` prop by identity. A fresh object
-  // literal each render → SDK rebuilds the iframe on every keystroke in any
-  // billing field → mid-typing the donor clicks Pay and the in-flight
-  // postMessage to the now-destroyed iframe fails with "Window closed for
-  // postrobot_method before ack", which we surface as "Payment was
-  // interrupted". PR #77 stabilised the callbacks and PR #85 stabilised the
-  // PayPalScriptProvider options; these style objects were the remaining leak.
-  const hostedFieldStyle = useMemo(() => ({
-    input: { color: '#f5f0dc', 'font-size': '14px', 'font-family': 'inherit', background: 'transparent', height: '100%' },
-    '.invalid': { color: '#f87171' },
-  }), [])
-  const hostedFieldClass = 'block relative bg-black/30 border border-white/10 rounded-xl px-3 overflow-hidden'
-  const hostedFieldHeight = useMemo(() => ({ height: 48 }), [])
   const paypalButtonsStyle = useMemo(() => ({
-    layout: 'horizontal' as const,
-    color:  'gold' as const,
+    layout: 'vertical' as const,
     shape:  'rect' as const,
-    label:  'paypal' as const,
     height: 48,
     tagline: false,
   }), [])
-
-  const billingAddressPayload = (() => {
-    const sourceAddr = giftAidDeclaration?.address || contactInfo?.address || ''
-    const parts      = sourceAddr.split(',').map(p => p.trim()).filter(Boolean)
-    const line1      = (billingAddress1 || parts[0] || '').trim()
-    const line2      = parts[1] || ''
-    const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
-    const cityCandidates = parts.slice(1).filter(p => !ukPostRe.test(p))
-    const city = cityCandidates.length ? cityCandidates[cityCandidates.length - 1] : ''
-    return {
-      addressLine1: line1 || billingPostcode || '',
-      ...(line2 && line2 !== city ? { addressLine2: line2 } : {}),
-      ...(city ? { adminArea2: city } : {}),
-      postalCode:   billingPostcode.trim(),
-      countryCode:  'GB',
-    }
-  })()
-  const cardholderName = `${billingFirst.trim()} ${billingLast.trim()}`.trim()
 
   const paypalScriptOptions = useMemo(() => ({
     clientId: paypalClientId,
     currency: 'GBP',
     intent: 'capture',
-    components: 'buttons,card-fields',
+    components: 'buttons',
   }), [paypalClientId])
 
   return (
@@ -386,90 +263,14 @@ export function PaymentPage() {
               onCancel={handlePayPalButtonsCancel}
             />
 
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px" style={{ background: 'rgba(255,248,220,0.1)' }} />
-              <span className="text-xs font-semibold" style={{ color: 'rgba(255,248,220,0.3)' }}>or pay by card</span>
-              <div className="flex-1 h-px" style={{ background: 'rgba(255,248,220,0.1)' }} />
-            </div>
-
-            {cardFieldsReady && (
-              <PayPalCardFieldsProvider
-                createOrder={handleCreateOrder}
-                onApprove={handleApprove}
-                onError={handleCardFieldsError}
-              >
-                <div className="temple-card p-5 space-y-4 relative">
-                  <div className="flex gap-3">
-                    <div className="flex-1">
-                      <label className={labelStyle}>First name</label>
-                      <input className={fieldStyle} value={billingFirst} onChange={e => setBillingFirst(e.target.value)} placeholder="First name" autoComplete="given-name" />
-                    </div>
-                    <div className="flex-1">
-                      <label className={labelStyle}>Last name</label>
-                      <input className={fieldStyle} value={billingLast} onChange={e => setBillingLast(e.target.value)} placeholder="Last name" autoComplete="family-name" />
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <div className="flex-1">
-                      <label className={labelStyle}>Email</label>
-                      <input className={fieldStyle} type="email" value={billingEmail} onChange={e => setBillingEmail(e.target.value)} placeholder="Email" autoComplete="email" />
-                    </div>
-                    <div className="w-36">
-                      <label className={labelStyle}>Mobile</label>
-                      <input className={fieldStyle} type="tel" value={billingPhone} onChange={e => setBillingPhone(e.target.value)} placeholder="+44" autoComplete="tel" />
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <div className="flex-1">
-                      <label className={labelStyle}>Address</label>
-                      <input className={fieldStyle} value={billingAddress1} onChange={e => setBillingAddress1(e.target.value)} placeholder="Street address" autoComplete="address-line1" />
-                    </div>
-                    <div className="w-32">
-                      <label className={labelStyle}>Postcode</label>
-                      <input className={fieldStyle + ' uppercase'} value={billingPostcode} onChange={e => setBillingPostcode(e.target.value.toUpperCase())} placeholder="Postcode" autoComplete="postal-code" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className={labelStyle}>Card number</label>
-                    <div className={hostedFieldClass} style={hostedFieldHeight}>
-                      <PayPalNumberField style={hostedFieldStyle} />
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="flex-1 min-w-0">
-                      <label className={labelStyle}>Expiry</label>
-                      <div className={hostedFieldClass} style={hostedFieldHeight}>
-                        <PayPalExpiryField style={hostedFieldStyle} />
-                      </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <label className={labelStyle}>Security code</label>
-                      <div className={hostedFieldClass} style={hostedFieldHeight}>
-                        <PayPalCVVField style={hostedFieldStyle} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <CardSubmitButton
-                    total={total}
-                    paying={capturing}
-                    setError={setError}
-                    setCapturing={setCapturing}
-                    billingAddress={billingAddressPayload}
-                    cardholderName={cardholderName}
-                  />
-                </div>
-              </PayPalCardFieldsProvider>
-            )}
-
-            {!cardFieldsReady && (
-              <div className="temple-card p-4 text-center text-xs" style={{ color: 'rgba(255,248,220,0.4)' }}>
-                Use the PayPal button above to pay — choose "Debit or Credit Card" inside PayPal.
-              </div>
-            )}
+            <PayPalButtons
+              style={paypalButtonsStyle}
+              fundingSource="card"
+              createOrder={handleCreateOrder}
+              onApprove={handleApprove}
+              onError={handlePayPalButtonsError}
+              onCancel={handlePayPalButtonsCancel}
+            />
 
             {error && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
