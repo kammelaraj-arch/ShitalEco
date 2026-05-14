@@ -228,12 +228,28 @@ export function PaymentPage() {
 
   const fieldStyle = 'w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-ivory-200 text-sm outline-none focus:border-amber-700/40 placeholder:text-white/20'
   const labelStyle = 'block text-xs font-bold uppercase tracking-wider mb-1 text-white/40'
-  const hostedFieldStyle = {
+  // PayPal SDK iframe components (PayPalNumberField / ExpiryField / CVVField
+  // and PayPalButtons) compare their `style` prop by identity. A fresh object
+  // literal each render → SDK rebuilds the iframe on every keystroke in any
+  // billing field → mid-typing the donor clicks Pay and the in-flight
+  // postMessage to the now-destroyed iframe fails with "Window closed for
+  // postrobot_method before ack", which we surface as "Payment was
+  // interrupted". PR #77 stabilised the callbacks and PR #85 stabilised the
+  // PayPalScriptProvider options; these style objects were the remaining leak.
+  const hostedFieldStyle = useMemo(() => ({
     input: { color: '#f5f0dc', 'font-size': '14px', 'font-family': 'inherit', background: 'transparent', height: '100%' },
     '.invalid': { color: '#f87171' },
-  }
+  }), [])
   const hostedFieldClass = 'block relative bg-black/30 border border-white/10 rounded-xl px-3 overflow-hidden'
-  const hostedFieldHeight = { height: 48 }
+  const hostedFieldHeight = useMemo(() => ({ height: 48 }), [])
+  const paypalButtonsStyle = useMemo(() => ({
+    layout: 'horizontal' as const,
+    color:  'gold' as const,
+    shape:  'rect' as const,
+    label:  'paypal' as const,
+    height: 48,
+    tagline: false,
+  }), [])
 
   const billingAddressPayload = (() => {
     const sourceAddr = giftAidDeclaration?.address || contactInfo?.address || ''
@@ -346,7 +362,7 @@ export function PaymentPage() {
         <PayPalScriptProvider options={paypalScriptOptions}>
           <div className="space-y-4">
             <PayPalButtons
-              style={{ layout: 'horizontal', color: 'gold', shape: 'rect', label: 'paypal', height: 48, tagline: false }}
+              style={paypalButtonsStyle}
               fundingSource="paypal"
               createOrder={handleCreateOrder}
               onApprove={handleApprove}
