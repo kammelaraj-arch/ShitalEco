@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, useTotal, useItemCount, t } from '../store'
 import { ItemCard } from '../components/ItemCard'
+import { CustomDonationCard } from '../components/CustomDonationCard'
 import { api } from '../api'
 
 type Tab = 'donate' | 'soft_donation' | 'project' | 'shop' | 'sponsorship' | 'services'
@@ -103,8 +104,11 @@ export function BrowsePage() {
         </div>
       </div>
 
+      {/* ── Custom Donation (any-amount instant donate) ─────────────── */}
+      <CustomDonationCard />
+
       {/* ── Monthly Giving Banner ───────────────────────────────────── */}
-      <div className="max-w-5xl mx-auto px-4 mt-5">
+      <div className="max-w-5xl mx-auto px-4 mt-3">
         <button
           onClick={() => setScreen('monthly-giving')}
           className="w-full rounded-2xl p-4 flex items-center gap-4 transition-all active:scale-[0.99]"
