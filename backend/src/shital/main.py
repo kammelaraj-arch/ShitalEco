@@ -938,6 +938,11 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_leave_requests_employee ON leave_requests(employee_id)",
         "CREATE INDEX IF NOT EXISTS idx_leave_requests_status   ON leave_requests(status)",
+        # leave_type was added in PR #97 (admin form / stat-cards rely on it).
+        # _ensure_hr_tables also ALTERs, but that only runs lazily on first
+        # POST — adding it here means GET /hr/leave works on a fresh backend
+        # immediately, instead of 500ing until someone submits a request.
+        "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS leave_type VARCHAR(50) NOT NULL DEFAULT 'annual'",
         """CREATE TABLE IF NOT EXISTS time_entries (
             id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             employee_id UUID NOT NULL,

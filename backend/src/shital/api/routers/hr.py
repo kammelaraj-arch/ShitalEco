@@ -293,6 +293,15 @@ async def list_leave(
     returns the rows + a joined employee name so the table is renderable
     in one round-trip.
     """
+    # Make sure the leave_type column (and any other ALTERs added in
+    # _ensure_hr_tables) exists before we SELECT from it — previously
+    # the schema patch only ran on POST /hr/leave, so a fresh backend
+    # that had never received a leave submission 500'd this GET with
+    # `column "leave_type" does not exist`. _ensure_hr_tables is
+    # idempotent + cheap; safe to call on every read path.
+    from shital.capabilities.hr.capabilities import _ensure_hr_tables
+    await _ensure_hr_tables()
+
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
