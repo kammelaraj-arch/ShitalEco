@@ -104,59 +104,83 @@ export function BrowsePage() {
         </div>
       </div>
 
-      {/* ── Custom Donation (any-amount instant donate) ─────────────── */}
-      <CustomDonationCard />
+      {/* ── 3-column CTA grid: Volunteer Seva · Monthly Giving · Custom ──
+          Side-by-side at md+, stacked on mobile. All three cards target
+          roughly the same vertical height — `h-full` + `flex-col` on each
+          inner card lets the grid stretch them. */}
+      <div className="max-w-5xl mx-auto px-4 mt-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
-      {/* ── Monthly Giving Banner ───────────────────────────────────── */}
-      <div className="max-w-5xl mx-auto px-4 mt-3">
-        <button
-          onClick={() => setScreen('monthly-giving')}
-          className="w-full rounded-2xl p-4 flex items-center gap-4 transition-all active:scale-[0.99]"
-          style={{
-            background: 'linear-gradient(135deg,rgba(22,163,74,0.18),rgba(21,128,61,0.12))',
-            border: '1.5px solid rgba(34,197,94,0.35)',
-            boxShadow: '0 4px 20px rgba(22,163,74,0.15)',
-          }}
-        >
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
-            style={{ background: 'rgba(22,163,74,0.2)', border: '1px solid rgba(34,197,94,0.3)' }}>
-            🔁
-          </div>
-          <div className="flex-1 text-left">
-            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(74,222,128,0.8)' }}>Monthly Giving</p>
-            <p className="font-black text-base text-ivory-200">Make a big impact from just £5/month</p>
-            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>Regular giving · Cancel anytime · Secure PayPal</p>
-          </div>
-          <svg className="w-5 h-5 flex-shrink-0" style={{ color: 'rgba(74,222,128,0.6)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      </div>
+          {/* 1 hr/week Seva — Volunteer Registration */}
+          <button
+            onClick={() => setScreen('volunteer')}
+            className="rounded-2xl p-4 text-left flex flex-col h-full transition-all active:scale-[0.99] hover:brightness-110"
+            style={{
+              background: 'linear-gradient(135deg,rgba(34,197,94,0.18),rgba(22,163,74,0.10))',
+              border: '1.5px solid rgba(74,222,128,0.40)',
+              boxShadow: '0 4px 20px rgba(22,163,74,0.15)',
+            }}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
+                style={{ background: 'rgba(22,163,74,0.22)', border: '1px solid rgba(74,222,128,0.35)' }}>
+                🤝
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(74,222,128,0.85)' }}>
+                  1 hr / week Seva
+                </p>
+                <p className="font-black text-sm text-ivory-200 leading-tight">
+                  Volunteer with SHITAL
+                </p>
+              </div>
+            </div>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: 'rgba(255,248,220,0.55)' }}>
+              Give one hour a week. Help with seva, langar, events. Register online — trustees review.
+            </p>
+            <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs self-start"
+              style={{ background: 'rgba(74,222,128,0.18)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.35)' }}>
+              Register →
+            </div>
+          </button>
 
-      {/* ── Volunteer Registration Banner ───────────────────────────── */}
-      <div className="max-w-5xl mx-auto px-4 mt-3">
-        <button
-          onClick={() => setScreen('volunteer')}
-          className="w-full rounded-2xl p-4 flex items-center gap-4 transition-all active:scale-[0.99]"
-          style={{
-            background: 'linear-gradient(135deg,rgba(212,175,55,0.18),rgba(212,175,55,0.10))',
-            border: '1.5px solid rgba(212,175,55,0.35)',
-            boxShadow: '0 4px 20px rgba(212,175,55,0.12)',
-          }}
-        >
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
-            style={{ background: 'rgba(212,175,55,0.18)', border: '1px solid rgba(212,175,55,0.30)' }}>
-            🤝
-          </div>
-          <div className="flex-1 text-left">
-            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,217,128,0.85)' }}>Volunteer with us</p>
-            <p className="font-black text-base text-ivory-200">Join the SHITAL volunteering family</p>
-            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>Register online · Trustee review · References taken</p>
-          </div>
-          <svg className="w-5 h-5 flex-shrink-0" style={{ color: 'rgba(255,217,128,0.6)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
+          {/* £5 Monthly Giving */}
+          <button
+            onClick={() => setScreen('monthly-giving')}
+            className="rounded-2xl p-4 text-left flex flex-col h-full transition-all active:scale-[0.99] hover:brightness-110"
+            style={{
+              background: 'linear-gradient(135deg,rgba(96,165,250,0.18),rgba(37,99,235,0.10))',
+              border: '1.5px solid rgba(96,165,250,0.40)',
+              boxShadow: '0 4px 20px rgba(37,99,235,0.15)',
+            }}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
+                style={{ background: 'rgba(37,99,235,0.22)', border: '1px solid rgba(96,165,250,0.35)' }}>
+                🔁
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(147,197,253,0.85)' }}>
+                  Monthly Giving
+                </p>
+                <p className="font-black text-sm text-ivory-200 leading-tight">
+                  From just £5 / month
+                </p>
+              </div>
+            </div>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: 'rgba(255,248,220,0.55)' }}>
+              Set up regular giving via PayPal. Cancel anytime. Gift Aid boosts your impact by 25%.
+            </p>
+            <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs self-start"
+              style={{ background: 'rgba(96,165,250,0.18)', color: '#93c5fd', border: '1px solid rgba(96,165,250,0.35)' }}>
+              Set up →
+            </div>
+          </button>
+
+          {/* Custom Donation (any-amount instant donate) */}
+          <CustomDonationCard />
+
+        </div>
       </div>
 
       {/* Category Tabs */}
