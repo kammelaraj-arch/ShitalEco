@@ -1,11 +1,26 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 
 interface Employee {
   id: string
   full_name: string
+}
+
+interface LeaveRequest {
+  id: string
+  employee_id: string
+  employee_name: string
+  leave_type: string
+  start_date: string
+  end_date: string
+  days: number
+  reason: string | null
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | string
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
 }
 
 interface LeaveForm {
@@ -21,11 +36,21 @@ const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide m
 
 const LEAVE_TYPES = ['annual', 'sick', 'maternity', 'paternity', 'unpaid']
 
+const STATUS_BADGE: Record<string, string> = {
+  PENDING:  'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  APPROVED: 'bg-green-500/15 text-green-300 border-green-500/30',
+  REJECTED: 'bg-red-500/15 text-red-300 border-red-500/30',
+}
+
 export default function LeavePage() {
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [requests, setRequests] = useState<LeaveRequest[]>([])
   const [empLoading, setEmpLoading] = useState(true)
+  const [reqLoading, setReqLoading] = useState(true)
+  const [reqError, setReqError]     = useState('')
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [actioning, setActioning] = useState<string>('')
   const [formError, setFormError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
 
@@ -39,13 +64,50 @@ export default function LeavePage() {
       const data = await apiFetch<{ items: Employee[] }>('/hr/employees?limit=100')
       setEmployees(data.items || [])
     } catch {
-      // non-fatal
+      // non-fatal — form falls back to "no employees" state if this errs
     } finally {
       setEmpLoading(false)
     }
   }, [])
 
+  const loadRequests = useCallback(async () => {
+    setReqLoading(true); setReqError('')
+    try {
+      const data = await apiFetch<{ items: LeaveRequest[] }>('/hr/leave?limit=200')
+      setRequests(data.items || [])
+    } catch (e) {
+      setReqError(e instanceof Error ? e.message : 'Failed to load leave requests')
+    } finally {
+      setReqLoading(false)
+    }
+  }, [])
+
   useEffect(() => { loadEmployees() }, [loadEmployees])
+  useEffect(() => { loadRequests() }, [loadRequests])
+
+  // Stat-card values, computed from the loaded requests. Used to live as
+  // hardcoded '—' placeholders. "Approved this month" filters on reviewed_at
+  // (when the approval actually happened), not created_at.
+  const stats = useMemo(() => {
+    const now      = new Date()
+    const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+    let annual = 0, sick = 0, pending = 0, approvedThisMonth = 0
+    for (const r of requests) {
+      if (r.leave_type === 'annual') annual += r.days || 0
+      if (r.leave_type === 'sick')   sick   += r.days || 0
+      if (r.status === 'PENDING')    pending += 1
+      if (r.status === 'APPROVED' && r.reviewed_at && r.reviewed_at.startsWith(monthKey)) {
+        approvedThisMonth += 1
+      }
+    }
+    const fmt = (n: number) => n.toFixed(n % 1 === 0 ? 0 : 1)
+    return {
+      annual:            fmt(annual),
+      sick:              fmt(sick),
+      pending:           String(pending),
+      approvedThisMonth: String(approvedThisMonth),
+    }
+  }, [requests])
 
   async function submit() {
     if (!form.employee_id || !form.start_date || !form.end_date) {
@@ -60,6 +122,7 @@ export default function LeavePage() {
         method: 'POST',
         body: JSON.stringify({
           employee_id: form.employee_id,
+          leave_type: form.leave_type,        // was dropped server-side; now persisted
           leave_policy_id: '',
           start_date: form.start_date,
           end_date: form.end_date,
@@ -70,10 +133,26 @@ export default function LeavePage() {
       setForm({ employee_id: '', leave_type: 'annual', start_date: '', end_date: '', reason: '' })
       setSuccessMsg('Leave request submitted successfully')
       setTimeout(() => setSuccessMsg(''), 5000)
+      // Refresh table + stats so the new row appears immediately —
+      // previously the page never re-fetched, so submissions vanished
+      // from the UI even when persisted server-side.
+      loadRequests()
     } catch (e: unknown) {
       setFormError(e instanceof Error ? e.message : 'Failed to submit leave request')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function actionLeave(id: string, verb: 'approve' | 'reject') {
+    setActioning(id + ':' + verb)
+    try {
+      await apiFetch(`/hr/leave/${id}/${verb}`, { method: 'POST' })
+      loadRequests()
+    } catch (e: unknown) {
+      setReqError(e instanceof Error ? e.message : `Failed to ${verb} request`)
+    } finally {
+      setActioning('')
     }
   }
 
@@ -94,41 +173,116 @@ export default function LeavePage() {
         </motion.div>
       )}
 
-      {/* Summary cards */}
+      {/* Summary cards — values now computed from the loaded requests
+          (annual/sick days summed; pending counted; approvals dated by
+          reviewed_at). Used to be hardcoded '—' placeholders. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Annual Leave', value: '—', icon: '🏖️', color: 'from-blue-600 to-indigo-500' },
-          { label: 'Sick Leave', value: '—', icon: '🏥', color: 'from-red-600 to-rose-500' },
-          { label: 'Pending Approval', value: '—', icon: '⏳', color: 'from-amber-600 to-orange-500' },
-          { label: 'Approved This Month', value: '—', icon: '✓', color: 'from-green-600 to-emerald-500' },
+          { label: 'Annual Leave',         value: stats.annual,            suffix: 'days', icon: '🏖️', color: 'from-blue-600 to-indigo-500' },
+          { label: 'Sick Leave',           value: stats.sick,              suffix: 'days', icon: '🏥', color: 'from-red-600 to-rose-500' },
+          { label: 'Pending Approval',     value: stats.pending,           suffix: '',     icon: '⏳', color: 'from-amber-600 to-orange-500' },
+          { label: 'Approved This Month',  value: stats.approvedThisMonth, suffix: '',     icon: '✓',  color: 'from-green-600 to-emerald-500' },
         ].map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
             className="glass rounded-2xl p-5 relative overflow-hidden">
             <div className={`absolute top-0 right-0 w-24 h-24 rounded-full bg-gradient-to-br ${s.color} opacity-10 blur-xl`} />
             <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${s.color} flex items-center justify-center text-lg mb-3`}>{s.icon}</div>
             <p className="text-white/50 text-xs font-medium mb-1">{s.label}</p>
-            <p className="text-3xl font-black text-white/30">{s.value}</p>
+            <p className="text-3xl font-black text-white">
+              {reqLoading ? '—' : s.value}
+              {!reqLoading && s.suffix && <span className="text-sm font-bold text-white/40 ml-1">{s.suffix}</span>}
+            </p>
           </motion.div>
         ))}
       </div>
 
-      {/* Empty state table */}
+      {/* Leave requests table — was a hardcoded "No leave requests yet"
+          empty state with no GET call. Now fetches from /hr/leave and
+          renders rows, with PENDING-row inline Approve / Reject actions. */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
         className="glass rounded-2xl overflow-hidden border border-temple-border">
-        <div className="px-5 py-4 border-b border-white/5">
+        <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between gap-3">
           <h2 className="text-white font-bold">Leave Requests</h2>
-        </div>
-        <div className="text-center py-20 text-white/30">
-          <p className="text-4xl mb-3">📅</p>
-          <p className="font-medium text-white/40">No leave requests yet</p>
-          <p className="text-xs mt-2 max-w-sm mx-auto">
-            Leave requests submitted via the kiosk or admin will appear here once the HR database is seeded.
-          </p>
-          <button onClick={() => setShowForm(true)}
-            className="mt-5 px-5 py-2.5 rounded-xl bg-saffron-gradient text-white text-sm font-bold">
-            Submit First Request
+          <button onClick={loadRequests}
+            className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 text-xs hover:bg-white/10">
+            ↻ Refresh
           </button>
         </div>
+
+        {reqError && (
+          <div className="px-5 py-3 bg-red-500/10 border-b border-red-500/30 text-red-300 text-sm">{reqError}</div>
+        )}
+
+        {reqLoading ? (
+          <div className="text-center py-16 text-white/30">Loading…</div>
+        ) : requests.length === 0 ? (
+          <div className="text-center py-20 text-white/30">
+            <p className="text-4xl mb-3">📅</p>
+            <p className="font-medium text-white/40">No leave requests yet</p>
+            <p className="text-xs mt-2 max-w-sm mx-auto">
+              Leave requests submitted via this page or the kiosk will appear here.
+            </p>
+            <button onClick={() => setShowForm(true)}
+              className="mt-5 px-5 py-2.5 rounded-xl bg-saffron-gradient text-white text-sm font-bold">
+              Submit First Request
+            </button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-white/5">
+                <tr className="text-white/40 text-xs font-bold uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left">Employee</th>
+                  <th className="px-4 py-3 text-left">Type</th>
+                  <th className="px-4 py-3 text-left">Dates</th>
+                  <th className="px-4 py-3 text-left">Days</th>
+                  <th className="px-4 py-3 text-left">Reason</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requests.map(r => (
+                  <tr key={r.id} className="border-t border-white/5 hover:bg-white/3">
+                    <td className="px-4 py-3 text-white font-semibold">{r.employee_name || r.employee_id.slice(0, 8)}</td>
+                    <td className="px-4 py-3 text-white/70 capitalize">{r.leave_type}</td>
+                    <td className="px-4 py-3 text-white/70 whitespace-nowrap">
+                      {r.start_date}
+                      {r.start_date !== r.end_date && <> → {r.end_date}</>}
+                    </td>
+                    <td className="px-4 py-3 text-white/70">{r.days}</td>
+                    <td className="px-4 py-3 text-white/50 max-w-xs truncate" title={r.reason || ''}>
+                      {r.reason || <span className="text-white/20">—</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${STATUS_BADGE[r.status] || 'bg-white/5 text-white/40 border-white/10'}`}>
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {r.status === 'PENDING' ? (
+                        <>
+                          <button onClick={() => actionLeave(r.id, 'approve')}
+                            disabled={actioning === r.id + ':approve'}
+                            className="px-2.5 py-1 mr-1 rounded-lg text-xs font-bold bg-green-500/15 text-green-300 border border-green-500/30 hover:bg-green-500/25 disabled:opacity-40">
+                            {actioning === r.id + ':approve' ? '…' : 'Approve'}
+                          </button>
+                          <button onClick={() => actionLeave(r.id, 'reject')}
+                            disabled={actioning === r.id + ':reject'}
+                            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 disabled:opacity-40">
+                            {actioning === r.id + ':reject' ? '…' : 'Reject'}
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-white/20 text-xs">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </motion.div>
 
       {/* Slide-over form */}

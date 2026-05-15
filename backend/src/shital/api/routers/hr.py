@@ -279,9 +279,95 @@ async def create_leave(body: LeaveRequestInput, ctx: CurrentSpace):
     return await request_leave(ctx, body)
 
 
+@router.get("/leave")
+async def list_leave(
+    ctx: CurrentSpace,
+    status: str | None = None,
+    limit: int = 200,
+) -> dict[str, Any]:
+    """List leave requests for the current branch, newest first.
+
+    The admin Leave page was rendering '—' in every stat card and
+    "No leave requests yet" because there was no GET endpoint to call —
+    submissions were saved to leave_requests but never surfaced. This
+    returns the rows + a joined employee name so the table is renderable
+    in one round-trip.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    where = ["e.branch_id = :bid", "e.deleted_at IS NULL"]
+    params: dict[str, Any] = {"bid": ctx.branch_id, "limit": limit}
+    if status:
+        where.append("lr.status = :status")
+        params["status"] = status.upper()
+    async with SessionLocal() as db:
+        result = await db.execute(text(f"""
+            SELECT lr.id, lr.employee_id, e.full_name AS employee_name,
+                   lr.leave_type, lr.start_date, lr.end_date, lr.days,
+                   lr.reason, lr.status,
+                   lr.reviewed_by, lr.reviewed_at,
+                   lr.created_at, lr.updated_at
+            FROM leave_requests lr
+            JOIN employees e ON e.id = lr.employee_id
+            WHERE {' AND '.join(where)}
+            ORDER BY lr.created_at DESC
+            LIMIT :limit
+        """), params)
+        rows = result.mappings().all()
+    items = []
+    for r in rows:
+        d = dict(r)
+        # Stringify the few non-JSON-native types so the frontend doesn't
+        # need a serialiser. dates → 'YYYY-MM-DD'; days → float; uuids → str.
+        for k in ("id", "employee_id"):
+            if d.get(k) is not None:
+                d[k] = str(d[k])
+        for k in ("start_date", "end_date"):
+            if d.get(k) is not None:
+                d[k] = d[k].isoformat()
+        for k in ("reviewed_at", "created_at", "updated_at"):
+            if d.get(k) is not None:
+                d[k] = d[k].isoformat()
+        if d.get("days") is not None:
+            try:
+                d["days"] = float(d["days"])
+            except (TypeError, ValueError):
+                d["days"] = 0
+        items.append(d)
+    return {"items": items, "count": len(items)}
+
+
 @router.post("/leave/{leave_id}/approve")
 async def approve(leave_id: str, ctx: CurrentSpace):
     return await approve_leave(ctx, leave_id)
+
+
+@router.post("/leave/{leave_id}/reject")
+async def reject_leave(leave_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """Mark a pending leave request as REJECTED. Same auth + transition rules
+    as /approve: only operates on PENDING rows; idempotent re-rejects are 404
+    so the admin UI surfaces a clear error instead of silently double-handling."""
+    from datetime import datetime as _dt
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text("""
+                UPDATE leave_requests
+                SET status = 'REJECTED', reviewed_by = :user, reviewed_at = :now, updated_at = :now
+                WHERE id = :id AND status = 'PENDING'
+                RETURNING id
+            """),
+            {"id": leave_id, "user": ctx.user_id, "now": _dt.utcnow()},
+        )
+        if not result.scalar():
+            from fastapi import HTTPException
+            raise HTTPException(404, detail="Leave request not found or already actioned")
+        await db.commit()
+    return {"leave_request_id": leave_id, "status": "REJECTED"}
 
 
 @router.post("/timesheet")
