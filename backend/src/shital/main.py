@@ -943,6 +943,43 @@ async def _patch_schema() -> None:
         # POST — adding it here means GET /hr/leave works on a fresh backend
         # immediately, instead of 500ing until someone submits a request.
         "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS leave_type VARCHAR(50) NOT NULL DEFAULT 'annual'",
+        # ── Reimbursement claims — employee / trustee / LMC member files an
+        # expense claim with a receipt (photo via camera or file upload),
+        # auto-routes to their manager for approval. receipt_data holds the
+        # base64-encoded image (PDF / JPEG / PNG); for big or many receipts
+        # this should move to an S3-style blob store, but inline-DB is fine
+        # for the temple's volumes today.
+        """CREATE TABLE IF NOT EXISTS reimbursement_claims (
+            id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            claimant_type      VARCHAR(20)  NOT NULL DEFAULT 'EMPLOYEE',
+            claimant_id        UUID,
+            claimant_name      VARCHAR(255) NOT NULL DEFAULT '',
+            claimant_email     VARCHAR(255) NOT NULL DEFAULT '',
+            branch_id          VARCHAR(100) NOT NULL DEFAULT 'main',
+            amount             NUMERIC(12,2) NOT NULL,
+            currency           VARCHAR(3)   NOT NULL DEFAULT 'GBP',
+            category           VARCHAR(50)  NOT NULL DEFAULT 'GENERAL',
+            expense_date       DATE,
+            description        TEXT         NOT NULL DEFAULT '',
+            receipt_data       TEXT,
+            receipt_mime       VARCHAR(50),
+            status             VARCHAR(20)  NOT NULL DEFAULT 'PENDING_APPROVAL',
+            manager_id         UUID,
+            manager_name       VARCHAR(255) NOT NULL DEFAULT '',
+            reviewed_by        UUID,
+            reviewed_by_name   VARCHAR(255) NOT NULL DEFAULT '',
+            reviewed_at        TIMESTAMPTZ,
+            review_notes       TEXT NOT NULL DEFAULT '',
+            payment_method     VARCHAR(50)  NOT NULL DEFAULT '',
+            payment_ref        VARCHAR(255) NOT NULL DEFAULT '',
+            paid_at            TIMESTAMPTZ,
+            created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_reimbursements_claimant ON reimbursement_claims(claimant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_reimbursements_manager  ON reimbursement_claims(manager_id)",
+        "CREATE INDEX IF NOT EXISTS idx_reimbursements_status   ON reimbursement_claims(status)",
+        "CREATE INDEX IF NOT EXISTS idx_reimbursements_branch   ON reimbursement_claims(branch_id)",
         """CREATE TABLE IF NOT EXISTS time_entries (
             id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             employee_id UUID NOT NULL,
@@ -2529,6 +2566,7 @@ _mount("shital.api.routers.giftaid",          "router")
 _mount("shital.api.routers.brain",            "router")
 _mount("shital.api.routers.finance",          "router")
 _mount("shital.api.routers.hr",               "router")
+_mount("shital.api.routers.reimbursements",   "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
