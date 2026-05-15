@@ -69,8 +69,11 @@ function fmtDate(iso: string | null): string {
   } catch { return '—' }
 }
 
+interface Branch { branch_id: string; name: string; is_active?: boolean }
+
 export default function VolunteersPage() {
   const [items, setItems] = useState<VolunteerSummary[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -123,6 +126,21 @@ export default function VolunteersPage() {
   }, [statusFilter, search])
 
   useEffect(() => { load() }, [load])
+
+  // Source-of-truth branches list — used to resolve volunteer.branch_id
+  // (and each preferred_branches entry) to its human-readable branch name.
+  // Previously rendered raw, which surfaced bogus codes like 'wembley_main'.
+  useEffect(() => {
+    apiFetch<{ branches: Branch[] }>('/branches')
+      .then(d => setBranches(d.branches || []))
+      .catch(() => setBranches([]))
+  }, [])
+
+  const branchLabel = (code: string | null | undefined): string => {
+    if (!code) return '—'
+    const hit = branches.find(b => b.branch_id === code)
+    return hit ? hit.name : code
+  }
 
   const openDetail = async (id: string) => {
     setError('')
@@ -249,12 +267,12 @@ export default function VolunteersPage() {
                   <td className="px-4 py-3 text-white font-semibold">{v.first_names} {v.last_name}</td>
                   <td className="px-4 py-3 text-white/60">{v.email}</td>
                   <td className="px-4 py-3 text-white/60">{v.mobile || v.phone || '—'}</td>
-                  <td className="px-4 py-3 text-white/60 capitalize">{v.branch_id}</td>
+                  <td className="px-4 py-3 text-white/60">{branchLabel(v.branch_id)}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
                       {(v.preferred_branches || []).slice(0, 3).map(p => (
-                        <span key={p} className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${p === 'remote' ? 'bg-blue-500/20 text-blue-300' : 'bg-amber-500/15 text-amber-300'}`}>
-                          {p === 'remote' ? '🌐 remote' : p}
+                        <span key={p} className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${p === 'remote' ? 'bg-blue-500/20 text-blue-300' : 'bg-amber-500/15 text-amber-300'}`}>
+                          {p === 'remote' ? '🌐 remote' : branchLabel(p)}
                         </span>
                       ))}
                       {(v.preferred_branches || []).length > 3 && (
@@ -320,11 +338,11 @@ export default function VolunteersPage() {
                   ['Age range', selected.age_range],
                   ['Address', selected.address],
                   ['Postcode', selected.postcode],
-                  ['Branch', selected.branch_id],
+                  ['Branch', branchLabel(selected.branch_id)],
                   ['Wants to volunteer at',
                     (selected.preferred_branches || []).length
                       ? selected.preferred_branches
-                          .map(p => p === 'remote' ? '🌐 Remote' : p.charAt(0).toUpperCase() + p.slice(1))
+                          .map(p => p === 'remote' ? '🌐 Remote' : branchLabel(p))
                           .join(', ')
                       : '—',
                   ],

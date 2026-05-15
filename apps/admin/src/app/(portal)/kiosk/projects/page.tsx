@@ -37,12 +37,7 @@ interface ProjectItem {
   project_id: string
 }
 
-const BRANCHES = [
-  { id: 'main', name: 'Wembley (Main)' },
-  { id: 'leicester', name: 'Leicester' },
-  { id: 'reading', name: 'Reading' },
-  { id: 'mk', name: 'Milton Keynes' },
-]
+interface Branch { branch_id: string; name: string; is_active?: boolean }
 
 const EMPTY: Omit<Project, 'id' | 'project_id'> = {
   name: '', description: '', branch_id: 'main', goal_amount: 0,
@@ -54,6 +49,7 @@ const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide m
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [itemsByProject, setItemsByProject] = useState<Record<string, ProjectItem[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -100,6 +96,16 @@ export default function ProjectsPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Source-of-truth branches list. Replaces a previous hardcoded list with
+  // a fetch to the /branches entity so new branches added in admin show up
+  // automatically and the branch label here is always consistent with the
+  // Branches admin page.
+  useEffect(() => {
+    apiFetch<{ branches: Branch[] }>('/branches')
+      .then(d => setBranches((d.branches || []).filter(b => b.is_active !== false)))
+      .catch(() => setBranches([]))
+  }, [])
 
   const openNew = () => { setEditing(null); setForm(EMPTY); setShowForm(true) }
   const openEdit = (p: Project) => {
@@ -199,7 +205,7 @@ export default function ProjectsPage() {
   const f = <K extends keyof typeof EMPTY>(k: K, v: typeof EMPTY[K]) =>
     setForm(p => ({ ...p, [k]: v }))
 
-  const branchName = (bid: string) => BRANCHES.find(b => b.id === bid)?.name || bid
+  const branchName = (bid: string) => branches.find(b => b.branch_id === bid)?.name || bid
 
   async function downloadCsv() {
     setCsvDownloading(true)
@@ -531,7 +537,12 @@ export default function ProjectsPage() {
                   <div>
                     <label className={lbl}>Branch</label>
                     <select value={form.branch_id} onChange={e => f('branch_id', e.target.value)} className={inp}>
-                      {BRANCHES.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      {/* Show legacy/unknown branch_ids as disabled marker so they're visible
+                          to the admin instead of silently held. */}
+                      {form.branch_id && !branches.some(b => b.branch_id === form.branch_id) && (
+                        <option value={form.branch_id} disabled>{form.branch_id} (unknown — please reselect)</option>
+                      )}
+                      {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
                     </select>
                   </div>
                   <div>
