@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -434,3 +435,147 @@ async def list_accounts(ctx: CurrentSpace):
             {"bid": ctx.branch_id},
         )
         return {"accounts": [_row(r) for r in result.mappings()]}
+
+
+# ─── Incoming Funds Dashboard ────────────────────────────────────────────────
+# Time-bucketed totals of donation income, with optional Gift Aid splits and
+# per-branch breakdowns. Drives the Incoming Funds dashboard in the admin UI.
+#
+# All buckets are computed via PostgreSQL `date_trunc()` so a single SQL pass
+# gives us the series for whatever granularity (day / week / month / quarter
+# / year) the caller asks for. Gift Aid amounts come from
+# `donations.gift_aid_amount` (set by the kiosk / service-portal capture
+# handlers when the donor declared eligibility — 25% of the eligible total).
+
+@router.get("/dashboards/incoming-funds")
+async def incoming_funds(
+    ctx: CurrentSpace,
+    period: str = "day",        # day | week | month | quarter | year
+    start_date: str = "",
+    end_date:   str = "",
+    branch_id:  str = "",       # "" = all branches; specific id = filter
+    group_by_branch: bool = False,
+) -> dict[str, Any]:
+    """Time-series + breakdowns for incoming donations.
+
+    Response shape:
+    {
+      "period": "day",
+      "start_date": "...", "end_date": "...",
+      "series": [
+        {"bucket": "2026-05-01", "amount": 123.45, "gift_aid": 12.34,
+         "with_gift_aid": 135.79, "count": 4},
+        ...
+      ],
+      "by_branch": [                # populated only when group_by_branch=true
+        {"branch_id": "main", "branch_name": "Wembley (Main)",
+         "amount": 500.00, "gift_aid": 50.00, "with_gift_aid": 550.00,
+         "count": 12},
+        ...
+      ],
+      "totals": {"amount": ..., "gift_aid": ..., "with_gift_aid": ...,
+                 "count": ...}
+    }
+    """
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    if period not in {"day", "week", "month", "quarter", "year"}:
+        raise HTTPException(400, detail="period must be day/week/month/quarter/year")
+
+    # Default window: last 30 days if not supplied. Cap end at today.
+    end_d   = _date.fromisoformat(end_date)   if end_date   else _date.today()
+    start_d = _date.fromisoformat(start_date) if start_date else (end_d - _td(days=30))
+    if start_d > end_d:
+        raise HTTPException(400, detail="start_date must be on or before end_date")
+
+    where = ["d.deleted_at IS NULL",
+             "d.created_at >= :start_ts",
+             "d.created_at < :end_ts"]
+    params: dict[str, Any] = {
+        "start_ts": datetime.combine(start_d, datetime.min.time()),
+        # End is exclusive; add one day so end_date itself is included.
+        "end_ts":   datetime.combine(end_d + _td(days=1), datetime.min.time()),
+    }
+    if branch_id:
+        where.append("d.branch_id = :branch_id")
+        params["branch_id"] = branch_id
+    where_sql = " AND ".join(where)
+
+    # `date_trunc` returns the start of the bucket; cast to date for ISO output.
+    series_sql = f"""
+        SELECT date_trunc(:period, d.created_at)::date  AS bucket,
+               COALESCE(SUM(d.amount), 0)::numeric      AS amount,
+               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COUNT(*)                                  AS cnt
+        FROM   donations d
+        WHERE  {where_sql}
+        GROUP  BY bucket
+        ORDER  BY bucket
+    """
+    by_branch_sql = f"""
+        SELECT d.branch_id,
+               COALESCE(b.name, d.branch_id)            AS branch_name,
+               COALESCE(SUM(d.amount), 0)::numeric      AS amount,
+               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COUNT(*)                                  AS cnt
+        FROM   donations d
+        LEFT   JOIN branches b ON b.branch_id = d.branch_id
+        WHERE  {where_sql}
+        GROUP  BY d.branch_id, b.name
+        ORDER  BY amount DESC
+    """
+
+    series: list[dict[str, Any]] = []
+    by_branch: list[dict[str, Any]] = []
+    totals = {"amount": 0.0, "gift_aid": 0.0, "with_gift_aid": 0.0, "count": 0}
+
+    async with SessionLocal() as db:
+        # Series
+        s = await db.execute(text(series_sql), {**params, "period": period})
+        for r in s.mappings().all():
+            amount   = float(r["amount"] or 0)
+            gift_aid = float(r["gift_aid"] or 0)
+            series.append({
+                "bucket":         r["bucket"].isoformat() if r["bucket"] else None,
+                "amount":         round(amount, 2),
+                "gift_aid":       round(gift_aid, 2),
+                "with_gift_aid":  round(amount + gift_aid, 2),
+                "count":          int(r["cnt"] or 0),
+            })
+            totals["amount"]        += amount
+            totals["gift_aid"]      += gift_aid
+            totals["with_gift_aid"] += amount + gift_aid
+            totals["count"]         += int(r["cnt"] or 0)
+
+        # Per-branch breakdown (always cheap, even when group_by_branch=false
+        # the caller often wants the top-branch chip — return it always).
+        b = await db.execute(text(by_branch_sql), params)
+        for r in b.mappings().all():
+            amount   = float(r["amount"] or 0)
+            gift_aid = float(r["gift_aid"] or 0)
+            by_branch.append({
+                "branch_id":     r["branch_id"],
+                "branch_name":   r["branch_name"],
+                "amount":        round(amount, 2),
+                "gift_aid":      round(gift_aid, 2),
+                "with_gift_aid": round(amount + gift_aid, 2),
+                "count":         int(r["cnt"] or 0),
+            })
+
+    for k in ("amount", "gift_aid", "with_gift_aid"):
+        totals[k] = round(totals[k], 2)
+
+    return {
+        "period":     period,
+        "start_date": start_d.isoformat(),
+        "end_date":   end_d.isoformat(),
+        "branch_id":  branch_id or None,
+        "series":     series,
+        "by_branch":  by_branch,
+        "totals":     totals,
+    }
