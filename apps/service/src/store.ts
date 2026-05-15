@@ -74,6 +74,18 @@ export interface OrderResult {
   paypal_order_id: string
   paypal_capture_id?: string
   amount: number
+  // Snapshot of basket items at the moment of successful capture, so the
+  // ConfirmationPage can render the receipt rows AFTER we've cleared the
+  // live basket. Previously the confirmation page read the live `items`
+  // array, which forced us to delay basket-clear until the auto-reset
+  // timer — leaving the basket badge populated and the basket page
+  // showing the just-purchased items if the donor clicked anywhere.
+  items?: BasketItem[]
+  // Same idea for Gift Aid: snapshot whether the donor declared at
+  // capture time, so confirmation still shows "Gift Aid Confirmed" even
+  // after we've reset giftAidDeclaration.
+  gift_aid_agreed?: boolean
+  gift_aid_total?: number
 }
 
 /** Detect branch from hostname subdomain.

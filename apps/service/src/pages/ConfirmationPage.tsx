@@ -1,15 +1,23 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { useStore, useTotal, useGiftAidTotal } from '../store'
+import { useStore } from '../store'
 
 export function ConfirmationPage() {
-  const { orderResult, contactInfo, giftAidDeclaration, items, reset } = useStore()
-  const total = useTotal()
-  const giftAidTotal = useGiftAidTotal()
+  const { orderResult, contactInfo, reset } = useStore()
   const [countdown, setCountdown] = useState(60)
 
-  const boost = giftAidTotal * 0.25
-  const templeReceives = total + (giftAidDeclaration?.agreed ? boost : 0)
+  // Read from the orderResult snapshot captured at /capture-success time,
+  // not from the live store — PaymentPage now calls clearBasket() right
+  // after setOrderResult(), so the live `items` array is [] by the time
+  // this page mounts. Falling back to the orderResult-stored snapshot
+  // (with empty-list defaults) keeps the receipt rendering correct.
+  const items          = orderResult?.items ?? []
+  const giftAidAgreed  = orderResult?.gift_aid_agreed ?? false
+  const giftAidEligible= orderResult?.gift_aid_total ?? 0
+  const total          = orderResult?.amount ?? items.reduce((sum, i) => sum + i.totalPrice, 0)
+
+  const boost          = giftAidEligible * 0.25
+  const templeReceives = total + (giftAidAgreed ? boost : 0)
 
   useEffect(() => {
     if (countdown <= 0) { reset(); return }
@@ -77,7 +85,7 @@ export function ConfirmationPage() {
             <span style={{ color: 'rgba(255,248,220,0.45)' }}>You paid</span>
             <span className="font-bold text-ivory-200 price-display">£{total.toFixed(2)}</span>
           </div>
-          {giftAidDeclaration?.agreed && boost > 0 && (
+          {giftAidAgreed && boost > 0 && (
             <div className="flex justify-between text-sm" style={{ color: '#4ade80' }}>
               <span>Gift Aid (HMRC adds)</span>
               <span className="font-bold price-display">+£{boost.toFixed(2)}</span>
@@ -98,7 +106,7 @@ export function ConfirmationPage() {
         )}
       </motion.div>
 
-      {giftAidDeclaration?.agreed && (
+      {giftAidAgreed && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

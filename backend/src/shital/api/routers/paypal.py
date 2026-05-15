@@ -299,14 +299,25 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
     order_ref = f"SVC-{body.paypal_order_id[:8].upper()}"
     now       = datetime.utcnow()
 
-    try:
-        async with SessionLocal() as db:
-            full_name = body.contact_name or f"{body.contact_first_name} {body.contact_surname}".strip()
-            email_key = body.contact_email.strip().lower() if body.contact_email.strip() else None
+    # Each non-critical step runs in its own SessionLocal() block so a
+    # failure on (say) addresses' unique-constraint for a returning donor
+    # doesn't poison the rest of the transaction and lose the donation
+    # row. The DONATION + ORDER inserts are the financial record and run
+    # last, in their own block, so they only fail when the donations table
+    # itself is genuinely unwritable (in which case the structured 500
+    # below carries the PayPal capture id for manual reconciliation).
+    import structlog
+    logger = structlog.get_logger()
 
-            # ── Upsert CRM contact ──────────────────────────────────────────
-            contact_id: str | None = None
-            if email_key:
+    full_name = body.contact_name or f"{body.contact_first_name} {body.contact_surname}".strip()
+    email_key = body.contact_email.strip().lower() if body.contact_email.strip() else None
+    contact_id: str | None = None
+    decl_id: str | None = None
+
+    # ── 1) Upsert CRM contact (best-effort) ─────────────────────────────────
+    if email_key:
+        try:
+            async with SessionLocal() as db:
                 contact_uuid = str(uuid.uuid4())
                 c_result = await db.execute(text("""
                     INSERT INTO contacts
@@ -336,25 +347,50 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
                 })
                 row = c_result.mappings().first()
                 contact_id = str(row["id"]) if row else contact_uuid
+                await db.commit()
+        except Exception as exc:
+            logger.error("paypal_capture_contact_upsert_failed",
+                         error=str(exc), email=email_key,
+                         paypal_capture_id=capture_id)
 
-                # ── Upsert address linked to contact ────────────────────────
-                addr_text    = body.gift_aid_address or ""
-                addr_postcode = body.gift_aid_postcode or ""
-                addr_uprn    = body.contact_uprn or ""
-                if addr_postcode or addr_text:
+    # ── 2) Upsert address linked to contact (best-effort) ───────────────────
+    # `addresses` has a partial UNIQUE INDEX on (contact_id, postcode,
+    # house_number) WHERE contact_id IS NOT NULL. Returning donors who pay
+    # twice from the same postcode would trigger that, so add the matching
+    # ON CONFLICT — and wrap the whole thing in try/except as belt-and-braces
+    # against any other constraint the schema may grow.
+    if contact_id:
+        addr_text     = body.gift_aid_address or ""
+        addr_postcode = body.gift_aid_postcode or ""
+        addr_uprn     = body.contact_uprn or ""
+        if addr_postcode or addr_text:
+            try:
+                async with SessionLocal() as db:
                     await db.execute(text("""
                         INSERT INTO addresses
                             (id, contact_id, formatted, postcode, uprn,
                              is_primary, lookup_source, created_at)
                         VALUES (:id, :cid, :fmt, :pc, :uprn, true, 'service-portal', :now)
+                        ON CONFLICT (contact_id, postcode, house_number)
+                          WHERE contact_id IS NOT NULL
+                          DO UPDATE SET
+                              formatted     = COALESCE(NULLIF(EXCLUDED.formatted,''), addresses.formatted),
+                              uprn          = COALESCE(NULLIF(EXCLUDED.uprn,''),      addresses.uprn),
+                              lookup_source = EXCLUDED.lookup_source
                     """), {
                         "id": str(uuid.uuid4()), "cid": contact_id,
                         "fmt": addr_text, "pc": addr_postcode, "uprn": addr_uprn, "now": now,
                     })
+                    await db.commit()
+            except Exception as exc:
+                logger.error("paypal_capture_address_upsert_failed",
+                             error=str(exc), contact_id=contact_id,
+                             paypal_capture_id=capture_id)
 
-            # ── Gift Aid declaration ────────────────────────────────────────
-            decl_id: str | None = None
-            if body.gift_aid and full_name:
+    # ── 3) Gift Aid declaration (best-effort) ───────────────────────────────
+    if body.gift_aid and full_name:
+        try:
+            async with SessionLocal() as db:
                 decl_id = str(uuid.uuid4())
                 await db.execute(text("""
                     INSERT INTO gift_aid_declarations
@@ -372,8 +408,16 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
                     "email": body.contact_email, "phone": body.contact_phone,
                     "amt": captured_amount, "today": now.date(), "cid": contact_id, "now": now,
                 })
+                await db.commit()
+        except Exception as exc:
+            logger.error("paypal_capture_giftaid_insert_failed",
+                         error=str(exc), order_ref=order_ref,
+                         paypal_capture_id=capture_id)
+            decl_id = None  # so the donation row doesn't FK-link to a non-existent decl
 
-            # ── Donation ledger ─────────────────────────────────────────────
+    # ── 4) DONATION + ORDER (CRITICAL — must succeed or we surface 500) ─────
+    try:
+        async with SessionLocal() as db:
             await db.execute(text("""
                 INSERT INTO donations
                     (id, branch_id, amount, currency, gift_aid_eligible, gift_aid_declaration_id,
@@ -390,7 +434,6 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
                 "cid": contact_id, "idem": f"paypal-{body.paypal_order_id}", "now": now,
             })
 
-            # ── Order record ────────────────────────────────────────────────
             await db.execute(text("""
                 INSERT INTO orders
                     (id, branch_id, reference, status, total_amount, currency,
