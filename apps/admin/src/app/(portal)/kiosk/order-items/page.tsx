@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
+import { Pagination } from '@/components/ui/Pagination'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
@@ -41,12 +42,12 @@ export default function OrderItemsPage() {
   const [orderRef, setOrderRef] = useState('')
   const [branchId, setBranchId] = useState('')
   const [page, setPage] = useState(1)
-  const PER_PAGE = 100
+  const [perPage, setPerPage] = useState(20)
 
-  const load = useCallback(async (ref = orderRef, bid = branchId, pg = page) => {
+  const load = useCallback(async (ref = orderRef, bid = branchId, pg = page, pp = perPage) => {
     setLoading(true); setError('')
     try {
-      const params = new URLSearchParams({ page: String(pg), per_page: String(PER_PAGE) })
+      const params = new URLSearchParams({ page: String(pg), per_page: String(pp) })
       if (ref) params.set('order_ref', ref)
       if (bid) params.set('branch_id', bid)
       const res = await fetch(`${API}/admin/order-items?${params}`, {
@@ -59,13 +60,12 @@ export default function OrderItemsPage() {
     } catch (e: unknown) {
       setError(`Failed to load: ${e instanceof Error ? e.message : 'unknown'}`)
     } finally { setLoading(false) }
-  }, [orderRef, branchId, page])
+  }, [orderRef, branchId, page, perPage])
 
   useEffect(() => { load() }, [load])
 
-  function search() { setPage(1); load(orderRef, branchId, 1) }
+  function search() { setPage(1); load(orderRef, branchId, 1, perPage) }
   const fmt = (dt: string) => new Date(dt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-  const totalPages = Math.ceil(total / PER_PAGE)
 
   const totalRevenue = items.reduce((s, i) => s + Number(i.total_price), 0)
 
@@ -241,17 +241,14 @@ export default function OrderItemsPage() {
             </table>
           </div>
 
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-5 py-3 border-t border-white/5">
-              <p className="text-white/40 text-sm">Page {page} of {totalPages}</p>
-              <div className="flex gap-2">
-                <button disabled={page === 1} onClick={() => { setPage(p => p - 1); load(orderRef, branchId, page - 1) }}
-                  className="px-3 py-1.5 rounded-lg border border-white/10 text-white/60 text-sm disabled:opacity-30 hover:bg-white/5">← Prev</button>
-                <button disabled={page >= totalPages} onClick={() => { setPage(p => p + 1); load(orderRef, branchId, page + 1) }}
-                  className="px-3 py-1.5 rounded-lg border border-white/10 text-white/60 text-sm disabled:opacity-30 hover:bg-white/5">Next →</button>
-              </div>
-            </div>
-          )}
+          <Pagination
+            page={page}
+            pageSize={perPage}
+            total={total}
+            disabled={loading}
+            onPageChange={(p) => { setPage(p); load(orderRef, branchId, p, perPage) }}
+            onPageSizeChange={(pp) => { setPerPage(pp); setPage(1); load(orderRef, branchId, 1, pp) }}
+          />
         </div>
       )}
     </div>
