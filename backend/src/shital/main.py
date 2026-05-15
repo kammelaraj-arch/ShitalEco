@@ -1544,6 +1544,37 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_trustees_email  ON trustees(email)",
         "CREATE INDEX IF NOT EXISTS idx_trustees_role   ON trustees(role)",
         "CREATE INDEX IF NOT EXISTS idx_trustees_active ON trustees(is_active)",
+        # Board roles registry — admins can add/edit/disable positions from
+        # the Users & Roles page; the trustee form fetches the live list so
+        # changes show up without a redeploy. Seeded below from
+        # board.SEED_BOARD_ROLES so a fresh DB has the existing 10 entries.
+        """CREATE TABLE IF NOT EXISTS board_roles (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            code        VARCHAR(50) UNIQUE NOT NULL,
+            label       VARCHAR(100) NOT NULL,
+            category    VARCHAR(20) NOT NULL DEFAULT 'MAIN_BOARD',
+            sort_order  INTEGER     NOT NULL DEFAULT 100,
+            is_active   BOOLEAN     NOT NULL DEFAULT true,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_board_roles_category ON board_roles(category)",
+        "CREATE INDEX IF NOT EXISTS idx_board_roles_active   ON board_roles(is_active)",
+        # Seed (idempotent — ON CONFLICT DO NOTHING). Codes match the
+        # hardcoded list from board.py's VALID_ROLES, so existing trustees
+        # rows continue to resolve.
+        """INSERT INTO board_roles (code, label, category, sort_order) VALUES
+            ('CHAIR',               'Chair',               'MAIN_BOARD',  10),
+            ('TREASURER',           'Treasurer',           'MAIN_BOARD',  20),
+            ('SECRETARY',           'Secretary',           'MAIN_BOARD',  30),
+            ('CEO',                 'CEO',                 'MAIN_BOARD',  40),
+            ('TRUSTEE',             'Trustee',             'MAIN_BOARD',  50),
+            ('LMC_CHAIR',           'LMC Chair',           'LMC',         110),
+            ('LMC_TREASURER',       'LMC Treasurer',       'LMC',         120),
+            ('LMC_MEMBER',          'LMC Member',          'LMC',         130),
+            ('EXTERNAL_CONTRACTOR', 'External Contractor', 'NON_OFFICER', 210),
+            ('TEMP_WORKER',         'Temp Worker',         'NON_OFFICER', 220)
+        ON CONFLICT (code) DO NOTHING""",
         # PIN-protected magic-link voting. Each trustee sets their own 4-6
         # digit PIN to confirm a vote cast via an emailed magic link. PIN is
         # bcrypt-hashed; rate-limited via pin_failed_attempts +

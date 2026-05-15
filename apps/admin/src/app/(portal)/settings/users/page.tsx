@@ -527,6 +527,11 @@ export default function UsersPage() {
         </table></div>
       </div>
 
+      {/* Board Roles (Chair / Treasurer / LMC Chair / …) — was hardcoded
+          inside the trustee form, now editable here so adding a new
+          position doesn't need a redeploy. */}
+      <BoardRolesManager />
+
       {/* Modals */}
       <AnimatePresence>
         {modal === 'create' && <UserModal user={null} onClose={() => setModal(null)} onSaved={load} />}
@@ -534,5 +539,222 @@ export default function UsersPage() {
         {modal === 'password' && selected && <ChangePasswordModal user={selected} onClose={() => { setModal(null); setSelected(null) }} />}
       </AnimatePresence>
     </div>
+  )
+}
+
+// ─── Board Roles Manager ─────────────────────────────────────────────────────
+// CRUD over the board_roles table. The trustee form (board/trustees/page.tsx)
+// fetches the active rows from here to render its role picker.
+
+interface BoardRole {
+  id: string
+  code: string
+  label: string
+  category: 'MAIN_BOARD' | 'LMC' | 'NON_OFFICER' | string
+  sort_order: number
+  is_active: boolean
+}
+
+const ROLE_CATEGORIES: { id: BoardRole['category']; label: string }[] = [
+  { id: 'MAIN_BOARD',  label: 'Main Board' },
+  { id: 'LMC',         label: 'Local Management Committee' },
+  { id: 'NON_OFFICER', label: 'Non-Officer' },
+]
+
+function BoardRolesManager() {
+  const [roles, setRoles]   = useState<BoardRole[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError]   = useState('')
+  const [editing, setEditing] = useState<BoardRole | 'new' | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const data = await apiFetch<{ items: BoardRole[] }>('/admin/board/roles')
+      setRoles((data.items || []).sort((a, b) => a.sort_order - b.sort_order))
+    } catch (e: any) {
+      setError(e.message || 'Failed to load board roles')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  async function toggleActive(r: BoardRole) {
+    try {
+      await apiFetch(`/admin/board/roles/${r.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...r, is_active: !r.is_active }),
+      })
+      load()
+    } catch (e: any) { setError(e.message || 'Failed to toggle role') }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-2xl font-black text-white">🪪 Board Roles</h2>
+          <p className="text-white/40 text-sm mt-1">
+            Positions used by the Trustee form (Chair, Treasurer, LMC Chair, etc.). Disabling a role hides it from the picker but keeps existing trustee rows referencing it intact.
+          </p>
+        </div>
+        <button onClick={() => setEditing('new')} className="btn-primary">+ New Role</button>
+      </div>
+
+      {error && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
+
+      <div className="glass rounded-2xl overflow-hidden border border-temple-border">
+        {loading ? (
+          <div className="text-center py-12 text-white/30">Loading…</div>
+        ) : roles.length === 0 ? (
+          <div className="text-center py-12 text-white/30">No roles defined.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-white/5">
+                <tr className="text-white/40 text-xs font-bold uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left">Label</th>
+                  <th className="px-4 py-3 text-left">Code</th>
+                  <th className="px-4 py-3 text-left">Category</th>
+                  <th className="px-4 py-3 text-left">Sort</th>
+                  <th className="px-4 py-3 text-left">Active</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {roles.map(r => (
+                  <tr key={r.id} className="border-t border-white/5 hover:bg-white/3">
+                    <td className="px-4 py-3 text-white font-semibold">{r.label}</td>
+                    <td className="px-4 py-3 text-white/40 font-mono text-xs">{r.code}</td>
+                    <td className="px-4 py-3 text-white/60">{ROLE_CATEGORIES.find(c => c.id === r.category)?.label || r.category}</td>
+                    <td className="px-4 py-3 text-white/40">{r.sort_order}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        r.is_active
+                          ? 'bg-green-500/15 text-green-300 border-green-500/30'
+                          : 'bg-white/5 text-white/40 border-white/10'
+                      }`}>{r.is_active ? 'Active' : 'Disabled'}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <button onClick={() => setEditing(r)}
+                        className="px-2.5 py-1 mr-1 rounded-lg text-xs font-bold bg-white/5 text-white/60 border border-white/10 hover:bg-white/10">Edit</button>
+                      <button onClick={() => toggleActive(r)}
+                        className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white/5 text-white/60 border border-white/10 hover:bg-white/10">
+                        {r.is_active ? 'Disable' : 'Enable'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {editing && (
+          <BoardRoleModal
+            role={editing === 'new' ? null : editing}
+            onClose={() => setEditing(null)}
+            onSaved={() => { setEditing(null); load() }}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function BoardRoleModal({ role, onClose, onSaved }: { role: BoardRole | null; onClose: () => void; onSaved: () => void }) {
+  const [code, setCode]             = useState(role?.code  || '')
+  const [label, setLabel]           = useState(role?.label || '')
+  const [category, setCategory]     = useState<BoardRole['category']>(role?.category || 'MAIN_BOARD')
+  const [sortOrder, setSortOrder]   = useState(role?.sort_order ?? 100)
+  const [isActive, setIsActive]     = useState(role?.is_active ?? true)
+  const [saving, setSaving]         = useState(false)
+  const [error, setError]           = useState('')
+
+  async function save() {
+    if (!label.trim()) { setError('Label is required'); return }
+    if (!role && !code.trim()) { setError('Code is required'); return }
+    setSaving(true); setError('')
+    try {
+      if (role) {
+        await apiFetch(`/admin/board/roles/${role.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ code: role.code, label, category, sort_order: sortOrder, is_active: isActive }),
+        })
+      } else {
+        await apiFetch('/admin/board/roles', {
+          method: 'POST',
+          body: JSON.stringify({ code, label, category, sort_order: sortOrder, is_active: isActive }),
+        })
+      }
+      onSaved()
+    } catch (e: any) {
+      setError(e.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50'
+  const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5'
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full sm:max-w-[480px] bg-temple-deep border-l border-temple-border z-50 flex flex-col">
+        <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
+          <h2 className="text-white font-black text-lg">{role ? 'Edit Board Role' : 'New Board Role'}</h2>
+          <button onClick={onClose} className="text-white/40 hover:text-white text-xl">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {error && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
+          <div>
+            <label className={lbl}>Code {role && <span className="text-white/30 normal-case font-normal">(immutable)</span>}</label>
+            <input value={code} onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
+              disabled={!!role}
+              className={`${inp} font-mono ${role ? 'opacity-50' : ''}`}
+              placeholder="e.g. NEW_OFFICER" />
+            <p className="text-[10px] text-white/30 mt-1">UPPER_SNAKE — used as the stable identifier (stored on trustees.role).</p>
+          </div>
+          <div>
+            <label className={lbl}>Label *</label>
+            <input value={label} onChange={e => setLabel(e.target.value)} className={inp} placeholder="e.g. New Officer" />
+          </div>
+          <div>
+            <label className={lbl}>Category *</label>
+            <select value={category} onChange={e => setCategory(e.target.value as BoardRole['category'])} className={inp}>
+              {ROLE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>Sort Order</label>
+            <input type="number" value={sortOrder} onChange={e => setSortOrder(parseInt(e.target.value) || 0)} className={inp} />
+            <p className="text-[10px] text-white/30 mt-1">Lower = earlier in the picker. Main board uses 10–99, LMC 100–199, non-officer 200+.</p>
+          </div>
+          <div>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)}
+                className="w-5 h-5 rounded accent-saffron-400" />
+              <span className="text-sm text-white">Active (shown in trustee form picker)</span>
+            </label>
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-white/5 flex gap-3">
+          <button onClick={onClose}
+            className="flex-1 py-3 rounded-xl border border-white/10 text-white/60 font-semibold text-sm">Cancel</button>
+          <button onClick={save} disabled={saving}
+            className="flex-[2] py-3 rounded-xl bg-saffron-gradient text-white font-black text-sm disabled:opacity-40">
+            {saving ? 'Saving…' : 'Save Role'}
+          </button>
+        </div>
+      </motion.div>
+    </>
   )
 }
