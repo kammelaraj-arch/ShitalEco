@@ -33,6 +33,7 @@ jobs:
             ufw allow 8000/tcp 2>/dev/null || true
             ufw allow 8001/tcp 2>/dev/null || true
             ufw allow 8080/tcp 2>/dev/null || true
+            ufw allow 8082/tcp 2>/dev/null || true   # service-dev (dev service portal)
             ufw reload         2>/dev/null || true
             echo "Firewall updated:"
             ufw status numbered
