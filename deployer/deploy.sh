@@ -135,20 +135,41 @@ if [ "$PROMOTE" -eq 1 ]; then
   take_snapshot "$PROMOTE_TS" "promote"
 
   echo "=== Promoting :dev → :latest ==="
-  docker pull "ghcr.io/kammelaraj-arch/shitaleco-backend:dev"
+  PROMOTE_FAILED=""
   for svc in backend admin quick-donation kiosk screen service; do
     img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
-    # Snapshot current :latest as :previous (rollback target — kept for compat
-    # with existing one-step rollback logic below).
+    # Snapshot current :latest as :previous (rollback target).
     docker tag "${img}:latest" "${img}:previous" 2>/dev/null || true
-    # Promote :dev → :latest
-    if docker pull "${img}:dev" 2>/dev/null; then
+
+    # Pull :dev LOUDLY. The previous version swallowed stderr with
+    # `2>/dev/null`, so when GHCR auth blipped or the registry 5xx'd, the
+    # script printed "skipped" and prod kept serving its stale :latest —
+    # which is how a hand-built service image (commit ed19268-paypal-fix)
+    # sat on prod for days despite "successful" promotes.
+    pull_out=$(docker pull "${img}:dev" 2>&1) && pull_rc=0 || pull_rc=$?
+    if [ "$pull_rc" -eq 0 ]; then
+      dev_id=$(docker image inspect "${img}:dev" --format '{{.Id}}' 2>/dev/null || echo "unknown")
       docker tag "${img}:dev" "${img}:latest"
-      echo "  ✓ promoted ${svc}"
+      echo "  ✓ promoted ${svc} (image_id=${dev_id})"
     else
-      echo "  - skipped ${svc} (no :dev image)"
+      echo "  !!! FAILED to promote ${svc}: docker pull exit=${pull_rc}"
+      echo "      ${pull_out}"
+      PROMOTE_FAILED="${PROMOTE_FAILED} ${svc}"
     fi
   done
+  if [ -n "$PROMOTE_FAILED" ]; then
+    echo "!!! Promote partially failed for:${PROMOTE_FAILED}"
+    echo "!!! Prod will continue serving STALE :latest for those services."
+    echo "!!! Common causes: GHCR auth (GITHUB_TOKEN missing/expired), :dev tag never pushed by CI, transient registry 5xx."
+    # Record the failure in the deploy history so the admin UI surfaces it.
+    HISTORY_FILE=/workspace/backups/deploy-history.jsonl
+    mkdir -p "$(dirname "$HISTORY_FILE")"
+    SHORT_SHA="${GIT_SHA:0:7}"
+    cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"prod","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"promote_partial","message":"promote failed for:${PROMOTE_FAILED}"}
+JSON
+    exit 1
+  fi
   gc_snapshots
 fi
 
@@ -235,9 +256,35 @@ if [ "$TARGET" = "dev" ]; then
   docker compose -f "$COMPOSE" up -d --no-deps --force-recreate \
     admin-dev quick-donation-dev kiosk-dev screen-dev 2>/dev/null || true
 else
-  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate admin quick-donation kiosk screen
-  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate service 2>/dev/null || \
-    echo "service container not yet available — skipping"
+  # `docker tag :dev :latest` updates Docker's local manifest, but if a stale
+  # :latest is cached from a previous (manual or partial) pull, `--force-recreate`
+  # alone will happily restart the container with the OLD image. Explicitly
+  # `docker compose pull` here re-resolves :latest from the local daemon's
+  # most recent tag — which is the one we just retagged in the promote step.
+  docker compose -f "$COMPOSE" pull admin quick-donation kiosk screen service 2>&1 | tail -15
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate admin quick-donation kiosk screen service
+
+  # Verify each prod frontend container is now serving the expected GIT_SHA
+  # by reading the baked-in /usr/share/nginx/html/version.txt from each
+  # frontend image. Surfaces stale-image bugs immediately (this is exactly
+  # the trap that left service.shital.org.uk serving ed19268-paypal-fix for
+  # days — a manual image with that tag had taken over :latest and the
+  # silent promote skip masked the issue).
+  echo "=== Verify frontend image versions ==="
+  for svc in admin quick-donation kiosk screen service; do
+    cid=$(docker compose -f "$COMPOSE" ps -q "$svc" 2>/dev/null || true)
+    if [ -n "$cid" ]; then
+      v=$(docker exec "$cid" cat /usr/share/nginx/html/version.txt 2>/dev/null || echo "<not-served>")
+      echo "  ${svc}: ${v}"
+      # Sanity flag: GIT_SHA from the image should be a clean 40-char hex.
+      # The manual image had GIT_SHA='ed19268…-paypal-fix' — anything that
+      # doesn't match [0-9a-f]{40} is a smell worth surfacing.
+      case "$v" in
+        [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+        *) echo "  ⚠️  ${svc}: GIT_SHA is not a clean 40-char hex — likely a hand-built image (NOT a CI build)." ;;
+      esac
+    fi
+  done
 
   # Reload nginx (prod only — dev nginx auto-reloads)
   docker compose -f "$COMPOSE" exec -T nginx nginx -s reload 2>/dev/null || \
