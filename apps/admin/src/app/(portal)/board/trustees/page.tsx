@@ -3,24 +3,21 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 
-type Role =
-  | 'CHAIR' | 'TREASURER' | 'SECRETARY' | 'CEO' | 'TRUSTEE'
-  | 'LMC_CHAIR' | 'LMC_TREASURER' | 'LMC_MEMBER'
-  | 'EXTERNAL_CONTRACTOR' | 'TEMP_WORKER'
+// Role is just a string now — the DB-backed board_roles registry is the
+// source of truth (admins manage it from Settings → Users & Roles → Board
+// Roles). The trustee form fetches the active list at render time so a
+// newly-added role surfaces without a redeploy. The badge colour falls
+// back to a neutral grey for any code not in BUILTIN_BADGES (i.e. any
+// role added after this file was last shipped).
+type Role = string
 
-// What humans see on a button / badge — internally we still store the
-// canonical UPPER_SNAKE values so the API contract is stable.
-const ROLE_LABELS: Record<Role, string> = {
-  CHAIR:               'Chair',
-  TREASURER:           'Treasurer',
-  SECRETARY:           'Secretary',
-  CEO:                 'CEO',
-  TRUSTEE:             'Trustee',
-  LMC_CHAIR:           'LMC Chair',
-  LMC_TREASURER:       'LMC Treasurer',
-  LMC_MEMBER:          'LMC Member',
-  EXTERNAL_CONTRACTOR: 'External Contractor',
-  TEMP_WORKER:         'Temp Worker',
+interface BoardRole {
+  id: string
+  code: string
+  label: string
+  category: 'MAIN_BOARD' | 'LMC' | 'NON_OFFICER' | string
+  sort_order: number
+  is_active: boolean
 }
 
 interface Trustee {
@@ -58,21 +55,26 @@ const EMPTY: Form = {
   term_start: '', term_end: '', notes: '',
 }
 
-const ROLE_BADGES: Record<Role, string> = {
-  // Main board officers — warm primary colours
+// Visual hints for the badge column — fallback is a neutral pill, so
+// admin-added roles still render correctly even before this file knows
+// about them.
+const BUILTIN_BADGES: Record<string, string> = {
   CHAIR:               'bg-saffron-400/20 text-saffron-300 border-saffron-400/30',
   TREASURER:           'bg-green-500/20 text-green-400 border-green-500/30',
   SECRETARY:           'bg-blue-500/20 text-blue-400 border-blue-500/30',
   CEO:                 'bg-purple-500/20 text-purple-300 border-purple-500/30',
   TRUSTEE:             'bg-white/10 text-white/70 border-white/20',
-  // LMC (Local Management Committee) — same hue as board officers but
-  // dimmer so the role hierarchy reads at a glance.
   LMC_CHAIR:           'bg-saffron-400/10 text-saffron-200 border-saffron-400/20',
   LMC_TREASURER:       'bg-green-500/10 text-green-300/80 border-green-500/20',
   LMC_MEMBER:          'bg-white/5 text-white/50 border-white/10',
-  // Non-officers — neutral
   EXTERNAL_CONTRACTOR: 'bg-amber-500/15 text-amber-300 border-amber-500/25',
   TEMP_WORKER:         'bg-cyan-500/15 text-cyan-300 border-cyan-500/25',
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  MAIN_BOARD:  'Main Board',
+  LMC:         'Local Management Committee',
+  NON_OFFICER: 'Non-Officer',
 }
 
 const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50'
@@ -94,6 +96,25 @@ export default function TrusteesPage() {
   const [form, setForm] = useState<Form>(EMPTY)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  // DB-backed board roles registry. Was hardcoded — now lives in the
+  // board_roles table and is managed from Settings → Users & Roles.
+  const [roles, setRoles] = useState<BoardRole[]>([])
+
+  useEffect(() => {
+    apiFetch<{ items: BoardRole[] }>('/admin/board/roles?active=true')
+      .then(d => setRoles((d.items || []).sort((a, b) => a.sort_order - b.sort_order)))
+      .catch(() => {})
+  }, [])
+
+  const rolesByCategory = roles.reduce<Record<string, BoardRole[]>>((acc, r) => {
+    (acc[r.category] ||= []).push(r)
+    return acc
+  }, {})
+
+  function roleLabel(code: string): string {
+    return roles.find(r => r.code === code)?.label || code
+  }
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -217,8 +238,8 @@ export default function TrusteesPage() {
                 <tr key={t.id} className="border-b border-white/5 hover:bg-white/5">
                   <td className="px-4 py-3 text-white font-semibold">{t.full_name}</td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${ROLE_BADGES[t.role] || 'bg-white/10 text-white/60 border-white/15'}`}>
-                      {ROLE_LABELS[t.role] ?? t.role}
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${BUILTIN_BADGES[t.role] || 'bg-white/10 text-white/60 border-white/15'}`}>
+                      {roleLabel(t.role)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-white/70">{t.email}</td>
@@ -254,36 +275,35 @@ export default function TrusteesPage() {
               <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
                 <div>
                   <label className={lbl}>Role</label>
-                  {/* Grouped by tier so the picker doesn't read as one long
-                      undifferentiated grid — main board on top, LMC next,
-                      non-officers at the bottom. */}
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-1.5 mt-1">Main Board</p>
-                  <div className="grid grid-cols-3 gap-2 mb-3">
-                    {(['CHAIR', 'TREASURER', 'SECRETARY', 'CEO', 'TRUSTEE'] as Role[]).map(r => (
-                      <button key={r} type="button" onClick={() => setForm(p => ({ ...p, role: r }))}
-                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                          form.role === r ? 'bg-saffron-gradient text-white' : 'bg-white/5 text-white/60 border border-white/10'
-                        }`}>{ROLE_LABELS[r]}</button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-1.5">Local Management Committee</p>
-                  <div className="grid grid-cols-3 gap-2 mb-3">
-                    {(['LMC_CHAIR', 'LMC_TREASURER', 'LMC_MEMBER'] as Role[]).map(r => (
-                      <button key={r} type="button" onClick={() => setForm(p => ({ ...p, role: r }))}
-                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                          form.role === r ? 'bg-saffron-gradient text-white' : 'bg-white/5 text-white/60 border border-white/10'
-                        }`}>{ROLE_LABELS[r]}</button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-1.5">Non-Officer</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(['EXTERNAL_CONTRACTOR', 'TEMP_WORKER'] as Role[]).map(r => (
-                      <button key={r} type="button" onClick={() => setForm(p => ({ ...p, role: r }))}
-                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                          form.role === r ? 'bg-saffron-gradient text-white' : 'bg-white/5 text-white/60 border border-white/10'
-                        }`}>{ROLE_LABELS[r]}</button>
-                    ))}
-                  </div>
+                  {/* Source of truth: DB-backed board_roles table, fetched
+                      on mount. Renders one section per category present in
+                      the fetched list. Add/disable roles from
+                      Settings → Users & Roles → Board Roles. */}
+                  {roles.length === 0 ? (
+                    <p className="text-xs text-white/30 mt-2">Loading roles…</p>
+                  ) : (
+                    ['MAIN_BOARD', 'LMC', 'NON_OFFICER',
+                     ...Object.keys(rolesByCategory).filter(c => !['MAIN_BOARD', 'LMC', 'NON_OFFICER'].includes(c))
+                    ].map(category => {
+                      const rs = rolesByCategory[category]
+                      if (!rs || rs.length === 0) return null
+                      return (
+                        <div key={category} className="mb-3">
+                          <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-1.5 mt-1">
+                            {CATEGORY_LABELS[category] || category.replace(/_/g, ' ').toLowerCase()}
+                          </p>
+                          <div className="grid grid-cols-3 gap-2">
+                            {rs.map(r => (
+                              <button key={r.code} type="button" onClick={() => setForm(p => ({ ...p, role: r.code }))}
+                                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                                  form.role === r.code ? 'bg-saffron-gradient text-white' : 'bg-white/5 text-white/60 border border-white/10'
+                                }`}>{r.label}</button>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
                 <div>
                   <label className={lbl}>Full Name *</label>
