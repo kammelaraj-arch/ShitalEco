@@ -76,8 +76,30 @@ export function ItemCard({ item, category }: { item: Item; category?: string }) 
           border: '1.5px solid rgba(212,175,55,0.5)',
           borderBottom: 'none',
         }}>
-        {item.image_url && !item.image_url.startsWith('data:') ? (
-          <img src={item.image_url} alt={displayName} className="w-full h-full object-cover" />
+        {item.image_url ? (
+          // Render whatever URL the admin set — hosted https://, relative
+          // /uploads/, OR base64 data: URLs. Previously this branch
+          // explicitly skipped data: URLs and fell through to the 🕉
+          // emoji, which made every admin-uploaded image invisible on
+          // service.shital.org.uk (the upload pipeline stores images as
+          // data URLs). Browsers handle data: URLs natively; CSV export
+          // already strips them in backend items.py.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.image_url} alt={displayName} className="w-full h-full object-cover"
+            onError={e => {
+              // If a hosted URL 404s or a data URL is malformed, fall
+              // back to the emoji rather than leaving a broken-image icon.
+              const img = e.currentTarget
+              img.style.display = 'none'
+              const parent = img.parentElement
+              if (parent && !parent.querySelector('.fallback-emoji')) {
+                const span = document.createElement('span')
+                span.className = 'fallback-emoji text-5xl'
+                span.style.filter = 'drop-shadow(0 2px 4px rgba(100,65,10,0.3))'
+                span.textContent = item.emoji || '🕉'
+                parent.appendChild(span)
+              }
+            }} />
         ) : (
           <span className="text-5xl" style={{ filter: 'drop-shadow(0 2px 4px rgba(100,65,10,0.3))' }}>
             {item.emoji || '🕉'}
