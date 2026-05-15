@@ -1025,6 +1025,14 @@ async def _patch_schema() -> None:
         # PayPal capture transaction ID (different from the PayPal order ID)
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
         "ALTER TABLE orders    ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(200) NOT NULL DEFAULT ''",
+        # Gift Aid on orders + basket_items (donations already has both).
+        # gift_aid_eligible mirrors basket_items so the orders grid can show
+        # "GA" badges without a per-item join; gift_aid_amount is the 25%
+        # HMRC top-up that the Service Portal / Kiosk capture handlers
+        # already compute from the eligible total at checkout time.
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_aid_eligible BOOLEAN       NOT NULL DEFAULT false",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_aid_amount   NUMERIC(12,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE basket_items ADD COLUMN IF NOT EXISTS gift_aid_amount NUMERIC(12,2) NOT NULL DEFAULT 0",
         # Source channel on donations (kiosk, quick-donation, service, paypal, etc.)
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'kiosk'",
         # ── CRM: Contacts table ───────────────────────────────────────────────
