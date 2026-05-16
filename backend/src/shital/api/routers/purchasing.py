@@ -340,6 +340,89 @@ async def get_purchase_order(po_id: str, ctx: CurrentSpace) -> dict[str, Any]:
     return await _get_po_with_lines(po_id)
 
 
+@router.put("/admin/purchase-orders/{po_id}")
+async def update_purchase_order(po_id: str, body: POIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Edit a DRAFT PO — header + complete line replacement. Past DRAFT
+    the data is locked (cancel + create a fresh PO instead)."""
+    _require_priv(ctx)
+    errs = _validate_lines(body.lines)
+    if errs:
+        raise HTTPException(400, detail={"errors": errs})
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    order_date    = _parse_date(body.order_date, default=datetime.now(UTC).date())
+    expected_date = _parse_date(body.expected_date, default=None)
+
+    subtotal = 0.0
+    vat_total = 0.0
+    computed: list[tuple[LineIn, float, float, float]] = []
+    for ln in body.lines:
+        net, vat, ttl = _compute_line_money(ln)
+        subtotal += net
+        vat_total += vat
+        computed.append((ln, net, vat, ttl))
+    total = round(subtotal + vat_total, 2)
+
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("SELECT status FROM purchase_orders WHERE id = :id"), {"id": po_id},
+        )).mappings().first()
+        if not row:
+            raise HTTPException(404, detail="Purchase order not found")
+        if row["status"] != "DRAFT":
+            raise HTTPException(409, detail=f"Only DRAFT can be edited (status={row['status']})")
+
+        await db.execute(text("""
+            UPDATE purchase_orders SET
+                branch_id           = :bid,
+                supplier_contact_id = :sid,
+                supplier_name       = :sname,
+                order_date          = :odate,
+                expected_date       = :edate,
+                currency            = :curr,
+                subtotal            = :sub,
+                vat_total           = :vat,
+                total               = :tot,
+                notes               = :notes,
+                reference           = :ref,
+                delivery_address    = :addr,
+                updated_at          = NOW()
+            WHERE id = :id
+        """), {
+            "id":   po_id, "bid": (body.branch_id or "main").strip(),
+            "sid":  body.supplier_contact_id or None,
+            "sname": body.supplier_name.strip(),
+            "odate": order_date, "edate": expected_date,
+            "curr": (body.currency or "GBP").upper()[:3],
+            "sub":  round(subtotal, 2), "vat": round(vat_total, 2), "tot": total,
+            "notes": body.notes, "ref": body.reference, "addr": body.delivery_address,
+        })
+        await db.execute(text("DELETE FROM purchase_order_lines WHERE po_id = :id"), {"id": po_id})
+        for i, (ln, net, vat, ttl) in enumerate(computed, start=1):
+            await db.execute(text("""
+                INSERT INTO purchase_order_lines
+                    (po_id, line_no, description, nominal_code_id, nominal_code,
+                     quantity, unit_price, vat_rate, vat_code,
+                     line_net, line_vat, line_total, received_qty)
+                VALUES (:pid, :ln, :desc, :ncid, :nc,
+                        :qty, :up, :vr, :vc,
+                        :net, :vat, :tot, 0)
+            """), {
+                "pid": po_id, "ln": i,
+                "desc": ln.description.strip(),
+                "ncid": ln.nominal_code_id or None,
+                "nc":   ln.nominal_code.strip().upper(),
+                "qty":  float(ln.quantity), "up": float(ln.unit_price),
+                "vr":   float(ln.vat_rate), "vc": ln.vat_code,
+                "net":  net, "vat": vat, "tot": ttl,
+            })
+        await db.commit()
+    return await _get_po_with_lines(po_id)
+
+
 @router.post("/admin/purchase-orders/{po_id}/send")
 async def send_purchase_order(po_id: str, ctx: CurrentSpace) -> dict[str, Any]:
     return await _transition_po(po_id, ctx, from_status="DRAFT", to_status="SENT",
@@ -348,36 +431,222 @@ async def send_purchase_order(po_id: str, ctx: CurrentSpace) -> dict[str, Any]:
 
 @router.post("/admin/purchase-orders/{po_id}/receive")
 async def receive_purchase_order(po_id: str, ctx: CurrentSpace) -> dict[str, Any]:
-    """Mark all lines as fully received and flip header to RECEIVED.
-    Part-receive (per-line received_qty updates) ships in a follow-up."""
+    """Mark all lines fully received, flip header to RECEIVED, and post the
+    GL entry (DR Expense + Input VAT, CR AP)."""
+    _require_priv(ctx)
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
     async with SessionLocal() as db:
         po = (await db.execute(
-            text("SELECT id, status FROM purchase_orders WHERE id = :id"), {"id": po_id},
+            text("SELECT * FROM purchase_orders WHERE id = :id"), {"id": po_id},
         )).mappings().first()
         if not po:
             raise HTTPException(404, detail="Purchase order not found")
         if po["status"] not in ("SENT", "DRAFT", "PART_RECEIVED"):
             raise HTTPException(409, detail=f"Cannot receive from status {po['status']}")
+
+        lines = (await db.execute(text("""
+            SELECT nominal_code, nominal_code_id, line_net, line_vat, line_total, quantity
+            FROM   purchase_order_lines WHERE po_id = :id ORDER BY line_no
+        """), {"id": po_id})).mappings().all()
+
         await db.execute(text("""
             UPDATE purchase_order_lines SET received_qty = quantity WHERE po_id = :id
         """), {"id": po_id})
+        now = datetime.now(UTC)
         await db.execute(text("""
             UPDATE purchase_orders
             SET status = 'RECEIVED', received_at = :now, updated_at = :now
             WHERE id = :id
-        """), {"id": po_id, "now": datetime.now(UTC)})
+        """), {"id": po_id, "now": now})
+
+        try:
+            posting: list[dict[str, Any]] = []
+            for line in lines:
+                net = float(line["line_net"] or 0)
+                vat = float(line["line_vat"] or 0)
+                if net:
+                    posting.append({
+                        "nominal_code": line["nominal_code"] or gl.DEFAULT_EXPENSE,
+                        "nominal_code_id": str(line["nominal_code_id"]) if line["nominal_code_id"] else None,
+                        "debit": net, "credit": 0,
+                        "description": f"PO {po['po_number']} — {po['supplier_name'] or 'supplier'}",
+                    })
+                if vat > 0:
+                    posting.append({
+                        "nominal_code": gl.DEFAULT_VAT_INPUT,
+                        "debit": vat, "credit": 0,
+                        "description": f"Input VAT — PO {po['po_number']}",
+                    })
+            posting.append({
+                "nominal_code": gl.DEFAULT_CREDITOR,
+                "debit": 0, "credit": float(po["total"] or 0),
+                "description": f"AP — {po['supplier_name'] or 'supplier'}",
+            })
+            await gl.post(
+                db,
+                branch_id=po["branch_id"], entry_date=now.date(),
+                description=f"PO receipt — {po['po_number']} ({po['supplier_name'] or 'supplier'})",
+                reference=po["po_number"],
+                source_type=gl.SOURCE_PO_RECEIVE, source_id=po_id,
+                posted_by=getattr(ctx, "user_email", "") or "",
+                idempotency_key=f"gl-po-receive-{po_id}",
+                lines=posting,
+            )
+        except Exception:
+            import structlog
+            structlog.get_logger().exception("po_receive_gl_post_failed", po_id=po_id)
+
         await db.commit()
     return await _get_po_with_lines(po_id)
 
 
+class ReceiveLineIn(BaseModel):
+    line_id: str
+    received_qty: float
+
+
+class PartReceiveIn(BaseModel):
+    lines: list[ReceiveLineIn]
+
+
+@router.post("/admin/purchase-orders/{po_id}/part-receive")
+async def part_receive_po(po_id: str, body: PartReceiveIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Per-line partial receipt. Updates received_qty for the specified
+    lines (clamped between 0 and the line quantity), then transitions the
+    header: every line fully received -> RECEIVED + GL post; anything
+    partial -> PART_RECEIVED (no GL until fully received, to keep one
+    posting per PO; for per-receipt GL granularity post the matching
+    delta manually for now)."""
+    _require_priv(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        po = (await db.execute(
+            text("SELECT * FROM purchase_orders WHERE id = :id"), {"id": po_id},
+        )).mappings().first()
+        if not po:
+            raise HTTPException(404, detail="Purchase order not found")
+        if po["status"] not in ("SENT", "DRAFT", "PART_RECEIVED"):
+            raise HTTPException(409, detail=f"Cannot part-receive from status {po['status']}")
+
+        for ln in body.lines:
+            await db.execute(text("""
+                UPDATE purchase_order_lines
+                SET    received_qty = LEAST(GREATEST(:rq, 0), quantity)
+                WHERE  id = :id AND po_id = :po
+            """), {"rq": float(ln.received_qty), "id": ln.line_id, "po": po_id})
+
+        agg = (await db.execute(text("""
+            SELECT SUM(quantity)     AS total_q,
+                   SUM(received_qty) AS recv_q,
+                   COUNT(*) FILTER (WHERE received_qty = 0) AS zero_lines,
+                   COUNT(*) FILTER (WHERE received_qty >= quantity) AS full_lines,
+                   COUNT(*) AS line_count
+            FROM purchase_order_lines WHERE po_id = :id
+        """), {"id": po_id})).mappings().first()
+
+        now = datetime.now(UTC)
+        all_received = agg and agg["full_lines"] == agg["line_count"]
+        any_received = agg and (agg["recv_q"] or 0) > 0
+        if all_received:
+            new_status = "RECEIVED"
+            await db.execute(text("""
+                UPDATE purchase_orders SET status='RECEIVED', received_at=:now, updated_at=:now WHERE id=:id
+            """), {"id": po_id, "now": now})
+            # Auto-post GL on full receipt (same as /receive)
+            from shital.services import gl
+            try:
+                lines = (await db.execute(text("""
+                    SELECT nominal_code, nominal_code_id, line_net, line_vat
+                    FROM   purchase_order_lines WHERE po_id = :id ORDER BY line_no
+                """), {"id": po_id})).mappings().all()
+                posting: list[dict[str, Any]] = []
+                for line in lines:
+                    net = float(line["line_net"] or 0)
+                    vat = float(line["line_vat"] or 0)
+                    if net:
+                        posting.append({
+                            "nominal_code": line["nominal_code"] or gl.DEFAULT_EXPENSE,
+                            "nominal_code_id": str(line["nominal_code_id"]) if line["nominal_code_id"] else None,
+                            "debit": net, "credit": 0,
+                            "description": f"PO {po['po_number']}",
+                        })
+                    if vat > 0:
+                        posting.append({
+                            "nominal_code": gl.DEFAULT_VAT_INPUT,
+                            "debit": vat, "credit": 0,
+                            "description": f"Input VAT — PO {po['po_number']}",
+                        })
+                posting.append({
+                    "nominal_code": gl.DEFAULT_CREDITOR,
+                    "debit": 0, "credit": float(po["total"] or 0),
+                    "description": f"AP — {po['supplier_name'] or 'supplier'}",
+                })
+                await gl.post(
+                    db, branch_id=po["branch_id"], entry_date=now.date(),
+                    description=f"PO receipt — {po['po_number']}",
+                    reference=po["po_number"],
+                    source_type=gl.SOURCE_PO_RECEIVE, source_id=po_id,
+                    posted_by=getattr(ctx, "user_email", "") or "",
+                    idempotency_key=f"gl-po-receive-{po_id}",
+                    lines=posting,
+                )
+            except Exception:
+                import structlog
+                structlog.get_logger().exception("po_part_receive_gl_post_failed", po_id=po_id)
+        elif any_received:
+            new_status = "PART_RECEIVED"
+            await db.execute(text("""
+                UPDATE purchase_orders SET status='PART_RECEIVED', updated_at=:now WHERE id=:id
+            """), {"id": po_id, "now": now})
+        else:
+            new_status = po["status"]
+        await db.commit()
+    return {**await _get_po_with_lines(po_id), "new_status": new_status}
+
+
 @router.post("/admin/purchase-orders/{po_id}/cancel")
 async def cancel_purchase_order(po_id: str, ctx: CurrentSpace) -> dict[str, Any]:
-    return await _transition_po(po_id, ctx, from_status=None, to_status="CANCELLED",
-                                stamp_col="cancelled_at",
-                                forbid_from=("RECEIVED", "CANCELLED"))
+    """Cancel a PO. If the receipt was already posted to the GL, also
+    reverse that journal entry so the ledger stays clean."""
+    _require_priv(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
+
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("SELECT id, status FROM purchase_orders WHERE id = :id"), {"id": po_id},
+        )).mappings().first()
+        if not row:
+            raise HTTPException(404, detail="Purchase order not found")
+        if row["status"] in ("RECEIVED", "CANCELLED"):
+            raise HTTPException(409, detail=f"Cannot cancel from {row['status']}")
+
+        gl_row = (await db.execute(text("""
+            SELECT id FROM transactions
+            WHERE  source_type = :st AND source_id = :sid AND reversal_of IS NULL
+            ORDER  BY posted_at DESC LIMIT 1
+        """), {"st": gl.SOURCE_PO_RECEIVE, "sid": po_id})).mappings().first()
+        if gl_row:
+            try:
+                await gl.reverse(db, original_txn_id=str(gl_row["id"]),
+                                 posted_by=getattr(ctx, "user_email", "") or "",
+                                 description="PO cancelled — reversing receipt")
+            except Exception:
+                import structlog
+                structlog.get_logger().exception("po_cancel_reverse_failed", po_id=po_id)
+
+        await db.execute(text("""
+            UPDATE purchase_orders SET status='CANCELLED', cancelled_at=:now, updated_at=:now WHERE id=:id
+        """), {"id": po_id, "now": datetime.now(UTC)})
+        await db.commit()
+    return await _get_po_with_lines(po_id)
 
 
 @router.delete("/admin/purchase-orders/{po_id}", status_code=204)
@@ -598,42 +867,309 @@ async def get_sales_invoice(inv_id: str, ctx: CurrentSpace) -> dict[str, Any]:
     return await _get_invoice_with_lines(inv_id)
 
 
+@router.put("/admin/sales-invoices/{inv_id}")
+async def update_sales_invoice(inv_id: str, body: InvoiceIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Edit a DRAFT invoice — header + complete line replacement.
+    Past DRAFT the data is locked (void + create a fresh invoice instead)."""
+    _require_priv(ctx)
+    errs = _validate_lines(body.lines)
+    if errs:
+        raise HTTPException(400, detail={"errors": errs})
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    invoice_date = _parse_date(body.invoice_date, default=datetime.now(UTC).date())
+    due_date     = _parse_date(body.due_date, default=None)
+
+    subtotal = 0.0
+    vat_total = 0.0
+    computed: list[tuple[LineIn, float, float, float]] = []
+    for ln in body.lines:
+        net, vat, ttl = _compute_line_money(ln)
+        subtotal += net
+        vat_total += vat
+        computed.append((ln, net, vat, ttl))
+    total = round(subtotal + vat_total, 2)
+
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("SELECT status FROM sales_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not row:
+            raise HTTPException(404, detail="Invoice not found")
+        if row["status"] != "DRAFT":
+            raise HTTPException(409, detail=f"Only DRAFT can be edited (status={row['status']})")
+
+        await db.execute(text("""
+            UPDATE sales_invoices SET
+                branch_id           = :bid,
+                customer_contact_id = :cid,
+                customer_name       = :cname,
+                invoice_date        = :idate,
+                due_date            = :ddate,
+                currency            = :curr,
+                subtotal            = :sub,
+                vat_total           = :vat,
+                total               = :tot,
+                notes               = :notes,
+                reference           = :ref,
+                billing_address     = :addr,
+                updated_at          = NOW()
+            WHERE id = :id
+        """), {
+            "id":   inv_id, "bid": (body.branch_id or "main").strip(),
+            "cid":  body.customer_contact_id or None,
+            "cname": body.customer_name.strip(),
+            "idate": invoice_date, "ddate": due_date,
+            "curr": (body.currency or "GBP").upper()[:3],
+            "sub":  round(subtotal, 2), "vat": round(vat_total, 2), "tot": total,
+            "notes": body.notes, "ref": body.reference, "addr": body.billing_address,
+        })
+        await db.execute(text("DELETE FROM sales_invoice_lines WHERE invoice_id = :id"), {"id": inv_id})
+        for i, (ln, net, vat, ttl) in enumerate(computed, start=1):
+            await db.execute(text("""
+                INSERT INTO sales_invoice_lines
+                    (invoice_id, line_no, description, nominal_code_id, nominal_code,
+                     quantity, unit_price, vat_rate, vat_code,
+                     line_net, line_vat, line_total)
+                VALUES (:iid, :ln, :desc, :ncid, :nc,
+                        :qty, :up, :vr, :vc,
+                        :net, :vat, :tot)
+            """), {
+                "iid": inv_id, "ln": i,
+                "desc": ln.description.strip(),
+                "ncid": ln.nominal_code_id or None,
+                "nc":   ln.nominal_code.strip().upper(),
+                "qty":  float(ln.quantity), "up": float(ln.unit_price),
+                "vr":   float(ln.vat_rate), "vc": ln.vat_code,
+                "net":  net, "vat": vat, "tot": ttl,
+            })
+        await db.commit()
+    return await _get_invoice_with_lines(inv_id)
+
+
 @router.post("/admin/sales-invoices/{inv_id}/send")
 async def send_sales_invoice(inv_id: str, ctx: CurrentSpace) -> dict[str, Any]:
-    return await _transition_invoice(inv_id, ctx, from_status="DRAFT", to_status="SENT",
-                                     stamp_col="sent_at")
-
-
-@router.post("/admin/sales-invoices/{inv_id}/pay")
-async def pay_sales_invoice(inv_id: str, ctx: CurrentSpace) -> dict[str, Any]:
-    """Mark whole invoice as paid in one shot. Per-payment matching against
-    bank statements ships in a follow-up."""
+    """Mark invoice SENT and post the receivable to the GL
+    (DR AR, CR Income + Output VAT)."""
     _require_priv(ctx)
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
+    async with SessionLocal() as db:
+        inv = (await db.execute(
+            text("SELECT * FROM sales_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not inv:
+            raise HTTPException(404, detail="Invoice not found")
+        if inv["status"] != "DRAFT":
+            raise HTTPException(409, detail=f"Expected status DRAFT, got {inv['status']}")
+
+        lines = (await db.execute(text("""
+            SELECT nominal_code, nominal_code_id, line_net, line_vat
+            FROM   sales_invoice_lines WHERE invoice_id = :id ORDER BY line_no
+        """), {"id": inv_id})).mappings().all()
+
+        now = datetime.now(UTC)
+        await db.execute(text("""
+            UPDATE sales_invoices SET status='SENT', sent_at=:now, updated_at=:now WHERE id=:id
+        """), {"id": inv_id, "now": now})
+
+        try:
+            posting: list[dict[str, Any]] = [{
+                "nominal_code": gl.DEFAULT_DEBTOR,
+                "debit": float(inv["total"] or 0), "credit": 0,
+                "description": f"AR — {inv['customer_name'] or 'customer'}",
+            }]
+            for line in lines:
+                net = float(line["line_net"] or 0)
+                vat = float(line["line_vat"] or 0)
+                if net:
+                    posting.append({
+                        "nominal_code": line["nominal_code"] or gl.DEFAULT_INVOICE_INCOME,
+                        "nominal_code_id": str(line["nominal_code_id"]) if line["nominal_code_id"] else None,
+                        "debit": 0, "credit": net,
+                        "description": f"Invoice {inv['invoice_number']}",
+                    })
+                if vat > 0:
+                    posting.append({
+                        "nominal_code": gl.DEFAULT_VAT_OUTPUT,
+                        "debit": 0, "credit": vat,
+                        "description": f"Output VAT — Invoice {inv['invoice_number']}",
+                    })
+            await gl.post(
+                db, branch_id=inv["branch_id"], entry_date=now.date(),
+                description=f"Invoice raised — {inv['invoice_number']} ({inv['customer_name'] or 'customer'})",
+                reference=inv["invoice_number"],
+                source_type=gl.SOURCE_INVOICE_SEND, source_id=inv_id,
+                posted_by=getattr(ctx, "user_email", "") or "",
+                idempotency_key=f"gl-inv-send-{inv_id}",
+                lines=posting,
+            )
+        except Exception:
+            import structlog
+            structlog.get_logger().exception("invoice_send_gl_post_failed", inv_id=inv_id)
+
+        await db.commit()
+    return await _get_invoice_with_lines(inv_id)
+
+
+@router.post("/admin/sales-invoices/{inv_id}/pay")
+async def pay_sales_invoice(inv_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """Mark whole invoice as PAID and post DR Bank CR AR for the
+    outstanding amount (total - paid_total)."""
+    _require_priv(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
     async with SessionLocal() as db:
         row = (await db.execute(
-            text("SELECT id, status, total FROM sales_invoices WHERE id = :id"), {"id": inv_id},
+            text("SELECT * FROM sales_invoices WHERE id = :id"), {"id": inv_id},
         )).mappings().first()
         if not row:
             raise HTTPException(404, detail="Invoice not found")
         if row["status"] not in ("SENT", "DRAFT", "PART_PAID"):
             raise HTTPException(409, detail=f"Cannot mark paid from status {row['status']}")
+
+        outstanding = float(row["total"] or 0) - float(row["paid_total"] or 0)
+        now = datetime.now(UTC)
         await db.execute(text("""
             UPDATE sales_invoices
-            SET status = 'PAID', paid_total = total, paid_at = :now, updated_at = :now
-            WHERE id = :id
-        """), {"id": inv_id, "now": datetime.now(UTC)})
+            SET status='PAID', paid_total=total, paid_at=:now, updated_at=:now
+            WHERE id=:id
+        """), {"id": inv_id, "now": now})
+
+        if outstanding > 0:
+            try:
+                await gl.post(
+                    db, branch_id=row["branch_id"], entry_date=now.date(),
+                    description=f"Invoice payment — {row['invoice_number']}",
+                    reference=row["invoice_number"],
+                    source_type=gl.SOURCE_INVOICE_PAY, source_id=inv_id,
+                    posted_by=getattr(ctx, "user_email", "") or "",
+                    idempotency_key=f"gl-inv-pay-{inv_id}-{outstanding:.2f}",
+                    lines=gl.lines_for_invoice_pay(outstanding, row["customer_name"] or "customer"),
+                )
+            except Exception:
+                import structlog
+                structlog.get_logger().exception("invoice_pay_gl_post_failed", inv_id=inv_id)
+
+        await db.commit()
+    return await _get_invoice_with_lines(inv_id)
+
+
+class InvoicePaymentIn(BaseModel):
+    amount: float
+    payment_date: str = ""
+    bank_nominal_code: str = ""
+    payment_ref: str = ""
+
+
+@router.post("/admin/sales-invoices/{inv_id}/payments")
+async def record_invoice_payment(inv_id: str, body: InvoicePaymentIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Record a partial (or full) payment against an invoice. Posts a
+    DR Bank / CR AR for the amount and bumps paid_total. Flips status
+    PART_PAID -> PAID when paid_total >= total."""
+    _require_priv(ctx)
+    if body.amount <= 0:
+        raise HTTPException(400, detail="amount must be > 0")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
+    async with SessionLocal() as db:
+        inv = (await db.execute(
+            text("SELECT * FROM sales_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not inv:
+            raise HTTPException(404, detail="Invoice not found")
+        if inv["status"] in ("VOID",):
+            raise HTTPException(409, detail="Cannot record payment on a VOID invoice")
+
+        paid_so_far = float(inv["paid_total"] or 0) + float(body.amount)
+        total = float(inv["total"] or 0)
+        if paid_so_far > total + 0.005:
+            raise HTTPException(400, detail=f"Payment {body.amount} would over-pay (paid {paid_so_far:.2f} vs total {total:.2f})")
+
+        now = datetime.now(UTC)
+        new_status = "PAID" if abs(paid_so_far - total) < 0.01 else "PART_PAID"
+        stamp_pay_at = ", paid_at = :now" if new_status == "PAID" else ""
+        await db.execute(text(f"""
+            UPDATE sales_invoices
+            SET    paid_total = :pt, status = :st, updated_at = :now{stamp_pay_at}
+            WHERE  id = :id
+        """), {"pt": round(paid_so_far, 2), "st": new_status, "now": now, "id": inv_id})
+
+        try:
+            bank = (body.bank_nominal_code or "").strip().upper() or gl.DEFAULT_BANK
+            entry_date = body.payment_date.strip() or now.date().isoformat()
+            await gl.post(
+                db, branch_id=inv["branch_id"], entry_date=entry_date,
+                description=f"Payment — Invoice {inv['invoice_number']} ({body.amount:.2f})",
+                reference=body.payment_ref or inv["invoice_number"],
+                source_type=gl.SOURCE_INVOICE_PAY, source_id=inv_id,
+                posted_by=getattr(ctx, "user_email", "") or "",
+                idempotency_key=f"gl-inv-pay-{inv_id}-{entry_date}-{body.amount:.2f}",
+                lines=[
+                    {"nominal_code": bank, "debit": body.amount, "credit": 0,
+                     "description": f"Receipt — {inv['customer_name'] or 'customer'}"},
+                    {"nominal_code": gl.DEFAULT_DEBTOR, "debit": 0, "credit": body.amount,
+                     "description": f"AR clear — {inv['customer_name'] or 'customer'}"},
+                ],
+            )
+        except Exception:
+            import structlog
+            structlog.get_logger().exception("invoice_payment_gl_post_failed", inv_id=inv_id)
+
         await db.commit()
     return await _get_invoice_with_lines(inv_id)
 
 
 @router.post("/admin/sales-invoices/{inv_id}/void")
 async def void_sales_invoice(inv_id: str, ctx: CurrentSpace) -> dict[str, Any]:
-    return await _transition_invoice(inv_id, ctx, from_status=None, to_status="VOID",
-                                     stamp_col="voided_at",
-                                     forbid_from=("PAID", "VOID"))
+    """Void an invoice. Reverses the send + any payment GL entries
+    posted against it to keep the ledger clean."""
+    _require_priv(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
+
+    async with SessionLocal() as db:
+        inv = (await db.execute(
+            text("SELECT id, status FROM sales_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not inv:
+            raise HTTPException(404, detail="Invoice not found")
+        if inv["status"] in ("PAID", "VOID"):
+            raise HTTPException(409, detail=f"Cannot void from {inv['status']}")
+
+        gl_entries = (await db.execute(text("""
+            SELECT id FROM transactions
+            WHERE  source_id = :sid
+              AND  source_type IN (:s1, :s2)
+              AND  reversal_of IS NULL
+              AND  NOT EXISTS (SELECT 1 FROM transactions r WHERE r.reversal_of = transactions.id)
+            ORDER  BY posted_at
+        """), {"sid": inv_id, "s1": gl.SOURCE_INVOICE_SEND, "s2": gl.SOURCE_INVOICE_PAY})).mappings().all()
+        for gl_row in gl_entries:
+            try:
+                await gl.reverse(db, original_txn_id=str(gl_row["id"]),
+                                 posted_by=getattr(ctx, "user_email", "") or "",
+                                 description="Invoice voided — reversing posting")
+            except Exception:
+                import structlog
+                structlog.get_logger().exception("invoice_void_reverse_failed", inv_id=inv_id, gl_id=str(gl_row["id"]))
+
+        await db.execute(text("""
+            UPDATE sales_invoices SET status='VOID', voided_at=:now, updated_at=:now WHERE id=:id
+        """), {"id": inv_id, "now": datetime.now(UTC)})
+        await db.commit()
+    return await _get_invoice_with_lines(inv_id)
 
 
 @router.delete("/admin/sales-invoices/{inv_id}", status_code=204)
