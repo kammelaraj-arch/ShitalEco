@@ -120,11 +120,14 @@ async def list_codes(
         "offset": max(0, (page - 1) * per_page),
     }
     if type:
-        where.append("type = :type"); params["type"] = type
+        where.append("type = :type")
+        params["type"] = type
     if category:
-        where.append("category = :cat"); params["cat"] = category
+        where.append("category = :cat")
+        params["cat"] = category
     if scope:
-        where.append("scope = :scope"); params["scope"] = scope
+        where.append("scope = :scope")
+        params["scope"] = scope
     if branch_id:
         # Branch filter shows both branch-specific AND HEAD_OFFICE/BOTH so
         # the per-branch view shows everything that branch can use.
