@@ -23,6 +23,7 @@ interface Donation {
   branch_id: string
   amount: number | string
   currency: string
+  source: string
   purpose: string
   payment_provider: string
   payment_ref: string | null
@@ -30,8 +31,35 @@ interface Donation {
   gift_aid_amount: number | string
   status: string
   reference: string
+  contact_id: string | null
+  contact_name: string | null
+  contact_email: string | null
+  donation_type: 'one-time' | 'recurring' | string
   created_at: string
+  updated_at: string
 }
+
+// Master column list — drives the column-toggle menu + the table render.
+// `default` = visible on first load (mirrors what the old grid showed plus
+// Gift Aid + Contact, which are the most commonly-requested additions).
+const ALL_COLUMNS = [
+  { key: 'gift_aid',         label: '🇬🇧 Gift Aid',  default: true,  always: false },
+  { key: 'date',             label: 'Date',           default: true,  always: true  },
+  { key: 'amount',           label: 'Amount',         default: true,  always: true  },
+  { key: 'contact',          label: 'Donor',          default: true,  always: false },
+  { key: 'purpose',          label: 'Purpose',        default: true,  always: false },
+  { key: 'branch',           label: 'Branch',         default: true,  always: false },
+  { key: 'source',           label: 'Source',         default: false, always: false },
+  { key: 'donation_type',    label: 'Type',           default: false, always: false },
+  { key: 'payment_provider', label: 'Method',         default: true,  always: false },
+  { key: 'payment_ref',      label: 'Payment Ref',    default: false, always: false },
+  { key: 'reference',        label: 'Reference',      default: false, always: false },
+  { key: 'status',           label: 'Status',         default: true,  always: true  },
+] as const
+
+type ColumnKey = typeof ALL_COLUMNS[number]['key']
+
+const SOURCES = ['', 'service-portal', 'quick-donation', 'monthly-giving', 'manual', 'kiosk']
 
 const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-saffron-400/50'
 const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1'
@@ -48,6 +76,40 @@ export default function DonationsPage() {
   const [firstOfYear] = useState(() => `${new Date().getFullYear()}-01-01`)
   const [fromDate, setFromDate] = useState(() => `${new Date().getFullYear()}-01-01`)
   const [toDate, setToDate] = useState(() => new Date().toISOString().slice(0, 10))
+
+  // Extended query filters (all wired to the existing /finance/donations params)
+  const [filterBranch, setFilterBranch]   = useState('')
+  const [filterSource, setFilterSource]   = useState('')
+  const [filterPurpose, setFilterPurpose] = useState('')
+  const [filterStatus, setFilterStatus]   = useState('')
+  const [filterLimit, setFilterLimit]     = useState(500)
+  const [giftAidOnly, setGiftAidOnly]     = useState(false)
+  const [search, setSearch]               = useState('')
+
+  // Column toggle — visible columns persist in localStorage so each trustee
+  // keeps their own view. Defaults come from ALL_COLUMNS.
+  const [visibleCols, setVisibleCols] = useState<Set<ColumnKey>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('shital_donations_cols')
+        if (raw) return new Set(JSON.parse(raw) as ColumnKey[])
+      } catch { /* ignore */ }
+    }
+    return new Set(ALL_COLUMNS.filter(c => c.default).map(c => c.key))
+  })
+  useEffect(() => {
+    try { localStorage.setItem('shital_donations_cols', JSON.stringify([...visibleCols])) }
+    catch { /* ignore */ }
+  }, [visibleCols])
+  const [showColMenu, setShowColMenu] = useState(false)
+  const toggleCol = (k: ColumnKey) => {
+    setVisibleCols(prev => {
+      const next = new Set(prev)
+      if (next.has(k)) next.delete(k); else next.add(k)
+      return next
+    })
+  }
+  const isVisible = (k: ColumnKey) => visibleCols.has(k)
 
   // CSV
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -74,8 +136,17 @@ export default function DonationsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
+      const qs = new URLSearchParams({
+        from_date: fromDate,
+        to_date:   toDate,
+        limit:     String(filterLimit),
+      })
+      if (filterBranch)  qs.set('branch_id', filterBranch)
+      if (filterSource)  qs.set('source',    filterSource)
+      if (filterPurpose) qs.set('purpose',   filterPurpose)
+      if (filterStatus)  qs.set('status',    filterStatus)
       const [donData, brData] = await Promise.all([
-        apiFetch<{ donations: Donation[] }>(`/finance/donations?from_date=${fromDate}&to_date=${toDate}&limit=500`),
+        apiFetch<{ donations: Donation[] }>(`/finance/donations?${qs}`),
         apiFetch<{ branches: Branch[] }>('/branches'),
       ])
       setDonations(donData.donations || [])
@@ -85,7 +156,7 @@ export default function DonationsPage() {
     } finally {
       setLoading(false)
     }
-  }, [fromDate, toDate])
+  }, [fromDate, toDate, filterBranch, filterSource, filterPurpose, filterStatus, filterLimit])
 
   useEffect(() => { load() }, [load])
 
@@ -194,11 +265,14 @@ export default function DonationsPage() {
     }
   }
 
-  const totalAmount  = donations.reduce((s, d) => s + Number(d.amount), 0)
-  const totalGiftAid = donations.reduce((s, d) => s + Number(d.gift_aid_amount || 0), 0)
+  // Totals reflect the FILTERED dataset so trustees see what their query
+  // returned, not the whole period.
+  const totalAmount  = visibleDonations.reduce((s, d) => s + Number(d.amount), 0)
+  const totalGiftAid = visibleDonations.reduce((s, d) => s + Number(d.gift_aid_amount || 0), 0)
+  const gaEligibleCount = visibleDonations.filter(d => d.gift_aid_eligible).length
   // Per-status breakdown (count + sum) so the summary cards reflect the
   // health of the cashflow, not just the total.
-  const byStatus = donations.reduce<Record<string, { count: number; sum: number }>>((acc, d) => {
+  const byStatus = visibleDonations.reduce<Record<string, { count: number; sum: number }>>((acc, d) => {
     const k = d.status || 'UNKNOWN'
     if (!acc[k]) acc[k] = { count: 0, sum: 0 }
     acc[k].count += 1
@@ -222,7 +296,22 @@ export default function DonationsPage() {
     if (sortBy === k) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortBy(k); setSortDir(k === 'amount' || k === 'date' ? 'desc' : 'asc') }
   }
-  const sortedDonations = [...donations].sort((a, b) => {
+  // Apply client-side filters on top of the server response
+  const q = search.trim().toLowerCase()
+  const visibleDonations = donations.filter(d => {
+    if (giftAidOnly && !d.gift_aid_eligible) return false
+    if (q) {
+      const hay = [
+        d.contact_name, d.contact_email, d.purpose, d.reference,
+        d.payment_ref, d.payment_provider, d.source, d.branch_id,
+        String(d.amount),
+      ].filter(Boolean).join(' ').toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+
+  const sortedDonations = [...visibleDonations].sort((a, b) => {
     const getVal = (d: Donation): string | number => {
       switch (sortBy) {
         case 'date':             return new Date(d.created_at).getTime()
@@ -295,23 +384,98 @@ export default function DonationsPage() {
         )}
       </AnimatePresence>
 
-      {/* Date range filter */}
-      <div className="flex flex-wrap gap-2 sm:gap-3 items-end">
-        <div className="min-w-0">
-          <label className={lbl}>From</label>
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={inp + ' w-full sm:w-40'} />
+      {/* Filter panel — every backend query param exposed + Gift-Aid-only
+          shortcut + a free-text search across donor/purpose/refs.
+          Date + status/source/branch/purpose hit the API; gift-aid-only
+          + search are client-side over the returned set. */}
+      <div className="glass rounded-2xl p-4 space-y-3">
+        <div className="flex flex-wrap gap-2 sm:gap-3 items-end">
+          <div className="min-w-0 flex-1 sm:flex-none">
+            <label className={lbl}>From</label>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={inp + ' w-full sm:w-40'} />
+          </div>
+          <div className="min-w-0 flex-1 sm:flex-none">
+            <label className={lbl}>To</label>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={inp + ' w-full sm:w-40'} />
+          </div>
+          <div className="min-w-0">
+            <label className={lbl}>Branch</label>
+            <select value={filterBranch} onChange={e => setFilterBranch(e.target.value)} className={inp + ' min-w-[140px]'}>
+              <option value="">All</option>
+              {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
+            </select>
+          </div>
+          <div className="min-w-0">
+            <label className={lbl}>Source</label>
+            <select value={filterSource} onChange={e => setFilterSource(e.target.value)} className={inp + ' min-w-[150px]'}>
+              {SOURCES.map(s => <option key={s} value={s}>{s || 'All sources'}</option>)}
+            </select>
+          </div>
+          <div className="min-w-0">
+            <label className={lbl}>Purpose contains</label>
+            <input value={filterPurpose} onChange={e => setFilterPurpose(e.target.value)}
+              placeholder="any" className={inp + ' min-w-[140px]'} />
+          </div>
+          <div className="min-w-0">
+            <label className={lbl}>Status</label>
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={inp + ' min-w-[130px]'}>
+              <option value="">All</option>
+              {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="min-w-0">
+            <label className={lbl}>Row limit</label>
+            <select value={filterLimit} onChange={e => setFilterLimit(Number(e.target.value))} className={inp + ' min-w-[100px]'}>
+              {[100, 250, 500, 1000, 2500].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={load} className="px-4 py-2.5 rounded-xl text-white text-sm font-bold"
+              style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>Apply</button>
+            <button onClick={() => {
+              setFromDate(firstOfYear); setToDate(today)
+              setFilterBranch(''); setFilterSource(''); setFilterPurpose('')
+              setFilterStatus(''); setFilterLimit(500); setGiftAidOnly(false); setSearch('')
+            }}
+              className="px-4 py-2.5 rounded-xl border border-white/10 text-white/50 text-sm font-semibold hover:bg-white/5">Reset</button>
+          </div>
         </div>
-        <div className="min-w-0">
-          <label className={lbl}>To</label>
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={inp + ' w-full sm:w-40'} />
-        </div>
-        <div className="flex gap-2">
-          <button onClick={load} className="px-4 py-2.5 rounded-xl text-white text-sm font-bold"
-            style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>Apply</button>
-          <button onClick={() => { setFromDate(firstOfYear); setToDate(today) }}
-            className="px-4 py-2.5 rounded-xl border border-white/10 text-white/50 text-sm font-semibold hover:bg-white/5">This Year</button>
-          <button onClick={() => { setFromDate('2020-01-01'); setToDate(today) }}
-            className="px-4 py-2.5 rounded-xl border border-white/10 text-white/50 text-sm font-semibold hover:bg-white/5">All Time</button>
+        <div className="flex flex-wrap gap-2 sm:gap-3 items-center pt-2 border-t border-white/5">
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="🔍 Search donor / purpose / reference / payment ref…"
+            className={inp + ' flex-1 min-w-[220px]'} />
+          <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer select-none px-3 py-2.5 rounded-xl border border-white/10 hover:bg-white/5">
+            <input type="checkbox" checked={giftAidOnly} onChange={e => setGiftAidOnly(e.target.checked)}
+              className="w-4 h-4 accent-saffron-500" />
+            <span className="text-base">🇬🇧</span>
+            <span className="font-bold">Gift Aid only</span>
+          </label>
+          <div className="relative">
+            <button onClick={() => setShowColMenu(v => !v)}
+              className="px-4 py-2.5 rounded-xl border border-white/10 text-white/70 text-sm font-semibold hover:bg-white/5">
+              ⚙ Columns ({visibleCols.size})
+            </button>
+            {showColMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowColMenu(false)} />
+                <div className="absolute right-0 mt-2 w-60 bg-temple-deep border border-white/10 rounded-xl shadow-2xl p-3 z-40">
+                  <p className="text-[10px] font-bold text-white/40 uppercase mb-2">Show columns</p>
+                  <div className="space-y-1.5">
+                    {ALL_COLUMNS.map(c => (
+                      <label key={c.key}
+                        className={`flex items-center gap-2 text-sm px-2 py-1.5 rounded-lg cursor-pointer ${c.always ? 'opacity-60 cursor-not-allowed' : 'hover:bg-white/5'}`}>
+                        <input type="checkbox"
+                          checked={isVisible(c.key)} disabled={c.always}
+                          onChange={() => !c.always && toggleCol(c.key)}
+                          className="w-4 h-4 accent-saffron-500" />
+                        <span className="text-white/80">{c.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -341,7 +505,7 @@ export default function DonationsPage() {
             icon: '💰', color: 'from-saffron-600 to-orange-600' },
           { label: 'Gift Aid',
             value: `£${totalGiftAid.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
-            sub:   '25% reclaim',
+            sub:   `${gaEligibleCount} of ${visibleDonations.length} eligible · 25% reclaim`,
             icon: '🇬🇧', color: 'from-blue-600 to-indigo-500' },
         ].map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
@@ -371,23 +535,60 @@ export default function DonationsPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
-                  {([
-                    { k: 'date',             label: 'Date',    cls: '' },
-                    { k: 'amount',           label: 'Amount',  cls: '' },
-                    { k: 'purpose',          label: 'Purpose', cls: 'hidden sm:table-cell' },
-                    { k: 'branch_id',        label: 'Branch',  cls: 'hidden md:table-cell' },
-                    { k: 'payment_provider', label: 'Method',  cls: 'hidden lg:table-cell' },
-                    { k: 'status',           label: 'Status',  cls: '' },
-                  ] as const).map(({ k, label, cls }) => (
-                    <th key={k}
-                      onClick={() => toggleSort(k as SortKey)}
-                      className={`text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase cursor-pointer select-none hover:text-white/70 ${cls}`}>
-                      {label}
-                      {sortBy === k && (
-                        <span className="ml-1 text-saffron-400">{sortDir === 'asc' ? '↑' : '↓'}</span>
-                      )}
+                  {isVisible('gift_aid') && (
+                    <th className="text-center px-3 py-3 text-white/40 text-xs font-semibold uppercase">🇬🇧 GA</th>
+                  )}
+                  {isVisible('date') && (
+                    <th onClick={() => toggleSort('date')}
+                      className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase cursor-pointer select-none hover:text-white/70">
+                      Date {sortBy === 'date' && <span className="ml-1 text-saffron-400">{sortDir === 'asc' ? '↑' : '↓'}</span>}
                     </th>
-                  ))}
+                  )}
+                  {isVisible('amount') && (
+                    <th onClick={() => toggleSort('amount')}
+                      className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase cursor-pointer select-none hover:text-white/70">
+                      Amount {sortBy === 'amount' && <span className="ml-1 text-saffron-400">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                    </th>
+                  )}
+                  {isVisible('contact') && (
+                    <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Donor</th>
+                  )}
+                  {isVisible('purpose') && (
+                    <th onClick={() => toggleSort('purpose')}
+                      className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase cursor-pointer select-none hover:text-white/70">
+                      Purpose {sortBy === 'purpose' && <span className="ml-1 text-saffron-400">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                    </th>
+                  )}
+                  {isVisible('branch') && (
+                    <th onClick={() => toggleSort('branch_id')}
+                      className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase cursor-pointer select-none hover:text-white/70">
+                      Branch {sortBy === 'branch_id' && <span className="ml-1 text-saffron-400">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                    </th>
+                  )}
+                  {isVisible('source') && (
+                    <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Source</th>
+                  )}
+                  {isVisible('donation_type') && (
+                    <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Type</th>
+                  )}
+                  {isVisible('payment_provider') && (
+                    <th onClick={() => toggleSort('payment_provider')}
+                      className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase cursor-pointer select-none hover:text-white/70">
+                      Method {sortBy === 'payment_provider' && <span className="ml-1 text-saffron-400">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                    </th>
+                  )}
+                  {isVisible('payment_ref') && (
+                    <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Payment Ref</th>
+                  )}
+                  {isVisible('reference') && (
+                    <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Reference</th>
+                  )}
+                  {isVisible('status') && (
+                    <th onClick={() => toggleSort('status')}
+                      className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase cursor-pointer select-none hover:text-white/70">
+                      Status {sortBy === 'status' && <span className="ml-1 text-saffron-400">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                    </th>
+                  )}
                   {canEdit && <th className="px-4 py-3" />}
                 </tr>
               </thead>
@@ -395,23 +596,91 @@ export default function DonationsPage() {
                 {sortedDonations.map((d, i) => (
                   <motion.tr key={d.id}
                     initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.01 }}
-                    className="border-b border-white/5 hover:bg-white/3 transition-colors">
-                    <td className="px-4 py-3 text-white/60 text-sm whitespace-nowrap">
-                      {new Date(d.created_at).toLocaleDateString('en-GB')}
-                    </td>
-                    <td className="px-4 py-3 font-mono font-bold text-saffron-400 whitespace-nowrap">
-                      £{Number(d.amount).toFixed(2)}
-                    </td>
-                    <td className="px-4 py-3 text-white/70 text-sm hidden sm:table-cell">{d.purpose}</td>
-                    <td className="px-4 py-3 text-white/50 text-sm hidden md:table-cell">{branchName(d.branch_id)}</td>
-                    <td className="px-4 py-3 text-white/50 text-xs capitalize hidden lg:table-cell">{d.payment_provider}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
-                        d.status === 'COMPLETED' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-                        d.status === 'PENDING'   ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
-                                                   'bg-red-500/20 text-red-400 border-red-500/30'
-                      }`}>{d.status}</span>
-                    </td>
+                    className={`border-b border-white/5 hover:bg-white/3 transition-colors ${
+                      d.gift_aid_eligible ? 'bg-blue-500/[0.04]' : ''
+                    }`}
+                    style={d.gift_aid_eligible ? { borderLeft: '3px solid #3B82F6' } : { borderLeft: '3px solid transparent' }}
+                  >
+                    {isVisible('gift_aid') && (
+                      <td className="px-3 py-3 text-center whitespace-nowrap">
+                        {d.gift_aid_eligible ? (
+                          <div className="inline-flex flex-col items-center gap-0.5">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-500/25 text-blue-200 border border-blue-400/50 shadow shadow-blue-500/20">
+                              🇬🇧 GA
+                            </span>
+                            {Number(d.gift_aid_amount) > 0 && (
+                              <span className="text-[10px] font-mono font-bold text-blue-300">
+                                +£{Number(d.gift_aid_amount).toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-white/15 text-xs">—</span>
+                        )}
+                      </td>
+                    )}
+                    {isVisible('date') && (
+                      <td className="px-4 py-3 text-white/60 text-sm whitespace-nowrap">
+                        {new Date(d.created_at).toLocaleDateString('en-GB')}
+                      </td>
+                    )}
+                    {isVisible('amount') && (
+                      <td className="px-4 py-3 font-mono font-bold text-saffron-400 whitespace-nowrap">
+                        £{Number(d.amount).toFixed(2)}
+                      </td>
+                    )}
+                    {isVisible('contact') && (
+                      <td className="px-4 py-3 text-white/80 text-sm">
+                        {d.contact_name ? (
+                          <div>
+                            <div className="font-semibold">{d.contact_name}</div>
+                            {d.contact_email && <div className="text-white/40 text-[11px] truncate max-w-[200px]">{d.contact_email}</div>}
+                          </div>
+                        ) : (
+                          <span className="text-white/30 italic">anonymous</span>
+                        )}
+                      </td>
+                    )}
+                    {isVisible('purpose') && (
+                      <td className="px-4 py-3 text-white/70 text-sm">{d.purpose}</td>
+                    )}
+                    {isVisible('branch') && (
+                      <td className="px-4 py-3 text-white/50 text-sm">{branchName(d.branch_id)}</td>
+                    )}
+                    {isVisible('source') && (
+                      <td className="px-4 py-3 text-white/50 text-xs font-mono">{d.source}</td>
+                    )}
+                    {isVisible('donation_type') && (
+                      <td className="px-4 py-3 text-xs">
+                        <span className={`px-2 py-0.5 rounded-full border ${
+                          d.donation_type === 'recurring'
+                            ? 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                            : 'bg-white/5 text-white/50 border-white/10'
+                        }`}>
+                          {d.donation_type === 'recurring' ? '🔄 recurring' : 'one-time'}
+                        </span>
+                      </td>
+                    )}
+                    {isVisible('payment_provider') && (
+                      <td className="px-4 py-3 text-white/50 text-xs capitalize">{d.payment_provider}</td>
+                    )}
+                    {isVisible('payment_ref') && (
+                      <td className="px-4 py-3 text-white/50 text-xs font-mono truncate max-w-[180px]" title={d.payment_ref || ''}>
+                        {d.payment_ref || '—'}
+                      </td>
+                    )}
+                    {isVisible('reference') && (
+                      <td className="px-4 py-3 text-white/50 text-xs">{d.reference || '—'}</td>
+                    )}
+                    {isVisible('status') && (
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                          d.status === 'COMPLETED' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                          d.status === 'PENDING'   ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                                                     'bg-red-500/20 text-red-400 border-red-500/30'
+                        }`}>{d.status}</span>
+                      </td>
+                    )}
                     {canEdit && (
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         <button onClick={() => openEdit(d)}
