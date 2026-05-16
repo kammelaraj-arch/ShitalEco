@@ -204,9 +204,63 @@ else
 fi
 
 docker image prune -f
-docker container prune -f
+# DO NOT `docker container prune -f` here. It removes ALL stopped containers
+# on the host, with no compose-project / label filter — so if a prod
+# container ever stopped (OOM, crash, mid-deploy force-recreate window),
+# the next deploy permanently deleted it. That's exactly how
+# shitaleco-backend-1 ended up missing on prod and nginx started 502'ing
+# every request. We rely on `up -d --force-recreate` below to handle
+# container churn; we never need a blanket prune.
+
+# ── Self-healing: ensure every required service is present ──────────────────
+# Every deploy MUST end with all required containers running. If any has
+# been removed (manual `docker rm`, host reboot, an earlier-version
+# deploy's prune line, OOM-then-crashloop-then-stopped), `up -d` (no
+# --force-recreate) creates it from compose. This runs BEFORE the rolling
+# restart so the force-recreate phase below has something to recreate
+# (and doesn't no-op on a missing container).
+echo "=== Ensure all required ${STACK_NAME} containers exist ==="
+if [ "$TARGET" = "dev" ]; then
+  REQUIRED_SERVICES="db-dev backend-dev admin-dev quick-donation-dev kiosk-dev screen-dev nginx-dev"
+else
+  REQUIRED_SERVICES="db backend admin quick-donation kiosk screen service nginx certbot backup-scheduler deployer"
+fi
+docker compose -f "$COMPOSE" up -d --no-deps $REQUIRED_SERVICES 2>&1 | tail -30 || true
+
+# Quick audit — log any required service that's still missing/stopped.
+# If one is, we DON'T abort the deploy (`up -d` already tried), but the
+# warning lands in /var/log/shital-ops.log so it's actionable.
+MISSING=""
+for svc in $REQUIRED_SERVICES; do
+  # The compose-named container is shitaleco-${svc}-1 (prod) or
+  # shitaleco-dev-${svc}-1 (dev). Both forms checked.
+  if [ "$TARGET" = "dev" ]; then
+    cname="shitaleco-dev-${svc}-1"
+  else
+    cname="shitaleco-${svc}-1"
+  fi
+  state=$(docker inspect "$cname" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
+  if [ "$state" != "running" ] && [ "$state" != "restarting" ]; then
+    echo "  !!! ${cname} is '${state}' (expected running)"
+    MISSING="${MISSING} ${cname}"
+  fi
+done
+if [ -n "$MISSING" ]; then
+  echo "!!! Some required containers are not running:${MISSING}"
+  echo "!!! `up -d --no-deps` was attempted; check the lines above for compose errors."
+fi
 
 # ── Rolling restart — backend first ─────────────────────────────────────────
+# Safety net — if a backend container is missing entirely (previously
+# pruned, host reboot, manual `docker rm`), `up -d --force-recreate` may
+# leave compose unhappy in some edge cases. `up -d` (without
+# force-recreate, against the actual service name) is the most reliable
+# path to recreate a missing container. Then below we force-recreate so
+# we get the new image even if compose found an existing container.
+echo "=== Ensure-create: backend (${STACK_NAME}) ==="
+docker compose -f "$COMPOSE" up -d --no-deps backend 2>/dev/null || \
+  docker compose -f "$COMPOSE" up -d --no-deps backend-dev
+
 echo "=== Rolling restart: backend (${STACK_NAME}) ==="
 docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend 2>/dev/null || \
   docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend-dev
