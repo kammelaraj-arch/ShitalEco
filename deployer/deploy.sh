@@ -51,21 +51,45 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 fi
 
 # ── Snapshot before promote: DB dump + timestamped image tag ────────────────
+# Failures here used to be silent (`2>/dev/null`) — so the snapshot listing
+# was permanently empty after multiple successful promotes because the
+# .sql.gz file the listing endpoint hunted for was never created. Now
+# pg_dump stderr is shown loud in the deployer log AND persisted to a
+# small log file alongside backups, so operators can diagnose without
+# shelling into the container.
 take_snapshot() {
   local ts="$1" reason="$2"
   local out="${SNAP_DIR}/${reason}-${ts}-${GIT_SHA:0:7}.sql.gz"
+  local err_log="${SNAP_DIR}/${reason}-${ts}-pg_dump.log"
   echo "=== Taking ${reason} snapshot ${ts} ==="
-  # DB dump (best-effort — don't fail the deploy if pg_dump misbehaves)
-  if docker compose -f docker-compose.prod.yml exec -T db \
+  # The deployer's CWD is /workspace, which is NOT the prod compose project
+  # ("shitaleco" — derived from /opt/shitaleco on the host). Pass an explicit
+  # project name + absolute compose file path so `docker compose exec` finds
+  # the running db container regardless of where the deployer was started.
+  set +e
+  docker compose -p shitaleco -f /workspace/docker-compose.prod.yml exec -T db \
        pg_dump -U "${POSTGRES_USER:-shitaleco_db_user}" \
-               -d "${POSTGRES_DB:-shitaleco_db}" 2>/dev/null \
-       | gzip > "$out" ; then
+               -d "${POSTGRES_DB:-shitaleco_db}" \
+       2>"$err_log" | gzip > "$out"
+  local pg_rc=${PIPESTATUS[0]}
+  local gz_rc=${PIPESTATUS[1]}
+  set -e
+  if [ "$pg_rc" -eq 0 ] && [ "$gz_rc" -eq 0 ] && [ -s "$out" ]; then
+    rm -f "$err_log"
     echo "  ✓ DB dump → ${out} ($(du -h "$out" | cut -f1))"
   else
     rm -f "$out"
-    echo "  ✗ DB dump failed (continuing — image snapshot still useful)"
+    echo "  ✗ DB dump failed (pg_dump rc=${pg_rc}, gzip rc=${gz_rc})"
+    if [ -s "$err_log" ]; then
+      echo "  ── pg_dump stderr (also in ${err_log}): ─────────────────────"
+      sed 's/^/      /' "$err_log"
+      echo "  ─────────────────────────────────────────────────────────────"
+    fi
+    echo "  → continuing with image-tag snapshot only — image-only rollback"
+    echo "    will still be available for this snapshot."
   fi
-  # Image-tag snapshot of current :latest, before any retag
+  # Image-tag snapshot of current :latest, before any retag — runs even
+  # when pg_dump failed so the operator can still do an image-only rollback.
   for svc in backend admin quick-donation kiosk screen service; do
     local img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
     if docker tag "${img}:latest" "${img}:${reason}-${ts}" 2>/dev/null; then

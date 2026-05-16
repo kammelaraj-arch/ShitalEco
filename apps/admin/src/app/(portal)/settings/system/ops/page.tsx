@@ -17,9 +17,11 @@ interface OpsResult {
 interface Snapshot {
   id: string            // 20260506T070000Z
   git_sha: string
-  db_dump: string
+  db_dump: string | null
   size_bytes: number
   created_at: string
+  has_db?: boolean
+  has_images?: boolean
 }
 
 interface EnvSummary {
@@ -421,26 +423,47 @@ export default function OpsPage() {
                 <tr className="text-left border-b border-white/10">
                   <th className="py-2 pr-4">When</th>
                   <th className="py-2 pr-4">Commit</th>
-                  <th className="py-2 pr-4">DB dump</th>
+                  <th className="py-2 pr-4">Contents</th>
                   <th className="py-2 pr-4">Size</th>
                   <th className="py-2 pr-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {snapshots.map(s => (
-                  <tr key={s.id} className="border-b border-white/5 hover:bg-white/5">
-                    <td className="py-2.5 pr-4 text-white/80 font-mono text-xs">{formatTs(s.id)}</td>
-                    <td className="py-2.5 pr-4 text-white/60 font-mono text-xs">{s.git_sha}</td>
-                    <td className="py-2.5 pr-4 text-white/40 text-xs truncate max-w-[260px]">{s.db_dump}</td>
-                    <td className="py-2.5 pr-4 text-white/60 text-xs">{formatBytes(s.size_bytes)}</td>
-                    <td className="py-2.5 pr-4 text-right">
-                      <button onClick={() => openRestoreDialog(s)}
-                        className="px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold hover:bg-amber-500/25">
-                        ↩ Restore
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {snapshots.map(s => {
+                  const hasDb     = s.has_db     ?? !!s.db_dump
+                  const hasImages = s.has_images ?? !!s.git_sha
+                  return (
+                    <tr key={s.id} className="border-b border-white/5 hover:bg-white/5">
+                      <td className="py-2.5 pr-4 text-white/80 font-mono text-xs">{formatTs(s.id)}</td>
+                      <td className="py-2.5 pr-4 text-white/60 font-mono text-xs">{s.git_sha || '—'}</td>
+                      <td className="py-2.5 pr-4 text-xs">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className={`px-1.5 py-0.5 rounded-full border text-[10px] font-bold ${
+                            hasDb ? 'bg-green-500/15 text-green-300 border-green-500/30'
+                                  : 'bg-red-500/15 text-red-300 border-red-500/30'
+                          }`}>{hasDb ? '✓ DB' : '✗ no DB'}</span>
+                          <span className={`px-1.5 py-0.5 rounded-full border text-[10px] font-bold ${
+                            hasImages ? 'bg-green-500/15 text-green-300 border-green-500/30'
+                                      : 'bg-white/10 text-white/40 border-white/20'
+                          }`}>{hasImages ? '✓ Images' : '✗ no images'}</span>
+                          {s.db_dump && (
+                            <span className="text-white/30 font-mono truncate max-w-[200px]" title={s.db_dump}>{s.db_dump}</span>
+                          )}
+                        </div>
+                        {!hasDb && hasImages && (
+                          <p className="text-amber-300/80 text-[10px] mt-1">⚠ DB dump missing — restore will be images-only (no DB rollback)</p>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-4 text-white/60 text-xs">{s.size_bytes > 0 ? formatBytes(s.size_bytes) : '—'}</td>
+                      <td className="py-2.5 pr-4 text-right">
+                        <button onClick={() => openRestoreDialog(s)} disabled={!hasDb && !hasImages}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold hover:bg-amber-500/25 disabled:opacity-30 disabled:cursor-not-allowed">
+                          ↩ Restore
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

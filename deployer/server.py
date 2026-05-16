@@ -352,10 +352,22 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(403)
                 self.end_headers()
                 return
-            # List promote-time DB dumps. Each is named promote-<ts>-<sha>.sql.gz.
+            # List promote-time snapshots. Two sources, merged by timestamp:
+            #   1) DB dumps   — /workspace/backups/promote-<ts>-<sha>.sql.gz
+            #   2) Image tags — ghcr.io/.../shitaleco-backend:promote-<ts>
+            #
+            # Listing BOTH means a snapshot remains visible even when
+            # pg_dump silently fails (which was the original bug — the UI
+            # showed "No snapshots yet" despite multiple successful image
+            # promotions). `has_db` lets the UI grey out / warn on entries
+            # that can't do a full restore.
             import glob
             import re as _re
-            entries = []
+            import subprocess
+
+            entries_by_ts: dict[str, dict] = {}
+
+            # 1) DB dumps
             for path in sorted(glob.glob("/workspace/backups/promote-*.sql.gz"), reverse=True):
                 name = os.path.basename(path)
                 m = _re.match(r"^promote-(\d{8}T\d{6}Z)-([0-9a-f]{7,})\.sql\.gz$", name)
@@ -366,13 +378,55 @@ class Handler(BaseHTTPRequestHandler):
                     size = os.path.getsize(path)
                 except OSError:
                     size = 0
-                entries.append({
+                entries_by_ts[ts] = {
                     "id":         ts,
                     "git_sha":    sha,
                     "db_dump":    name,
                     "size_bytes": size,
                     "created_at": ts,
-                })
+                    "has_db":     True,
+                    "has_images": False,
+                }
+
+            # 2) Image tags — survey the backend image (canonical reference,
+            # the other 5 services get the same tag in lockstep)
+            try:
+                out = subprocess.check_output(
+                    ["docker", "images",
+                     "ghcr.io/kammelaraj-arch/shitaleco-backend",
+                     "--format", "{{.Tag}}"],
+                    timeout=15, stderr=subprocess.DEVNULL,
+                ).decode()
+                for tag in out.splitlines():
+                    tag = tag.strip()
+                    if not tag.startswith("promote-"):
+                        continue
+                    ts = tag[len("promote-"):]
+                    if not _re.match(r"^\d{8}T\d{6}Z$", ts):
+                        continue
+                    existing = entries_by_ts.get(ts)
+                    if existing:
+                        existing["has_images"] = True
+                    else:
+                        # Image-only snapshot — pg_dump must have failed.
+                        # We can still partially restore (images) — UI should
+                        # warn but still let the operator pick this row.
+                        entries_by_ts[ts] = {
+                            "id":         ts,
+                            "git_sha":    "",
+                            "db_dump":    None,
+                            "size_bytes": 0,
+                            "created_at": ts,
+                            "has_db":     False,
+                            "has_images": True,
+                        }
+            except (subprocess.SubprocessError, OSError):
+                # Docker socket might be unreachable from the deployer
+                # (eg. socket not bind-mounted). Fall through with what we
+                # have — DB-dump-only listing is still useful.
+                pass
+
+            entries = sorted(entries_by_ts.values(), key=lambda e: e["id"], reverse=True)
             self._send_json(200, {"snapshots": entries[:20]})
             return
 
