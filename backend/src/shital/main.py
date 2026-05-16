@@ -1900,6 +1900,68 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_board_audit_action ON board_audit_log(action)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_entity ON board_audit_log(entity_type, entity_id)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_when   ON board_audit_log(created_at DESC)",
+        # ── Phase 3: Budgets ─────────────────────────────────────────────────
+        # `budgets` is the period+branch header (one row per branch+year+
+        # period(+project)). `budget_lines` allocates the budget across
+        # nominal_codes (so a single budget header can split into 30+ codes
+        # for fine-grained planning).
+        #
+        # The actuals side reuses transaction_lines from Phase 2 — variance
+        # reporting JOINs budget_lines to transaction_lines on
+        # (nominal_code_id, branch_id, fund_type, date BETWEEN
+        # period_start AND period_end). No duplicated actuals storage.
+        """CREATE TABLE IF NOT EXISTS budgets (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id       VARCHAR(100) NOT NULL DEFAULT 'main',
+            fiscal_year     INTEGER NOT NULL,
+            period_type     VARCHAR(20) NOT NULL DEFAULT 'YEAR',
+                -- YEAR | QUARTER | MONTH
+            period_label    VARCHAR(40) NOT NULL DEFAULT '',
+                -- eg. '2026', '2026-Q1', '2026-04'
+            period_start    DATE NOT NULL,
+            period_end      DATE NOT NULL,
+            name            VARCHAR(200) NOT NULL DEFAULT '',
+            status          VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | APPROVED | CLOSED
+            fund_type       VARCHAR(20) NOT NULL DEFAULT 'UNRESTRICTED',
+            project_id      UUID,
+            total_income    NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total_expense   NUMERIC(12,2) NOT NULL DEFAULT 0,
+            net_budget      NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes           TEXT NOT NULL DEFAULT '',
+            created_by      VARCHAR(200) NOT NULL DEFAULT '',
+            approved_by     VARCHAR(200) NOT NULL DEFAULT '',
+            approved_at     TIMESTAMPTZ,
+            closed_at       TIMESTAMPTZ,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        # UNIQUE constraint with NULLs: Postgres treats NULLs as distinct
+        # by default, so two budgets with project_id NULL won't collide
+        # — we use a partial-index trick to dedupe non-project rows too.
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_budgets_per_period_proj ON budgets(branch_id, fiscal_year, period_type, period_label, project_id) WHERE project_id IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_budgets_per_period_noproj ON budgets(branch_id, fiscal_year, period_type, period_label) WHERE project_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_budgets_branch  ON budgets(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_budgets_year    ON budgets(fiscal_year)",
+        "CREATE INDEX IF NOT EXISTS idx_budgets_status  ON budgets(status)",
+        "CREATE INDEX IF NOT EXISTS idx_budgets_project ON budgets(project_id)",
+        """CREATE TABLE IF NOT EXISTS budget_lines (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            budget_id       UUID NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+            nominal_code_id UUID NOT NULL,
+            nominal_code    VARCHAR(20) NOT NULL DEFAULT '',
+            fund_type       VARCHAR(20) NOT NULL DEFAULT 'UNRESTRICTED',
+            project_id      UUID,
+            amount          NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes           TEXT NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_budget_lines_per_code_proj ON budget_lines(budget_id, nominal_code_id, project_id) WHERE project_id IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_budget_lines_per_code_noproj ON budget_lines(budget_id, nominal_code_id) WHERE project_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_budget_lines_budget  ON budget_lines(budget_id)",
+        "CREATE INDEX IF NOT EXISTS idx_budget_lines_nominal ON budget_lines(nominal_code_id)",
+        "CREATE INDEX IF NOT EXISTS idx_budget_lines_project ON budget_lines(project_id)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -2705,6 +2767,7 @@ _mount("shital.api.routers.finance",          "router")
 _mount("shital.api.routers.hr",               "router")
 _mount("shital.api.routers.reimbursements",   "router")
 _mount("shital.api.routers.nominal_codes",    "router")
+_mount("shital.api.routers.budgets",          "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
