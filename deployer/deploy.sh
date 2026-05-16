@@ -204,9 +204,28 @@ else
 fi
 
 docker image prune -f
-docker container prune -f
+# DO NOT `docker container prune -f` here. It removes ALL stopped containers
+# on the host, with no compose-project / label filter — so if a prod
+# container ever stopped (OOM, crash, mid-deploy force-recreate window),
+# the next deploy permanently deleted it. That's exactly how
+# shitaleco-backend-1 ended up missing on prod and nginx started 502'ing
+# every request. We rely on `up -d --force-recreate` below to handle
+# container churn; we never need a blanket prune.
+# If you genuinely need to clean stale ones-off, do it from the host via
+# `docker container prune --filter "label=com.docker.compose.project=shitaleco_REAL_THING_OFF"`
+# (a real project filter) — never wholesale.
 
 # ── Rolling restart — backend first ─────────────────────────────────────────
+# Safety net — if a backend container is missing entirely (previously
+# pruned, host reboot, manual `docker rm`), `up -d --force-recreate` may
+# leave compose unhappy in some edge cases. `up -d` (without
+# force-recreate, against the actual service name) is the most reliable
+# path to recreate a missing container. Then below we force-recreate so
+# we get the new image even if compose found an existing container.
+echo "=== Ensure-create: backend (${STACK_NAME}) ==="
+docker compose -f "$COMPOSE" up -d --no-deps backend 2>/dev/null || \
+  docker compose -f "$COMPOSE" up -d --no-deps backend-dev
+
 echo "=== Rolling restart: backend (${STACK_NAME}) ==="
 docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend 2>/dev/null || \
   docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend-dev
