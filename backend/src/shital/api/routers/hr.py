@@ -382,3 +382,107 @@ async def reject_leave(leave_id: str, ctx: CurrentSpace) -> dict[str, Any]:
 @router.post("/timesheet")
 async def log_timesheet(body: TimeEntryInput, ctx: CurrentSpace):
     return await log_time(ctx, body)
+
+
+@router.get("/timesheets")
+async def list_timesheets(
+    ctx: CurrentSpace,
+    week_offset: int = 0,
+    limit: int = 500,
+) -> dict[str, Any]:
+    """List time entries for the current branch + this-week grid + summary.
+
+    Same fix pattern as `/hr/leave`: the admin Timesheets page was
+    rendering '—' in every cell because no GET endpoint existed —
+    entries were saved to `time_entries` but never surfaced. This
+    returns the raw rows, a per-employee Mon→Sun grid of hours for
+    the requested week, and the summary counters the page shows at
+    the top, in one round-trip.
+
+    `week_offset` lets the UI page backwards (0 = this week, -1 =
+    last week, etc.) — defaults to current week.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import text
+
+    from shital.capabilities.hr.capabilities import _ensure_hr_tables
+    from shital.core.fabrics.database import SessionLocal
+
+    # Idempotent — also runs on POST, but a fresh backend that's never
+    # logged time would 500 this GET with "relation does not exist"
+    # without it (same root cause as the leave-page fix).
+    await _ensure_hr_tables()
+
+    today = datetime.now(UTC).date()
+    # Monday of the requested week (Python: Mon=0, Sun=6)
+    monday = today - timedelta(days=today.weekday()) + timedelta(weeks=week_offset)
+    sunday = monday + timedelta(days=6)
+    # Month boundaries for the "this month" tile
+    month_start = today.replace(day=1)
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT te.id, te.employee_id, e.full_name AS employee_name,
+                   te.date, te.hours_worked, te.description, te.approved,
+                   te.created_at
+            FROM   time_entries te
+            JOIN   employees e ON e.id = te.employee_id
+            WHERE  e.branch_id = :bid AND e.deleted_at IS NULL
+              AND  te.date >= :since
+            ORDER  BY te.date DESC, te.created_at DESC
+            LIMIT  :limit
+        """), {
+            "bid": ctx.branch_id,
+            "since": month_start,
+            "limit": limit,
+        })).mappings().all()
+
+    items: list[dict[str, Any]] = []
+    # weekly_grid[employee_id][weekday_index_0_to_6] = total hours that day
+    weekly_grid: dict[str, dict[str, float]] = {}
+    hours_this_week = 0.0
+    hours_this_month = 0.0
+    staff_today: set[str] = set()
+
+    for r in rows:
+        d = dict(r)
+        for k in ("id", "employee_id"):
+            if d.get(k) is not None:
+                d[k] = str(d[k])
+        if d.get("date") is not None:
+            entry_date = d["date"]
+            d["date"] = entry_date.isoformat()
+        else:
+            continue
+        if d.get("created_at") is not None:
+            d["created_at"] = d["created_at"].isoformat()
+        try:
+            hours = float(d.get("hours_worked") or 0)
+        except (TypeError, ValueError):
+            hours = 0.0
+        d["hours_worked"] = hours
+        items.append(d)
+
+        hours_this_month += hours
+        if monday <= entry_date <= sunday:
+            hours_this_week += hours
+            day_idx = str((entry_date - monday).days)  # 0=Mon..6=Sun
+            emp_id = d["employee_id"]
+            grid_emp = weekly_grid.setdefault(emp_id, {})
+            grid_emp[day_idx] = round(grid_emp.get(day_idx, 0.0) + hours, 2)
+        if entry_date == today:
+            staff_today.add(d["employee_id"])
+
+    return {
+        "items": items,
+        "count": len(items),
+        "week_start": monday.isoformat(),
+        "week_end": sunday.isoformat(),
+        "weekly_grid": weekly_grid,
+        "summary": {
+            "hours_this_week": round(hours_this_week, 2),
+            "hours_this_month": round(hours_this_month, 2),
+            "staff_logged_today": len(staff_today),
+        },
+    }
