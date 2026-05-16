@@ -109,6 +109,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/settings/email-templates',  icon: '📧', label: 'Email Templates' },
       { href: '/settings/volunteer-form',   icon: '✍️', label: 'Volunteer Form Text' },
       { href: '/settings/branches',         icon: '🌿', label: 'Branches' },
+      { href: '/settings/nominal-codes',    icon: '📚', label: 'Nominal Codes' },
       { href: '/settings/users',            icon: '🔐', label: 'Users & Roles' },
       { href: '/settings/azure-ad',         icon: '🔷', label: 'Azure AD / SSO' },
       { href: '/settings/address-lookup',   icon: '📮', label: 'Address Lookup' },
