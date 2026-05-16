@@ -1900,6 +1900,27 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_board_audit_action ON board_audit_log(action)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_entity ON board_audit_log(entity_type, entity_id)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_when   ON board_audit_log(created_at DESC)",
+        # ── Phase 4: Project costing additions ──────────────────────────────
+        # The `projects` table already exists (line 361). We add lifecycle
+        # + classification + budget-snapshot columns so project P&L reports
+        # have everything they need without joining elsewhere. Actuals come
+        # live from transaction_lines.project_id (added in Phase 2) — no
+        # parallel actuals storage.
+        # status values:        ACTIVE | PLANNING | ON_HOLD | COMPLETED | CANCELLED
+        # project_type values:  GENERAL | CAPITAL | RESTRICTED_FUND | EVENT | GRANT | OUTREACH
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS status         VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE'",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type   VARCHAR(40)  NOT NULL DEFAULT 'GENERAL'",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS fund_type      VARCHAR(20)  NOT NULL DEFAULT 'UNRESTRICTED'",
+        # budget_amount is a header snapshot; full per-code allocation
+        # lives in budgets/budget_lines with project_id set
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_amount  NUMERIC(12,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS manager_user_id UUID",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS sponsor_contact_id UUID",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS reference      VARCHAR(100) NOT NULL DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS notes          TEXT         NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status)",
+        "CREATE INDEX IF NOT EXISTS idx_projects_type   ON projects(project_type)",
+        "CREATE INDEX IF NOT EXISTS idx_projects_manager ON projects(manager_user_id)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -2705,6 +2726,7 @@ _mount("shital.api.routers.finance",          "router")
 _mount("shital.api.routers.hr",               "router")
 _mount("shital.api.routers.reimbursements",   "router")
 _mount("shital.api.routers.nominal_codes",    "router")
+_mount("shital.api.routers.project_costing",  "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
