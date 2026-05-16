@@ -640,7 +640,7 @@ function ContactCaptureScreen({
 // ─── Main BasketScreen — "Your Order" McDonald's style ───────────────────────
 
 export function BasketScreen() {
-  const { language, setScreen, items, removeItem, updateQuantity, theme, setGiftAidDeclaration, setContactInfo, setPendingPayment, resetKiosk } = useKioskStore()
+  const { language, setScreen, items, removeItem, updateQuantity, theme, setGiftAidDeclaration, setContactInfo, setPendingPayment, setCashOverride, resetKiosk } = useKioskStore()
   const th = THEMES[theme]
 
   const total        = items.reduce((s, i) => s + i.totalPrice, 0)
@@ -653,6 +653,15 @@ export function BasketScreen() {
 
   function handleNormalCheckout() {
     setGiftAidDeclaration(null)
+    setCashOverride(false)
+    setShowContact(true)
+  }
+
+  function handleCashCheckout() {
+    // Cash path skips Gift Aid (no card → no eligibility tracking here)
+    // but still captures contact details so we can email a receipt.
+    setGiftAidDeclaration(null)
+    setCashOverride(true)
     setShowContact(true)
   }
 
@@ -884,6 +893,19 @@ export function BasketScreen() {
                 )}
 
               </div>
+
+              {/* Pay Cash — separate row at the end so the card path stays
+                  the primary CTA. Tapping this still walks through contact
+                  capture (so a receipt can be emailed) then lands on the
+                  "Pay at the Counter" screen with the order reference. */}
+              <button
+                onClick={handleCashCheckout}
+                className="mt-3 w-full py-3 rounded-xl border-2 font-black text-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                style={{ borderColor: '#16a34a', color: '#15803d', background: '#f0fdf4' }}
+              >
+                <span className="text-lg">💷</span>
+                <span>Pay Cash at Counter · £{total.toFixed(2)}</span>
+              </button>
             </div>
           </>
         )}

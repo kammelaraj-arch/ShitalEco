@@ -240,6 +240,11 @@ interface KioskState {
   kioskDeviceName: string
   pendingPayment: boolean
   receiptSentByConfirm: boolean
+  // Transient — picked on the basket screen, NOT persisted across sessions.
+  // When true, CheckoutScreen skips the configured card provider and runs
+  // the cash/counter flow (customer takes order ref to the front desk).
+  cashOverride: boolean
+  setCashOverride: (v: boolean) => void
   endScreenTemplate: EndScreenTemplate
   setEndScreenTemplate: (t: EndScreenTemplate) => void
   formTextConfig: FormTextConfig
@@ -298,6 +303,8 @@ export const useKioskStore = create<KioskState>()(
   kioskDeviceName: '',
   pendingPayment: false,
   receiptSentByConfirm: false,
+  cashOverride: false,
+  setCashOverride: (cashOverride) => set({ cashOverride }),
   endScreenTemplate: { icon: '🕉', thankYouLine: 'Jay Shri Krishna 🙏', subMessage: '' },
   setEndScreenTemplate: (endScreenTemplate) => set({ endScreenTemplate }),
   formTextConfig: DEFAULT_FORM_TEXT,
@@ -352,7 +359,7 @@ export const useKioskStore = create<KioskState>()(
   })),
   clearBasket: () => set({ items: [], basketId: null }),
   setOrderResult: (orderId, orderRef, paymentIntent) => set({ orderId, orderRef, paymentIntent }),
-  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, contactInfo: null, pendingPayment: false, receiptSentByConfirm: false }),
+  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, contactInfo: null, pendingPayment: false, receiptSentByConfirm: false, cashOverride: false }),
   get total() { return get().items.reduce((sum, i) => sum + i.totalPrice, 0) },
   get itemCount() { return get().items.reduce((sum, i) => sum + i.quantity, 0) },
     }),

@@ -329,6 +329,30 @@ async def register_volunteer(
         })
         await db.commit()
 
+    # Confirmation email to the applicant — non-fatal so a flaky SMTP /
+    # missing template doesn't roll back the DB write that's already
+    # committed above. send_template() logs failures into sent_emails
+    # so trustees can spot + resend from /admin/email-templates/sent.
+    try:
+        from shital.api.routers.email_templates import send_template
+        await send_template(
+            "volunteer_registration_confirmation",
+            email_key,
+            {
+                "applicant_first_name": body.first_names.strip() or "Volunteer",
+                "reference_number": reference,
+                "charity_number": "1175574",
+            },
+            related_type="volunteer",
+            related_id=reference,
+        )
+    except Exception as exc:
+        import structlog
+        structlog.get_logger().error(
+            "volunteer_confirmation_email_failed",
+            reference=reference, email=email_key, error=str(exc),
+        )
+
     return {
         "success": True,
         "reference_number": reference,

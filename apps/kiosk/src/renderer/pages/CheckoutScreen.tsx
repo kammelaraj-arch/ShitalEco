@@ -20,6 +20,7 @@ export function CheckoutScreen() {
     kioskDeviceId, kioskDeviceName,
     pendingPayment, setPendingPayment, theme,
     contactInfo, giftAidDeclaration,
+    cashOverride, setCashOverride,
   } = useKioskStore()
   const th = THEMES[theme]
 
@@ -30,20 +31,25 @@ export function CheckoutScreen() {
   async function processPayment() {
     setError('')
 
+    // Customer picked "Pay Cash" on the basket — short-circuit the card
+    // provider entirely. cashOverride is one-shot: cleared on success
+    // so the next customer falls back to the device's configured reader.
+    const useCash = cashOverride || cardProvider === 'cash'
+
     // ── Pre-flight: validate device config ───────────────────────────────────
-    if (cardProvider === 'stripe_terminal' && (!stripeReaderId || !stripeReaderId.trim())) {
+    if (!useCash && cardProvider === 'stripe_terminal' && (!stripeReaderId || !stripeReaderId.trim())) {
       setError('No Stripe reader configured. Go to Admin Settings → Device Config and assign a reader.')
       return
     }
-    if (cardProvider === 'square' && (!squareDeviceId || !squareDeviceId.trim())) {
+    if (!useCash && cardProvider === 'square' && (!squareDeviceId || !squareDeviceId.trim())) {
       setError('No Square device configured. Go to Admin Settings → Device Config and assign a device.')
       return
     }
-    if (cardProvider === 'clover' && (!cloverDeviceId || !cloverDeviceId.trim())) {
+    if (!useCash && cardProvider === 'clover' && (!cloverDeviceId || !cloverDeviceId.trim())) {
       setError('No Clover device configured. Go to Admin Settings → Device Config and assign a Clover Flex.')
       return
     }
-    if (cardProvider === 'sumup' && (!sumupReaderId || !sumupReaderId.trim())) {
+    if (!useCash && cardProvider === 'sumup' && (!sumupReaderId || !sumupReaderId.trim())) {
       setError('No SumUp reader configured. Go to Admin Settings → Device Config and assign a SumUp reader.')
       return
     }
@@ -111,6 +117,15 @@ export function CheckoutScreen() {
             ga_email:      giftAidDeclaration?.agreed ? (giftAidDeclaration.contactEmail || '') : '',
           }),
         }).catch(() => { /* non-fatal */ })
+      }
+
+      // ── Cash override — customer tapped "Pay Cash" on the basket ─────────
+      if (useCash) {
+        await savePending('CASH')
+        setOrderResult(basket_id, orderRef, { provider: 'CASH' })
+        setCashOverride(false)
+        setScreen('payment')
+        return
       }
 
       // ── Stripe Terminal ───────────────────────────────────────────────────

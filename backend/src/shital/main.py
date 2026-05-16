@@ -2474,6 +2474,67 @@ _{{ branch_name }} — Registered UK Charity_"""
             ),
             "variables": '["referee_name","applicant_name","response_url","charity_number"]',
         },
+        # ── Volunteer registration confirmation ─────────────────────────────
+        # Sent to the applicant immediately after they hit submit on the
+        # public volunteer registration wizard. Confirms the reference number
+        # and sets expectations (trustees will review, take up references).
+        {
+            "key": "volunteer_registration_confirmation",
+            "name": "Volunteer Registration Confirmation",
+            "subject": "We've received your volunteer application — Ref {{ reference_number }}",
+            "html_body": (
+                '<div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:auto;color:#222">'
+                '  <p>Dear {{ applicant_first_name }},</p>'
+                '  <p>Thank you for applying to volunteer with '
+                '     <a href="https://shital.org.uk">SHITAL — Shri Shirdi Saibaba Temple Association</a> '
+                '     (Registered UK Charity No. {{ charity_number }}).</p>'
+                '  <p>Your application has been received and is now with our trustees for review. '
+                '     Please quote the reference below in any correspondence:</p>'
+                '  <p style="margin:20px 0;text-align:center">'
+                '    <span style="display:inline-block;background:linear-gradient(135deg,#D4AF37,#C5A028);'
+                '                 color:#3B0000;font-weight:800;letter-spacing:2px;'
+                '                 padding:14px 28px;border-radius:12px;font-size:18px">'
+                '      {{ reference_number }}'
+                '    </span>'
+                '  </p>'
+                '  <p><strong>What happens next?</strong></p>'
+                '  <ul style="padding-left:20px;line-height:1.6">'
+                '    <li>Trustees will review your application (usually within 7&ndash;10 days).</li>'
+                '    <li>We will email your two character referees to ask for a short reference.</li>'
+                '    <li>Once references are back, a trustee will contact you to arrange a brief informal chat and confirm your start.</li>'
+                '  </ul>'
+                '  <p style="font-size:13px;color:#555">'
+                '    If you need to update any details or have questions, just reply to this email '
+                '    quoting your reference number.</p>'
+                '  <p style="font-size:12px;color:#999;margin-top:24px">'
+                '    With gratitude,<br>SHITAL Volunteer Coordinator<br>'
+                '    Registered UK Charity No. {{ charity_number }}'
+                '  </p>'
+                '</div>'
+            ),
+            "text_body": (
+                "Dear {{ applicant_first_name }},\n\n"
+                "Thank you for applying to volunteer with SHITAL "
+                "(Shri Shirdi Saibaba Temple Association, Registered UK "
+                "Charity No. {{ charity_number }}).\n\n"
+                "Your application has been received and is now with our "
+                "trustees for review. Please quote the reference below in "
+                "any correspondence:\n\n"
+                "    {{ reference_number }}\n\n"
+                "What happens next?\n"
+                "  - Trustees will review your application "
+                "(usually within 7-10 days).\n"
+                "  - We will email your two character referees to ask for a "
+                "short reference.\n"
+                "  - Once references are back, a trustee will contact you "
+                "to arrange a brief informal chat and confirm your start.\n\n"
+                "If you need to update any details or have questions, just "
+                "reply to this email quoting your reference number.\n\n"
+                "With gratitude,\n"
+                "SHITAL Volunteer Coordinator"
+            ),
+            "variables": '["applicant_first_name","reference_number","charity_number"]',
+        },
     ]
 
     async with SessionLocal() as db:
