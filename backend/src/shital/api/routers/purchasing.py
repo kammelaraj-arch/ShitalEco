@@ -149,8 +149,12 @@ async def _next_number(db: Any, prefix: str, branch_id: str) -> str:
     from sqlalchemy import text
 
     year = datetime.now(UTC).year
-    table = "purchase_orders" if prefix == "PO" else "sales_invoices"
-    col   = "po_number"      if prefix == "PO" else "invoice_number"
+    if prefix == "PO":
+        table, col = "purchase_orders", "po_number"
+    elif prefix == "BILL":
+        table, col = "purchase_invoices", "invoice_number"
+    else:
+        table, col = "sales_invoices", "invoice_number"
     like  = f"{prefix}-{year}-%"
     row = (await db.execute(text(f"""
         SELECT {col} AS num
@@ -1216,3 +1220,567 @@ async def _transition_invoice(
         """), {"st": to_status, "now": datetime.now(UTC), "id": inv_id})
         await db.commit()
     return await _get_invoice_with_lines(inv_id)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Purchase Invoices (Supplier Bills)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+PURCHASE_INVOICE_STATUSES = {"DRAFT", "RECEIVED", "PART_PAID", "PAID", "VOID"}
+
+
+class PurchaseInvoiceIn(BaseModel):
+    branch_id: str = "main"
+    supplier_contact_id: str | None = None
+    supplier_name: str = ""
+    supplier_invoice_number: str = ""
+    po_id: str | None = None
+    invoice_date: str = ""
+    due_date: str = ""
+    currency: str = "GBP"
+    notes: str = ""
+    reference: str = ""
+    lines: list[LineIn] = Field(default_factory=list)
+
+
+class SupplierPaymentIn(BaseModel):
+    amount: float
+    payment_date: str = ""
+    bank_nominal_code: str = ""
+    payment_ref: str = ""
+
+
+async def _get_pinv_with_lines(inv_id: str) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        inv = (await db.execute(
+            text("SELECT * FROM purchase_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not inv:
+            raise HTTPException(404, detail="Purchase invoice not found")
+        lines = (await db.execute(text("""
+            SELECT * FROM purchase_invoice_lines WHERE invoice_id = :id ORDER BY line_no
+        """), {"id": inv_id})).mappings().all()
+    out = _row(inv)
+    out["lines"] = [_row(line) for line in lines]
+    return out
+
+
+@router.get("/admin/purchase-invoices")
+async def list_purchase_invoices(
+    ctx: CurrentSpace,
+    branch_id: str = "",
+    status: str = "",
+    supplier_contact_id: str = "",
+    po_id: str = "",
+    overdue: bool = False,
+    search: str = "",
+    page: int = 1,
+    per_page: int = 25,
+) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    where: list[str] = []
+    params: dict[str, Any] = {
+        "limit":  max(1, min(per_page, 200)),
+        "offset": max(0, (page - 1) * per_page),
+    }
+    if branch_id.strip():
+        where.append("branch_id = :bid")
+        params["bid"] = branch_id.strip()
+    if status.strip():
+        where.append("status = :st")
+        params["st"] = status.strip().upper()
+    if supplier_contact_id.strip():
+        where.append("supplier_contact_id = :sid")
+        params["sid"] = supplier_contact_id.strip()
+    if po_id.strip():
+        where.append("po_id = :pid")
+        params["pid"] = po_id.strip()
+    if overdue:
+        where.append("due_date IS NOT NULL AND due_date < CURRENT_DATE AND status IN ('RECEIVED', 'PART_PAID')")
+    if search.strip():
+        where.append("(LOWER(invoice_number) LIKE :q OR LOWER(supplier_invoice_number) LIKE :q "
+                     "OR LOWER(supplier_name) LIKE :q OR LOWER(reference) LIKE :q OR LOWER(notes) LIKE :q)")
+        params["q"] = f"%{search.strip().lower()}%"
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(text(f"""
+            SELECT *, (total - paid_total) AS outstanding
+            FROM   purchase_invoices {where_sql}
+            ORDER  BY invoice_date DESC, created_at DESC
+            LIMIT  :limit OFFSET :offset
+        """), params)).mappings().all()
+        total_row = (await db.execute(
+            text(f"SELECT COUNT(*) AS c FROM purchase_invoices {where_sql}"),
+            {k: v for k, v in params.items() if k not in ("limit", "offset")},
+        )).scalar() or 0
+    return {
+        "items":    [_row(r) for r in rows],
+        "total":    int(total_row),
+        "page":     page,
+        "per_page": per_page,
+    }
+
+
+@router.get("/admin/purchase-invoices/{inv_id}")
+async def get_purchase_invoice(inv_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    return await _get_pinv_with_lines(inv_id)
+
+
+@router.post("/admin/purchase-invoices", status_code=201)
+async def create_purchase_invoice(body: PurchaseInvoiceIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Log a bill from a supplier. Created as DRAFT — call /receive to
+    post the expense + AP to the GL."""
+    _require_priv(ctx)
+    errs = _validate_lines(body.lines)
+    if errs:
+        raise HTTPException(400, detail={"errors": errs})
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    from shital.core.fabrics.database import SessionLocal
+
+    invoice_date = _parse_date(body.invoice_date, default=datetime.now(UTC).date())
+    due_date     = _parse_date(body.due_date, default=None)
+    branch_id    = (body.branch_id or "main").strip() or "main"
+    now          = datetime.now(UTC)
+
+    subtotal = 0.0
+    vat_total = 0.0
+    computed: list[tuple[LineIn, float, float, float]] = []
+    for ln in body.lines:
+        net, vat, ttl = _compute_line_money(ln)
+        subtotal += net
+        vat_total += vat
+        computed.append((ln, net, vat, ttl))
+    total = round(subtotal + vat_total, 2)
+
+    created_by = getattr(ctx, "user_email", "") or getattr(ctx, "user_id", "") or ""
+
+    for attempt in range(5):
+        async with SessionLocal() as db:
+            invoice_number = await _next_number(db, "BILL", branch_id)
+            try:
+                inv = (await db.execute(text("""
+                    INSERT INTO purchase_invoices
+                        (invoice_number, supplier_invoice_number, branch_id,
+                         supplier_contact_id, supplier_name, po_id,
+                         status, invoice_date, due_date, currency,
+                         subtotal, vat_total, total, paid_total,
+                         notes, reference, created_by, created_at, updated_at)
+                    VALUES
+                        (:num, :sref, :bid, :sid, :sname, :poid,
+                         'DRAFT', :idate, :ddate, :curr,
+                         :sub, :vat, :tot, 0,
+                         :notes, :ref, :cby, :now, :now)
+                    RETURNING *
+                """), {
+                    "num":  invoice_number, "sref": body.supplier_invoice_number.strip(),
+                    "bid":  branch_id, "sid": body.supplier_contact_id or None,
+                    "sname": body.supplier_name.strip(),
+                    "poid": body.po_id or None,
+                    "idate": invoice_date, "ddate": due_date,
+                    "curr": (body.currency or "GBP").upper()[:3],
+                    "sub":  round(subtotal, 2), "vat": round(vat_total, 2), "tot": total,
+                    "notes": body.notes, "ref": body.reference,
+                    "cby": created_by, "now": now,
+                })).mappings().first()
+                if inv is None:
+                    raise HTTPException(500, detail="Insert returned no row")
+                inv_id = inv["id"]
+                for i, (ln, net, vat, ttl) in enumerate(computed, start=1):
+                    await db.execute(text("""
+                        INSERT INTO purchase_invoice_lines
+                            (invoice_id, line_no, description, nominal_code_id, nominal_code,
+                             quantity, unit_price, vat_rate, vat_code,
+                             line_net, line_vat, line_total)
+                        VALUES (:iid, :ln, :desc, :ncid, :nc,
+                                :qty, :up, :vr, :vc,
+                                :net, :vat, :tot)
+                    """), {
+                        "iid": inv_id, "ln": i,
+                        "desc": ln.description.strip(),
+                        "ncid": ln.nominal_code_id or None,
+                        "nc":   ln.nominal_code.strip().upper(),
+                        "qty":  float(ln.quantity), "up": float(ln.unit_price),
+                        "vr":   float(ln.vat_rate), "vc": ln.vat_code,
+                        "net":  net, "vat": vat, "tot": ttl,
+                    })
+                await db.commit()
+                return await _get_pinv_with_lines(str(inv_id))
+            except IntegrityError as exc:
+                await db.rollback()
+                err_str = str(exc).lower()
+                if "invoice_number" in err_str and "purchase_invoices" in err_str and attempt < 4:
+                    continue
+                if "uq_purchase_invoices_supp_ref" in err_str:
+                    raise HTTPException(409, detail=(
+                        f"Bill with supplier reference '{body.supplier_invoice_number}' "
+                        f"already exists for this supplier"
+                    )) from exc
+                raise HTTPException(409, detail=f"Purchase invoice creation failed: {exc.orig}") from exc
+
+    raise HTTPException(500, detail="Failed to generate unique BILL number after 5 attempts")
+
+
+@router.post("/admin/purchase-invoices/from-po/{po_id}", status_code=201)
+async def create_purchase_invoice_from_po(po_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """Auto-build a DRAFT supplier bill from an existing PO — copies header
+    + lines. Caller can edit (PUT) before /receive to amend amounts to
+    match what the supplier actually billed."""
+    _require_priv(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        po = (await db.execute(
+            text("SELECT * FROM purchase_orders WHERE id = :id"), {"id": po_id},
+        )).mappings().first()
+        if not po:
+            raise HTTPException(404, detail="Purchase order not found")
+        po_lines = (await db.execute(text("""
+            SELECT * FROM purchase_order_lines WHERE po_id = :id ORDER BY line_no
+        """), {"id": po_id})).mappings().all()
+
+    body = PurchaseInvoiceIn(
+        branch_id=po["branch_id"],
+        supplier_contact_id=str(po["supplier_contact_id"]) if po["supplier_contact_id"] else None,
+        supplier_name=po["supplier_name"] or "",
+        po_id=str(po["id"]),
+        invoice_date=datetime.now(UTC).date().isoformat(),
+        currency=po["currency"] or "GBP",
+        reference=po["po_number"],
+        notes=f"From PO {po['po_number']}",
+        lines=[LineIn(
+            description=line["description"],
+            nominal_code_id=str(line["nominal_code_id"]) if line["nominal_code_id"] else None,
+            nominal_code=line["nominal_code"] or "",
+            quantity=float(line["quantity"] or 0),
+            unit_price=float(line["unit_price"] or 0),
+            vat_rate=float(line["vat_rate"] or 0),
+            vat_code=line["vat_code"] or "OUT_OF_SCOPE",
+        ) for line in po_lines],
+    )
+    return await create_purchase_invoice(body, ctx)
+
+
+@router.put("/admin/purchase-invoices/{inv_id}")
+async def update_purchase_invoice(inv_id: str, body: PurchaseInvoiceIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Edit a DRAFT supplier bill (header + lines)."""
+    _require_priv(ctx)
+    errs = _validate_lines(body.lines)
+    if errs:
+        raise HTTPException(400, detail={"errors": errs})
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    invoice_date = _parse_date(body.invoice_date, default=datetime.now(UTC).date())
+    due_date     = _parse_date(body.due_date, default=None)
+    subtotal = 0.0
+    vat_total = 0.0
+    computed: list[tuple[LineIn, float, float, float]] = []
+    for ln in body.lines:
+        net, vat, ttl = _compute_line_money(ln)
+        subtotal += net
+        vat_total += vat
+        computed.append((ln, net, vat, ttl))
+    total = round(subtotal + vat_total, 2)
+
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("SELECT status FROM purchase_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not row:
+            raise HTTPException(404, detail="Purchase invoice not found")
+        if row["status"] != "DRAFT":
+            raise HTTPException(409, detail=f"Only DRAFT can be edited (status={row['status']})")
+        await db.execute(text("""
+            UPDATE purchase_invoices SET
+                branch_id               = :bid,
+                supplier_contact_id     = :sid,
+                supplier_name           = :sname,
+                supplier_invoice_number = :sref,
+                po_id                   = :poid,
+                invoice_date            = :idate,
+                due_date                = :ddate,
+                currency                = :curr,
+                subtotal                = :sub,
+                vat_total               = :vat,
+                total                   = :tot,
+                notes                   = :notes,
+                reference               = :ref,
+                updated_at              = NOW()
+            WHERE id = :id
+        """), {
+            "id":   inv_id, "bid": (body.branch_id or "main").strip(),
+            "sid":  body.supplier_contact_id or None,
+            "sname": body.supplier_name.strip(),
+            "sref": body.supplier_invoice_number.strip(),
+            "poid": body.po_id or None,
+            "idate": invoice_date, "ddate": due_date,
+            "curr": (body.currency or "GBP").upper()[:3],
+            "sub":  round(subtotal, 2), "vat": round(vat_total, 2), "tot": total,
+            "notes": body.notes, "ref": body.reference,
+        })
+        await db.execute(text("DELETE FROM purchase_invoice_lines WHERE invoice_id = :id"), {"id": inv_id})
+        for i, (ln, net, vat, ttl) in enumerate(computed, start=1):
+            await db.execute(text("""
+                INSERT INTO purchase_invoice_lines
+                    (invoice_id, line_no, description, nominal_code_id, nominal_code,
+                     quantity, unit_price, vat_rate, vat_code,
+                     line_net, line_vat, line_total)
+                VALUES (:iid, :ln, :desc, :ncid, :nc,
+                        :qty, :up, :vr, :vc,
+                        :net, :vat, :tot)
+            """), {
+                "iid": inv_id, "ln": i,
+                "desc": ln.description.strip(),
+                "ncid": ln.nominal_code_id or None,
+                "nc":   ln.nominal_code.strip().upper(),
+                "qty":  float(ln.quantity), "up": float(ln.unit_price),
+                "vr":   float(ln.vat_rate), "vc": ln.vat_code,
+                "net":  net, "vat": vat, "tot": ttl,
+            })
+        await db.commit()
+    return await _get_pinv_with_lines(inv_id)
+
+
+@router.post("/admin/purchase-invoices/{inv_id}/receive")
+async def receive_purchase_invoice(inv_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """Mark the bill as RECEIVED and post DR Expense + DR VAT-input CR AP."""
+    _require_priv(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
+    async with SessionLocal() as db:
+        inv = (await db.execute(
+            text("SELECT * FROM purchase_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not inv:
+            raise HTTPException(404, detail="Purchase invoice not found")
+        if inv["status"] != "DRAFT":
+            raise HTTPException(409, detail=f"Expected status DRAFT, got {inv['status']}")
+
+        lines = (await db.execute(text("""
+            SELECT nominal_code, nominal_code_id, line_net, line_vat
+            FROM   purchase_invoice_lines WHERE invoice_id = :id ORDER BY line_no
+        """), {"id": inv_id})).mappings().all()
+
+        now = datetime.now(UTC)
+        await db.execute(text("""
+            UPDATE purchase_invoices SET status='RECEIVED', received_at=:now, updated_at=:now WHERE id=:id
+        """), {"id": inv_id, "now": now})
+
+        try:
+            posting: list[dict[str, Any]] = []
+            for line in lines:
+                net = float(line["line_net"] or 0)
+                vat = float(line["line_vat"] or 0)
+                if net:
+                    posting.append({
+                        "nominal_code": line["nominal_code"] or gl.DEFAULT_EXPENSE,
+                        "nominal_code_id": str(line["nominal_code_id"]) if line["nominal_code_id"] else None,
+                        "debit": net, "credit": 0,
+                        "description": f"Bill {inv['invoice_number']} — {inv['supplier_name'] or 'supplier'}",
+                    })
+                if vat > 0:
+                    posting.append({
+                        "nominal_code": gl.DEFAULT_VAT_INPUT,
+                        "debit": vat, "credit": 0,
+                        "description": f"Input VAT — Bill {inv['invoice_number']}",
+                    })
+            posting.append({
+                "nominal_code": gl.DEFAULT_CREDITOR,
+                "debit": 0, "credit": float(inv["total"] or 0),
+                "description": f"AP — {inv['supplier_name'] or 'supplier'}",
+            })
+            await gl.post(
+                db, branch_id=inv["branch_id"], entry_date=now.date(),
+                description=f"Bill received — {inv['invoice_number']} ({inv['supplier_name'] or 'supplier'})",
+                reference=inv["invoice_number"],
+                source_type=gl.SOURCE_PO_RECEIVE, source_id=inv_id,
+                posted_by=getattr(ctx, "user_email", "") or "",
+                idempotency_key=f"gl-pinv-receive-{inv_id}",
+                lines=posting,
+            )
+        except Exception:
+            import structlog
+            structlog.get_logger().exception("purchase_invoice_receive_gl_post_failed", inv_id=inv_id)
+
+        await db.commit()
+    return await _get_pinv_with_lines(inv_id)
+
+
+@router.post("/admin/purchase-invoices/{inv_id}/pay")
+async def pay_purchase_invoice_full(inv_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """Mark the bill PAID in one shot and post DR AP CR Bank for the
+    outstanding balance."""
+    _require_priv(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("SELECT * FROM purchase_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not row:
+            raise HTTPException(404, detail="Purchase invoice not found")
+        if row["status"] not in ("RECEIVED", "PART_PAID"):
+            raise HTTPException(409, detail=f"Cannot mark paid from status {row['status']}")
+
+        outstanding = float(row["total"] or 0) - float(row["paid_total"] or 0)
+        now = datetime.now(UTC)
+        await db.execute(text("""
+            UPDATE purchase_invoices
+            SET status='PAID', paid_total=total, paid_at=:now, updated_at=:now
+            WHERE id=:id
+        """), {"id": inv_id, "now": now})
+
+        if outstanding > 0:
+            try:
+                await gl.post(
+                    db, branch_id=row["branch_id"], entry_date=now.date(),
+                    description=f"Bill payment — {row['invoice_number']}",
+                    reference=row["invoice_number"],
+                    source_type=gl.SOURCE_PO_PAY, source_id=inv_id,
+                    posted_by=getattr(ctx, "user_email", "") or "",
+                    idempotency_key=f"gl-pinv-pay-{inv_id}-{outstanding:.2f}",
+                    lines=gl.lines_for_po_pay(outstanding, row["supplier_name"] or "supplier"),
+                )
+            except Exception:
+                import structlog
+                structlog.get_logger().exception("purchase_invoice_pay_gl_post_failed", inv_id=inv_id)
+        await db.commit()
+    return await _get_pinv_with_lines(inv_id)
+
+
+@router.post("/admin/purchase-invoices/{inv_id}/payments")
+async def record_supplier_payment(inv_id: str, body: SupplierPaymentIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Record a partial (or full) payment to the supplier. Posts DR AP
+    CR Bank for the amount, bumps paid_total. Flips RECEIVED -> PART_PAID
+    -> PAID as appropriate."""
+    _require_priv(ctx)
+    if body.amount <= 0:
+        raise HTTPException(400, detail="amount must be > 0")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
+    async with SessionLocal() as db:
+        inv = (await db.execute(
+            text("SELECT * FROM purchase_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not inv:
+            raise HTTPException(404, detail="Purchase invoice not found")
+        if inv["status"] in ("VOID", "DRAFT"):
+            raise HTTPException(409, detail=f"Cannot record payment on a {inv['status']} bill")
+
+        paid_so_far = float(inv["paid_total"] or 0) + float(body.amount)
+        total = float(inv["total"] or 0)
+        if paid_so_far > total + 0.005:
+            raise HTTPException(400, detail=f"Payment {body.amount} would over-pay (paid {paid_so_far:.2f} vs total {total:.2f})")
+
+        now = datetime.now(UTC)
+        new_status = "PAID" if abs(paid_so_far - total) < 0.01 else "PART_PAID"
+        stamp_paid = ", paid_at = :now" if new_status == "PAID" else ""
+        await db.execute(text(f"""
+            UPDATE purchase_invoices
+            SET    paid_total = :pt, status = :st, updated_at = :now{stamp_paid}
+            WHERE  id = :id
+        """), {"pt": round(paid_so_far, 2), "st": new_status, "now": now, "id": inv_id})
+
+        try:
+            bank = (body.bank_nominal_code or "").strip().upper() or gl.DEFAULT_BANK
+            entry_date = body.payment_date.strip() or now.date().isoformat()
+            await gl.post(
+                db, branch_id=inv["branch_id"], entry_date=entry_date,
+                description=f"Payment — Bill {inv['invoice_number']} ({body.amount:.2f})",
+                reference=body.payment_ref or inv["invoice_number"],
+                source_type=gl.SOURCE_PO_PAY, source_id=inv_id,
+                posted_by=getattr(ctx, "user_email", "") or "",
+                idempotency_key=f"gl-pinv-pay-{inv_id}-{entry_date}-{body.amount:.2f}",
+                lines=[
+                    {"nominal_code": gl.DEFAULT_CREDITOR, "debit": body.amount, "credit": 0,
+                     "description": f"AP clear — {inv['supplier_name'] or 'supplier'}"},
+                    {"nominal_code": bank, "debit": 0, "credit": body.amount,
+                     "description": f"Payment — {inv['supplier_name'] or 'supplier'}"},
+                ],
+            )
+        except Exception:
+            import structlog
+            structlog.get_logger().exception("supplier_payment_gl_post_failed", inv_id=inv_id)
+        await db.commit()
+    return await _get_pinv_with_lines(inv_id)
+
+
+@router.post("/admin/purchase-invoices/{inv_id}/void")
+async def void_purchase_invoice(inv_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """Void a bill and reverse every non-reversed GL entry against it
+    (receive + any payments)."""
+    _require_priv(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.services import gl
+    async with SessionLocal() as db:
+        inv = (await db.execute(
+            text("SELECT id, status FROM purchase_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not inv:
+            raise HTTPException(404, detail="Purchase invoice not found")
+        if inv["status"] in ("PAID", "VOID"):
+            raise HTTPException(409, detail=f"Cannot void from {inv['status']}")
+
+        gl_entries = (await db.execute(text("""
+            SELECT id FROM transactions
+            WHERE  source_id = :sid
+              AND  source_type IN (:s1, :s2)
+              AND  reversal_of IS NULL
+              AND  NOT EXISTS (SELECT 1 FROM transactions r WHERE r.reversal_of = transactions.id)
+            ORDER  BY posted_at
+        """), {"sid": inv_id, "s1": gl.SOURCE_PO_RECEIVE, "s2": gl.SOURCE_PO_PAY})).mappings().all()
+        for gl_row in gl_entries:
+            try:
+                await gl.reverse(db, original_txn_id=str(gl_row["id"]),
+                                 posted_by=getattr(ctx, "user_email", "") or "",
+                                 description="Bill voided — reversing posting")
+            except Exception:
+                import structlog
+                structlog.get_logger().exception("purchase_invoice_void_reverse_failed",
+                                                 inv_id=inv_id, gl_id=str(gl_row["id"]))
+
+        await db.execute(text("""
+            UPDATE purchase_invoices SET status='VOID', voided_at=:now, updated_at=:now WHERE id=:id
+        """), {"id": inv_id, "now": datetime.now(UTC)})
+        await db.commit()
+    return await _get_pinv_with_lines(inv_id)
+
+
+@router.delete("/admin/purchase-invoices/{inv_id}", status_code=204)
+async def delete_purchase_invoice(inv_id: str, ctx: CurrentSpace) -> None:
+    """Hard-delete a DRAFT bill (anything past DRAFT must be voided)."""
+    _require_priv(ctx)
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("SELECT status FROM purchase_invoices WHERE id = :id"), {"id": inv_id},
+        )).mappings().first()
+        if not row:
+            raise HTTPException(404, detail="Purchase invoice not found")
+        if row["status"] != "DRAFT":
+            raise HTTPException(409, detail=f"Only DRAFT can be deleted (status={row['status']})")
+        await db.execute(text("DELETE FROM purchase_invoices WHERE id = :id"), {"id": inv_id})
+        await db.commit()

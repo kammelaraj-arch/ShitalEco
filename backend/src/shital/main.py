@@ -2030,6 +2030,65 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_inv_lines_inv  ON sales_invoice_lines(invoice_id)",
         "CREATE INDEX IF NOT EXISTS idx_inv_lines_nom  ON sales_invoice_lines(nominal_code_id)",
+        # ── Purchase Invoices (supplier bills) ───────────────────────────────
+        # The bill we receive FROM a supplier. Optionally linked to a PO
+        # for 3-way match. Posts DR Expense + VAT-input CR AP on RECEIVED;
+        # payments post DR AP CR Bank. `supplier_invoice_number` is the
+        # supplier's external reference (eg. their 'INV-12345'); our
+        # internal sequential is `invoice_number` (BILL-YYYY-NNNN).
+        """CREATE TABLE IF NOT EXISTS purchase_invoices (
+            id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            invoice_number          VARCHAR(40) UNIQUE NOT NULL,
+            supplier_invoice_number VARCHAR(80) NOT NULL DEFAULT '',
+            branch_id               VARCHAR(100) NOT NULL DEFAULT 'main',
+            supplier_contact_id     UUID,
+            supplier_name           VARCHAR(200) NOT NULL DEFAULT '',
+            po_id                   UUID,
+            status                  VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+            invoice_date            DATE         NOT NULL DEFAULT CURRENT_DATE,
+            due_date                DATE,
+            currency                VARCHAR(3)   NOT NULL DEFAULT 'GBP',
+            subtotal                NUMERIC(12,2) NOT NULL DEFAULT 0,
+            vat_total               NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total                   NUMERIC(12,2) NOT NULL DEFAULT 0,
+            paid_total              NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes                   TEXT         NOT NULL DEFAULT '',
+            reference               VARCHAR(100) NOT NULL DEFAULT '',
+            created_by              VARCHAR(200) NOT NULL DEFAULT '',
+            received_at             TIMESTAMPTZ,
+            paid_at                 TIMESTAMPTZ,
+            voided_at               TIMESTAMPTZ,
+            created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_branch ON purchase_invoices(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_status ON purchase_invoices(status)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_date   ON purchase_invoices(invoice_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_supp   ON purchase_invoices(supplier_contact_id)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_po     ON purchase_invoices(po_id)",
+        # Partial unique index: dedupes per supplier on their external invoice
+        # number (only enforced when both are present).
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_purchase_invoices_supp_ref ON purchase_invoices(supplier_contact_id, supplier_invoice_number) WHERE supplier_contact_id IS NOT NULL AND supplier_invoice_number <> ''",
+        """CREATE TABLE IF NOT EXISTS purchase_invoice_lines (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            invoice_id      UUID NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+            po_line_id      UUID,
+            line_no         INTEGER NOT NULL DEFAULT 1,
+            description     TEXT NOT NULL,
+            nominal_code_id UUID,
+            nominal_code    VARCHAR(20) NOT NULL DEFAULT '',
+            quantity        NUMERIC(12,3) NOT NULL DEFAULT 1,
+            unit_price      NUMERIC(12,4) NOT NULL DEFAULT 0,
+            vat_rate        NUMERIC(5,2)  NOT NULL DEFAULT 0,
+            vat_code        VARCHAR(20)   NOT NULL DEFAULT 'OUT_OF_SCOPE',
+            line_net        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_vat        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_total      NUMERIC(12,2) NOT NULL DEFAULT 0,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_pi_lines_inv ON purchase_invoice_lines(invoice_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pi_lines_nom ON purchase_invoice_lines(nominal_code_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pi_lines_po  ON purchase_invoice_lines(po_line_id)",
         # ── Phase 3: Budgets ─────────────────────────────────────────────────
         # `budgets` is the period+branch header (one row per branch+year+
         # period(+project)). `budget_lines` allocates the budget across
