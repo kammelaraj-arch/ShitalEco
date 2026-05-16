@@ -26,6 +26,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/finance/incoming-funds',  icon: '💸', label: 'Incoming Funds' },
       { href: '/finance/reimbursements',  icon: '🧾', label: 'Reimbursements' },
       { href: '/finance/journal',         icon: '📒', label: 'Journal' },
+      { href: '/finance/reports',         icon: '📈', label: 'Reports' },
       { href: '/finance/recurring',       icon: '🔄', label: 'Recurring Payments' },
       { href: '/recurring-giving',  icon: '💝', label: 'Monthly Giving' },
       { href: '/donations',         icon: '🙏', label: 'Donations' },
