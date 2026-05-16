@@ -1900,6 +1900,108 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_board_audit_action ON board_audit_log(action)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_entity ON board_audit_log(entity_type, entity_id)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_when   ON board_audit_log(created_at DESC)",
+        # ── Purchasing & Sales: Purchase Orders + Sales Invoices (MVP) ───────
+        # Header + lines pattern. Money columns NUMERIC(12,2), unit_price has
+        # 4 dp so per-unit micro-pricing (eg. per-litre fuel) round-trips.
+        # `nominal_code_id` links each line to chart-of-accounts for SORP
+        # fund/activity reporting; `nominal_code` is denormalised for fast
+        # display + survives if the underlying code is renamed/deleted.
+        # supplier/customer point at the existing `contacts` table so the
+        # CRM is the single source of truth — no separate supplier table.
+        """CREATE TABLE IF NOT EXISTS purchase_orders (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            po_number           VARCHAR(40) UNIQUE NOT NULL,
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            supplier_contact_id UUID,
+            supplier_name       VARCHAR(200) NOT NULL DEFAULT '',
+            status              VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | SENT | RECEIVED | PART_RECEIVED | CANCELLED
+            order_date          DATE         NOT NULL DEFAULT CURRENT_DATE,
+            expected_date       DATE,
+            currency            VARCHAR(3)   NOT NULL DEFAULT 'GBP',
+            subtotal            NUMERIC(12,2) NOT NULL DEFAULT 0,
+            vat_total           NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total               NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes               TEXT         NOT NULL DEFAULT '',
+            reference           VARCHAR(100) NOT NULL DEFAULT '',
+            delivery_address    TEXT         NOT NULL DEFAULT '',
+            created_by          VARCHAR(200) NOT NULL DEFAULT '',
+            sent_at             TIMESTAMPTZ,
+            received_at         TIMESTAMPTZ,
+            cancelled_at        TIMESTAMPTZ,
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_orders_branch  ON purchase_orders(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_orders_status  ON purchase_orders(status)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_orders_date    ON purchase_orders(order_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_orders_supp    ON purchase_orders(supplier_contact_id)",
+        """CREATE TABLE IF NOT EXISTS purchase_order_lines (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            po_id           UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            line_no         INTEGER NOT NULL DEFAULT 1,
+            description     TEXT NOT NULL,
+            nominal_code_id UUID,
+            nominal_code    VARCHAR(20) NOT NULL DEFAULT '',
+            quantity        NUMERIC(12,3) NOT NULL DEFAULT 1,
+            unit_price      NUMERIC(12,4) NOT NULL DEFAULT 0,
+            vat_rate        NUMERIC(5,2)  NOT NULL DEFAULT 0,
+            vat_code        VARCHAR(20)   NOT NULL DEFAULT 'OUT_OF_SCOPE',
+            line_net        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_vat        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_total      NUMERIC(12,2) NOT NULL DEFAULT 0,
+            received_qty    NUMERIC(12,3) NOT NULL DEFAULT 0,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_po_lines_po      ON purchase_order_lines(po_id)",
+        "CREATE INDEX IF NOT EXISTS idx_po_lines_nom     ON purchase_order_lines(nominal_code_id)",
+        """CREATE TABLE IF NOT EXISTS sales_invoices (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            invoice_number      VARCHAR(40) UNIQUE NOT NULL,
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            customer_contact_id UUID,
+            customer_name       VARCHAR(200) NOT NULL DEFAULT '',
+            status              VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | SENT | PAID | PART_PAID | VOID
+            invoice_date        DATE         NOT NULL DEFAULT CURRENT_DATE,
+            due_date            DATE,
+            currency            VARCHAR(3)   NOT NULL DEFAULT 'GBP',
+            subtotal            NUMERIC(12,2) NOT NULL DEFAULT 0,
+            vat_total           NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total               NUMERIC(12,2) NOT NULL DEFAULT 0,
+            paid_total          NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes               TEXT         NOT NULL DEFAULT '',
+            reference           VARCHAR(100) NOT NULL DEFAULT '',
+            billing_address     TEXT         NOT NULL DEFAULT '',
+            created_by          VARCHAR(200) NOT NULL DEFAULT '',
+            sent_at             TIMESTAMPTZ,
+            paid_at             TIMESTAMPTZ,
+            voided_at           TIMESTAMPTZ,
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_sales_invoices_branch ON sales_invoices(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_invoices_status ON sales_invoices(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_invoices_date   ON sales_invoices(invoice_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_invoices_cust   ON sales_invoices(customer_contact_id)",
+        """CREATE TABLE IF NOT EXISTS sales_invoice_lines (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            invoice_id      UUID NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
+            line_no         INTEGER NOT NULL DEFAULT 1,
+            description     TEXT NOT NULL,
+            nominal_code_id UUID,
+            nominal_code    VARCHAR(20) NOT NULL DEFAULT '',
+            quantity        NUMERIC(12,3) NOT NULL DEFAULT 1,
+            unit_price      NUMERIC(12,4) NOT NULL DEFAULT 0,
+            vat_rate        NUMERIC(5,2)  NOT NULL DEFAULT 0,
+            vat_code        VARCHAR(20)   NOT NULL DEFAULT 'OUT_OF_SCOPE',
+            line_net        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_vat        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_total      NUMERIC(12,2) NOT NULL DEFAULT 0,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_inv_lines_inv  ON sales_invoice_lines(invoice_id)",
+        "CREATE INDEX IF NOT EXISTS idx_inv_lines_nom  ON sales_invoice_lines(nominal_code_id)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -2705,6 +2807,7 @@ _mount("shital.api.routers.finance",          "router")
 _mount("shital.api.routers.hr",               "router")
 _mount("shital.api.routers.reimbursements",   "router")
 _mount("shital.api.routers.nominal_codes",    "router")
+_mount("shital.api.routers.purchasing",       "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
