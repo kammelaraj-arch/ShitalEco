@@ -450,6 +450,37 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
                 "name": body.contact_name, "email": body.contact_email, "phone": body.contact_phone,
                 "cid": contact_id, "idem": f"paypal-order-{body.paypal_order_id}", "now": now,
             })
+
+            # ── GL posting (Phase 2): DR Bank CR Donation income ────────────
+            # Idempotency key matches the donation idempotency_key so a
+            # retried /capture (or the webhook backstop) only posts once.
+            try:
+                from shital.services import gl
+                payer_label = (body.contact_name or body.contact_email or "Donor").strip()
+                await gl.post(
+                    db,
+                    branch_id=body.branch_id,
+                    entry_date=now.date(),
+                    description=f"PayPal donation — {payer_label}",
+                    reference=order_ref,
+                    source_type=gl.SOURCE_DONATION,
+                    source_id=order_id,
+                    posted_by="paypal-capture",
+                    idempotency_key=f"gl-paypal-{body.paypal_order_id}",
+                    lines=gl.lines_for_donation(captured_amount, payer_label),
+                )
+            except Exception as gl_exc:
+                # Don't roll back the donation — funds are already captured.
+                # Trustees can spot the missing JNL via /admin/gl/audit and
+                # post a manual one. (We also log loudly.)
+                import structlog
+                structlog.get_logger().exception(
+                    "paypal_capture_gl_post_failed",
+                    error=str(gl_exc),
+                    paypal_order_id=body.paypal_order_id,
+                    paypal_capture_id=capture_id,
+                )
+
             await db.commit()
     except Exception as exc:
         # Donor's PayPal payment SUCCEEDED — only our DB recording failed.

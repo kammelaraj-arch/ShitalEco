@@ -921,6 +921,34 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_txn_lines_txn     ON transaction_lines(transaction_id)",
         "CREATE INDEX IF NOT EXISTS idx_txn_lines_account ON transaction_lines(account_id)",
+        # ── GL Phase 2: extend transactions + transaction_lines (no new tables;
+        #    we re-use the existing double-entry shape and add the columns the
+        #    full reporting suite needs: nominal code link, fund (SORP),
+        #    project (project costing), branch on the line (so a cross-branch
+        #    consolidation entry can split across branches), and source-document
+        #    linkage so every posting traces back to the PO/Invoice/Donation
+        #    that triggered it.
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS nominal_code_id UUID",
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS nominal_code    VARCHAR(20) NOT NULL DEFAULT ''",
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS fund_type       VARCHAR(20) NOT NULL DEFAULT 'UNRESTRICTED'",
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS project_id      UUID",
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS branch_id       VARCHAR(100) NOT NULL DEFAULT 'main'",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_nominal ON transaction_lines(nominal_code_id)",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_project ON transaction_lines(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_fund    ON transaction_lines(fund_type)",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_branch  ON transaction_lines(branch_id)",
+        # Source-document trace on the header. source_type matches the kind
+        # of upstream record (po_receive/invoice_pay/donation/reimbursement/
+        # manual/reversal); source_id is the originator's PK. reversal_of
+        # points an inverse entry back at the one it cancels for clean audits.
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS source_type VARCHAR(40) NOT NULL DEFAULT 'manual'",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS source_id   UUID",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reversal_of UUID",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS fund_type   VARCHAR(20) NOT NULL DEFAULT 'UNRESTRICTED'",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS project_id  UUID",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_source   ON transactions(source_type, source_id)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_project  ON transactions(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_reversal ON transactions(reversal_of)",
         # ── HR: Leave Requests, Time Entries ─────────────────────────────────
         """CREATE TABLE IF NOT EXISTS leave_requests (
             id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2705,6 +2733,7 @@ _mount("shital.api.routers.finance",          "router")
 _mount("shital.api.routers.hr",               "router")
 _mount("shital.api.routers.reimbursements",   "router")
 _mount("shital.api.routers.nominal_codes",    "router")
+_mount("shital.api.routers.gl",               "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")

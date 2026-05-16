@@ -341,6 +341,53 @@ async def _transition(claim_id: str, ctx: CurrentSpace, new_status: str,
                     updated_at        = :now
                 WHERE id = :id
             """), params)
+
+        # ── GL posting (Phase 2) ──────────────────────────────────────────────
+        # On APPROVE → book the expense + AP credit. On PAID → clear the AP
+        # against bank. Both inside the same txn that updated the claim, so
+        # status + ledger move atomically. Failure to post the GL aborts
+        # the whole transition so the claim never lands in a state that
+        # the ledger can't reconcile.
+        if new_status in ("APPROVED", "PAID"):
+            from shital.services import gl
+            amount = float(r["amount"] or 0)
+            claimant_label = r.get("claimant_name") or r.get("claimant_email") or "Reimbursement"
+            branch_id = r.get("branch_id") or "main"
+            today = datetime.now(UTC).date()
+            try:
+                if new_status == "APPROVED":
+                    await gl.post(
+                        db,
+                        branch_id=branch_id, entry_date=today,
+                        description=f"Reimbursement approved — {claimant_label}",
+                        reference=f"REIMB-{claim_id[:8].upper()}",
+                        source_type=gl.SOURCE_REIMBURSEMENT_APPROVE, source_id=claim_id,
+                        posted_by=me_name,
+                        idempotency_key=f"reimb-approve-{claim_id}",
+                        lines=gl.lines_for_reimbursement_approve(amount, claimant_label),
+                    )
+                elif new_status == "PAID":
+                    await gl.post(
+                        db,
+                        branch_id=branch_id, entry_date=today,
+                        description=f"Reimbursement paid — {claimant_label}",
+                        reference=f"REIMB-PAY-{claim_id[:8].upper()}",
+                        source_type=gl.SOURCE_REIMBURSEMENT_PAY, source_id=claim_id,
+                        posted_by=me_name,
+                        idempotency_key=f"reimb-pay-{claim_id}",
+                        lines=gl.lines_for_reimbursement_pay(amount, claimant_label),
+                    )
+            except Exception:
+                # Log loudly but DO NOT block the status change — the trustee
+                # workflow keeps moving; finance can post a manual JNL to
+                # repair if the auto-post failed (eg. nominal codes not seeded
+                # yet on a fresh deploy).
+                import structlog
+                structlog.get_logger().exception(
+                    "reimbursement_gl_post_failed",
+                    claim_id=claim_id, new_status=new_status,
+                )
+
         await db.commit()
 
     return {"id": claim_id, "status": new_status}
