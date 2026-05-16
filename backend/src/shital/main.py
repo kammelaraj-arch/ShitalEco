@@ -1493,6 +1493,49 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_volunteers_email  ON volunteers(email)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_branch ON volunteers(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_volunteers_created ON volunteers(created_at DESC)",
+        # ── Volunteer reference requests — first-class table ──────────────
+        # Existing volunteers.ref1_*/ref2_* columns store referee details
+        # inline on the volunteer row. This table makes each request a
+        # first-class entity so admins can list/filter/CRUD them, track
+        # multiple resends, and capture the full response payload
+        # separately from the volunteer record itself.
+        """CREATE TABLE IF NOT EXISTS volunteer_reference_requests (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            volunteer_id    UUID NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
+            referee_index   SMALLINT NOT NULL DEFAULT 1,   -- 1 or 2 (the two on the paper form)
+            referee_name    VARCHAR(255) NOT NULL DEFAULT '',
+            referee_email   VARCHAR(255) NOT NULL DEFAULT '',
+            referee_phone   VARCHAR(50)  NOT NULL DEFAULT '',
+            relationship    VARCHAR(100) NOT NULL DEFAULT '',  -- how they know the applicant
+            -- Magic-link token the referee uses to open the response form.
+            request_token   VARCHAR(64)  UNIQUE,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+              -- PENDING (not yet emailed) / SENT (email out, awaiting response)
+              -- / OPENED (referee clicked link) / RESPONDED / EXPIRED / CANCELLED
+            requested_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            sent_at         TIMESTAMPTZ,
+            opened_at       TIMESTAMPTZ,
+            responded_at    TIMESTAMPTZ,
+            expires_at      TIMESTAMPTZ,
+            send_count      INTEGER NOT NULL DEFAULT 0,
+            last_send_error TEXT NOT NULL DEFAULT '',
+            -- Free-form referee response. JSON so the response form can
+            -- evolve without schema migrations.
+            response_data   JSONB NOT NULL DEFAULT '{}'::jsonb,
+            notes           TEXT  NOT NULL DEFAULT '',
+            requested_by    UUID,
+            requested_by_name VARCHAR(255) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            -- One row per (volunteer, referee_index) — re-sending updates
+            -- the existing row (status, send_count, sent_at), doesn't
+            -- create duplicates.
+            UNIQUE (volunteer_id, referee_index)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_vref_volunteer ON volunteer_reference_requests(volunteer_id)",
+        "CREATE INDEX IF NOT EXISTS idx_vref_status    ON volunteer_reference_requests(status)",
+        "CREATE INDEX IF NOT EXISTS idx_vref_token     ON volunteer_reference_requests(request_token)",
+        "CREATE INDEX IF NOT EXISTS idx_vref_created   ON volunteer_reference_requests(created_at DESC)",
         # ── Volunteer ↔ Contact link (CRM dedup; criminal/health stay here) ───
         # The volunteer/donor/member is one PERSON in `contacts`; the volunteer
         # APPLICATION is a separate row keyed by contact_id. Sensitive fields
@@ -2703,6 +2746,7 @@ _mount("shital.api.routers.giftaid",          "router")
 _mount("shital.api.routers.brain",            "router")
 _mount("shital.api.routers.finance",          "router")
 _mount("shital.api.routers.hr",               "router")
+_mount("shital.api.routers.volunteer_references", "router")
 _mount("shital.api.routers.reimbursements",   "router")
 _mount("shital.api.routers.nominal_codes",    "router")
 _mount("shital.api.routers.payroll",          "router")

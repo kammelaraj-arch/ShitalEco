@@ -42,6 +42,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/hr/timesheets',     icon: '⏱️', label: 'Timesheets' },
       { href: '/payroll',           icon: '💷', label: 'Payroll' },
       { href: '/volunteers',        icon: '🤝', label: 'Volunteers' },
+      { href: '/volunteers/reference-requests', icon: '📨', label: 'Reference Requests' },
     ],
   },
   {
