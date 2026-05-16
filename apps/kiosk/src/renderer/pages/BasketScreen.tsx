@@ -658,11 +658,17 @@ export function BasketScreen() {
   }
 
   function handleCashCheckout() {
-    // Cash path skips Gift Aid (no card → no eligibility tracking here)
-    // but still captures contact details so we can email a receipt.
-    setGiftAidDeclaration(null)
+    // Cash routes through the EXACT same screens as the card path —
+    // Gift Aid prompt when eligible, otherwise straight to contact capture.
+    // Only difference is the cashOverride flag which CheckoutScreen reads
+    // to skip the card provider and land on the "Pay at the Counter" page.
     setCashOverride(true)
-    setShowContact(true)
+    if (hasEligible) {
+      setShowGiftAid(true)
+    } else {
+      setGiftAidDeclaration(null)
+      setShowContact(true)
+    }
   }
 
   function handleContactConfirm(info: { name: string; email: string; phone: string; anonymous: boolean }) {
