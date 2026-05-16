@@ -170,8 +170,10 @@ async def list_donations(
                 COALESCE(t.label, 'Monthly Giving')       AS purpose,
                 'paypal'::varchar                         AS payment_provider,
                 rgs.paypal_subscription_id                AS payment_ref,
-                false                                     AS gift_aid_eligible,
-                0::numeric                                AS gift_aid_amount,
+                COALESCE(rgs.gift_aid_declared, false)    AS gift_aid_eligible,
+                CASE WHEN rgs.gift_aid_declared
+                     THEN ROUND(rgs.amount * 0.25, 2)
+                     ELSE 0 END::numeric                  AS gift_aid_amount,
                 rgs.status,
                 rgs.paypal_subscription_id                AS reference,
                 rgs.contact_id::text,

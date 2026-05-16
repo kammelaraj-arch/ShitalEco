@@ -605,8 +605,8 @@ export default function DonationsPage() {
                       <td className="px-3 py-3 text-center whitespace-nowrap">
                         {d.gift_aid_eligible ? (
                           <div className="inline-flex flex-col items-center gap-0.5">
-                            <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-500/25 text-blue-200 border border-blue-400/50 shadow shadow-blue-500/20">
-                              🇬🇧 GA
+                            <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-0.5 rounded-full bg-blue-500/25 text-blue-100 border border-blue-400/50 shadow shadow-blue-500/20">
+                              🇬🇧 Yes
                             </span>
                             {Number(d.gift_aid_amount) > 0 && (
                               <span className="text-[10px] font-mono font-bold text-blue-300">
@@ -615,7 +615,7 @@ export default function DonationsPage() {
                             )}
                           </div>
                         ) : (
-                          <span className="text-white/15 text-xs">—</span>
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">No</span>
                         )}
                       </td>
                     )}
