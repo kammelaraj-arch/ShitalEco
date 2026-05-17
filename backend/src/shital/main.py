@@ -1151,6 +1151,97 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_payroll_runs_branch ON payroll_runs(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period)",
+        # Extend payroll_runs with structured period info + employer-cost totals.
+        # Existing rows backfill safely — period_label/start/end derive from
+        # the freeform `period` string at admin write-time.
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS period_year   INTEGER",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS period_month  INTEGER",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS period_label  VARCHAR(40) NOT NULL DEFAULT ''",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS period_start  DATE",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS period_end    DATE",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS pay_date      DATE",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS total_employer_ni      NUMERIC(12,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS total_employer_pension NUMERIC(12,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS total_employer_cost    NUMERIC(12,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS notes         TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS paid_at       TIMESTAMPTZ",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS finalised_at  TIMESTAMPTZ",
+        "ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS finalised_by  VARCHAR(200) NOT NULL DEFAULT ''",
+        # Stop two concurrent runs creating duplicate (branch, year, month).
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_payroll_runs_period ON payroll_runs(branch_id, period_year, period_month) WHERE period_year IS NOT NULL AND period_month IS NOT NULL AND deleted_at IS NULL",
+        # ── Payslips ──────────────────────────────────────────────────────────
+        # One row per (payroll_run × employee). Carries the full calculation
+        # snapshot so historical payslips remain accurate even if the
+        # employee's salary / tax_code / NI rate changes later.
+        # `earnings_json` / `deductions_json` hold the per-line breakdown
+        # rendered on the payslip itself (eg. basic + overtime + bonus, or
+        # PAYE + NI + pension + student loan + adjustments). YTD columns
+        # are snapshot at calculation time so the payslip itself is
+        # self-contained.
+        """CREATE TABLE IF NOT EXISTS payslips (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            payroll_run_id      UUID NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+            employee_id         UUID NOT NULL,
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            period_label        VARCHAR(40)  NOT NULL DEFAULT '',
+            period_start        DATE,
+            period_end          DATE,
+            pay_date            DATE,
+            -- Employee snapshot (historical accuracy)
+            employee_name       VARCHAR(200) NOT NULL DEFAULT '',
+            employee_number     VARCHAR(50)  NOT NULL DEFAULT '',
+            tax_code            VARCHAR(20)  NOT NULL DEFAULT '1257L',
+            ni_number           VARCHAR(20)  NOT NULL DEFAULT '',
+            ni_category         VARCHAR(5)   NOT NULL DEFAULT 'A',
+            -- Earnings
+            basic_pay           NUMERIC(12,2) NOT NULL DEFAULT 0,
+            overtime_pay        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            bonus_pay           NUMERIC(12,2) NOT NULL DEFAULT 0,
+            other_pay           NUMERIC(12,2) NOT NULL DEFAULT 0,
+            gross_pay           NUMERIC(12,2) NOT NULL DEFAULT 0,
+            taxable_pay         NUMERIC(12,2) NOT NULL DEFAULT 0,
+            hours_worked        NUMERIC(8,2)  NOT NULL DEFAULT 0,
+            hourly_rate         NUMERIC(8,4)  NOT NULL DEFAULT 0,
+            -- Deductions
+            tax_deduction       NUMERIC(12,2) NOT NULL DEFAULT 0,
+            ni_employee         NUMERIC(12,2) NOT NULL DEFAULT 0,
+            pension_employee    NUMERIC(12,2) NOT NULL DEFAULT 0,
+            student_loan        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            other_deductions    NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total_deductions    NUMERIC(12,2) NOT NULL DEFAULT 0,
+            net_pay             NUMERIC(12,2) NOT NULL DEFAULT 0,
+            -- Employer costs
+            ni_employer         NUMERIC(12,2) NOT NULL DEFAULT 0,
+            pension_employer    NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total_employer_cost NUMERIC(12,2) NOT NULL DEFAULT 0,
+            -- YTD snapshot
+            ytd_gross           NUMERIC(12,2) NOT NULL DEFAULT 0,
+            ytd_tax             NUMERIC(12,2) NOT NULL DEFAULT 0,
+            ytd_ni              NUMERIC(12,2) NOT NULL DEFAULT 0,
+            ytd_pension         NUMERIC(12,2) NOT NULL DEFAULT 0,
+            ytd_net             NUMERIC(12,2) NOT NULL DEFAULT 0,
+            -- Status
+            status              VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | FINALIZED | PAID
+            payment_method      VARCHAR(40)  NOT NULL DEFAULT '',
+            payment_ref         VARCHAR(100) NOT NULL DEFAULT '',
+            paid_at             TIMESTAMPTZ,
+            sent_at             TIMESTAMPTZ,
+            viewed_at           TIMESTAMPTZ,
+            -- Audit + breakdown
+            earnings_json       JSONB NOT NULL DEFAULT '[]'::jsonb,
+            deductions_json     JSONB NOT NULL DEFAULT '[]'::jsonb,
+            notes               TEXT  NOT NULL DEFAULT '',
+            calculated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (payroll_run_id, employee_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_payslips_run     ON payslips(payroll_run_id)",
+        "CREATE INDEX IF NOT EXISTS idx_payslips_emp     ON payslips(employee_id)",
+        "CREATE INDEX IF NOT EXISTS idx_payslips_branch  ON payslips(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_payslips_period  ON payslips(period_label)",
+        "CREATE INDEX IF NOT EXISTS idx_payslips_status  ON payslips(status)",
         # ── Recurring Giving (Monthly Donations) ──────────────────────────────
         """CREATE TABLE IF NOT EXISTS recurring_giving_tiers (
             id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2706,6 +2797,7 @@ _mount("shital.api.routers.hr",               "router")
 _mount("shital.api.routers.reimbursements",   "router")
 _mount("shital.api.routers.nominal_codes",    "router")
 _mount("shital.api.routers.payroll",          "router")
+_mount("shital.api.routers.hr_alerts",        "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
 _mount("shital.api.routers.functions",        "router")
