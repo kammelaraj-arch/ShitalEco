@@ -921,6 +921,34 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_txn_lines_txn     ON transaction_lines(transaction_id)",
         "CREATE INDEX IF NOT EXISTS idx_txn_lines_account ON transaction_lines(account_id)",
+        # ── GL Phase 2: extend transactions + transaction_lines (no new tables;
+        #    we re-use the existing double-entry shape and add the columns the
+        #    full reporting suite needs: nominal code link, fund (SORP),
+        #    project (project costing), branch on the line (so a cross-branch
+        #    consolidation entry can split across branches), and source-document
+        #    linkage so every posting traces back to the PO/Invoice/Donation
+        #    that triggered it.
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS nominal_code_id UUID",
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS nominal_code    VARCHAR(20) NOT NULL DEFAULT ''",
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS fund_type       VARCHAR(20) NOT NULL DEFAULT 'UNRESTRICTED'",
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS project_id      UUID",
+        "ALTER TABLE transaction_lines ADD COLUMN IF NOT EXISTS branch_id       VARCHAR(100) NOT NULL DEFAULT 'main'",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_nominal ON transaction_lines(nominal_code_id)",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_project ON transaction_lines(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_fund    ON transaction_lines(fund_type)",
+        "CREATE INDEX IF NOT EXISTS idx_txn_lines_branch  ON transaction_lines(branch_id)",
+        # Source-document trace on the header. source_type matches the kind
+        # of upstream record (po_receive/invoice_pay/donation/reimbursement/
+        # manual/reversal); source_id is the originator's PK. reversal_of
+        # points an inverse entry back at the one it cancels for clean audits.
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS source_type VARCHAR(40) NOT NULL DEFAULT 'manual'",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS source_id   UUID",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reversal_of UUID",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS fund_type   VARCHAR(20) NOT NULL DEFAULT 'UNRESTRICTED'",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS project_id  UUID",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_source   ON transactions(source_type, source_id)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_project  ON transactions(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_reversal ON transactions(reversal_of)",
         # ── HR: Leave Requests, Time Entries ─────────────────────────────────
         """CREATE TABLE IF NOT EXISTS leave_requests (
             id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1943,6 +1971,250 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_board_audit_action ON board_audit_log(action)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_entity ON board_audit_log(entity_type, entity_id)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_when   ON board_audit_log(created_at DESC)",
+        # ── Purchasing & Sales: Purchase Orders + Sales Invoices (MVP) ───────
+        # Header + lines pattern. Money columns NUMERIC(12,2), unit_price has
+        # 4 dp so per-unit micro-pricing (eg. per-litre fuel) round-trips.
+        # `nominal_code_id` links each line to chart-of-accounts for SORP
+        # fund/activity reporting; `nominal_code` is denormalised for fast
+        # display + survives if the underlying code is renamed/deleted.
+        # supplier/customer point at the existing `contacts` table so the
+        # CRM is the single source of truth — no separate supplier table.
+        """CREATE TABLE IF NOT EXISTS purchase_orders (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            po_number           VARCHAR(40) UNIQUE NOT NULL,
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            supplier_contact_id UUID,
+            supplier_name       VARCHAR(200) NOT NULL DEFAULT '',
+            status              VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | SENT | RECEIVED | PART_RECEIVED | CANCELLED
+            order_date          DATE         NOT NULL DEFAULT CURRENT_DATE,
+            expected_date       DATE,
+            currency            VARCHAR(3)   NOT NULL DEFAULT 'GBP',
+            subtotal            NUMERIC(12,2) NOT NULL DEFAULT 0,
+            vat_total           NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total               NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes               TEXT         NOT NULL DEFAULT '',
+            reference           VARCHAR(100) NOT NULL DEFAULT '',
+            delivery_address    TEXT         NOT NULL DEFAULT '',
+            created_by          VARCHAR(200) NOT NULL DEFAULT '',
+            sent_at             TIMESTAMPTZ,
+            received_at         TIMESTAMPTZ,
+            cancelled_at        TIMESTAMPTZ,
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_orders_branch  ON purchase_orders(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_orders_status  ON purchase_orders(status)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_orders_date    ON purchase_orders(order_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_orders_supp    ON purchase_orders(supplier_contact_id)",
+        """CREATE TABLE IF NOT EXISTS purchase_order_lines (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            po_id           UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            line_no         INTEGER NOT NULL DEFAULT 1,
+            description     TEXT NOT NULL,
+            nominal_code_id UUID,
+            nominal_code    VARCHAR(20) NOT NULL DEFAULT '',
+            quantity        NUMERIC(12,3) NOT NULL DEFAULT 1,
+            unit_price      NUMERIC(12,4) NOT NULL DEFAULT 0,
+            vat_rate        NUMERIC(5,2)  NOT NULL DEFAULT 0,
+            vat_code        VARCHAR(20)   NOT NULL DEFAULT 'OUT_OF_SCOPE',
+            line_net        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_vat        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_total      NUMERIC(12,2) NOT NULL DEFAULT 0,
+            received_qty    NUMERIC(12,3) NOT NULL DEFAULT 0,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_po_lines_po      ON purchase_order_lines(po_id)",
+        "CREATE INDEX IF NOT EXISTS idx_po_lines_nom     ON purchase_order_lines(nominal_code_id)",
+        """CREATE TABLE IF NOT EXISTS sales_invoices (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            invoice_number      VARCHAR(40) UNIQUE NOT NULL,
+            branch_id           VARCHAR(100) NOT NULL DEFAULT 'main',
+            customer_contact_id UUID,
+            customer_name       VARCHAR(200) NOT NULL DEFAULT '',
+            status              VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | SENT | PAID | PART_PAID | VOID
+            invoice_date        DATE         NOT NULL DEFAULT CURRENT_DATE,
+            due_date            DATE,
+            currency            VARCHAR(3)   NOT NULL DEFAULT 'GBP',
+            subtotal            NUMERIC(12,2) NOT NULL DEFAULT 0,
+            vat_total           NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total               NUMERIC(12,2) NOT NULL DEFAULT 0,
+            paid_total          NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes               TEXT         NOT NULL DEFAULT '',
+            reference           VARCHAR(100) NOT NULL DEFAULT '',
+            billing_address     TEXT         NOT NULL DEFAULT '',
+            created_by          VARCHAR(200) NOT NULL DEFAULT '',
+            sent_at             TIMESTAMPTZ,
+            paid_at             TIMESTAMPTZ,
+            voided_at           TIMESTAMPTZ,
+            created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_sales_invoices_branch ON sales_invoices(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_invoices_status ON sales_invoices(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_invoices_date   ON sales_invoices(invoice_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_invoices_cust   ON sales_invoices(customer_contact_id)",
+        """CREATE TABLE IF NOT EXISTS sales_invoice_lines (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            invoice_id      UUID NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
+            line_no         INTEGER NOT NULL DEFAULT 1,
+            description     TEXT NOT NULL,
+            nominal_code_id UUID,
+            nominal_code    VARCHAR(20) NOT NULL DEFAULT '',
+            quantity        NUMERIC(12,3) NOT NULL DEFAULT 1,
+            unit_price      NUMERIC(12,4) NOT NULL DEFAULT 0,
+            vat_rate        NUMERIC(5,2)  NOT NULL DEFAULT 0,
+            vat_code        VARCHAR(20)   NOT NULL DEFAULT 'OUT_OF_SCOPE',
+            line_net        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_vat        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_total      NUMERIC(12,2) NOT NULL DEFAULT 0,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_inv_lines_inv  ON sales_invoice_lines(invoice_id)",
+        "CREATE INDEX IF NOT EXISTS idx_inv_lines_nom  ON sales_invoice_lines(nominal_code_id)",
+        # ── Purchase Invoices (supplier bills) ───────────────────────────────
+        # The bill we receive FROM a supplier. Optionally linked to a PO
+        # for 3-way match. Posts DR Expense + VAT-input CR AP on RECEIVED;
+        # payments post DR AP CR Bank. `supplier_invoice_number` is the
+        # supplier's external reference (eg. their 'INV-12345'); our
+        # internal sequential is `invoice_number` (BILL-YYYY-NNNN).
+        """CREATE TABLE IF NOT EXISTS purchase_invoices (
+            id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            invoice_number          VARCHAR(40) UNIQUE NOT NULL,
+            supplier_invoice_number VARCHAR(80) NOT NULL DEFAULT '',
+            branch_id               VARCHAR(100) NOT NULL DEFAULT 'main',
+            supplier_contact_id     UUID,
+            supplier_name           VARCHAR(200) NOT NULL DEFAULT '',
+            po_id                   UUID,
+            status                  VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+            invoice_date            DATE         NOT NULL DEFAULT CURRENT_DATE,
+            due_date                DATE,
+            currency                VARCHAR(3)   NOT NULL DEFAULT 'GBP',
+            subtotal                NUMERIC(12,2) NOT NULL DEFAULT 0,
+            vat_total               NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total                   NUMERIC(12,2) NOT NULL DEFAULT 0,
+            paid_total              NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes                   TEXT         NOT NULL DEFAULT '',
+            reference               VARCHAR(100) NOT NULL DEFAULT '',
+            created_by              VARCHAR(200) NOT NULL DEFAULT '',
+            received_at             TIMESTAMPTZ,
+            paid_at                 TIMESTAMPTZ,
+            voided_at               TIMESTAMPTZ,
+            created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_branch ON purchase_invoices(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_status ON purchase_invoices(status)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_date   ON purchase_invoices(invoice_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_supp   ON purchase_invoices(supplier_contact_id)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_po     ON purchase_invoices(po_id)",
+        # Partial unique index: dedupes per supplier on their external invoice
+        # number (only enforced when both are present).
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_purchase_invoices_supp_ref ON purchase_invoices(supplier_contact_id, supplier_invoice_number) WHERE supplier_contact_id IS NOT NULL AND supplier_invoice_number <> ''",
+        """CREATE TABLE IF NOT EXISTS purchase_invoice_lines (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            invoice_id      UUID NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+            po_line_id      UUID,
+            line_no         INTEGER NOT NULL DEFAULT 1,
+            description     TEXT NOT NULL,
+            nominal_code_id UUID,
+            nominal_code    VARCHAR(20) NOT NULL DEFAULT '',
+            quantity        NUMERIC(12,3) NOT NULL DEFAULT 1,
+            unit_price      NUMERIC(12,4) NOT NULL DEFAULT 0,
+            vat_rate        NUMERIC(5,2)  NOT NULL DEFAULT 0,
+            vat_code        VARCHAR(20)   NOT NULL DEFAULT 'OUT_OF_SCOPE',
+            line_net        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_vat        NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_total      NUMERIC(12,2) NOT NULL DEFAULT 0,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_pi_lines_inv ON purchase_invoice_lines(invoice_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pi_lines_nom ON purchase_invoice_lines(nominal_code_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pi_lines_po  ON purchase_invoice_lines(po_line_id)",
+        # ── Phase 3: Budgets ─────────────────────────────────────────────────
+        # `budgets` is the period+branch header (one row per branch+year+
+        # period(+project)). `budget_lines` allocates the budget across
+        # nominal_codes (so a single budget header can split into 30+ codes
+        # for fine-grained planning).
+        #
+        # The actuals side reuses transaction_lines from Phase 2 — variance
+        # reporting JOINs budget_lines to transaction_lines on
+        # (nominal_code_id, branch_id, fund_type, date BETWEEN
+        # period_start AND period_end). No duplicated actuals storage.
+        """CREATE TABLE IF NOT EXISTS budgets (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id       VARCHAR(100) NOT NULL DEFAULT 'main',
+            fiscal_year     INTEGER NOT NULL,
+            period_type     VARCHAR(20) NOT NULL DEFAULT 'YEAR',
+                -- YEAR | QUARTER | MONTH
+            period_label    VARCHAR(40) NOT NULL DEFAULT '',
+                -- eg. '2026', '2026-Q1', '2026-04'
+            period_start    DATE NOT NULL,
+            period_end      DATE NOT NULL,
+            name            VARCHAR(200) NOT NULL DEFAULT '',
+            status          VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | APPROVED | CLOSED
+            fund_type       VARCHAR(20) NOT NULL DEFAULT 'UNRESTRICTED',
+            project_id      UUID,
+            total_income    NUMERIC(12,2) NOT NULL DEFAULT 0,
+            total_expense   NUMERIC(12,2) NOT NULL DEFAULT 0,
+            net_budget      NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes           TEXT NOT NULL DEFAULT '',
+            created_by      VARCHAR(200) NOT NULL DEFAULT '',
+            approved_by     VARCHAR(200) NOT NULL DEFAULT '',
+            approved_at     TIMESTAMPTZ,
+            closed_at       TIMESTAMPTZ,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        # UNIQUE constraint with NULLs: Postgres treats NULLs as distinct
+        # by default, so two budgets with project_id NULL won't collide
+        # — we use a partial-index trick to dedupe non-project rows too.
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_budgets_per_period_proj ON budgets(branch_id, fiscal_year, period_type, period_label, project_id) WHERE project_id IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_budgets_per_period_noproj ON budgets(branch_id, fiscal_year, period_type, period_label) WHERE project_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_budgets_branch  ON budgets(branch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_budgets_year    ON budgets(fiscal_year)",
+        "CREATE INDEX IF NOT EXISTS idx_budgets_status  ON budgets(status)",
+        "CREATE INDEX IF NOT EXISTS idx_budgets_project ON budgets(project_id)",
+        """CREATE TABLE IF NOT EXISTS budget_lines (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            budget_id       UUID NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+            nominal_code_id UUID NOT NULL,
+            nominal_code    VARCHAR(20) NOT NULL DEFAULT '',
+            fund_type       VARCHAR(20) NOT NULL DEFAULT 'UNRESTRICTED',
+            project_id      UUID,
+            amount          NUMERIC(12,2) NOT NULL DEFAULT 0,
+            notes           TEXT NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_budget_lines_per_code_proj ON budget_lines(budget_id, nominal_code_id, project_id) WHERE project_id IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_budget_lines_per_code_noproj ON budget_lines(budget_id, nominal_code_id) WHERE project_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_budget_lines_budget  ON budget_lines(budget_id)",
+        "CREATE INDEX IF NOT EXISTS idx_budget_lines_nominal ON budget_lines(nominal_code_id)",
+        "CREATE INDEX IF NOT EXISTS idx_budget_lines_project ON budget_lines(project_id)",
+        # ── Phase 4: Project costing additions ──────────────────────────────
+        # The `projects` table already exists (line 361). We add lifecycle
+        # + classification + budget-snapshot columns so project P&L reports
+        # have everything they need without joining elsewhere. Actuals come
+        # live from transaction_lines.project_id (added in Phase 2) — no
+        # parallel actuals storage.
+        # status values:        ACTIVE | PLANNING | ON_HOLD | COMPLETED | CANCELLED
+        # project_type values:  GENERAL | CAPITAL | RESTRICTED_FUND | EVENT | GRANT | OUTREACH
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS status         VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE'",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type   VARCHAR(40)  NOT NULL DEFAULT 'GENERAL'",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS fund_type      VARCHAR(20)  NOT NULL DEFAULT 'UNRESTRICTED'",
+        # budget_amount is a header snapshot; full per-code allocation
+        # lives in budgets/budget_lines with project_id set
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_amount  NUMERIC(12,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS manager_user_id UUID",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS sponsor_contact_id UUID",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS reference      VARCHAR(100) NOT NULL DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS notes          TEXT         NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status)",
+        "CREATE INDEX IF NOT EXISTS idx_projects_type   ON projects(project_type)",
+        "CREATE INDEX IF NOT EXISTS idx_projects_manager ON projects(manager_user_id)",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -2749,6 +3021,11 @@ _mount("shital.api.routers.hr",               "router")
 _mount("shital.api.routers.volunteer_references", "router")
 _mount("shital.api.routers.reimbursements",   "router")
 _mount("shital.api.routers.nominal_codes",    "router")
+_mount("shital.api.routers.purchasing",       "router")
+_mount("shital.api.routers.gl",               "router")
+_mount("shital.api.routers.budgets",          "router")
+_mount("shital.api.routers.project_costing",  "router")
+_mount("shital.api.routers.reports",          "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
