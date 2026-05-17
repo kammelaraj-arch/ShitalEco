@@ -1,8 +1,11 @@
 import hmac
 import json
 import os
+import re
 import subprocess
 import sys
+import time
+from datetime import datetime as _dt
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Strip whitespace + surrounding quotes — .env files commonly leave these on
@@ -60,10 +63,6 @@ def run_script(args):
 # Admin → System → Ops can call POST /ops/run with {action, args}. Allowlist is
 # defined here (defense-in-depth — backend also validates). Each handler returns
 # {stdout, stderr, exit_code, duration_ms}.
-import re
-import shlex
-import time
-from datetime import datetime as _dt
 
 OPS_LOG = "/var/log/shital-ops.log"
 
@@ -350,7 +349,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/snapshots":
             if not self._check_secret():
-                self.send_response(403); self.end_headers(); return
+                self.send_response(403)
+                self.end_headers()
+                return
             # List promote-time DB dumps. Each is named promote-<ts>-<sha>.sql.gz.
             import glob
             import re as _re
@@ -377,7 +378,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/status":
             if not self._check_secret():
-                self.send_response(403); self.end_headers(); return
+                self.send_response(403)
+                self.end_headers()
+                return
             envs = {}
             for env, container in ENV_CONTAINERS.items():
                 running = inspect_container(container)
@@ -409,25 +412,31 @@ class Handler(BaseHTTPRequestHandler):
                 }
             self._send_json(200, {"environments": envs})
             return
-        self.send_response(403); self.end_headers()
+        self.send_response(403)
+        self.end_headers()
 
     def do_POST(self):
         if not self._check_secret():
-            self.send_response(403); self.end_headers(); return
+            self.send_response(403)
+            self.end_headers()
+            return
 
         if self.path == "/deploy":
             target = (self.headers.get("X-Deploy-Target") or "dev").lower()
             if target not in ("dev", "prod"):
-                self.send_response(400); self.end_headers()
+                self.send_response(400)
+                self.end_headers()
                 self.wfile.write(b"X-Deploy-Target must be 'dev' or 'prod'")
                 return
             run_script(["--target", target])
-            self.send_response(202); self.end_headers()
+            self.send_response(202)
+            self.end_headers()
             return
 
         if self.path == "/promote-prod":
             run_script(["--promote-prod"])
-            self.send_response(202); self.end_headers()
+            self.send_response(202)
+            self.end_headers()
             return
 
         if self.path == "/restore":
@@ -435,17 +444,21 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 body = json.loads(self.rfile.read(length).decode() or "{}")
             except json.JSONDecodeError:
-                self.send_response(400); self.end_headers()
-                self.wfile.write(b"invalid JSON body"); return
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"invalid JSON body")
+                return
             sid = (body.get("snapshot_id") or "").strip()
             # Format guard — must look like 20260506T070000Z
             import re as _re
             if not _re.match(r"^\d{8}T\d{6}Z$", sid):
-                self.send_response(400); self.end_headers()
+                self.send_response(400)
+                self.end_headers()
                 self.wfile.write(b"snapshot_id must be timestamp like 20260506T070000Z")
                 return
             run_script(["--restore", sid])
-            self.send_response(202); self.end_headers()
+            self.send_response(202)
+            self.end_headers()
             return
 
         if self.path == "/ops/run":
@@ -453,20 +466,25 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 body = json.loads(self.rfile.read(length).decode() or "{}")
             except json.JSONDecodeError:
-                self.send_response(400); self.end_headers()
-                self.wfile.write(b"invalid JSON body"); return
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"invalid JSON body")
+                return
             action = body.get("action", "")
             args   = body.get("args", {}) or {}
             handler = OP_HANDLERS.get(action)
             if not handler:
-                self.send_response(400); self.end_headers()
-                self.wfile.write(f"unknown action '{action}'".encode()); return
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(f"unknown action '{action}'".encode())
+                return
             result = handler(args)
             _audit(action, args, result)
             self._send_json(200, result)
             return
 
-        self.send_response(404); self.end_headers()
+        self.send_response(404)
+        self.end_headers()
 
 
 if __name__ == "__main__":
