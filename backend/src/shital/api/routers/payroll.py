@@ -484,10 +484,7 @@ async def mark_run_paid(run_id: str, body: MarkPaidIn, ctx: CurrentSpace) -> dic
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    try:
-        from shital.services import gl  # ships with the financial-stack PR
-    except ImportError:
-        gl = None  # GL posting is skipped; payroll still pays out cleanly
+    from shital.services import gl
     user = getattr(ctx, "user_email", "") or getattr(ctx, "user_id", "") or ""
     async with SessionLocal() as db:
         run_row = (await db.execute(
@@ -512,9 +509,6 @@ async def mark_run_paid(run_id: str, body: MarkPaidIn, ctx: CurrentSpace) -> dic
             WHERE payroll_run_id=:id AND status='FINALIZED'
         """), {"id": run_id, "now": now, "m": body.payment_method, "r": body.payment_ref})
 
-        if gl is None:
-            await db.commit()
-            return await _get_run_with_payslips(db, run_id)
         try:
             gross  = float(run_row["total_gross"] or 0)
             er_ni  = float(run_row["total_employer_ni"] or 0)
@@ -684,14 +678,19 @@ async def update_payslip(payslip_id: str, body: PayslipOverride, ctx: CurrentSpa
         other_d  = float(body.other_deductions) if body.other_deductions is not None else float(ps["other_deductions"] or 0)
         basic    = float(body.basic_pay)        if body.basic_pay        is not None else float(ps["basic_pay"]    or 0)
 
+        # Pull pension settings from the employee row; default to no pension
+        # if the row's been deleted between the original payslip and this edit.
+        pen_emp_pct: float = float(emp["pension_employee_pct"] or 0) if emp else 0.0
+        pen_er_pct:  float = float(emp["pension_employer_pct"] or 0) if emp else 0.0
+        pen_enrolled: bool = bool(emp["pension_enrolled"]) if emp else False
         calc = payroll_calc.calculate(
             annual_salary=basic * 12,
             overtime_pay=overtime, bonus_pay=bonus, other_pay=other,
             other_deductions=other_d, student_loan=student,
             tax_code=ps["tax_code"] or "1257L",
-            pension_employee_pct=float((emp or {}).get("pension_employee_pct") or 0),
-            pension_employer_pct=float((emp or {}).get("pension_employer_pct") or 0),
-            pension_enrolled=bool((emp or {}).get("pension_enrolled")),
+            pension_employee_pct=pen_emp_pct,
+            pension_employer_pct=pen_er_pct,
+            pension_enrolled=pen_enrolled,
         )
 
         await db.execute(text("""

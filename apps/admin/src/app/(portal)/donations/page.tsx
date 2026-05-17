@@ -265,6 +265,23 @@ export default function DonationsPage() {
     }
   }
 
+  // Apply client-side filters on top of the server response — must come
+  // before the totals/byStatus calculations below since they consume
+  // visibleDonations.
+  const q = search.trim().toLowerCase()
+  const visibleDonations = donations.filter(d => {
+    if (giftAidOnly && !d.gift_aid_eligible) return false
+    if (q) {
+      const hay = [
+        d.contact_name, d.contact_email, d.purpose, d.reference,
+        d.payment_ref, d.payment_provider, d.source, d.branch_id,
+        String(d.amount),
+      ].filter(Boolean).join(' ').toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+
   // Totals reflect the FILTERED dataset so trustees see what their query
   // returned, not the whole period.
   const totalAmount  = visibleDonations.reduce((s, d) => s + Number(d.amount), 0)
@@ -296,21 +313,6 @@ export default function DonationsPage() {
     if (sortBy === k) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortBy(k); setSortDir(k === 'amount' || k === 'date' ? 'desc' : 'asc') }
   }
-  // Apply client-side filters on top of the server response
-  const q = search.trim().toLowerCase()
-  const visibleDonations = donations.filter(d => {
-    if (giftAidOnly && !d.gift_aid_eligible) return false
-    if (q) {
-      const hay = [
-        d.contact_name, d.contact_email, d.purpose, d.reference,
-        d.payment_ref, d.payment_provider, d.source, d.branch_id,
-        String(d.amount),
-      ].filter(Boolean).join(' ').toLowerCase()
-      if (!hay.includes(q)) return false
-    }
-    return true
-  })
-
   const sortedDonations = [...visibleDonations].sort((a, b) => {
     const getVal = (d: Donation): string | number => {
       switch (sortBy) {
