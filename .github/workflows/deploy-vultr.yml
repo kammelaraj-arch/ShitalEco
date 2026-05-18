@@ -134,7 +134,7 @@ jobs:
             fi
 
             # ── Ensure DB and nginx are up ────────────────────────────────────
-            docker compose -f docker-compose.prod.yml up -d db nginx 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml --env-file .env up -d db nginx 2>/dev/null || true
             echo "Waiting for DB..."
             for i in $(seq 1 30); do
               sleep 2
@@ -197,27 +197,45 @@ jobs:
             docker compose -f docker-compose.prod.yml pull service 2>/dev/null || \
               echo "service image not yet available — skipping pull"
             docker image prune -f
-            docker container prune -f
+            # NOTE: removed `docker container prune -f` — it deletes ALL stopped
+            # containers including the ones docker-compose is mid-recreate on.
+            # PR #108 fixed this in deploy.sh; the SSH fallback still had it,
+            # which is why some deploys hit "no such container" right after pull.
 
             # ── Rolling restart: backend first ────────────────────────────────
             echo "=== Rolling restart: backend ==="
-            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
+            docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps --force-recreate backend
 
+            # 90 × 5s = 7.5 min. The first boot after a schema change runs
+            # _patch_schema() + sync_from_digital_dna() which adds 60+ ALTERs
+            # and seeds reference data — easily 3-4 min on a 2GB VPS. The old
+            # 30 × 5s = 150s budget was too tight and was the actual cause
+            # of "backend unhealthy → rolled back to :previous" loops the
+            # last few prod deploys saw, even though the new image worked.
             echo "Waiting for backend health..."
             BACKEND_OK=0
-            for i in $(seq 1 30); do
+            for i in $(seq 1 90); do
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null; then
-                echo "Backend healthy!"; BACKEND_OK=1; break
+                echo "Backend healthy after $((i*5))s!"; BACKEND_OK=1; break
               fi
-              echo "  attempt $i/30..."
+              # Every 30s, peek at the backend logs so the workflow log
+              # shows WHY startup is slow rather than just "still waiting".
+              if [ $((i % 6)) -eq 0 ]; then
+                echo "  attempt $i/90 ($((i*5))s elapsed) — backend logs tail:"
+                docker compose -f docker-compose.prod.yml logs --tail=5 backend 2>&1 | sed 's/^/    /'
+              else
+                echo "  attempt $i/90..."
+              fi
             done
 
             if [ "$BACKEND_OK" -eq 0 ]; then
-              echo "!!! Backend unhealthy — rolling back to :previous !!!"
+              echo "!!! Backend unhealthy after 450s — dumping full logs before rollback !!!"
+              docker compose -f docker-compose.prod.yml logs --tail=200 backend
+              echo "!!! Rolling back to :previous !!!"
               docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
                          ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
-              docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
+              docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps --force-recreate backend
               docker compose -f docker-compose.prod.yml ps
               exit 1
             fi
@@ -226,14 +244,14 @@ jobs:
 
             # ── Rolling restart: frontends ────────────────────────────────────
             echo "=== Rolling restart: frontends ==="
-            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate admin quick-donation kiosk screen
+            docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps --force-recreate admin quick-donation kiosk screen
             # service was previously wrapped in `2>/dev/null || true`, which
             # silently masked recreate failures and left prod serving stale
             # bundles. Now: if the service image exists in :latest, the
             # restart MUST succeed; otherwise (very first deploy before the
             # service image has ever been pushed) we tolerate the absence.
             if docker image inspect ghcr.io/kammelaraj-arch/shitaleco-service:latest >/dev/null 2>&1; then
-              docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate service
+              docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps --force-recreate service
             else
               echo "service:latest not yet in registry — skipping (first-deploy path)"
             fi
@@ -256,7 +274,7 @@ jobs:
             # 24f8df6..._shitaleco-deployer-1"). Force-remove first so
             # the up/recreate has a clean slot.
             docker rm -f shitaleco-deployer-1 2>/dev/null || true
-            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate deployer 2>&1 | tail -5 || \
+            docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps --force-recreate deployer 2>&1 | tail -5 || \
               echo "deployer recreate failed — non-fatal, continue"
 
             echo "Waiting for admin (nginx:alpine on :80)..."
@@ -267,7 +285,7 @@ jobs:
             done
 
             docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || \
-              docker compose -f docker-compose.prod.yml up -d --no-deps nginx
+              docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps nginx
 
             # ── Smoke tests ───────────────────────────────────────────────────
             echo "=== Smoke tests ==="
@@ -398,8 +416,29 @@ jobs:
               cd "$DEV_DIR"
               git fetch origin
               git reset --hard origin/main
-              docker compose -f docker-compose.dev.yml pull 2>/dev/null || true
-              docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
+              # docker-compose.dev.yml uses ${JWT_SECRET:?…} ${DEPLOY_SECRET:?…}
+              # ${GITHUB_TOKEN:?…} required-vars. Without --env-file pointing at
+              # a real .env.dev, every `compose up` fails at interpolation and
+              # containers get stuck in `Created` state — root cause of every
+              # dev outage in the last week (PR #120).
+              #
+              # Build .env.dev from prod .env + the secrets we have in scope.
+              # If a real one already exists on the host (manually curated)
+              # don't overwrite it.
+              if [ ! -f .env.dev ]; then
+                echo "  Generating .env.dev from prod .env"
+                cp /opt/shitaleco/.env .env.dev
+                # Override prod-only knobs so the dev stack points at its own DB
+                sed -i 's|^APP_ENV=.*|APP_ENV=development|' .env.dev
+                grep -q '^DEPLOY_SECRET=' .env.dev || echo "DEPLOY_SECRET=ShitalDeploy2026!" >> .env.dev
+                grep -q '^GITHUB_TOKEN=' .env.dev   || echo "GITHUB_TOKEN=${GH_PAT}" >> .env.dev
+              fi
+              # Symlink .env → .env.dev so any tool reading the default name
+              # (incl. older deploy.sh paths) picks up the dev secrets.
+              ln -sf .env.dev .env
+              docker compose -f docker-compose.dev.yml --env-file .env.dev pull 2>/dev/null || true
+              docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --remove-orphans 2>&1 | tail -10 || \
+                echo "dev stack up failed — non-fatal, deployer watchdog will retry"
             fi
 
             docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || true
