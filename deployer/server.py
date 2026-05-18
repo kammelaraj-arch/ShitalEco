@@ -541,6 +541,97 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+# ─── Watchdog ────────────────────────────────────────────────────────────────
+# Background sweep that runs every 60s and force-recreates any required
+# service that's not 'running' (covers 'created', 'exited', 'restarting'
+# stuck-loops, 'unhealthy' from the new container healthchecks).
+#
+# Survives the dev outage scenario: if a deploy leaves admin-dev in
+# Created state (and nobody hits /deploy again for a while), the watchdog
+# catches it within a minute and force-recreates. The user gets dev back
+# without manually triggering anything.
+#
+# Bounded heal counter per service per hour stops a genuinely-broken
+# image (CrashLoopBackOff equivalent) from being looped on forever.
+
+DEV_REQUIRED  = ["db-dev", "backend-dev", "admin-dev",
+                 "quick-donation-dev", "kiosk-dev", "screen-dev", "nginx-dev"]
+PROD_REQUIRED = ["db", "backend", "admin", "quick-donation", "kiosk",
+                 "screen", "service", "nginx", "certbot", "deployer"]
+WATCHDOG_INTERVAL_SECONDS = 60
+WATCHDOG_HEAL_CAP_PER_HOUR = 4  # per service
+
+
+def _service_state(target: str, svc: str) -> str:
+    cname = f"shitaleco-dev-{svc}-1" if target == "dev" else f"shitaleco-{svc}-1"
+    try:
+        out = subprocess.check_output(
+            ["docker", "inspect", "--format",
+             "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}",
+             cname],
+            stderr=subprocess.DEVNULL, timeout=5,
+        ).decode().strip()
+    except Exception:
+        return "absent|-"
+    return out
+
+
+def _watchdog_heal(target: str, svc: str) -> None:
+    compose_file = "/workspace/docker-compose.prod.yml" if target == "prod" \
+                    else "/workspace/docker-compose.dev.yml"
+    cname = f"shitaleco-dev-{svc}-1" if target == "dev" else f"shitaleco-{svc}-1"
+    # rm if in a state that blocks `up -d`
+    state, _ = (_service_state(target, svc) + "|-").split("|", 1)
+    if state in ("created", "exited"):
+        subprocess.run(["docker", "rm", "-f", cname],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=10)
+    subprocess.run(
+        ["docker", "compose", "-f", compose_file,
+         "up", "-d", "--no-deps", "--force-recreate", svc],
+        stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=120,
+    )
+
+
+def _watchdog_loop():
+    from collections import defaultdict
+    heal_counts: dict[tuple[str, str], list[float]] = defaultdict(list)
+    while True:
+        try:
+            for target, services in (("dev", DEV_REQUIRED), ("prod", PROD_REQUIRED)):
+                for svc in services:
+                    state_str = _service_state(target, svc)
+                    state, health = (state_str + "|-").split("|")[:2]
+                    needs_heal = (
+                        state in ("created", "exited", "absent")
+                        or (state == "restarting")
+                        or (health == "unhealthy")
+                    )
+                    if not needs_heal:
+                        continue
+                    # Rate-limit per service per hour
+                    now = time.time()
+                    key = (target, svc)
+                    heal_counts[key] = [t for t in heal_counts[key] if now - t < 3600]
+                    if len(heal_counts[key]) >= WATCHDOG_HEAL_CAP_PER_HOUR:
+                        continue  # don't loop on a broken image
+                    heal_counts[key].append(now)
+                    print(f"[watchdog] {target}/{svc} = {state_str} → force-recreate")
+                    sys.stdout.flush()
+                    _watchdog_heal(target, svc)
+        except Exception as exc:
+            print(f"[watchdog] sweep error: {exc!r}")
+            sys.stdout.flush()
+        time.sleep(WATCHDOG_INTERVAL_SECONDS)
+
+
 if __name__ == "__main__":
+    import threading
+    # Kick off watchdog in a daemon thread so it dies with the deployer
+    # process. Logs go to deployer stdout — visible via `docker logs`.
+    watchdog_enabled = os.environ.get("DEPLOY_WATCHDOG", "1") != "0"
+    if watchdog_enabled:
+        threading.Thread(target=_watchdog_loop, daemon=True, name="deploy-watchdog").start()
+        print("[watchdog] started — sweeping every 60s, cap 4 heals/service/hour")
+        sys.stdout.flush()
     server = HTTPServer(("0.0.0.0", 9000), Handler)
     server.serve_forever()

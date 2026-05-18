@@ -490,6 +490,59 @@ if [ "$TARGET" = "prod" ]; then
   endpoint_check "/api/v1/admin/system/version"     "http://localhost:8000/api/v1/admin/system/version"  "401"
   endpoint_check "/api/v1/admin/system/environments" "http://localhost:8000/api/v1/admin/system/environments" "401"
   endpoint_check "/api/v1/gift-aid/gasds/buildings" "http://localhost:8000/api/v1/gift-aid/gasds/buildings"  "401"
+else
+  # Dev — backend exposed on 8001, dev nginx on 8080.
+  endpoint_check "dev backend /health"        "http://localhost:8001/health"          "200"
+  endpoint_check "dev nginx hub"              "http://localhost:8080/"                "200"
+  endpoint_check "dev admin via nginx"        "http://localhost:8080/admin/"          "200"
+fi
+
+# Bulletproof admin smoketest: hit the admin's *own* internal port too
+# (not just through nginx) so a working backend + broken admin is caught
+# as 'admin broken' rather than 'something somewhere in the chain'.
+# For dev, the admin container exposes port 80 internally. We retry up
+# to 6 times with 5s gaps because the container can be still warming up
+# nginx right after a force-recreate. If after 30s the smoketest still
+# fails, we force-recreate the admin container ONE more time and re-test
+# before giving up — last-ditch self-heal.
+admin_smoketest() {
+  local svc=$1
+  local cname
+  if [ "$TARGET" = "dev" ]; then
+    cname="shitaleco-dev-${svc}-1"
+  else
+    cname="shitaleco-${svc}-1"
+  fi
+  local i
+  for i in 1 2 3 4 5 6; do
+    local code
+    code=$(docker exec "$cname" wget -q -O /dev/null -S 'http://127.0.0.1/admin/' 2>&1 | grep -oE 'HTTP/[0-9.]+ [0-9]+' | head -1 | awk '{print $2}')
+    if [ "$code" = "200" ]; then
+      echo "  ✓ in-container admin smoketest (HTTP 200, attempt $i)"
+      return 0
+    fi
+    echo "  · attempt $i — admin not serving yet (got '$code'), waiting 5s…"
+    sleep 5
+  done
+  echo "  ✗ in-container admin smoketest FAILED after 30s — force-recreating ${cname} ONCE more"
+  docker rm -f "$cname" >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate "$svc" 2>&1 | tail -10 || true
+  sleep 10
+  code=$(docker exec "$cname" wget -q -O /dev/null -S 'http://127.0.0.1/admin/' 2>&1 | grep -oE 'HTTP/[0-9.]+ [0-9]+' | head -1 | awk '{print $2}')
+  if [ "$code" = "200" ]; then
+    echo "  ✓ recovered after force-recreate (HTTP 200)"
+    return 0
+  fi
+  echo "  ✗ admin STILL broken after final force-recreate (got '$code')"
+  return 1
+}
+
+echo "=== In-container admin smoketest ==="
+if [ "$TARGET" = "dev" ]; then
+  admin_smoketest admin-dev || ENDPOINT_FAIL=1
+else
+  admin_smoketest admin || ENDPOINT_FAIL=1
 fi
 if [ "$ENDPOINT_FAIL" -ne 0 ]; then
   echo "WARNING: One or more sanity-check endpoints did not respond as expected."
