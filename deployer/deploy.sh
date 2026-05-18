@@ -210,10 +210,58 @@ else
   HISTORY_TAG="prod"
 fi
 
+# ── Resolve env-file (root cause of repeat dev outages) ─────────────────────
+# docker-compose.dev.yml has `${JWT_SECRET:?must be set in .env.dev}` etc.
+# When the deployer ran `docker compose up -d` without --env-file, compose
+# tried to interpolate against the shell's empty env → bailed out → admin/
+# nginx stuck in 'Created' forever. We now pick the env-file explicitly per
+# target and pass --env-file to every compose call. Fallback chain:
+#   dev  → /workspace-dev/.env.dev → /workspace/.env.dev → /workspace/.env
+#   prod → /workspace/.env
+# Also: ensure /opt/shitaleco-dev/.env.dev exists (symlink to prod .env if
+# missing) so manual `docker compose up -d` from the dev dir works too —
+# the user's recovery would have worked first-try with this in place.
+resolve_env_file() {
+  local t="$1"
+  if [ "$t" = "dev" ]; then
+    for candidate in /workspace-dev/.env.dev /workspace/.env.dev /workspace/.env; do
+      [ -f "$candidate" ] && echo "$candidate" && return 0
+    done
+  else
+    [ -f /workspace/.env ] && echo "/workspace/.env" && return 0
+  fi
+  return 1
+}
+ENV_FILE="$(resolve_env_file "$TARGET" 2>/dev/null || true)"
+if [ -n "$ENV_FILE" ]; then
+  echo "=== Using env file: $ENV_FILE ==="
+else
+  echo "!!! No env file found for target=$TARGET — compose interpolation will fail"
+fi
+
+# Heal the persistent dev gotcha: /opt/shitaleco-dev/.env.dev not existing.
+# Best-effort: create it as a symlink to the prod .env so the same secrets
+# are reused. If the host filesystem isn't writable from the deployer, the
+# symlink fails silently and we fall back to passing --env-file directly.
+if [ "$TARGET" = "dev" ] && [ -f /workspace-dev/.env.dev ]; then
+  : # already there
+elif [ "$TARGET" = "dev" ] && [ -d /workspace-dev ] && [ -f /workspace/.env ]; then
+  ln -sf /workspace/.env /workspace-dev/.env.dev 2>/dev/null && \
+    echo "  → linked /workspace-dev/.env.dev → /workspace/.env"
+fi
+
+# Build the base compose command once so EVERY call below uses --env-file.
+if [ -n "$ENV_FILE" ]; then
+  COMPOSE_CMD="docker compose --env-file $ENV_FILE -f $COMPOSE"
+else
+  COMPOSE_CMD="docker compose -f $COMPOSE"
+fi
+echo "=== Compose command: $COMPOSE_CMD ==="
+
 echo "=== Pulling images for ${STACK_NAME} stack ==="
 if [ "$TARGET" = "dev" ]; then
   # Dev stack pulls :dev (most CI builds)
-  docker compose -f "$COMPOSE" pull 2>&1 | tail -10 || true
+  $COMPOSE_CMD pull 2>&1 | tail -10 || true
 elif [ "$PROMOTE" -eq 1 ]; then
   # Prod promotion path — :latest was JUST retagged from :dev locally above.
   # Skip the registry pull so we don't overwrite our promotion with whatever
@@ -222,8 +270,8 @@ elif [ "$PROMOTE" -eq 1 ]; then
   echo "Skipping docker pull — using locally promoted :latest tags"
 else
   # Plain prod deploy (no promotion) — fall back to pulling :latest from GHCR
-  docker compose -f "$COMPOSE" pull backend admin quick-donation kiosk screen 2>&1 | tail -10 || true
-  docker compose -f "$COMPOSE" pull service 2>/dev/null || \
+  $COMPOSE_CMD pull backend admin quick-donation kiosk screen 2>&1 | tail -10 || true
+  $COMPOSE_CMD pull service 2>/dev/null || \
     echo "service image not yet in GHCR — skipping pull"
 fi
 
@@ -282,7 +330,7 @@ if [ "$TARGET" = "dev" ]; then
 else
   REQUIRED_SERVICES="db backend admin quick-donation kiosk screen service nginx certbot backup-scheduler deployer"
 fi
-docker compose -f "$COMPOSE" up -d --no-deps $REQUIRED_SERVICES 2>&1 | tail -30 || true
+$COMPOSE_CMD up -d --no-deps $REQUIRED_SERVICES 2>&1 | tail -30 || true
 
 # Audit + self-heal — if any required service is not running, force-recreate
 # it specifically (covers the 'Created but never started' state that blocked
@@ -330,7 +378,7 @@ while [ -n "$NEED_HEAL" ] && [ "$HEAL_ATTEMPT" -lt 2 ]; do
     fi
   done
   # shellcheck disable=SC2086
-  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate $NEED_HEAL 2>&1 | tail -20 || true
+  $COMPOSE_CMD up -d --no-deps --force-recreate $NEED_HEAL 2>&1 | tail -20 || true
   sleep 5
   NEED_HEAL=$(audit_and_heal "post-heal-${HEAL_ATTEMPT}")
 done
@@ -349,12 +397,12 @@ fi
 # path to recreate a missing container. Then below we force-recreate so
 # we get the new image even if compose found an existing container.
 echo "=== Ensure-create: backend (${STACK_NAME}) ==="
-docker compose -f "$COMPOSE" up -d --no-deps backend 2>/dev/null || \
-  docker compose -f "$COMPOSE" up -d --no-deps backend-dev
+$COMPOSE_CMD up -d --no-deps backend 2>/dev/null || \
+  $COMPOSE_CMD up -d --no-deps backend-dev
 
 echo "=== Rolling restart: backend (${STACK_NAME}) ==="
-docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend 2>/dev/null || \
-  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend-dev
+$COMPOSE_CMD up -d --no-deps --force-recreate backend 2>/dev/null || \
+  $COMPOSE_CMD up -d --no-deps --force-recreate backend-dev
 
 echo "=== Waiting for backend health (${HEALTH_URL}) ==="
 # 60 × 5s = 300s. Lifespan runs _patch_schema() + sync_from_digital_dna()
@@ -382,7 +430,7 @@ if [ "$BACKEND_OK" -eq 0 ]; then
   if [ "$TARGET" = "prod" ]; then
     docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
                ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
-    docker compose -f "$COMPOSE" up -d --no-deps --force-recreate backend
+    $COMPOSE_CMD up -d --no-deps --force-recreate backend
   fi
   cat >> "$HISTORY_FILE" <<JSON
 {"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"rolled_back","message":"backend health check failed"}
@@ -398,7 +446,7 @@ fi
 # ── Frontend rollout ─────────────────────────────────────────────────────────
 echo "=== Rolling restart: frontends (${STACK_NAME}) ==="
 if [ "$TARGET" = "dev" ]; then
-  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate \
+  $COMPOSE_CMD up -d --no-deps --force-recreate \
     admin-dev quick-donation-dev kiosk-dev screen-dev 2>/dev/null || true
 else
   # `docker tag :dev :latest` updates Docker's local manifest, but if a stale
@@ -406,8 +454,8 @@ else
   # alone will happily restart the container with the OLD image. Explicitly
   # `docker compose pull` here re-resolves :latest from the local daemon's
   # most recent tag — which is the one we just retagged in the promote step.
-  docker compose -f "$COMPOSE" pull admin quick-donation kiosk screen service 2>&1 | tail -15
-  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate admin quick-donation kiosk screen service
+  $COMPOSE_CMD pull admin quick-donation kiosk screen service 2>&1 | tail -15
+  $COMPOSE_CMD up -d --no-deps --force-recreate admin quick-donation kiosk screen service
 
   # Verify each prod frontend container is now serving the expected GIT_SHA
   # by reading the baked-in /usr/share/nginx/html/version.txt from each
@@ -417,7 +465,7 @@ else
   # silent promote skip masked the issue).
   echo "=== Verify frontend image versions ==="
   for svc in admin quick-donation kiosk screen service; do
-    cid=$(docker compose -f "$COMPOSE" ps -q "$svc" 2>/dev/null || true)
+    cid=$($COMPOSE_CMD ps -q "$svc" 2>/dev/null || true)
     if [ -n "$cid" ]; then
       v=$(docker exec "$cid" cat /usr/share/nginx/html/version.txt 2>/dev/null || echo "<not-served>")
       echo "  ${svc}: ${v}"
@@ -432,8 +480,8 @@ else
   done
 
   # Reload nginx (prod only — dev nginx auto-reloads)
-  docker compose -f "$COMPOSE" exec -T nginx nginx -s reload 2>/dev/null || \
-    docker compose -f "$COMPOSE" up -d --no-deps nginx
+  $COMPOSE_CMD exec -T nginx nginx -s reload 2>/dev/null || \
+    $COMPOSE_CMD up -d --no-deps nginx
 fi
 
 # ── Smoke tests ──────────────────────────────────────────────────────────────
@@ -461,8 +509,8 @@ fi
 
 if [ "$SMOKE_FAIL" -ne 0 ]; then
   echo "!!! Smoke tests failed ==="
-  docker compose -f "$COMPOSE" logs --tail=20 backend 2>/dev/null || \
-    docker compose -f "$COMPOSE" logs --tail=20 backend-dev
+  $COMPOSE_CMD logs --tail=20 backend 2>/dev/null || \
+    $COMPOSE_CMD logs --tail=20 backend-dev
   cat >> "$HISTORY_FILE" <<JSON
 {"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"smoke_fail","message":"${COMMIT_MSG}"}
 JSON
@@ -527,7 +575,7 @@ admin_smoketest() {
   echo "  ✗ in-container admin smoketest FAILED after 30s — force-recreating ${cname} ONCE more"
   docker rm -f "$cname" >/dev/null 2>&1 || true
   # shellcheck disable=SC2086
-  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate "$svc" 2>&1 | tail -10 || true
+  $COMPOSE_CMD up -d --no-deps --force-recreate "$svc" 2>&1 | tail -10 || true
   sleep 10
   code=$(docker exec "$cname" wget -q -O /dev/null -S 'http://127.0.0.1/admin/' 2>&1 | grep -oE 'HTTP/[0-9.]+ [0-9]+' | head -1 | awk '{print $2}')
   if [ "$code" = "200" ]; then

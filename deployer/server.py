@@ -576,6 +576,22 @@ def _service_state(target: str, svc: str) -> str:
     return out
 
 
+def _resolve_env_file(target: str) -> str | None:
+    """Pick the env-file the watchdog should pass to `docker compose`.
+    Match the fallback chain in deploy.sh so a heal can't fail with the
+    same compose-interpolation error that caused the dev outages."""
+    if target == "dev":
+        for path in ("/workspace-dev/.env.dev",
+                     "/workspace/.env.dev",
+                     "/workspace/.env"):
+            if os.path.isfile(path):
+                return path
+        return None
+    if os.path.isfile("/workspace/.env"):
+        return "/workspace/.env"
+    return None
+
+
 def _watchdog_heal(target: str, svc: str) -> None:
     compose_file = "/workspace/docker-compose.prod.yml" if target == "prod" \
                     else "/workspace/docker-compose.dev.yml"
@@ -585,9 +601,13 @@ def _watchdog_heal(target: str, svc: str) -> None:
     if state in ("created", "exited"):
         subprocess.run(["docker", "rm", "-f", cname],
                        stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=10)
+    cmd = ["docker", "compose"]
+    env_file = _resolve_env_file(target)
+    if env_file:
+        cmd += ["--env-file", env_file]
+    cmd += ["-f", compose_file, "up", "-d", "--no-deps", "--force-recreate", svc]
     subprocess.run(
-        ["docker", "compose", "-f", compose_file,
-         "up", "-d", "--no-deps", "--force-recreate", svc],
+        cmd,
         stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=120,
     )
 
