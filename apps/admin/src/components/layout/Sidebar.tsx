@@ -16,6 +16,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: '/dashboard',         icon: '🏗️', label: 'Dashboard' },
       { href: '/ai',                icon: '🧠', label: 'Digital Brain' },
+      { href: '/ai/inbox',          icon: '📥', label: 'AI Inbox' },
       { href: '/ai/functions',      icon: '⚙️', label: 'Function Registry' },
     ],
   },

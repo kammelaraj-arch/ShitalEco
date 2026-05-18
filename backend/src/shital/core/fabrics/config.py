@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
 
+    # Mail Agent — agentic triage of shared mailboxes
+    # Comma-separated list of mailbox UPNs the agent should poll. Empty → agent disabled.
+    # Service account in Azure AD must have ApplicationAccessPolicy granting access to each.
+    MAIL_AGENT_MAILBOXES: str = "accounts@shirdisai.org.uk,trustees@shirdisai.org.uk,info@shirdisai.org.uk"
+    MAIL_AGENT_POLL_SECONDS: int = 300        # 5 min; 0 = disabled
+    MAIL_AGENT_MODEL: str = "claude-opus-4-7"  # used for the agentic loop
+    MAIL_AGENT_MAX_ITER: int = 15             # cap tool turns per email
+    TEAMS_WEBHOOK_URL: str = ""               # MS Teams Incoming Webhook for alerts
+
     # SendGrid (legacy fallback)
     SENDGRID_API_KEY: str = ""
     SENDGRID_FROM_EMAIL: str = "noreply@shital.org.uk"
