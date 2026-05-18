@@ -257,9 +257,62 @@ export default function ReimbursementsPage() {
 function NewClaimModal({ branches, onClose, onSaved }: {
   branches: Branch[]; onClose: () => void; onSaved: () => void
 }) {
-  const [claimantType, setClaimantType] = useState('EMPLOYEE')
-  const [claimantName, setClaimantName] = useState('')
-  const [branchId, setBranchId]         = useState(branches[0]?.branch_id || 'main')
+  // Read logged-in user from localStorage — set by login flow. role maps
+  // to claimant_type so it's read-only on the form (HR_MANAGER / ACCOUNTANT
+  // / ADMIN all count as EMPLOYEE for claims; TRUSTEE / LMC keep their own).
+  const me = (() => {
+    if (typeof window === 'undefined') return null
+    try { return JSON.parse(localStorage.getItem('shital_user') || 'null') } catch { return null }
+  })() as { id?: string; name?: string; email?: string; role?: string; branch_id?: string } | null
+
+  const roleToClaimantType = (r?: string): string => {
+    const up = (r || '').toUpperCase()
+    if (up === 'TRUSTEE') return 'TRUSTEE'
+    if (up === 'LMC' || up === 'LMC_MEMBER') return 'LMC'
+    return 'EMPLOYEE'
+  }
+  const claimantType = roleToClaimantType(me?.role)
+  const branchId     = me?.branch_id || branches[0]?.branch_id || 'main'
+
+  // Yourself vs On behalf of
+  const [onBehalf, setOnBehalf] = useState(false)
+  const [behalfOf, setBehalfOf] = useState<{ id: string; name: string; email?: string; source: 'employee' | 'contact' } | null>(null)
+  const [behalfQuery, setBehalfQuery] = useState('')
+  const [behalfResults, setBehalfResults] = useState<Array<{ id: string; name: string; email?: string; source: 'employee' | 'contact' }>>([])
+  const [behalfLoading, setBehalfLoading] = useState(false)
+  const [behalfOpen, setBehalfOpen] = useState(false)
+
+  useEffect(() => {
+    if (!behalfOpen || behalfOf) return
+    const t = setTimeout(async () => {
+      setBehalfLoading(true)
+      try {
+        const q = behalfQuery.trim()
+        const [emps, contacts] = await Promise.all([
+          apiFetch<{ items: Array<{ id: string; full_name: string }> }>(
+            `/hr/employees/search?q=${encodeURIComponent(q)}&limit=10`,
+          ).catch(() => ({ items: [] })),
+          apiFetch<{ contacts: Array<{ id: string; full_name: string; email: string }> }>(
+            `/admin/contacts?q=${encodeURIComponent(q)}&per_page=10`,
+          ).catch(() => ({ contacts: [] })),
+        ])
+        const out: typeof behalfResults = [
+          ...(emps.items || []).map(e => ({ id: e.id, name: e.full_name || '(unnamed)', source: 'employee' as const })),
+          ...(contacts.contacts || []).map(c => ({ id: c.id, name: c.full_name || c.email || '(unnamed)', email: c.email, source: 'contact' as const })),
+        ]
+        setBehalfResults(out.slice(0, 20))
+      } finally {
+        setBehalfLoading(false)
+      }
+    }, 200)
+    return () => clearTimeout(t)
+  }, [behalfQuery, behalfOpen, behalfOf])
+
+  // The claimant_name we actually submit. Yourself = me.name; On behalf = picked
+  const claimantName = onBehalf ? (behalfOf?.name || '') : (me?.name || me?.email || '')
+  const claimantId   = onBehalf ? behalfOf?.id : me?.id
+  const claimantEmail = onBehalf ? (behalfOf?.email || '') : (me?.email || '')
+
   const [amount, setAmount]             = useState('')
   const [category, setCategory]         = useState('GENERAL')
   const [expenseDate, setExpenseDate]   = useState(new Date().toISOString().slice(0, 10))
@@ -344,11 +397,16 @@ function NewClaimModal({ branches, onClose, onSaved }: {
           receipt_data = m[2]
         }
       }
+      if (onBehalf && !behalfOf) {
+        setError('Pick the person you are filing on behalf of'); setSaving(false); return
+      }
       await apiFetch('/reimbursements', {
         method: 'POST',
         body: JSON.stringify({
           claimant_type: claimantType,
+          claimant_id: claimantId || null,
           claimant_name: claimantName,
+          claimant_email: claimantEmail,
           branch_id: branchId,
           amount: amt,
           currency: 'GBP',
@@ -386,26 +444,98 @@ function NewClaimModal({ branches, onClose, onSaved }: {
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           {error && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
 
+          {/* Read-only role + branch, from logged-in user's profile.
+              Trustees can't change to EMPLOYEE; admins can't bill against
+              a different branch — both blocked at the form so users can't
+              create cross-contamination by accident. */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={lbl}>Claimant Type</label>
-              <select value={claimantType} onChange={e => setClaimantType(e.target.value)} className={inp}>
-                {CLAIMANT_TYPES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-              </select>
+              <label className={lbl}>Claimant Type <span className="text-white/30 normal-case font-normal">(from your profile)</span></label>
+              <div className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white/70 text-sm">
+                {CLAIMANT_TYPES.find(c => c.id === claimantType)?.label || claimantType}
+              </div>
             </div>
             <div>
-              <label className={lbl}>Branch</label>
-              <select value={branchId} onChange={e => setBranchId(e.target.value)} className={inp}>
-                {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
-              </select>
+              <label className={lbl}>Branch <span className="text-white/30 normal-case font-normal">(from your profile)</span></label>
+              <div className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white/70 text-sm">
+                {branches.find(b => b.branch_id === branchId)?.name || branchId}
+              </div>
             </div>
           </div>
 
+          {/* Yourself vs On behalf of */}
           <div>
-            <label className={lbl}>Claimant Name</label>
-            <input value={claimantName} onChange={e => setClaimantName(e.target.value)} className={inp}
-              placeholder="Your name (or person you're filing on behalf of)" />
+            <label className={lbl}>Filing for</label>
+            <div className="flex gap-2">
+              <button type="button"
+                onClick={() => { setOnBehalf(false); setBehalfOf(null); setBehalfQuery('') }}
+                className={`flex-1 px-4 py-2.5 rounded-xl border text-sm font-bold ${
+                  !onBehalf ? 'border-saffron-400/50 bg-saffron-400/10 text-saffron-200'
+                            : 'border-white/10 text-white/50'
+                }`}>
+                {!onBehalf ? '● ' : '○ '} Yourself
+              </button>
+              <button type="button"
+                onClick={() => setOnBehalf(true)}
+                className={`flex-1 px-4 py-2.5 rounded-xl border text-sm font-bold ${
+                  onBehalf  ? 'border-saffron-400/50 bg-saffron-400/10 text-saffron-200'
+                            : 'border-white/10 text-white/50'
+                }`}>
+                {onBehalf ? '● ' : '○ '} On behalf of someone
+              </button>
+            </div>
           </div>
+
+          {/* If yourself: show locked name. If on behalf: typeahead picker. */}
+          {!onBehalf ? (
+            <div>
+              <label className={lbl}>Claimant Name</label>
+              <div className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white/70 text-sm">
+                {me?.name || me?.email || '— logged-in user not detected —'}
+              </div>
+            </div>
+          ) : (
+            <div className="relative">
+              <label className={lbl}>Person you're filing for *</label>
+              {behalfOf ? (
+                <div className="flex items-center gap-2 bg-white/5 border border-saffron-400/40 rounded-xl px-3 py-2.5">
+                  <span className="text-saffron-300 text-sm">{behalfOf.source === 'employee' ? '👤' : '👥'}</span>
+                  <span className="flex-1 text-white text-sm font-semibold truncate">{behalfOf.name}</span>
+                  <span className="text-white/40 text-[10px] uppercase">{behalfOf.source === 'employee' ? 'employee' : 'contact'}</span>
+                  <button type="button" onClick={() => setBehalfOf(null)}
+                    className="text-white/40 hover:text-red-400 text-lg leading-none">✕</button>
+                </div>
+              ) : (
+                <input
+                  value={behalfQuery}
+                  onFocus={() => setBehalfOpen(true)}
+                  onChange={e => { setBehalfQuery(e.target.value); setBehalfOpen(true) }}
+                  placeholder="Search employees first, then contacts…"
+                  className={inp}
+                />
+              )}
+              {behalfOpen && !behalfOf && (
+                <div className="absolute z-30 mt-1 w-full bg-temple-deep border border-white/10 rounded-xl shadow-2xl max-h-[260px] overflow-y-auto">
+                  {behalfLoading && <div className="px-3 py-3 text-white/40 text-xs">Searching…</div>}
+                  {!behalfLoading && behalfResults.length === 0 && (
+                    <div className="px-3 py-3 text-white/40 text-xs">No matches in employees or contacts.</div>
+                  )}
+                  {behalfResults.map(r => (
+                    <button key={`${r.source}-${r.id}`} type="button"
+                      onClick={() => { setBehalfOf(r); setBehalfOpen(false); setBehalfQuery('') }}
+                      className="w-full text-left px-3 py-2 hover:bg-white/5 border-b border-white/5 last:border-b-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{r.source === 'employee' ? '👤' : '👥'}</span>
+                        <span className="text-white text-sm font-semibold">{r.name}</span>
+                        <span className="text-white/40 text-[10px] uppercase ml-auto">{r.source}</span>
+                      </div>
+                      {r.email && <div className="text-white/40 text-[10px] mt-0.5 ml-7">{r.email}</div>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
