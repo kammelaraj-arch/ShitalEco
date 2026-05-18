@@ -243,6 +243,39 @@ docker image prune -f
 # --force-recreate) creates it from compose. This runs BEFORE the rolling
 # restart so the force-recreate phase below has something to recreate
 # (and doesn't no-op on a missing container).
+
+# Robustness pre-step 1: load .env so subsequent `docker compose` calls
+# don't recreate containers with blank POSTGRES_PASSWORD / JWT_SECRET.
+# If the deploy doesn't load these and a force-recreate fires, the new
+# container ends up with no DB password and a broken JWT signer.
+if [ -f /workspace/.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /workspace/.env
+  set +a
+fi
+
+# Robustness pre-step 2: sweep up docker's auto-renamed stale containers.
+# When `docker compose up` tries to create a container whose name is
+# already taken by a stuck/zombie container, docker auto-renames the old
+# one to `<short_hex>_<original>` and the new one fails to start —
+# leaving BOTH in Created state and blocking every subsequent up -d.
+# This is exactly how dev ended up with bd9a41c5ffb0_*-admin-dev-1
+# blocking shitaleco-dev-admin-dev-1 from starting after a merge train.
+# Find anything matching that pattern and remove it BEFORE up -d.
+echo "=== Sweeping renamed-by-docker stale containers ==="
+STALE=$(docker ps -a --format '{{.Names}}' \
+  | grep -E '^[0-9a-f]{12}_shital' || true)
+if [ -n "$STALE" ]; then
+  echo "$STALE" | while read -r c; do
+    [ -z "$c" ] && continue
+    echo "  rm $c (auto-renamed zombie)"
+    docker rm -f "$c" >/dev/null 2>&1 || true
+  done
+else
+  echo "  none"
+fi
+
 echo "=== Ensure all required ${STACK_NAME} containers exist ==="
 if [ "$TARGET" = "dev" ]; then
   REQUIRED_SERVICES="db-dev backend-dev admin-dev quick-donation-dev kiosk-dev screen-dev nginx-dev"
@@ -251,27 +284,61 @@ else
 fi
 docker compose -f "$COMPOSE" up -d --no-deps $REQUIRED_SERVICES 2>&1 | tail -30 || true
 
-# Quick audit — log any required service that's still missing/stopped.
-# If one is, we DON'T abort the deploy (`up -d` already tried), but the
-# warning lands in /var/log/shital-ops.log so it's actionable.
-MISSING=""
-for svc in $REQUIRED_SERVICES; do
-  # The compose-named container is shitaleco-${svc}-1 (prod) or
-  # shitaleco-dev-${svc}-1 (dev). Both forms checked.
-  if [ "$TARGET" = "dev" ]; then
-    cname="shitaleco-dev-${svc}-1"
-  else
-    cname="shitaleco-${svc}-1"
-  fi
-  state=$(docker inspect "$cname" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
-  if [ "$state" != "running" ] && [ "$state" != "restarting" ]; then
-    echo "  !!! ${cname} is '${state}' (expected running)"
-    MISSING="${MISSING} ${cname}"
-  fi
+# Audit + self-heal — if any required service is not running, force-recreate
+# it specifically (covers the 'Created but never started' state that blocked
+# dev admin/nginx after the big merge train: docker compose up -d created
+# the container but a stale rename left it stuck, and the audit was
+# warn-only so nothing healed it). We retry up to twice with --force-recreate
+# before giving up loud. This makes the deploy idempotent: re-running it
+# converges on the desired state instead of leaving the stack half-broken.
+audit_and_heal() {
+  local attempt="$1"
+  local missing=""
+  for svc in $REQUIRED_SERVICES; do
+    if [ "$TARGET" = "dev" ]; then
+      cname="shitaleco-dev-${svc}-1"
+    else
+      cname="shitaleco-${svc}-1"
+    fi
+    state=$(docker inspect "$cname" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
+    if [ "$state" != "running" ] && [ "$state" != "restarting" ]; then
+      echo "  !!! ${cname} is '${state}' (expected running) — attempt ${attempt}"
+      missing="${missing} ${svc}"
+    fi
+  done
+  echo "${missing# }"
+}
+
+NEED_HEAL=$(audit_and_heal 1)
+HEAL_ATTEMPT=0
+while [ -n "$NEED_HEAL" ] && [ "$HEAL_ATTEMPT" -lt 2 ]; do
+  HEAL_ATTEMPT=$((HEAL_ATTEMPT + 1))
+  echo "=== Self-heal attempt ${HEAL_ATTEMPT}: force-recreating ${NEED_HEAL} ==="
+  # rm any 'Created' (never-started) instances so up -d doesn't no-op on
+  # them — this is the actual failure mode dev hit (Created admin-dev +
+  # nginx-dev stayed Created forever because up -d sees them present).
+  for svc in $NEED_HEAL; do
+    if [ "$TARGET" = "dev" ]; then
+      cname="shitaleco-dev-${svc}-1"
+    else
+      cname="shitaleco-${svc}-1"
+    fi
+    s=$(docker inspect "$cname" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
+    if [ "$s" = "created" ] || [ "$s" = "exited" ]; then
+      echo "  rm $cname ($s)"
+      docker rm -f "$cname" >/dev/null 2>&1 || true
+    fi
+  done
+  # shellcheck disable=SC2086
+  docker compose -f "$COMPOSE" up -d --no-deps --force-recreate $NEED_HEAL 2>&1 | tail -20 || true
+  sleep 5
+  NEED_HEAL=$(audit_and_heal "post-heal-${HEAL_ATTEMPT}")
 done
+
+MISSING="$NEED_HEAL"
 if [ -n "$MISSING" ]; then
-  echo "!!! Some required containers are not running:${MISSING}"
-  echo "!!! `up -d --no-deps` was attempted; check the lines above for compose errors."
+  echo "!!! Some required containers are STILL not running after ${HEAL_ATTEMPT} self-heal attempts: ${MISSING}"
+  echo "!!! Check `docker logs <container>` and the compose file for env-var errors."
 fi
 
 # ── Rolling restart — backend first ─────────────────────────────────────────
