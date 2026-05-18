@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { Pagination } from '@/components/ui/Pagination'
+import { AccountPicker } from '@/components/ui/AccountPicker'
 
 interface PILine {
   id?: string
@@ -269,7 +270,7 @@ function CreateForm({ open, onClose, onSaved, branches, codes }: {
   branches: Branch[]; codes: NominalCode[]
 }) {
   const [branchId, setBranchId] = useState('main')
-  const [supplierName, setSupplierName] = useState('')
+  const [supplier, setSupplier] = useState<{ id: string; name: string } | null>(null)
   const [supplierRef, setSupplierRef] = useState('')
   const [poId, setPoId] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0])
@@ -303,7 +304,7 @@ function CreateForm({ open, onClose, onSaved, branches, codes }: {
   const vatTotal = lines.reduce((s, l) => s + ((Number(l.quantity) || 0) * (Number(l.unit_price) || 0)) * (Number(l.vat_rate) || 0) / 100, 0)
 
   async function submit() {
-    if (!supplierName.trim()) { setError('Supplier name is required'); return }
+    if (!supplier) { setError('Pick a supplier from CRM Accounts'); return }
     if (lines.some(l => !l.description.trim() || l.quantity <= 0)) {
       setError('Every line needs a description and quantity > 0'); return
     }
@@ -312,7 +313,9 @@ function CreateForm({ open, onClose, onSaved, branches, codes }: {
       await apiFetch('/admin/purchase-invoices', {
         method: 'POST',
         body: JSON.stringify({
-          branch_id: branchId, supplier_name: supplierName.trim(),
+          branch_id: branchId,
+          supplier_account_id: supplier.id,
+          supplier_name: supplier.name,
           supplier_invoice_number: supplierRef.trim(),
           po_id: poId || null,
           invoice_date: invoiceDate, due_date: dueDate,
@@ -358,8 +361,9 @@ function CreateForm({ open, onClose, onSaved, branches, codes }: {
               </div>
 
               <div>
-                <label className={lbl}>Supplier *</label>
-                <input value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="Supplier name" className={inp} />
+                <label className={lbl}>Supplier * <span className="text-white/40 font-normal normal-case">(from CRM Accounts)</span></label>
+                <AccountPicker accountType="supplier" value={supplier} onChange={setSupplier}
+                  placeholder="Search CRM suppliers…" required />
               </div>
 
               <div className="grid grid-cols-2 gap-3">

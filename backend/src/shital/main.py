@@ -2098,6 +2098,11 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_purchase_orders_status  ON purchase_orders(status)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_orders_date    ON purchase_orders(order_date DESC)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_orders_supp    ON purchase_orders(supplier_contact_id)",
+        # Link PO to a CRM account (single source of truth for supplier name).
+        # supplier_name is kept as a denormalised snapshot for historical
+        # accuracy if the account is later renamed/merged.
+        "ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS supplier_account_id UUID",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_orders_supp_acc ON purchase_orders(supplier_account_id)",
         """CREATE TABLE IF NOT EXISTS purchase_order_lines (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             po_id           UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
@@ -2146,6 +2151,10 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_sales_invoices_status ON sales_invoices(status)",
         "CREATE INDEX IF NOT EXISTS idx_sales_invoices_date   ON sales_invoices(invoice_date DESC)",
         "CREATE INDEX IF NOT EXISTS idx_sales_invoices_cust   ON sales_invoices(customer_contact_id)",
+        # Link sales invoice to a CRM account (single source of truth for
+        # customer name). customer_name kept as denormalised snapshot.
+        "ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS customer_account_id UUID",
+        "CREATE INDEX IF NOT EXISTS idx_sales_invoices_cust_acc ON sales_invoices(customer_account_id)",
         """CREATE TABLE IF NOT EXISTS sales_invoice_lines (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             invoice_id      UUID NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
@@ -2199,6 +2208,9 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_status ON purchase_invoices(status)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_date   ON purchase_invoices(invoice_date DESC)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_supp   ON purchase_invoices(supplier_contact_id)",
+        # Link bill to a CRM account (single source of truth for supplier name).
+        "ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS supplier_account_id UUID",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_supp_acc ON purchase_invoices(supplier_account_id)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_po     ON purchase_invoices(po_id)",
         # Partial unique index: dedupes per supplier on their external invoice
         # number (only enforced when both are present).

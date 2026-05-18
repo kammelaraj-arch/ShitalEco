@@ -63,6 +63,11 @@ class LineIn(BaseModel):
 
 class POIn(BaseModel):
     branch_id: str = "main"
+    # supplier MUST be picked from CRM Accounts — the typeahead picker
+    # on the admin form returns an account_id. supplier_name is a
+    # denormalised snapshot kept so historical POs still render the
+    # original name if the account is later renamed/merged in CRM.
+    supplier_account_id: str | None = None
     supplier_contact_id: str | None = None
     supplier_name: str = ""
     order_date: str = ""    # YYYY-MM-DD; defaults to today
@@ -76,6 +81,8 @@ class POIn(BaseModel):
 
 class InvoiceIn(BaseModel):
     branch_id: str = "main"
+    # customer MUST be picked from CRM Accounts — see POIn comment.
+    customer_account_id: str | None = None
     customer_contact_id: str | None = None
     customer_name: str = ""
     invoice_date: str = ""
@@ -141,6 +148,52 @@ def _row(r: Any) -> dict[str, Any]:
             except (TypeError, ValueError):
                 d[k] = str(v)
     return d
+
+
+async def _resolve_account_name(
+    db: Any, account_id: str | None, fallback_name: str,
+    expected_type: str,
+) -> tuple[str | None, str]:
+    """Look up a CRM account by id. Returns (validated_id, canonical_name).
+
+    Suppliers/customers MUST be CRM accounts — free-text supplier_name
+    is no longer authoritative. If account_id is given, we resolve the
+    canonical name from `crm_accounts.name` and use that. If only
+    fallback_name is given, we accept it for backwards compatibility
+    with existing imports (the trustee can link to a real account later)
+    but warn loudly so manual entries are visible in the audit log.
+
+    expected_type is 'supplier' or 'customer' — we accept the matching
+    account_type plus the legacy aliases ('vendor' counts as supplier,
+    'donor' / 'partner' are not supplier/customer). A mismatch returns
+    409 so the trustee can't accidentally bill a donor.
+    """
+    if not account_id:
+        return None, (fallback_name or "").strip()
+
+    from sqlalchemy import text
+    row = (await db.execute(
+        text("""
+            SELECT id, name, account_type, status
+            FROM   crm_accounts
+            WHERE  id = :id AND deleted_at IS NULL
+        """), {"id": account_id},
+    )).mappings().first()
+    if not row:
+        raise HTTPException(404, detail=f"CRM account {account_id} not found")
+    if row["status"] != "active":
+        raise HTTPException(409, detail=f"CRM account is {row['status']}, not active")
+
+    valid_types = (
+        {"supplier", "vendor"} if expected_type == "supplier"
+        else {"customer"}
+    )
+    if row["account_type"] not in valid_types:
+        raise HTTPException(409, detail=(
+            f"CRM account is type '{row['account_type']}', not a {expected_type}. "
+            f"Change the account type in CRM or pick a different account."
+        ))
+    return str(row["id"]), row["name"]
 
 
 async def _next_number(db: Any, prefix: str, branch_id: str) -> str:
@@ -262,16 +315,22 @@ async def create_purchase_order(body: POIn, ctx: CurrentSpace) -> dict[str, Any]
     for attempt in range(5):
         async with SessionLocal() as db:
             po_number = await _next_number(db, "PO", branch_id)
+            # Supplier MUST come from CRM Accounts. If account_id is given,
+            # we pull the canonical name; otherwise fall back to the typed
+            # string (legacy import path — admin should link later).
+            supplier_account_id, supplier_name = await _resolve_account_name(
+                db, body.supplier_account_id, body.supplier_name, "supplier",
+            )
             try:
                 po = (await db.execute(text("""
                     INSERT INTO purchase_orders
-                        (po_number, branch_id, supplier_contact_id, supplier_name,
+                        (po_number, branch_id, supplier_account_id, supplier_contact_id, supplier_name,
                          status, order_date, expected_date, currency,
                          subtotal, vat_total, total,
                          notes, reference, delivery_address, created_by,
                          created_at, updated_at)
                     VALUES
-                        (:num, :bid, :sid, :sname,
+                        (:num, :bid, :sacc, :sid, :sname,
                          'DRAFT', :odate, :edate, :curr,
                          :sub, :vat, :tot,
                          :notes, :ref, :addr, :cby,
@@ -279,8 +338,9 @@ async def create_purchase_order(body: POIn, ctx: CurrentSpace) -> dict[str, Any]
                     RETURNING *
                 """), {
                     "num":   po_number, "bid": branch_id,
+                    "sacc":  supplier_account_id,
                     "sid":   body.supplier_contact_id or None,
-                    "sname": body.supplier_name.strip(),
+                    "sname": supplier_name,
                     "odate": order_date, "edate": expected_date,
                     "curr":  (body.currency or "GBP").upper()[:3],
                     "sub":   round(subtotal, 2), "vat": round(vat_total, 2), "tot": total,
@@ -379,9 +439,14 @@ async def update_purchase_order(po_id: str, body: POIn, ctx: CurrentSpace) -> di
         if row["status"] != "DRAFT":
             raise HTTPException(409, detail=f"Only DRAFT can be edited (status={row['status']})")
 
+        supplier_account_id, supplier_name = await _resolve_account_name(
+            db, body.supplier_account_id, body.supplier_name, "supplier",
+        )
+
         await db.execute(text("""
             UPDATE purchase_orders SET
                 branch_id           = :bid,
+                supplier_account_id = :sacc,
                 supplier_contact_id = :sid,
                 supplier_name       = :sname,
                 order_date          = :odate,
@@ -397,8 +462,9 @@ async def update_purchase_order(po_id: str, body: POIn, ctx: CurrentSpace) -> di
             WHERE id = :id
         """), {
             "id":   po_id, "bid": (body.branch_id or "main").strip(),
+            "sacc": supplier_account_id,
             "sid":  body.supplier_contact_id or None,
-            "sname": body.supplier_name.strip(),
+            "sname": supplier_name,
             "odate": order_date, "edate": expected_date,
             "curr": (body.currency or "GBP").upper()[:3],
             "sub":  round(subtotal, 2), "vat": round(vat_total, 2), "tot": total,
@@ -789,16 +855,19 @@ async def create_sales_invoice(body: InvoiceIn, ctx: CurrentSpace) -> dict[str, 
     for attempt in range(5):
         async with SessionLocal() as db:
             invoice_number = await _next_number(db, "INV", branch_id)
+            customer_account_id, customer_name = await _resolve_account_name(
+                db, body.customer_account_id, body.customer_name, "customer",
+            )
             try:
                 inv = (await db.execute(text("""
                     INSERT INTO sales_invoices
-                        (invoice_number, branch_id, customer_contact_id, customer_name,
+                        (invoice_number, branch_id, customer_account_id, customer_contact_id, customer_name,
                          status, invoice_date, due_date, currency,
                          subtotal, vat_total, total, paid_total,
                          notes, reference, billing_address, created_by,
                          created_at, updated_at)
                     VALUES
-                        (:num, :bid, :cid, :cname,
+                        (:num, :bid, :cacc, :cid, :cname,
                          'DRAFT', :idate, :ddate, :curr,
                          :sub, :vat, :tot, 0,
                          :notes, :ref, :addr, :cby,
@@ -806,8 +875,9 @@ async def create_sales_invoice(body: InvoiceIn, ctx: CurrentSpace) -> dict[str, 
                     RETURNING *
                 """), {
                     "num":   invoice_number, "bid": branch_id,
+                    "cacc":  customer_account_id,
                     "cid":   body.customer_contact_id or None,
-                    "cname": body.customer_name.strip(),
+                    "cname": customer_name,
                     "idate": invoice_date, "ddate": due_date,
                     "curr":  (body.currency or "GBP").upper()[:3],
                     "sub":   round(subtotal, 2), "vat": round(vat_total, 2), "tot": total,
@@ -906,9 +976,14 @@ async def update_sales_invoice(inv_id: str, body: InvoiceIn, ctx: CurrentSpace) 
         if row["status"] != "DRAFT":
             raise HTTPException(409, detail=f"Only DRAFT can be edited (status={row['status']})")
 
+        customer_account_id, customer_name = await _resolve_account_name(
+            db, body.customer_account_id, body.customer_name, "customer",
+        )
+
         await db.execute(text("""
             UPDATE sales_invoices SET
                 branch_id           = :bid,
+                customer_account_id = :cacc,
                 customer_contact_id = :cid,
                 customer_name       = :cname,
                 invoice_date        = :idate,
@@ -924,8 +999,9 @@ async def update_sales_invoice(inv_id: str, body: InvoiceIn, ctx: CurrentSpace) 
             WHERE id = :id
         """), {
             "id":   inv_id, "bid": (body.branch_id or "main").strip(),
+            "cacc": customer_account_id,
             "cid":  body.customer_contact_id or None,
-            "cname": body.customer_name.strip(),
+            "cname": customer_name,
             "idate": invoice_date, "ddate": due_date,
             "curr": (body.currency or "GBP").upper()[:3],
             "sub":  round(subtotal, 2), "vat": round(vat_total, 2), "tot": total,
@@ -1231,6 +1307,8 @@ PURCHASE_INVOICE_STATUSES = {"DRAFT", "RECEIVED", "PART_PAID", "PAID", "VOID"}
 
 class PurchaseInvoiceIn(BaseModel):
     branch_id: str = "main"
+    # supplier MUST be picked from CRM Accounts — see POIn comment.
+    supplier_account_id: str | None = None
     supplier_contact_id: str | None = None
     supplier_name: str = ""
     supplier_invoice_number: str = ""
@@ -1367,24 +1445,29 @@ async def create_purchase_invoice(body: PurchaseInvoiceIn, ctx: CurrentSpace) ->
     for attempt in range(5):
         async with SessionLocal() as db:
             invoice_number = await _next_number(db, "BILL", branch_id)
+            supplier_account_id, supplier_name = await _resolve_account_name(
+                db, body.supplier_account_id, body.supplier_name, "supplier",
+            )
             try:
                 inv = (await db.execute(text("""
                     INSERT INTO purchase_invoices
                         (invoice_number, supplier_invoice_number, branch_id,
-                         supplier_contact_id, supplier_name, po_id,
+                         supplier_account_id, supplier_contact_id, supplier_name, po_id,
                          status, invoice_date, due_date, currency,
                          subtotal, vat_total, total, paid_total,
                          notes, reference, created_by, created_at, updated_at)
                     VALUES
-                        (:num, :sref, :bid, :sid, :sname, :poid,
+                        (:num, :sref, :bid, :sacc, :sid, :sname, :poid,
                          'DRAFT', :idate, :ddate, :curr,
                          :sub, :vat, :tot, 0,
                          :notes, :ref, :cby, :now, :now)
                     RETURNING *
                 """), {
                     "num":  invoice_number, "sref": body.supplier_invoice_number.strip(),
-                    "bid":  branch_id, "sid": body.supplier_contact_id or None,
-                    "sname": body.supplier_name.strip(),
+                    "bid":  branch_id,
+                    "sacc": supplier_account_id,
+                    "sid":  body.supplier_contact_id or None,
+                    "sname": supplier_name,
                     "poid": body.po_id or None,
                     "idate": invoice_date, "ddate": due_date,
                     "curr": (body.currency or "GBP").upper()[:3],
@@ -1451,6 +1534,7 @@ async def create_purchase_invoice_from_po(po_id: str, ctx: CurrentSpace) -> dict
 
     body = PurchaseInvoiceIn(
         branch_id=po["branch_id"],
+        supplier_account_id=str(po["supplier_account_id"]) if po.get("supplier_account_id") else None,
         supplier_contact_id=str(po["supplier_contact_id"]) if po["supplier_contact_id"] else None,
         supplier_name=po["supplier_name"] or "",
         po_id=str(po["id"]),
@@ -1503,9 +1587,13 @@ async def update_purchase_invoice(inv_id: str, body: PurchaseInvoiceIn, ctx: Cur
             raise HTTPException(404, detail="Purchase invoice not found")
         if row["status"] != "DRAFT":
             raise HTTPException(409, detail=f"Only DRAFT can be edited (status={row['status']})")
+        supplier_account_id, supplier_name = await _resolve_account_name(
+            db, body.supplier_account_id, body.supplier_name, "supplier",
+        )
         await db.execute(text("""
             UPDATE purchase_invoices SET
                 branch_id               = :bid,
+                supplier_account_id     = :sacc,
                 supplier_contact_id     = :sid,
                 supplier_name           = :sname,
                 supplier_invoice_number = :sref,
@@ -1522,8 +1610,9 @@ async def update_purchase_invoice(inv_id: str, body: PurchaseInvoiceIn, ctx: Cur
             WHERE id = :id
         """), {
             "id":   inv_id, "bid": (body.branch_id or "main").strip(),
+            "sacc": supplier_account_id,
             "sid":  body.supplier_contact_id or None,
-            "sname": body.supplier_name.strip(),
+            "sname": supplier_name,
             "sref": body.supplier_invoice_number.strip(),
             "poid": body.po_id or None,
             "idate": invoice_date, "ddate": due_date,
