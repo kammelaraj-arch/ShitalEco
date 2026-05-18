@@ -2,7 +2,7 @@ name: Build Kiosk Apps
 
 on:
   push:
-    branches: [claude/shital-erp-platform-iR2UF, main]
+    branches: [claude/shital-erp-platform-iR2UF, claude/fix-access-payment-stability-Q40dj, main]
     paths:
       - 'apps/kiosk/**'
       - '.github/workflows/build-kiosk.yml'
@@ -129,6 +129,22 @@ jobs:
       - name: Sync web assets into Android project
         working-directory: apps/kiosk
         run: npx cap sync android --inline
+      - name: Apply kiosk-mode overlay
+        working-directory: apps/kiosk
+        # Copies our MainActivity / boot receiver / device-admin receiver into
+        # the generated Android project, then patches AndroidManifest.xml to
+        # turn the plain Capacitor wrapper into a real single-app kiosk
+        # (immersive, screen-always-on, lock-task on device-owner devices).
+        run: |
+          mkdir -p android/app/src/main/java/org/shital/kiosk
+          mkdir -p android/app/src/main/res/xml
+          cp android-kiosk-overlay/MainActivity.java              android/app/src/main/java/org/shital/kiosk/MainActivity.java
+          cp android-kiosk-overlay/KioskDeviceAdminReceiver.java  android/app/src/main/java/org/shital/kiosk/KioskDeviceAdminReceiver.java
+          cp android-kiosk-overlay/KioskBootReceiver.java         android/app/src/main/java/org/shital/kiosk/KioskBootReceiver.java
+          cp android-kiosk-overlay/res/xml/device_admin.xml       android/app/src/main/res/xml/device_admin.xml
+          python3 scripts/patch-manifest.py \
+            --manifest android/app/src/main/AndroidManifest.xml \
+            --snippet  android-kiosk-overlay/AndroidManifest.kiosk-snippet.xml
       - name: Set Gradle permissions
         working-directory: apps/kiosk/android
         run: chmod +x gradlew
