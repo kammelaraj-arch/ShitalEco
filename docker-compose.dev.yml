@@ -102,6 +102,17 @@ services:
       - backend-dev
     networks:
       - dev-internal
+    # Bulletproof self-recovery: without a healthcheck, docker's
+    # restart:unless-stopped can't tell when nginx inside the container
+    # is wedged (only when the process crashes). The healthcheck makes
+    # docker flip the container to (unhealthy) which deploy.sh's audit
+    # treats as 'needs heal' and the watchdog rotates it on the next sweep.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/admin/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   quick-donation-dev:
     image: ghcr.io/kammelaraj-arch/shitaleco-quick-donation:dev
@@ -187,6 +198,15 @@ services:
       - screen-dev
     networks:
       - dev-internal
+    # Same rationale as admin-dev — nginx-dev had no healthcheck so docker
+    # couldn't tell when the reverse proxy was wedged. wget hits the dev
+    # hub static page which nginx serves directly (no upstream needed).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
 volumes:
   pgdata-dev:
