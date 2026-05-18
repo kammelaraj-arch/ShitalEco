@@ -57,6 +57,16 @@ async def hr_alerts(ctx: CurrentSpace, branch_id: str = "",
     severity (red first) then by due date ascending. Stats counters
     let the dashboard show a count-by-severity tile."""
     _require(ctx)
+    # Same root cause as the leave-page bug from PR #100: `dbs_check_status`,
+    # `visa_type`, `share_code_expiry` etc are ALTERed in via
+    # `_ensure_hr_tables()` (lazy on first POST), not in main.py's
+    # `_patch_schema()` (startup). On a backend that hasn't received any
+    # leave/timesheet POST yet, those columns are missing and the SELECT
+    # below returns "column does not exist". Calling _ensure_hr_tables()
+    # here makes the GET self-healing; idempotent + cheap on subsequent calls.
+    from shital.capabilities.hr.capabilities import _ensure_hr_tables
+    await _ensure_hr_tables()
+
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
