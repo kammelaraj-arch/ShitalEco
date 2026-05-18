@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Device-admin policy descriptor — referenced from AndroidManifest by
+  KioskDeviceAdminReceiver. Empty <uses-policies/> because the app only
+  needs to BE the device owner so it can call setLockTaskPackages() and
+  startLockTask(); it does not exercise password / wipe / encryption
+  policies. Trying to declare unused policies fails Play Console review.
+-->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+        <!-- intentionally empty -->
+    </uses-policies>
+</device-admin>
