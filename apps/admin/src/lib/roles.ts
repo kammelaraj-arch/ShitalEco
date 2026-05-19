@@ -76,11 +76,17 @@ export const ROLES: RoleDef[] = [
   { id: 'SUPER_ADMIN',         label: 'Super Admin',         desc: 'Full system access',                      tier: 'admin',      exec: 'na',       level: 100, color: '#ef4444', bg: '#fef2f2' },
 
   // ─── Main board ──────────────────────────────────────────────────────
-  // Exec / non-exec follows Charity Commission convention: the CEO is the
-  // sole executive trustee; Chair / Treasurer / Secretary / lay trustees
-  // are all non-executive officers whose job is oversight, not management.
+  // Exec / non-exec follows Charity Commission convention: at this charity's
+  // size (~£500k-£800k turnover, 25 staff, 4 branches) best practice — and
+  // CC11 — is that the CEO is a paid senior staff officer who attends Board
+  // meetings as a non-voting executive, NOT a voting trustee. So the
+  // exec/non-exec distinction (which is a trustee-only categorisation)
+  // doesn't apply to the CEO and is rendered as N/A. If the constitution
+  // ever makes the CEO a voting trustee, flip this back to 'exec'.
+  // The lay Chair / Treasurer / Secretary / general trustees are all
+  // non-executive officers whose job is oversight, not management.
   { id: 'CHAIR',               label: 'Chair',               desc: 'Chair of the Board of Trustees',          tier: 'main_board', exec: 'non_exec', level:  95, color: '#d97706', bg: '#fffbeb' },
-  { id: 'CEO',                 label: 'CEO',                 desc: 'Chief Executive (executive trustee)',     tier: 'main_board', exec: 'exec',     level:  90, color: '#d97706', bg: '#fffbeb' },
+  { id: 'CEO',                 label: 'CEO',                 desc: 'Chief Executive (senior staff officer)',  tier: 'main_board', exec: 'na',       level:  90, color: '#d97706', bg: '#fffbeb' },
   { id: 'TREASURER',           label: 'Treasurer',           desc: 'Lead trustee for finance',                 tier: 'main_board', exec: 'non_exec', level:  88, color: '#d97706', bg: '#fffbeb' },
   { id: 'SECRETARY',           label: 'Secretary',           desc: 'Board records and resolutions',            tier: 'main_board', exec: 'non_exec', level:  85, color: '#d97706', bg: '#fffbeb' },
   { id: 'TRUSTEE',             label: 'Trustee',             desc: 'General trustee — no specific portfolio',  tier: 'main_board', exec: 'non_exec', level:  80, color: '#d97706', bg: '#fffbeb' },
