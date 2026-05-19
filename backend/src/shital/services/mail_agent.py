@@ -757,8 +757,18 @@ async def sweep_once() -> dict[str, Any]:
         return {"skipped": "no MAIL_AGENT_MAILBOXES configured"}
 
     out: dict[str, Any] = {"swept_at": datetime.now(UTC).isoformat(), "mailboxes": {}}
+    # Hard floor: never reach further back than MAIL_AGENT_LOOKBACK_DAYS. On
+    # a first sweep (no rows in mail_agent_messages) this prevents the agent
+    # from trying to triage years of accounts@ history. On a resumed sweep
+    # where the agent has been paused longer than the floor, this keeps the
+    # backlog bounded.
+    from datetime import timedelta
+    floor_dt = datetime.now(UTC) - timedelta(days=settings.MAIL_AGENT_LOOKBACK_DAYS)
+    floor_iso = floor_dt.isoformat().replace("+00:00", "Z")
+
     for mailbox in mailboxes:
-        # Resume from last successful processed message — sliding 30-day floor
+        # Resume from last successful processed message, but never further
+        # back than the lookback floor.
         async with SessionLocal() as db:
             row = (await db.execute(text("""
                 SELECT MAX(received_at) AS last_rcv
@@ -766,8 +776,12 @@ async def sweep_once() -> dict[str, Any]:
                 WHERE mailbox = :mb AND status = 'done'
             """), {"mb": mailbox})).first()
         last_rcv: datetime | None = row[0] if row else None
-        since = (last_rcv.astimezone(UTC).isoformat().replace("+00:00", "Z")
-                 if last_rcv else None)
+        if last_rcv is None:
+            since = floor_iso
+        else:
+            last_rcv_utc = last_rcv.astimezone(UTC)
+            effective_since = max(last_rcv_utc, floor_dt)
+            since = effective_since.isoformat().replace("+00:00", "Z")
         try:
             msgs = await mb.list_new_messages(mailbox, since_iso=since)
         except Exception as exc:

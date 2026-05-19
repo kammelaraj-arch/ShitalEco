@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     MAIL_AGENT_POLL_SECONDS: int = 300        # 5 min; 0 = disabled
     MAIL_AGENT_MODEL: str = "claude-opus-4-7"  # used for the agentic loop
     MAIL_AGENT_MAX_ITER: int = 15             # cap tool turns per email
+    # Hard floor on how far back to look on the first sweep. Without this,
+    # a fresh prod install would try to triage years of accounts@ history
+    # on first run — slow, expensive, and mostly noise. After the first
+    # sweep, the poller resumes from the newest processed message and the
+    # floor only matters again if the DB is wiped or the agent is paused
+    # for longer than the floor.
+    MAIL_AGENT_LOOKBACK_DAYS: int = 10
     # ── Optional service-account auth ─────────────────────────────────────
     # Either set these two for delegated OAuth (ROPC, "Resource Owner Password
     # Credentials" grant) using a service account that has been granted
