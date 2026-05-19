@@ -8,6 +8,11 @@ on:
       - '.github/workflows/build-kiosk.yml'
   workflow_dispatch:
 
+# `publish-android` needs to create/update releases — default GITHUB_TOKEN is
+# read-only on push events from non-default branches.
+permissions:
+  contents: write
+
 jobs:
   # ─── Windows x64 installer ──────────────────────────────────────────────────
   build-windows:
@@ -157,3 +162,45 @@ jobs:
           name: kiosk-android
           path: apps/kiosk/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  # ─── Publish APK to a stable GitHub Release download URL ────────────────────
+  # Maintains a rolling `kiosk-latest` tag/release so the APK is always at:
+  #   https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-kiosk-latest.apk
+  # No clicking through Actions runs — bookmark that URL on your phone and tap.
+  publish-android:
+    needs: build-android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kiosk-android
+          path: ./out
+      - name: Rename APK with commit SHA
+        run: |
+          mkdir -p release
+          cp out/app-debug.apk release/shital-kiosk-latest.apk
+          cp out/app-debug.apk "release/shital-kiosk-${GITHUB_SHA::7}.apk"
+          ls -lh release/
+      - name: Move kiosk-latest tag to this commit
+        # `gh release create` would fail if the release already exists — delete
+        # then recreate is the simplest cross-event-type pattern. Tag is
+        # force-moved to the current SHA so anyone who clones can `git checkout
+        # kiosk-latest` to reproduce exactly what's in the released APK.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete kiosk-latest --cleanup-tag --yes || true
+          gh release create kiosk-latest \
+            --title "Kiosk APK — latest build" \
+            --notes "Built from ${GITHUB_SHA::7} on $(date -u +'%Y-%m-%d %H:%M UTC'). Download \`shital-kiosk-latest.apk\` and install on the phone — see apps/kiosk/ANDROID_KIOSK.md for the locked-down provisioning steps." \
+            --target "$GITHUB_SHA" \
+            release/shital-kiosk-latest.apk \
+            "release/shital-kiosk-${GITHUB_SHA::7}.apk"
+      - name: Print download URL
+        run: |
+          echo ""
+          echo "📲  APK download URL (stable):"
+          echo "    https://github.com/${{ github.repository }}/releases/download/kiosk-latest/shital-kiosk-latest.apk"
+          echo ""
