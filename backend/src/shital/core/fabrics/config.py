@@ -42,7 +42,11 @@ class Settings(BaseSettings):
     # Mail Agent — agentic triage of shared mailboxes
     # Comma-separated list of mailbox UPNs the agent should poll. Empty → agent disabled.
     # Service account in Azure AD must have ApplicationAccessPolicy granting access to each.
-    MAIL_AGENT_MAILBOXES: str = "accounts@shirdisai.org.uk,trustees@shirdisai.org.uk,info@shirdisai.org.uk"
+    # Pilot scope: accounts@ only — invoices and payment confirmations have the
+    # clearest structured output for an agentic loop to handle well. Once that's
+    # proven (clean classifications, no false-positive invoices, reasonable
+    # supplier matching), add trustees@ and info@ via env var override.
+    MAIL_AGENT_MAILBOXES: str = "accounts@shirdisai.org.uk"
     MAIL_AGENT_POLL_SECONDS: int = 300        # 5 min; 0 = disabled
     MAIL_AGENT_MODEL: str = "claude-opus-4-7"  # used for the agentic loop
     MAIL_AGENT_MAX_ITER: int = 15             # cap tool turns per email
