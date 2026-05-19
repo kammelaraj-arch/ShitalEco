@@ -57,6 +57,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/compliance',        icon: '⚖️', label: 'Compliance' },
       { href: '/audit',             icon: '🔍', label: 'Audit Log' },
       { href: '/board',             icon: '🏛️', label: 'Board & Resolutions' },
+      { href: '/board/structure',   icon: '🗂️', label: 'Org Structure' },
       { href: '/board/trustees',    icon: '👤', label: 'Trustees' },
       { href: '/board/meetings',    icon: '📅', label: 'Meetings' },
       { href: '/board/resolutions', icon: '📜', label: 'Resolutions & Voting' },
