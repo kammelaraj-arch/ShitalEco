@@ -193,6 +193,49 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_assets_branch   ON assets(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_assets_category ON assets(category)",
+        # ── Key Register — custody of physical keys and digital access ──────
+        """CREATE TABLE IF NOT EXISTS key_register (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id VARCHAR(100) NOT NULL DEFAULT 'main',
+            name VARCHAR(200) NOT NULL,
+            key_type VARCHAR(30) NOT NULL DEFAULT 'PHYSICAL_KEY',
+            description TEXT NOT NULL DEFAULT '',
+            holder_employee_id UUID,
+            owner_employee_id UUID,
+            physical_location VARCHAR(200) NOT NULL DEFAULT '',
+            serial_number VARCHAR(100) NOT NULL DEFAULT '',
+            copies_count INTEGER NOT NULL DEFAULT 1,
+            vault_reference VARCHAR(500) NOT NULL DEFAULT '',
+            access_url VARCHAR(500) NOT NULL DEFAULT '',
+            username_hint VARCHAR(200) NOT NULL DEFAULT '',
+            provider VARCHAR(100) NOT NULL DEFAULT '',
+            status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+            issued_date DATE,
+            returned_date DATE,
+            expiry_date DATE,
+            last_rotated_date DATE,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_branch  ON key_register(branch_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_type    ON key_register(key_type) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_status  ON key_register(status)   WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_holder  ON key_register(holder_employee_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_expiry  ON key_register(expiry_date) WHERE expiry_date IS NOT NULL AND deleted_at IS NULL",
+        """CREATE TABLE IF NOT EXISTS key_register_events (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            key_id UUID NOT NULL,
+            event_type VARCHAR(30) NOT NULL,
+            actor_user_id UUID,
+            actor_name VARCHAR(200) NOT NULL DEFAULT '',
+            from_holder_id UUID,
+            to_holder_id UUID,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_events_key ON key_register_events(key_id, created_at DESC)",
         """CREATE TABLE IF NOT EXISTS bookings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             branch_id VARCHAR(100) NOT NULL DEFAULT 'main',
@@ -2651,6 +2694,7 @@ _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
 _mount("shital.api.routers.functions",        "router")
 _mount("shital.api.routers.assets",           "router")
+_mount("shital.api.routers.key_register",     "router")
 _mount("shital.api.routers.bookings_router",  "router")
 _mount("shital.api.routers.documents_router", "router")
 _mount("shital.api.routers.api_keys",         "router")

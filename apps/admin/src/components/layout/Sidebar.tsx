@@ -47,6 +47,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Operations',
     items: [
       { href: '/assets',            icon: '🏗️', label: 'Assets' },
+      { href: '/key-register',      icon: '🔐', label: 'Key Register' },
       { href: '/bookings',          icon: '📅', label: 'Bookings' },
       { href: '/documents',         icon: '📁', label: 'Documents' },
     ],
