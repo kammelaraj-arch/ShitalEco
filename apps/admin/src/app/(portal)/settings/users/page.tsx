@@ -22,13 +22,12 @@ interface User {
   created_at: string
 }
 
-// ─── Role config — sourced from the central registry at @/lib/roles ──────────
-// All other admin pages that show or pick a role (Board → Trustees, App
-// Permissions, etc.) import from the same module. To rename/add a role, edit
-// @/lib/roles.ts — this page renders from it automatically and also displays
-// the Board Positions list so admins manage everything here.
-import { SYSTEM_ROLES as ROLES, systemRoleInfo as roleInfo,
-         BOARD_POSITIONS, BOARD_TIER_LABELS } from '@/lib/roles'
+// ─── Role registry — single source of truth ──────────────────────────────────
+// All admin pages that show or pick a role (Board → Trustees, App Permissions,
+// etc.) import from @/lib/roles. To rename / add / remove a role, edit that
+// file — both this page and the Trustees module re-render automatically.
+import { ROLES, roleInfo, rolesByTier, TIER_ORDER, TIER_LABELS,
+         EXEC_LABELS } from '@/lib/roles'
 
 function RoleBadge({ role }: { role: string }) {
   const r = roleInfo(role)
@@ -395,41 +394,36 @@ export default function UsersPage() {
         <button onClick={load} className="px-4 py-2 rounded-xl bg-white/5 text-white/50 text-sm hover:bg-white/10">↻</button>
       </div>
 
-      {/* Role legend — system permission roles */}
+      {/* Unified roles registry — system permissions AND board positions
+          rendered together, grouped by tier, with exec / non-exec badges
+          where the distinction applies (Charity Commission convention). */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-white font-black text-sm mb-3">Role Permission Levels</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-          {ROLES.map(r => (
-            <div key={r.id} className="flex items-start gap-2.5 py-2 px-3 rounded-xl bg-white/2">
-              <div className="w-2 h-2 rounded-full flex-shrink-0 mt-0.5" style={{ background: r.color }} />
-              <span className="font-bold text-xs flex-shrink-0 w-24" style={{ color: r.color }}>{r.label}</span>
-              <span className="text-white/30 text-xs leading-snug flex-1 min-w-0">{r.desc}</span>
-              <span className="text-white/20 text-xs font-mono flex-shrink-0">L{r.level}</span>
-            </div>
-          ))}
+        <div className="flex items-baseline justify-between mb-4">
+          <h3 className="text-white font-black text-sm">All Roles</h3>
+          <span className="text-white/30 text-xs">Shared by Users, Trustees, App Permissions</span>
         </div>
-      </div>
-
-      {/* Board positions — single source of truth for the Trustees module */}
-      <div className="glass rounded-2xl p-5">
-        <div className="flex items-baseline justify-between mb-3">
-          <h3 className="text-white font-black text-sm">Board Positions</h3>
-          <span className="text-white/30 text-xs">Used by Board → Trustees</span>
-        </div>
-        {(['main_board', 'lmc', 'non_officer'] as const).map(tier => {
-          const items = BOARD_POSITIONS.filter(p => p.tier === tier)
+        {TIER_ORDER.map(tier => {
+          const items = rolesByTier()[tier]
           if (items.length === 0) return null
           return (
             <div key={tier} className="mb-4 last:mb-0">
               <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-2">
-                {BOARD_TIER_LABELS[tier]}
+                {TIER_LABELS[tier]}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                {items.map(p => (
-                  <div key={p.id} className="flex items-start gap-2.5 py-2 px-3 rounded-xl bg-white/2">
-                    <span className="font-bold text-xs flex-shrink-0 w-32 text-saffron-300">{p.label}</span>
-                    <span className="text-white/30 text-xs leading-snug flex-1 min-w-0">{p.desc || '—'}</span>
-                    <span className="text-white/20 text-xs font-mono flex-shrink-0">{p.id}</span>
+                {items.map(r => (
+                  <div key={r.id} className="flex items-start gap-2.5 py-2 px-3 rounded-xl bg-white/2">
+                    <div className="w-2 h-2 rounded-full flex-shrink-0 mt-0.5" style={{ background: r.color }} />
+                    <span className="font-bold text-xs flex-shrink-0 w-28" style={{ color: r.color }}>{r.label}</span>
+                    <span className="text-white/30 text-xs leading-snug flex-1 min-w-0">{r.desc}</span>
+                    {r.exec !== 'na' && (
+                      <span className={`text-[10px] font-bold flex-shrink-0 px-1.5 py-0.5 rounded-full border ${
+                        r.exec === 'exec'
+                          ? 'bg-rose-500/15  text-rose-300  border-rose-500/30'
+                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      }`}>{EXEC_LABELS[r.exec]}</span>
+                    )}
+                    <span className="text-white/20 text-xs font-mono flex-shrink-0">L{r.level}</span>
                   </div>
                 ))}
               </div>

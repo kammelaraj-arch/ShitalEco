@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import {
   BOARD_POSITIONS, BOARD_TIER_LABELS, boardPositionLabel, boardPositionsByTier,
+  roleInfo, EXEC_LABELS,
 } from '@/lib/roles'
 
 // All board position constants now come from the central registry in
@@ -206,9 +207,21 @@ export default function TrusteesPage() {
                 <tr key={t.id} className="border-b border-white/5 hover:bg-white/5">
                   <td className="px-4 py-3 text-white font-semibold">{t.full_name}</td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${ROLE_BADGES[t.role] || 'bg-white/10 text-white/60 border-white/15'}`}>
-                      {boardPositionLabel(t.role)}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${ROLE_BADGES[t.role] || 'bg-white/10 text-white/60 border-white/15'}`}>
+                        {boardPositionLabel(t.role)}
+                      </span>
+                      {/* Exec/Non-Exec badge — UK Charity Commission convention.
+                          Only rendered when the role actually has the
+                          distinction (CEO = exec; Chair/Treasurer/etc. = non-exec). */}
+                      {roleInfo(t.role).exec !== 'na' && (
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                          roleInfo(t.role).exec === 'exec'
+                            ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        }`}>{EXEC_LABELS[roleInfo(t.role).exec]}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-white/70">{t.email}</td>
                   <td className="px-4 py-3 text-white/60">{t.phone || '—'}</td>
@@ -247,7 +260,10 @@ export default function TrusteesPage() {
                       via boardPositionsByTier(). To add or rename a position,
                       edit Settings → Users (which renders the same registry)
                       instead of touching this file. */}
-                  {(['main_board', 'lmc', 'non_officer'] as const).map(tier => {
+                  {/* 'external' is the registry tier for non-officer roles
+                      (External Contractor / Temp Worker) — the tier used to
+                      be called 'non_officer' before the unification. */}
+                  {(['main_board', 'lmc', 'external'] as const).map(tier => {
                     const items = boardPositionsByTier()[tier]
                     if (items.length === 0) return null
                     // Hardcoded Tailwind classes — dynamic `grid-cols-${n}`
