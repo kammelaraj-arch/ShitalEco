@@ -5,6 +5,7 @@ import {
   ORG_STRUCTURE, KIND_LABELS, KIND_STYLES, childrenOf, type OrgNode,
 } from '@/lib/org-structure'
 import { roleLabel } from '@/lib/roles'
+import { CODE_OF_CONDUCT, CODE_OF_CONDUCT_PREAMBLE } from '@/lib/code-of-conduct'
 
 /**
  * Organisation Structure — read-only view of the temple's reporting lines as
@@ -169,6 +170,33 @@ export default function OrgStructurePage() {
       <div className="glass rounded-2xl p-5 border border-temple-border">
         <h2 className="text-saffron-300 font-black text-sm mb-3">Reporting Lines</h2>
         {root ? renderNode(root, 0) : <p className="text-white/40 text-sm">Structure not loaded.</p>}
+      </div>
+
+      {/* Code of Conduct — verbatim from the 2022 Roadmap, now adopted as
+          binding rules under M&A §34.5 and §38.1. Visible to every admin
+          user so the rules cannot be disputed later. */}
+      <div className="glass rounded-2xl p-5 border border-red-500/30 bg-red-500/[0.02]">
+        <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+          <h2 className="text-rose-300 font-black text-sm">📜 Code of Conduct — Trustees, LMC, Staff</h2>
+          <span className="text-white/30 text-[10px]">Source: 2022 Roadmap, adopted under M&amp;A §34.5 + §38.1</span>
+        </div>
+        <p className="text-white/50 text-xs leading-relaxed mb-4">
+          {CODE_OF_CONDUCT_PREAMBLE}
+        </p>
+        <div className="space-y-2">
+          {CODE_OF_CONDUCT.map(r => (
+            <div key={r.id} className="p-3 rounded-xl bg-white/2 border border-white/5">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-rose-300 font-mono text-[10px] font-bold">{r.id}</span>
+                <p className="text-white text-xs font-semibold flex-1">{r.text}</p>
+              </div>
+              <p className="text-white/50 text-xs mt-1.5 leading-relaxed">
+                <span className="text-white/30">In practice — </span>{r.plain}
+              </p>
+              <p className="text-white/25 text-[10px] mt-1 font-mono">{r.source}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Legend */}

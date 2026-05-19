@@ -1,31 +1,41 @@
 /**
- * Organisation structure — single source of truth for the temple's reporting
- * lines, aligned with UK Charity Commission guidance:
+ * SHITAL organisation structure — single source of truth for reporting lines.
  *
- *   • CC3   "The essential trustee"          — trustees collectively responsible
- *   • CC8   "Internal financial controls"    — separation of duties
- *   • CC9   "Speaking out"                   — independent whistleblowing
- *   • CC30  "Finding new trustees"           — Nominations Committee
- *   • CC50  "Charities and meetings"         — board / sub-committee structure
+ * Sources (in order of authority):
+ *   1. SHITAL Memorandum & Articles of Association 2009 (Company 06885384)
+ *      — the binding constitution. Every node below cites the specific
+ *      §-clause that authorises it.
+ *   2. SHITAL 2022 Roadmap (Board resolution + Areas for improvement) —
+ *      authored by the Chair, presented to the Board. Encodes the
+ *      Code of Conduct, the LMC operational model, and the multi-branch
+ *      strategy. Verbatim Code of Conduct rules live in lib/code-of-conduct.ts.
+ *   3. UK Charity Commission guidance — CC3 (essential trustee), CC8
+ *      (financial controls), CC9 (serious incident reporting), CC11 (paid
+ *      trustees), CC30 (finding new trustees), CC50 (committees / meetings).
+ *   4. NCVO / Association of Chairs guidance on the Chair role and Vice-Chair
+ *      succession.
  *
- * The four governance principles every node here observes:
+ * The four governance principles every node observes:
  *
- *   1. ONE LEGAL ENTITY. Branches and LMCs operate under delegated authority
- *      from the main Board — they are NOT separate registered charities. All
- *      money, contracts, and liabilities sit with the parent charity.
+ *   1. ONE LEGAL ENTITY (M&A §1). Branches and LMCs operate under DELEGATED
+ *      authority from the main Board (M&A §40) — they are NOT separate
+ *      registered charities. All money, contracts, and liabilities sit with
+ *      SHITAL.
  *
- *   2. TRUSTEES vs STAFF. The Board (volunteer, non-executive) governs; the
- *      CEO and staff (paid, executive) operate. The line never blurs — the
- *      CEO reports to the Board collectively, never to the Chair personally.
+ *   2. TRUSTEES GOVERN, CEO EXECUTES (M&A §21.1 + CC3). The Board governs
+ *      collectively; the CEO operates. The CEO reports to the FULL BOARD,
+ *      never to the Chair personally. No individual trustee — including the
+ *      Chair — can direct staff outside of a Board resolution (COC-01).
  *
- *   3. AUDITOR INDEPENDENCE. The external auditor and the Audit Committee
- *      report to the full Board, NOT through the CEO. Bypass arrow on the
- *      chart is deliberate.
+ *   3. AUDITOR INDEPENDENCE (Charities Act 2011 §144). The external auditor
+ *      and the Audit & Risk Committee report to the full Board, bypassing
+ *      the CEO. Chaired by a trustee who is neither the Chair nor the
+ *      Treasurer.
  *
- *   4. LOCAL AUTONOMY, CENTRAL CONTROL. LMCs run day-to-day branch life
- *      (events, rota, local fundraising) under their LMC Chair; finance,
- *      HR, safeguarding, and IT are centralised so policy is uniform and
- *      consolidated accounts are possible (Charities Act 2011 § 132).
+ *   4. LOCAL AUTONOMY, CENTRAL CONTROL (2022 Roadmap). LMCs run day-to-day
+ *      branch life with local people and local resources. Finance, HR,
+ *      safeguarding, and IT are centralised so policy is uniform and
+ *      consolidated accounts are possible (Charities Act 2011 §132).
  *
  * Visual rendering of this tree lives at /board/structure.
  */
@@ -69,86 +79,110 @@ export const ORG_STRUCTURE: OrgNode[] = [
   {
     id:           'board',
     label:        'Board of Trustees',
-    charter:      'Sovereign governing body. Sets strategy, approves budgets, appoints the CEO, and is accountable to the Charity Commission and the public. Meets quarterly at minimum.',
+    charter:      'Sovereign governing body. "The business of the Charity is managed by the Board" — M&A §21.1. Sets strategy, approves budgets, appoints the CEO, accountable to the Charity Commission and the public. Per the 2022 Roadmap, MUST meet at least monthly (COC-05). Quorum is one third of trustees, minimum 3 (M&A §36.1). Minimum 3 trustees at all times (M&A §28.1).',
     acceptsRoles: ['CHAIR', 'TREASURER', 'SECRETARY', 'TRUSTEE'],
     kind:         'governance',
     reportsTo:    'charity',
-    cite:         'CC3 — collective responsibility',
+    cite:         'M&A §21.1, §28.1, §36.1 + CC3',
   },
   {
     id:           'chair',
     label:        'Chair of the Board',
-    charter:      'Presides over Board meetings, sets the agenda jointly with the CEO and Secretary, and is the spokesperson for the trustees. Does not hold executive authority over staff.',
+    charter:      'The only constitutionally named officer (M&A §35.1). Primus inter pares — first among equals, one vote. Presides at meetings, sets the agenda, signs minutes, holds the casting vote on ties (M&A §33.2), represents the Board externally, and is the named Charity Commission contact. Performance-manages the CEO on behalf of the full Board. Does NOT direct staff individually — that authority lies only with a Board resolution.',
     acceptsRoles: ['CHAIR'],
     kind:         'governance',
     reportsTo:    'board',
-    cite:         'CC50 — Board meetings',
+    cite:         'M&A §33.2, §35.1',
+  },
+  {
+    id:           'vice_chair',
+    label:        'Vice-Chair (Chair-in-Waiting)',
+    charter:      'Deputises for the Chair when absent, chairs Board meetings on items where the Chair has a conflict of interest (M&A §34), and is the designated Senior Independent Trustee for any oversight of the Chair. Recruited as part of succession planning per NCVO guidance — the Vice-Chair is the natural successor when the 9-year tenure cap is reached (M&A §27.5).',
+    acceptsRoles: ['CHAIR', 'TRUSTEE'],
+    kind:         'governance',
+    reportsTo:    'board',
+    cite:         'M&A §34 + NCVO — succession & SIT role',
   },
   {
     id:           'treasurer',
     label:        'Honorary Treasurer',
-    charter:      'Lead trustee for financial oversight. Chairs the Finance Sub-Committee, reviews monthly management accounts, and signs the annual return to the Charity Commission.',
+    charter:      'Board-elected officer (M&A §35.1 — not constitutionally required, elected by the Board as it wishes). Lead trustee for financial oversight, chairs the Finance Sub-Committee, reviews monthly management accounts, signs the annual return to the Charity Commission. Unpaid (M&A §24.1).',
     acceptsRoles: ['TREASURER'],
     kind:         'governance',
     reportsTo:    'board',
-    cite:         'CC8 — financial controls',
+    cite:         'M&A §24.1, §35.1 + CC8',
   },
   {
     id:           'secretary',
     label:        'Honorary Secretary',
-    charter:      'Keeps the Trustees Register and minutes, files the annual return + accounts at Companies House and the Charity Commission, ensures Board resolutions are properly recorded.',
+    charter:      'Board-elected officer (M&A §35.1). Keeps the Trustees Register, signs and files all minutes within 48 hours of each Board meeting (M&A §25), files the annual return and accounts at Companies House and the Charity Commission. The "documents on SharePoint" rule (COC-12) is enforced by the Secretary.',
     acceptsRoles: ['SECRETARY'],
     kind:         'governance',
     reportsTo:    'board',
+    cite:         'M&A §25, §35.1',
   },
 
   // ─── Sub-committees of the Board ────────────────────────────────────
+  // Established under M&A §40.1 — "The Board may delegate the administration
+  // of any of its powers to individual Trustees or committees of Trustees".
+  // Non-trustees may be co-opted (§40.2). All acts reported to the Board
+  // (§40.3). Activated as trustee numbers grow to 5+ — at 3 trustees, the
+  // full Board acts as the sole committee.
   {
     id:           'cmte_finance',
     label:        'Finance Sub-Committee',
-    charter:      'Reviews monthly management accounts, scrutinises budgets and reserves, recommends investment decisions to the full Board. Meets monthly.',
+    charter:      'Reviews monthly management accounts, scrutinises budgets and reserves, recommends investment decisions to the full Board. Chaired by the Treasurer. Activates at 5+ trustees.',
     acceptsRoles: ['TREASURER', 'TRUSTEE'],
     kind:         'committee',
     reportsTo:    'board',
-    cite:         'CC8',
+    cite:         'M&A §40 + CC8',
   },
   {
     id:           'cmte_audit',
     label:        'Audit & Risk Committee',
-    charter:      'Independent of management. Reviews the annual audit, the risk register, and internal controls; reports concerns directly to the Board. Chaired by a trustee who is NOT the Chair or Treasurer.',
+    charter:      'Independent of management. Reviews the annual audit, the risk register, and internal controls; reports concerns directly to the Board, bypassing the CEO and Treasurer. Chaired by a trustee who is NEITHER the Chair NOR the Treasurer. Triggered by Charities Act 2011 §144 once income exceeds £1m — separate at SHITAL\'s £500-£800k income for readiness.',
     acceptsRoles: ['TRUSTEE'],
     kind:         'committee',
     reportsTo:    'board',
-    cite:         'CC8 — independent review',
+    cite:         'M&A §40 + Charities Act §144 + CC8',
   },
   {
     id:           'cmte_safeguarding',
     label:        'Safeguarding Committee',
-    charter:      'Owns the safeguarding policy, reviews every safeguarding incident, and reports serious cases to the Charity Commission within 24 hours.',
+    charter:      'Owns the safeguarding policy, reviews every safeguarding incident, and reports serious cases to the Charity Commission within 24 hours per CC9 / SI reporting. Essential given the temple\'s public-facing context with children present.',
     acceptsRoles: ['TRUSTEE'],
     kind:         'committee',
     reportsTo:    'board',
-    cite:         'CC9 — serious incident reporting',
+    cite:         'M&A §40 + CC9',
   },
   {
     id:           'cmte_nominations',
     label:        'Nominations Committee',
-    charter:      'Identifies and recommends new trustees, manages the recruitment process, oversees induction and term renewals.',
+    charter:      'Identifies and recommends new trustees per the constitutional requirements: adherence to the teachings of Shirdi Sai Baba (M&A §26.2), no relation by birth or marriage to a current serving trustee including uncles/aunts/first cousins (M&A §26.3), and the 9-year maximum tenure cap (M&A §27.5). Manages induction, term renewals, and the one-third annual retirement rotation (M&A §27.2).',
     acceptsRoles: ['CHAIR', 'TRUSTEE'],
     kind:         'committee',
     reportsTo:    'board',
-    cite:         'CC30',
+    cite:         'M&A §26.2, §26.3, §27.2, §27.5 + CC30',
+  },
+  {
+    id:           'cmte_conduct',
+    label:        'Conduct & Disciplinary Panel',
+    charter:      'Ad-hoc panel convened when a Code of Conduct breach is reported. Issues written warnings (COC-04 three-warning process), reviews evidence, and recommends removal resolutions to the Board where warranted. Cannot include the trustee whose conduct is under review (M&A §34 conflict procedure).',
+    acceptsRoles: ['TRUSTEE'],
+    kind:         'committee',
+    reportsTo:    'board',
+    cite:         '2022 Roadmap COC-04 + M&A §34',
   },
 
   // ─── Executive (single leader, accountable to the Board) ────────────
   {
     id:           'ceo',
     label:        'Chief Executive Officer',
-    charter:      'Sole executive officer. Runs the charity day-to-day under authority delegated by the Board, attends Board meetings in an advisory capacity, and is the only staff member with a direct line to the Board.',
+    charter:      'Sole executive officer — single point of accountability for all charity operations. Runs the charity day-to-day under authority delegated by the Board (M&A §40), attends Board meetings as a non-voting senior staff officer (CC11 best practice — paid trustees are discouraged), and is the ONLY staff member with a direct line to the Board. All trustee operational asks must route through the CEO. For SHITAL at £500-£800k income / 25 staff / 4 branches, a part-time CEO (2-3 days/week) is the right scale; aim to appoint within 6 months.',
     acceptsRoles: ['CEO'],
     kind:         'executive',
     reportsTo:    'board',
-    cite:         'CC3 — separation of governance and management',
+    cite:         'M&A §40 + CC3, CC11',
   },
 
   // ─── Senior Management Team (reports to CEO) ────────────────────────
@@ -190,26 +224,28 @@ export const ORG_STRUCTURE: OrgNode[] = [
   },
 
   // ─── Branch Management ──────────────────────────────────────────────
-  // Branch nodes are seeded by /branches API at render time — the
-  // structure file declares the *template* node so it always appears in
-  // the chart even when no branches exist yet.
+  // SHITAL operates a multi-branch model committed by the 2022 Roadmap:
+  // Wembley, Dratford, Milton Keynes (MK), plus a 4th planned branch.
+  // Branch nodes are also seeded dynamically from /branches API at render
+  // time so newly-added branches appear automatically.
   {
     id:           'branch_template',
     label:        'Branch Manager',
-    charter:      'Runs a temple branch day-to-day under standardised charity-wide policies. Manages local staff and volunteers, reports monthly KPIs to the CEO. Each branch has its own card on this chart, generated from the Branches register.',
+    charter:      'Single accountable manager for one temple branch. Per the 2022 Roadmap, branches are self-sustaining under the SHITAL framework with local people running local resources. Manages local staff and volunteers, files a weekly written ops report to the CEO. Cannot make charity-wide policy decisions (per COC-01) — those flow from the Board through the CEO. Each branch is an instance of this template; see the live Branches register for current sites.',
     acceptsRoles: ['BRANCH_MANAGER'],
     kind:         'branch',
     reportsTo:    'ceo',
+    cite:         '2022 Roadmap — self-sustaining temples + COC-01',
   },
   {
     id:           'lmc_template',
-    label:        'Local Management Committee',
-    charter:      'Local governance for each branch — sets the local events calendar, manages the branch volunteer rota, and runs local fundraising. Accountable to the Board via its LMC Chair, NOT to the CEO. Operational matters route through the Branch Manager.',
+    label:        'Local Management Committee (LMC)',
+    charter:      '"LMCs will eventually be responsible for all income and expenses, day-to-day management, and maintaining themselves within the framework (as branch) with the help of local people, local resources" — 2022 Roadmap, verbatim. LMCs are the governance layer for each branch: they set the local events calendar, manage the volunteer rota, run local fundraising under Board-approved policies. Accountable to the FULL Board via the LMC Chair — NOT to the CEO. Operational coordination with the Branch Manager is dotted-line. All COC-01 through COC-12 rules apply to LMC members identically to trustees.',
     acceptsRoles: ['LMC_CHAIR', 'LMC_TREASURER', 'LMC_MEMBER'],
     kind:         'governance',
     reportsTo:    'board',
     dottedTo:     ['branch_template'],
-    cite:         'CC50 — sub-committees',
+    cite:         '2022 Roadmap — LMC charter + M&A §40',
   },
   {
     id:           'branch_staff',
