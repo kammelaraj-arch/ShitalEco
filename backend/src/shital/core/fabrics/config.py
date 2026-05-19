@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     MAIL_AGENT_POLL_SECONDS: int = 300        # 5 min; 0 = disabled
     MAIL_AGENT_MODEL: str = "claude-opus-4-7"  # used for the agentic loop
     MAIL_AGENT_MAX_ITER: int = 15             # cap tool turns per email
+    # ── Optional service-account auth ─────────────────────────────────────
+    # Either set these two for delegated OAuth (ROPC, "Resource Owner Password
+    # Credentials" grant) using a service account that has been granted
+    # FullAccess on the three shared mailboxes — OR leave them empty and the
+    # mail agent uses app-only auth via MS_CLIENT_SECRET (requires Mail.Read
+    # application permission + ApplicationAccessPolicy in Exchange — the
+    # Microsoft-recommended path but needs an IT admin to set up).
+    # Service account must NOT have MFA enabled or ROPC will fail.
+    MAIL_AGENT_USER:     str = ""             # e.g. svc_emailrouter@shirdisai.org.uk
+    MAIL_AGENT_PASSWORD: str = ""             # set in .env, never in code
     TEAMS_WEBHOOK_URL: str = ""               # MS Teams Incoming Webhook for alerts
 
     # SendGrid (legacy fallback)
