@@ -2,26 +2,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+import {
+  BOARD_POSITIONS, BOARD_TIER_LABELS, boardPositionLabel, boardPositionsByTier,
+} from '@/lib/roles'
 
-type Role =
-  | 'CHAIR' | 'TREASURER' | 'SECRETARY' | 'CEO' | 'TRUSTEE'
-  | 'LMC_CHAIR' | 'LMC_TREASURER' | 'LMC_MEMBER'
-  | 'EXTERNAL_CONTRACTOR' | 'TEMP_WORKER'
-
-// What humans see on a button / badge — internally we still store the
-// canonical UPPER_SNAKE values so the API contract is stable.
-const ROLE_LABELS: Record<Role, string> = {
-  CHAIR:               'Chair',
-  TREASURER:           'Treasurer',
-  SECRETARY:           'Secretary',
-  CEO:                 'CEO',
-  TRUSTEE:             'Trustee',
-  LMC_CHAIR:           'LMC Chair',
-  LMC_TREASURER:       'LMC Treasurer',
-  LMC_MEMBER:          'LMC Member',
-  EXTERNAL_CONTRACTOR: 'External Contractor',
-  TEMP_WORKER:         'Temp Worker',
-}
+// All board position constants now come from the central registry in
+// @/lib/roles. To add a new position, edit that file — the trustees form
+// re-renders from BOARD_POSITIONS automatically. The Settings → Users page
+// displays the same list so administrators see it in one place.
+type Role = string
 
 interface Trustee {
   id: string
@@ -218,7 +207,7 @@ export default function TrusteesPage() {
                   <td className="px-4 py-3 text-white font-semibold">{t.full_name}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${ROLE_BADGES[t.role] || 'bg-white/10 text-white/60 border-white/15'}`}>
-                      {ROLE_LABELS[t.role] ?? t.role}
+                      {boardPositionLabel(t.role)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-white/70">{t.email}</td>
@@ -254,36 +243,33 @@ export default function TrusteesPage() {
               <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
                 <div>
                   <label className={lbl}>Role</label>
-                  {/* Grouped by tier so the picker doesn't read as one long
-                      undifferentiated grid — main board on top, LMC next,
-                      non-officers at the bottom. */}
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-1.5 mt-1">Main Board</p>
-                  <div className="grid grid-cols-3 gap-2 mb-3">
-                    {(['CHAIR', 'TREASURER', 'SECRETARY', 'CEO', 'TRUSTEE'] as Role[]).map(r => (
-                      <button key={r} type="button" onClick={() => setForm(p => ({ ...p, role: r }))}
-                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                          form.role === r ? 'bg-saffron-gradient text-white' : 'bg-white/5 text-white/60 border border-white/10'
-                        }`}>{ROLE_LABELS[r]}</button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-1.5">Local Management Committee</p>
-                  <div className="grid grid-cols-3 gap-2 mb-3">
-                    {(['LMC_CHAIR', 'LMC_TREASURER', 'LMC_MEMBER'] as Role[]).map(r => (
-                      <button key={r} type="button" onClick={() => setForm(p => ({ ...p, role: r }))}
-                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                          form.role === r ? 'bg-saffron-gradient text-white' : 'bg-white/5 text-white/60 border border-white/10'
-                        }`}>{ROLE_LABELS[r]}</button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-1.5">Non-Officer</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(['EXTERNAL_CONTRACTOR', 'TEMP_WORKER'] as Role[]).map(r => (
-                      <button key={r} type="button" onClick={() => setForm(p => ({ ...p, role: r }))}
-                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                          form.role === r ? 'bg-saffron-gradient text-white' : 'bg-white/5 text-white/60 border border-white/10'
-                        }`}>{ROLE_LABELS[r]}</button>
-                    ))}
-                  </div>
+                  {/* Position list comes from @/lib/roles — grouped by tier
+                      via boardPositionsByTier(). To add or rename a position,
+                      edit Settings → Users (which renders the same registry)
+                      instead of touching this file. */}
+                  {(['main_board', 'lmc', 'non_officer'] as const).map(tier => {
+                    const items = boardPositionsByTier()[tier]
+                    if (items.length === 0) return null
+                    // Hardcoded Tailwind classes — dynamic `grid-cols-${n}`
+                    // doesn't survive the JIT purge.
+                    const gridCls = items.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'
+                    return (
+                      <div key={tier} className="mb-3 last:mb-0">
+                        <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-1.5 mt-1">
+                          {BOARD_TIER_LABELS[tier]}
+                        </p>
+                        <div className={`grid gap-2 ${gridCls}`}>
+                          {items.map(p => (
+                            <button key={p.id} type="button"
+                              onClick={() => setForm(prev => ({ ...prev, role: p.id }))}
+                              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                                form.role === p.id ? 'bg-saffron-gradient text-white' : 'bg-white/5 text-white/60 border border-white/10'
+                              }`}>{p.label}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
                 <div>
                   <label className={lbl}>Full Name *</label>

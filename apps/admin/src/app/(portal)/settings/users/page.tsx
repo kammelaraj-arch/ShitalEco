@@ -22,24 +22,13 @@ interface User {
   created_at: string
 }
 
-// ─── Role config ──────────────────────────────────────────────────────────────
-
-const ROLES: { id: string; label: string; desc: string; color: string; bg: string; level: number }[] = [
-  { id: 'SUPER_ADMIN',    label: 'Super Admin',    desc: 'Full system access',                  color: '#ef4444', bg: '#fef2f2', level: 100 },
-  { id: 'TRUSTEE',        label: 'Trustee',        desc: 'Governance & finance oversight',       color: '#d97706', bg: '#fffbeb', level: 80 },
-  { id: 'ACCOUNTANT',     label: 'Accountant',     desc: 'Finance read/write access',           color: '#7c3aed', bg: '#f5f3ff', level: 70 },
-  { id: 'HR_MANAGER',     label: 'HR Manager',     desc: 'HR, payroll, employees',              color: '#0891b2', bg: '#ecfeff', level: 65 },
-  { id: 'AUDITOR',        label: 'Auditor',        desc: 'Read-only compliance & finance',      color: '#475569', bg: '#f8fafc', level: 60 },
-  { id: 'BRANCH_MANAGER', label: 'Branch Manager', desc: 'Branch operations & bookings',        color: '#059669', bg: '#f0fdf4', level: 50 },
-  { id: 'STAFF',          label: 'Staff',          desc: 'Bookings, kiosk, general ops',        color: '#2563eb', bg: '#eff6ff', level: 30 },
-  { id: 'VOLUNTEER',      label: 'Volunteer',      desc: 'Limited operational access',          color: '#16a34a', bg: '#f0fdf4', level: 20 },
-  { id: 'DEVOTEE',        label: 'Devotee',        desc: 'Self-service donations & bookings',   color: '#9333ea', bg: '#fdf4ff', level: 10 },
-  { id: 'KIOSK',          label: 'Kiosk',          desc: 'Kiosk terminal access only',          color: '#64748b', bg: '#f8fafc', level: 5 },
-]
-
-function roleInfo(id: string) {
-  return ROLES.find(r => r.id === id) ?? { id, label: id, desc: '', color: '#6b7280', bg: '#f9fafb', level: 0 }
-}
+// ─── Role config — sourced from the central registry at @/lib/roles ──────────
+// All other admin pages that show or pick a role (Board → Trustees, App
+// Permissions, etc.) import from the same module. To rename/add a role, edit
+// @/lib/roles.ts — this page renders from it automatically and also displays
+// the Board Positions list so admins manage everything here.
+import { SYSTEM_ROLES as ROLES, systemRoleInfo as roleInfo,
+         BOARD_POSITIONS, BOARD_TIER_LABELS } from '@/lib/roles'
 
 function RoleBadge({ role }: { role: string }) {
   const r = roleInfo(role)
@@ -406,7 +395,7 @@ export default function UsersPage() {
         <button onClick={load} className="px-4 py-2 rounded-xl bg-white/5 text-white/50 text-sm hover:bg-white/10">↻</button>
       </div>
 
-      {/* Role legend */}
+      {/* Role legend — system permission roles */}
       <div className="glass rounded-2xl p-5">
         <h3 className="text-white font-black text-sm mb-3">Role Permission Levels</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -419,6 +408,34 @@ export default function UsersPage() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Board positions — single source of truth for the Trustees module */}
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-baseline justify-between mb-3">
+          <h3 className="text-white font-black text-sm">Board Positions</h3>
+          <span className="text-white/30 text-xs">Used by Board → Trustees</span>
+        </div>
+        {(['main_board', 'lmc', 'non_officer'] as const).map(tier => {
+          const items = BOARD_POSITIONS.filter(p => p.tier === tier)
+          if (items.length === 0) return null
+          return (
+            <div key={tier} className="mb-4 last:mb-0">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-2">
+                {BOARD_TIER_LABELS[tier]}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {items.map(p => (
+                  <div key={p.id} className="flex items-start gap-2.5 py-2 px-3 rounded-xl bg-white/2">
+                    <span className="font-bold text-xs flex-shrink-0 w-32 text-saffron-300">{p.label}</span>
+                    <span className="text-white/30 text-xs leading-snug flex-1 min-w-0">{p.desc || '—'}</span>
+                    <span className="text-white/20 text-xs font-mono flex-shrink-0">{p.id}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {/* Users table */}
