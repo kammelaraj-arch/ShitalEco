@@ -8,7 +8,6 @@ import httpx
 
 from shital.core.fabrics.config import settings
 
-
 _THEME = {
     "red":   "D13438",
     "amber": "FF8C00",

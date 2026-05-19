@@ -162,7 +162,7 @@ async def triage_one(ctx: CurrentSpace, mailbox: str,
                      message_id: str) -> dict[str, Any]:
     """Re-trigger triage on a specific Graph message_id (debugging tool)."""
     _require(ctx)
-    from shital.services.mail_agent import triage_email
     from shital.services import mailbox as mb
+    from shital.services.mail_agent import triage_email
     full = await mb.get_message_body(mailbox, message_id)
     return await triage_email(mailbox, full)

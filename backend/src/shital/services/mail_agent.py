@@ -23,7 +23,7 @@ import base64
 import json
 import logging
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from anthropic import AsyncAnthropic
@@ -542,17 +542,28 @@ async def _tool_escalate(args: dict[str, Any], *,
 
 async def _dispatch(name: str, args: dict[str, Any], *,
                     mail_agent_message_id: str) -> dict[str, Any]:
-    if   name == "find_crm_account":           return await _tool_find_crm_account(args)
-    elif name == "create_crm_account":         return await _tool_create_crm_account(args)
-    elif name == "create_purchase_invoice":    return await _tool_create_purchase_invoice(args)
-    elif name == "find_open_purchase_invoice": return await _tool_find_open_purchase_invoice(args)
-    elif name == "mark_invoice_paid":          return await _tool_mark_invoice_paid(args)
-    elif name == "create_case":                return await _tool_create_case(args)
-    elif name == "create_task":                return await _tool_create_task(args)
-    elif name == "attach_email_to_record":     return await _tool_attach_email_to_record(args, mail_agent_message_id=mail_agent_message_id)
-    elif name == "send_teams_alert":           return await _tool_send_teams_alert(args)
-    elif name == "escalate_to_human":          return await _tool_escalate(args, mail_agent_message_id=mail_agent_message_id)
-    elif name == "finish":                     return {"acknowledged": True}
+    if name == "find_crm_account":
+        return await _tool_find_crm_account(args)
+    if name == "create_crm_account":
+        return await _tool_create_crm_account(args)
+    if name == "create_purchase_invoice":
+        return await _tool_create_purchase_invoice(args)
+    if name == "find_open_purchase_invoice":
+        return await _tool_find_open_purchase_invoice(args)
+    if name == "mark_invoice_paid":
+        return await _tool_mark_invoice_paid(args)
+    if name == "create_case":
+        return await _tool_create_case(args)
+    if name == "create_task":
+        return await _tool_create_task(args)
+    if name == "attach_email_to_record":
+        return await _tool_attach_email_to_record(args, mail_agent_message_id=mail_agent_message_id)
+    if name == "send_teams_alert":
+        return await _tool_send_teams_alert(args)
+    if name == "escalate_to_human":
+        return await _tool_escalate(args, mail_agent_message_id=mail_agent_message_id)
+    if name == "finish":
+        return {"acknowledged": True}
     return {"error": f"unknown tool {name}"}
 
 
@@ -612,7 +623,7 @@ async def triage_email(mailbox: str, message_meta: dict[str, Any]) -> dict[str, 
     body_text  = body_block.get("content", "")
     header_lines = [
         f"From: {sender.get('name') or ''} <{sender.get('address') or ''}>",
-        f"To: " + ", ".join(((r.get('emailAddress') or {}).get('address', '') for r in (full.get('toRecipients') or []))),
+        "To: " + ", ".join((r.get('emailAddress') or {}).get('address', '') for r in (full.get('toRecipients') or [])),
         f"Date: {full.get('receivedDateTime', '')}",
         f"Subject: {full.get('subject', '')}",
         f"Mailbox: {mailbox}",
@@ -745,7 +756,7 @@ async def sweep_once() -> dict[str, Any]:
     if not mailboxes:
         return {"skipped": "no MAIL_AGENT_MAILBOXES configured"}
 
-    out: dict[str, Any] = {"swept_at": datetime.now(timezone.utc).isoformat(), "mailboxes": {}}
+    out: dict[str, Any] = {"swept_at": datetime.now(UTC).isoformat(), "mailboxes": {}}
     for mailbox in mailboxes:
         # Resume from last successful processed message — sliding 30-day floor
         async with SessionLocal() as db:
@@ -755,7 +766,7 @@ async def sweep_once() -> dict[str, Any]:
                 WHERE mailbox = :mb AND status = 'done'
             """), {"mb": mailbox})).first()
         last_rcv: datetime | None = row[0] if row else None
-        since = (last_rcv.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        since = (last_rcv.astimezone(UTC).isoformat().replace("+00:00", "Z")
                  if last_rcv else None)
         try:
             msgs = await mb.list_new_messages(mailbox, since_iso=since)
