@@ -30,9 +30,16 @@ RUN echo "Built commit ${GIT_SHA}"
 # ─── Stage 2: Serve with nginx ────────────────────────────────────────────────
 FROM nginx:alpine AS production
 
+# Bake the git SHA into the image so deploy-vultr.yml can verify which commit
+# is actually serving without docker-exec'ing into the container. Same pattern
+# as apps/service/Dockerfile so the deploy version-drift check is uniform.
+ARG GIT_SHA=dev
+ENV GIT_SHA=${GIT_SHA}
+
 RUN rm /etc/nginx/conf.d/default.conf
 
 COPY --from=builder /app/dist /usr/share/nginx/html
+RUN printf '%s\n' "${GIT_SHA}" > /usr/share/nginx/html/version.txt
 
 # SPA nginx config: serve the kiosk at '/' inside this container.
 # The reverse proxy (shital.conf) maps /kiosk/ -> http://kiosk:80/
@@ -45,6 +52,12 @@ RUN printf 'server {\n\
 \n\
     gzip on;\n\
     gzip_types text/plain text/css application/json application/javascript text/javascript image/svg+xml;\n\
+\n\
+    # Version probe — never cached, so deploy verification reads fresh every time.\n\
+    location = /version.txt {\n\
+        add_header Cache-Control "no-store" always;\n\
+        default_type text/plain;\n\
+    }\n\
 \n\
     location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {\n\
         expires 1y;\n\

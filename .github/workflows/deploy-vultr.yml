@@ -341,6 +341,11 @@ jobs:
             }
             if [ -n "$EXPECTED_SHA" ]; then
               verify_version "service portal" "shitaleco-service-1"
+              # Kiosk now bakes /version.txt the same way (PR adds it to
+              # apps/kiosk/Dockerfile). Catches the drift where main has new
+              # kiosk SPA code (e.g. the Cash/Card chooser) but the prod
+              # container still serves an older build.
+              verify_version "kiosk"          "shitaleco-kiosk-1"
             fi
 
             if [ "$VERSION_FAIL" -ne 0 ]; then
