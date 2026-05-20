@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useKioskStore, type KioskTheme } from '../store/kiosk.store'
+import { KioskKeyboard, type KeyboardMode } from '../components/KioskKeyboard'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -28,6 +29,25 @@ export function SetupScreen() {
   const [error, setError]       = useState('')
   const [azureEnabled, setAzureEnabled] = useState(false)
   const [azureConfig, setAzureConfig]   = useState<AzureConfig | null>(null)
+
+  // On-screen keyboard wiring. Kiosk tablets typically have no physical
+  // keyboard, so the existing KioskKeyboard component (used elsewhere in
+  // the kiosk flow) is hoisted here so admins can sign in by tap. Tapping
+  // a field sets activeField; the keyboard renders fixed at the bottom of
+  // the viewport and routes its value/onChange back through the right
+  // setter. "DONE" dismisses it.
+  const [activeField, setActiveField] = useState<'username' | 'password' | null>(null)
+  const kbValue = activeField === 'username' ? username
+                : activeField === 'password' ? password
+                : ''
+  const kbOnChange = (v: string) => {
+    if (activeField === 'username') setUsername(v)
+    if (activeField === 'password') setPassword(v)
+  }
+  // Username = typical user account (no spaces, lowercase-friendly) → text
+  // QWERTY mode. Password = same QWERTY (don't lock to numeric — admins
+  // often use a mix).
+  const kbMode: KeyboardMode = 'text'
 
   useEffect(() => {
     fetch(`${API_BASE}/kiosk/quick-donation/azure-config`)
@@ -112,9 +132,12 @@ export function SetupScreen() {
   }
 
   return (
-    <div className="w-screen h-screen flex flex-col items-center justify-center px-8"
+    <div className="w-screen h-screen flex flex-col"
       style={{ background: 'linear-gradient(160deg,#1a0a00 0%,#2d1200 100%)' }}>
-      <div className="w-full max-w-sm">
+      {/* Form area — flex-1 + overflow-y-auto so the on-screen keyboard
+          docked at the bottom never covers the inputs. */}
+      <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center px-8 py-6">
+        <div className="w-full max-w-sm">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="text-5xl mb-3">🕉</div>
@@ -131,9 +154,11 @@ export function SetupScreen() {
               style={{ color: 'rgba(212,175,55,0.6)' }}>Username</label>
             <input
               type="text" value={username} onChange={e => setUsername(e.target.value)}
+              onFocus={() => setActiveField('username')}
               onKeyDown={e => e.key === 'Enter' && handleLogin()}
               placeholder="kiosk-wembley-1"
-              className="w-full px-4 py-3 rounded-xl text-sm border outline-none"
+              readOnly={false}
+              className={`w-full px-4 py-3 rounded-xl text-sm border outline-none ${activeField === 'username' ? 'ring-2 ring-gold-400/40' : ''}`}
               style={{ background: 'rgba(255,255,255,0.07)', color: '#fff',
                 border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }}
               autoComplete="username" autoFocus
@@ -145,9 +170,10 @@ export function SetupScreen() {
               style={{ color: 'rgba(212,175,55,0.6)' }}>Password</label>
             <input
               type="password" value={password} onChange={e => setPassword(e.target.value)}
+              onFocus={() => setActiveField('password')}
               onKeyDown={e => e.key === 'Enter' && handleLogin()}
               placeholder="••••••••"
-              className="w-full px-4 py-3 rounded-xl text-sm border outline-none"
+              className={`w-full px-4 py-3 rounded-xl text-sm border outline-none ${activeField === 'password' ? 'ring-2 ring-gold-400/40' : ''}`}
               style={{ background: 'rgba(255,255,255,0.07)', color: '#fff',
                 border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }}
               autoComplete="current-password"
@@ -185,6 +211,18 @@ export function SetupScreen() {
           Use your SHITAL kiosk account · Contact admin if you need access
         </p>
       </div>
+      </div>
+
+      {/* On-screen QWERTY keyboard — pinned to the bottom edge, only visible
+          while a field is focused. Tap DONE to dismiss. */}
+      <KioskKeyboard
+        value={kbValue}
+        onChange={kbOnChange}
+        mode={kbMode}
+        visible={activeField !== null}
+        onDone={() => setActiveField(null)}
+        accent="#D4AF37"
+      />
     </div>
   )
 }

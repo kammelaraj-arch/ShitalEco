@@ -61,6 +61,25 @@ VALID_ROLES = {
     "EXTERNAL_CONTRACTOR",
     "TEMP_WORKER",
 }
+# Default seed for the DB-backed board_roles table. Loaded once on startup
+# via ON CONFLICT DO NOTHING — admins can add/edit/disable rows from the
+# Users & Roles page after that; the trustee form fetches the live list at
+# render time, so changes show up without a redeploy.
+SEED_BOARD_ROLES = [
+    # (code, label, category, sort_order)
+    ("CHAIR",               "Chair",               "MAIN_BOARD",  10),
+    ("TREASURER",           "Treasurer",           "MAIN_BOARD",  20),
+    ("SECRETARY",           "Secretary",           "MAIN_BOARD",  30),
+    ("CEO",                 "CEO",                 "MAIN_BOARD",  40),
+    ("TRUSTEE",             "Trustee",             "MAIN_BOARD",  50),
+    ("LMC_CHAIR",           "LMC Chair",           "LMC",         110),
+    ("LMC_TREASURER",       "LMC Treasurer",       "LMC",         120),
+    ("LMC_MEMBER",          "LMC Member",          "LMC",         130),
+    ("EXTERNAL_CONTRACTOR", "External Contractor", "NON_OFFICER", 210),
+    ("TEMP_WORKER",         "Temp Worker",         "NON_OFFICER", 220),
+]
+VALID_ROLE_CATEGORIES = {"MAIN_BOARD", "LMC", "NON_OFFICER"}
+
 VALID_MEETING_TYPES = {"TRUSTEE_MEETING", "COMMITTEE", "AGM", "EMERGENCY"}
 VALID_MEETING_MODES = {"IN_PERSON", "VIRTUAL", "HYBRID"}
 VALID_MEETING_STATUSES = {"SCHEDULED", "OPENED", "CLOSED", "CANCELLED"}
@@ -162,10 +181,30 @@ class TrusteeUpdate(BaseModel):
     is_active: bool | None = None
 
 
-def _validate_trustee_role(role: str | None) -> list[str]:
+async def _active_role_codes() -> set[str]:
+    """Return the set of currently-active board_role codes from the DB.
+    Falls back to the hardcoded VALID_ROLES if the DB lookup fails (so
+    a transient DB blip can't lock out trustee creates)."""
+    try:
+        from sqlalchemy import text
+
+        from shital.core.fabrics.database import SessionLocal
+        async with SessionLocal() as db:
+            result = await db.execute(
+                text("SELECT code FROM board_roles WHERE is_active = true"),
+            )
+            codes = {r[0] for r in result.all()}
+            return codes or VALID_ROLES
+    except Exception:
+        return VALID_ROLES
+
+
+async def _validate_trustee_role(role: str | None) -> list[str]:
     errs: list[str] = []
-    if role and role not in VALID_ROLES:
-        errs.append(f"role '{role}' must be one of: {', '.join(sorted(VALID_ROLES))}")
+    if role:
+        allowed = await _active_role_codes()
+        if role not in allowed:
+            errs.append(f"role '{role}' must be one of: {', '.join(sorted(allowed))}")
     return errs
 
 
@@ -244,7 +283,7 @@ async def create_trustee(
 
     from shital.core.fabrics.database import SessionLocal
 
-    errs = _validate_trustee_role(body.role)
+    errs = await _validate_trustee_role(body.role)
     if not body.full_name.strip():
         errs.append("full_name is required")
     if not body.email.strip() or "@" not in body.email:
@@ -331,7 +370,7 @@ async def update_trustee(
 
     errs: list[str] = []
     if "role" in updates:
-        errs.extend(_validate_trustee_role(updates["role"]))
+        errs.extend(await _validate_trustee_role(updates["role"]))
     if "term_start" in updates:
         d = _parse_date(updates["term_start"], "term_start", errs)
         updates["term_start"] = d
@@ -1542,3 +1581,154 @@ async def chair_casting_vote(
         )
         await db.commit()
     return {"resolution_id": resolution_id, "outcome": new_outcome, "success": True}
+
+
+# ─── Board Roles registry ────────────────────────────────────────────────────
+# DB-backed list of trustee positions (Chair, Treasurer, LMC Chair, etc.).
+# The trustee form fetches GET /admin/board/roles?active=true at render
+# time so adding a new role from Users & Roles takes effect immediately
+# without a redeploy. _validate_trustee_role above gates creates/updates
+# against the active set.
+
+class RoleIn(BaseModel):
+    code: str = ""           # set on POST; ignored on PUT (use the URL id)
+    label: str
+    category: str = "MAIN_BOARD"
+    sort_order: int = 100
+    is_active: bool = True
+
+
+def _role_row(r: Any) -> dict[str, Any]:
+    d = dict(r)
+    if d.get("id") is not None:
+        d["id"] = str(d["id"])
+    for k in ("created_at", "updated_at"):
+        if d.get(k) is not None and hasattr(d[k], "isoformat"):
+            d[k] = d[k].isoformat()
+    return d
+
+
+@router.get("/admin/board/roles")
+async def list_board_roles(
+    ctx: CurrentSpace,
+    active: bool | None = None,
+) -> dict[str, Any]:
+    """List board roles. Filterable to active-only — that's what the trustee
+    form uses to render its picker; the Users & Roles management table uses
+    `active=` unset to show inactive too."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    where = ""
+    params: dict[str, Any] = {}
+    if active is True:
+        where = "WHERE is_active = true"
+    elif active is False:
+        where = "WHERE is_active = false"
+    async with SessionLocal() as db:
+        result = await db.execute(text(f"""
+            SELECT id, code, label, category, sort_order, is_active,
+                   created_at, updated_at
+            FROM board_roles
+            {where}
+            ORDER BY sort_order, label
+        """), params)
+        rows = result.mappings().all()
+    return {"items": [_role_row(r) for r in rows], "count": len(rows)}
+
+
+@router.post("/admin/board/roles", status_code=201)
+async def create_board_role(body: RoleIn, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    code = (body.code or "").strip().upper().replace(" ", "_").replace("-", "_")
+    errs: list[str] = []
+    if not code:
+        errs.append("code is required (UPPER_SNAKE, e.g. NEW_OFFICER)")
+    if not body.label.strip():
+        errs.append("label is required")
+    if body.category not in VALID_ROLE_CATEGORIES:
+        errs.append(f"category must be one of: {', '.join(sorted(VALID_ROLE_CATEGORIES))}")
+    if errs:
+        raise HTTPException(400, detail={"errors": errs})
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        # Idempotent: if the code already exists we update its label /
+        # category / sort_order / is_active rather than 409. Matches how
+        # the Users & Roles UI treats "Add" as upsert.
+        result = await db.execute(text("""
+            INSERT INTO board_roles (code, label, category, sort_order, is_active)
+            VALUES (:code, :label, :cat, :sort, :active)
+            ON CONFLICT (code) DO UPDATE SET
+                label      = EXCLUDED.label,
+                category   = EXCLUDED.category,
+                sort_order = EXCLUDED.sort_order,
+                is_active  = EXCLUDED.is_active,
+                updated_at = NOW()
+            RETURNING id, code, label, category, sort_order, is_active,
+                      created_at, updated_at
+        """), {
+            "code": code, "label": body.label.strip(),
+            "cat": body.category, "sort": int(body.sort_order),
+            "active": bool(body.is_active),
+        })
+        row = result.mappings().first()
+        await db.commit()
+    return _role_row(row) if row else {}
+
+
+@router.put("/admin/board/roles/{role_id}")
+async def update_board_role(role_id: str, body: RoleIn, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    if not _looks_uuid(role_id):
+        raise HTTPException(400, detail="role_id must be a UUID")
+    if body.category and body.category not in VALID_ROLE_CATEGORIES:
+        raise HTTPException(400, detail={"errors": [f"category must be one of: {', '.join(sorted(VALID_ROLE_CATEGORIES))}"]})
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            UPDATE board_roles SET
+                label      = :label,
+                category   = :cat,
+                sort_order = :sort,
+                is_active  = :active,
+                updated_at = NOW()
+            WHERE id = :id
+            RETURNING id, code, label, category, sort_order, is_active,
+                      created_at, updated_at
+        """), {
+            "id": role_id, "label": body.label.strip(),
+            "cat": body.category, "sort": int(body.sort_order),
+            "active": bool(body.is_active),
+        })
+        row = result.mappings().first()
+        if not row:
+            raise HTTPException(404, detail="board role not found")
+        await db.commit()
+    return _role_row(row)
+
+
+@router.delete("/admin/board/roles/{role_id}", status_code=204)
+async def deactivate_board_role(role_id: str, ctx: CurrentSpace) -> None:
+    """Soft-delete: flips is_active=false. Keeps trustees rows that still
+    reference the code from breaking (FK is on the code string, not the
+    UUID, so a hard DELETE could orphan rows even with ON DELETE SET NULL).
+    Admins can re-enable by editing the role and ticking Active again."""
+    _require_admin(ctx)
+    if not _looks_uuid(role_id):
+        raise HTTPException(400, detail="role_id must be a UUID")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text("UPDATE board_roles SET is_active = false, updated_at = NOW() WHERE id = :id RETURNING id"),
+            {"id": role_id},
+        )
+        if not result.scalar():
+            raise HTTPException(404, detail="board role not found")
+        await db.commit()

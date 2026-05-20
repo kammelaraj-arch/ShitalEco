@@ -1,8 +1,11 @@
 import hmac
 import json
 import os
+import re
 import subprocess
 import sys
+import time
+from datetime import datetime as _dt
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Strip whitespace + surrounding quotes — .env files commonly leave these on
@@ -60,10 +63,6 @@ def run_script(args):
 # Admin → System → Ops can call POST /ops/run with {action, args}. Allowlist is
 # defined here (defense-in-depth — backend also validates). Each handler returns
 # {stdout, stderr, exit_code, duration_ms}.
-import re
-import shlex
-import time
-from datetime import datetime as _dt
 
 OPS_LOG = "/var/log/shital-ops.log"
 
@@ -350,11 +349,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/snapshots":
             if not self._check_secret():
-                self.send_response(403); self.end_headers(); return
-            # List promote-time DB dumps. Each is named promote-<ts>-<sha>.sql.gz.
+                self.send_response(403)
+                self.end_headers()
+                return
+            # List promote-time snapshots. Two sources, merged by timestamp:
+            #   1) DB dumps   — /workspace/backups/promote-<ts>-<sha>.sql.gz
+            #   2) Image tags — ghcr.io/.../shitaleco-backend:promote-<ts>
+            #
+            # Listing BOTH means a snapshot remains visible even when
+            # pg_dump silently fails (which was the original bug — the UI
+            # showed "No snapshots yet" despite multiple successful image
+            # promotions). `has_db` lets the UI grey out / warn on entries
+            # that can't do a full restore.
             import glob
             import re as _re
-            entries = []
+            import subprocess
+
+            entries_by_ts: dict[str, dict] = {}
+
+            # 1) DB dumps
             for path in sorted(glob.glob("/workspace/backups/promote-*.sql.gz"), reverse=True):
                 name = os.path.basename(path)
                 m = _re.match(r"^promote-(\d{8}T\d{6}Z)-([0-9a-f]{7,})\.sql\.gz$", name)
@@ -365,19 +378,63 @@ class Handler(BaseHTTPRequestHandler):
                     size = os.path.getsize(path)
                 except OSError:
                     size = 0
-                entries.append({
+                entries_by_ts[ts] = {
                     "id":         ts,
                     "git_sha":    sha,
                     "db_dump":    name,
                     "size_bytes": size,
                     "created_at": ts,
-                })
+                    "has_db":     True,
+                    "has_images": False,
+                }
+
+            # 2) Image tags — survey the backend image (canonical reference,
+            # the other 5 services get the same tag in lockstep)
+            try:
+                out = subprocess.check_output(
+                    ["docker", "images",
+                     "ghcr.io/kammelaraj-arch/shitaleco-backend",
+                     "--format", "{{.Tag}}"],
+                    timeout=15, stderr=subprocess.DEVNULL,
+                ).decode()
+                for tag in out.splitlines():
+                    tag = tag.strip()
+                    if not tag.startswith("promote-"):
+                        continue
+                    ts = tag[len("promote-"):]
+                    if not _re.match(r"^\d{8}T\d{6}Z$", ts):
+                        continue
+                    existing = entries_by_ts.get(ts)
+                    if existing:
+                        existing["has_images"] = True
+                    else:
+                        # Image-only snapshot — pg_dump must have failed.
+                        # We can still partially restore (images) — UI should
+                        # warn but still let the operator pick this row.
+                        entries_by_ts[ts] = {
+                            "id":         ts,
+                            "git_sha":    "",
+                            "db_dump":    None,
+                            "size_bytes": 0,
+                            "created_at": ts,
+                            "has_db":     False,
+                            "has_images": True,
+                        }
+            except (subprocess.SubprocessError, OSError):
+                # Docker socket might be unreachable from the deployer
+                # (eg. socket not bind-mounted). Fall through with what we
+                # have — DB-dump-only listing is still useful.
+                pass
+
+            entries = sorted(entries_by_ts.values(), key=lambda e: e["id"], reverse=True)
             self._send_json(200, {"snapshots": entries[:20]})
             return
 
         if self.path == "/status":
             if not self._check_secret():
-                self.send_response(403); self.end_headers(); return
+                self.send_response(403)
+                self.end_headers()
+                return
             envs = {}
             for env, container in ENV_CONTAINERS.items():
                 running = inspect_container(container)
@@ -409,25 +466,31 @@ class Handler(BaseHTTPRequestHandler):
                 }
             self._send_json(200, {"environments": envs})
             return
-        self.send_response(403); self.end_headers()
+        self.send_response(403)
+        self.end_headers()
 
     def do_POST(self):
         if not self._check_secret():
-            self.send_response(403); self.end_headers(); return
+            self.send_response(403)
+            self.end_headers()
+            return
 
         if self.path == "/deploy":
             target = (self.headers.get("X-Deploy-Target") or "dev").lower()
             if target not in ("dev", "prod"):
-                self.send_response(400); self.end_headers()
+                self.send_response(400)
+                self.end_headers()
                 self.wfile.write(b"X-Deploy-Target must be 'dev' or 'prod'")
                 return
             run_script(["--target", target])
-            self.send_response(202); self.end_headers()
+            self.send_response(202)
+            self.end_headers()
             return
 
         if self.path == "/promote-prod":
             run_script(["--promote-prod"])
-            self.send_response(202); self.end_headers()
+            self.send_response(202)
+            self.end_headers()
             return
 
         if self.path == "/restore":
@@ -435,17 +498,21 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 body = json.loads(self.rfile.read(length).decode() or "{}")
             except json.JSONDecodeError:
-                self.send_response(400); self.end_headers()
-                self.wfile.write(b"invalid JSON body"); return
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"invalid JSON body")
+                return
             sid = (body.get("snapshot_id") or "").strip()
             # Format guard — must look like 20260506T070000Z
             import re as _re
             if not _re.match(r"^\d{8}T\d{6}Z$", sid):
-                self.send_response(400); self.end_headers()
+                self.send_response(400)
+                self.end_headers()
                 self.wfile.write(b"snapshot_id must be timestamp like 20260506T070000Z")
                 return
             run_script(["--restore", sid])
-            self.send_response(202); self.end_headers()
+            self.send_response(202)
+            self.end_headers()
             return
 
         if self.path == "/ops/run":
@@ -453,22 +520,138 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 body = json.loads(self.rfile.read(length).decode() or "{}")
             except json.JSONDecodeError:
-                self.send_response(400); self.end_headers()
-                self.wfile.write(b"invalid JSON body"); return
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"invalid JSON body")
+                return
             action = body.get("action", "")
             args   = body.get("args", {}) or {}
             handler = OP_HANDLERS.get(action)
             if not handler:
-                self.send_response(400); self.end_headers()
-                self.wfile.write(f"unknown action '{action}'".encode()); return
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(f"unknown action '{action}'".encode())
+                return
             result = handler(args)
             _audit(action, args, result)
             self._send_json(200, result)
             return
 
-        self.send_response(404); self.end_headers()
+        self.send_response(404)
+        self.end_headers()
+
+
+# ─── Watchdog ────────────────────────────────────────────────────────────────
+# Background sweep that runs every 60s and force-recreates any required
+# service that's not 'running' (covers 'created', 'exited', 'restarting'
+# stuck-loops, 'unhealthy' from the new container healthchecks).
+#
+# Survives the dev outage scenario: if a deploy leaves admin-dev in
+# Created state (and nobody hits /deploy again for a while), the watchdog
+# catches it within a minute and force-recreates. The user gets dev back
+# without manually triggering anything.
+#
+# Bounded heal counter per service per hour stops a genuinely-broken
+# image (CrashLoopBackOff equivalent) from being looped on forever.
+
+DEV_REQUIRED  = ["db-dev", "backend-dev", "admin-dev",
+                 "quick-donation-dev", "kiosk-dev", "screen-dev", "nginx-dev"]
+PROD_REQUIRED = ["db", "backend", "admin", "quick-donation", "kiosk",
+                 "screen", "service", "nginx", "certbot", "deployer"]
+WATCHDOG_INTERVAL_SECONDS = 60
+WATCHDOG_HEAL_CAP_PER_HOUR = 4  # per service
+
+
+def _service_state(target: str, svc: str) -> str:
+    cname = f"shitaleco-dev-{svc}-1" if target == "dev" else f"shitaleco-{svc}-1"
+    try:
+        out = subprocess.check_output(
+            ["docker", "inspect", "--format",
+             "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}",
+             cname],
+            stderr=subprocess.DEVNULL, timeout=5,
+        ).decode().strip()
+    except Exception:
+        return "absent|-"
+    return out
+
+
+def _resolve_env_file(target: str) -> str | None:
+    """Pick the env-file the watchdog should pass to `docker compose`.
+    Match the fallback chain in deploy.sh so a heal can't fail with the
+    same compose-interpolation error that caused the dev outages."""
+    if target == "dev":
+        for path in ("/workspace-dev/.env.dev",
+                     "/workspace/.env.dev",
+                     "/workspace/.env"):
+            if os.path.isfile(path):
+                return path
+        return None
+    if os.path.isfile("/workspace/.env"):
+        return "/workspace/.env"
+    return None
+
+
+def _watchdog_heal(target: str, svc: str) -> None:
+    compose_file = "/workspace/docker-compose.prod.yml" if target == "prod" \
+                    else "/workspace/docker-compose.dev.yml"
+    cname = f"shitaleco-dev-{svc}-1" if target == "dev" else f"shitaleco-{svc}-1"
+    # rm if in a state that blocks `up -d`
+    state, _ = (_service_state(target, svc) + "|-").split("|", 1)
+    if state in ("created", "exited"):
+        subprocess.run(["docker", "rm", "-f", cname],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=10)
+    cmd = ["docker", "compose"]
+    env_file = _resolve_env_file(target)
+    if env_file:
+        cmd += ["--env-file", env_file]
+    cmd += ["-f", compose_file, "up", "-d", "--no-deps", "--force-recreate", svc]
+    subprocess.run(
+        cmd,
+        stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=120,
+    )
+
+
+def _watchdog_loop():
+    from collections import defaultdict
+    heal_counts: dict[tuple[str, str], list[float]] = defaultdict(list)
+    while True:
+        try:
+            for target, services in (("dev", DEV_REQUIRED), ("prod", PROD_REQUIRED)):
+                for svc in services:
+                    state_str = _service_state(target, svc)
+                    state, health = (state_str + "|-").split("|")[:2]
+                    needs_heal = (
+                        state in ("created", "exited", "absent")
+                        or (state == "restarting")
+                        or (health == "unhealthy")
+                    )
+                    if not needs_heal:
+                        continue
+                    # Rate-limit per service per hour
+                    now = time.time()
+                    key = (target, svc)
+                    heal_counts[key] = [t for t in heal_counts[key] if now - t < 3600]
+                    if len(heal_counts[key]) >= WATCHDOG_HEAL_CAP_PER_HOUR:
+                        continue  # don't loop on a broken image
+                    heal_counts[key].append(now)
+                    print(f"[watchdog] {target}/{svc} = {state_str} → force-recreate")
+                    sys.stdout.flush()
+                    _watchdog_heal(target, svc)
+        except Exception as exc:
+            print(f"[watchdog] sweep error: {exc!r}")
+            sys.stdout.flush()
+        time.sleep(WATCHDOG_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":
+    import threading
+    # Kick off watchdog in a daemon thread so it dies with the deployer
+    # process. Logs go to deployer stdout — visible via `docker logs`.
+    watchdog_enabled = os.environ.get("DEPLOY_WATCHDOG", "1") != "0"
+    if watchdog_enabled:
+        threading.Thread(target=_watchdog_loop, daemon=True, name="deploy-watchdog").start()
+        print("[watchdog] started — sweeping every 60s, cap 4 heals/service/hour")
+        sys.stdout.flush()
     server = HTTPServer(("0.0.0.0", 9000), Handler)
     server.serve_forever()

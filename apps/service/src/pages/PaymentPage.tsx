@@ -15,7 +15,7 @@ const PayPalButtons        = _PayPalButtons        as ComponentType<PayPalButton
 export function PaymentPage() {
   const {
     language, items, branchId, basketId, setBasketId,
-    contactInfo, giftAidDeclaration, setScreen, setOrderResult,
+    contactInfo, giftAidDeclaration, setScreen, setOrderResult, clearBasket,
   } = useStore()
   const total        = useTotal()
   const giftAidTotal = useGiftAidTotal()
@@ -99,12 +99,22 @@ export function PaymentPage() {
         contact_uprn:       s.giftAidDeclaration?.uprn     || s.contactInfo?.uprn     || '',
       })
       if (result.success) {
+        // Snapshot items + Gift Aid totals into the order result BEFORE we
+        // clear the basket, so the ConfirmationPage can render the receipt
+        // rows from the snapshot. Without this snapshot, clearBasket()
+        // empties the store's items array and confirmation goes blank.
         setOrderResult({
           order_id:          result.order_id,
           order_ref:         result.order_ref,
           paypal_order_id:   data.orderID,
           paypal_capture_id: result.paypal_capture_id || '',
           amount:            result.amount ?? s.total,
+          items:             s.items,
+          gift_aid_agreed:   s.giftAidDeclaration?.agreed ?? false,
+          gift_aid_total:    s.giftAidDeclaration?.agreed
+                              ? s.items.reduce((sum: number, i: { totalPrice: number; giftAidEligible?: boolean }) =>
+                                  sum + (i.giftAidEligible ? i.totalPrice : 0), 0)
+                              : 0,
         })
         if (s.contactInfo?.email && result.order_ref) {
           await api.sendReceipt({
@@ -116,7 +126,12 @@ export function PaymentPage() {
               ({ name: i.name, quantity: i.quantity, unit_price: i.unitPrice })),
           }).catch(() => {})
         }
+        // Transition to confirmation BEFORE clearing the basket so React
+        // commits the screen change with the still-populated `items`
+        // referenced by callbacks above; clearBasket() then leaves only
+        // the orderResult.items snapshot for ConfirmationPage to read.
         setScreen('confirmation')
+        clearBasket()
       } else {
         setError('Payment could not be confirmed. Please contact the temple.')
       }
@@ -126,7 +141,9 @@ export function PaymentPage() {
       // paypal_capture_id, amount} from the 500 body). Show the donor the
       // exact references so they can email us — never advance to the
       // confirmation screen on this path or they'll think everything's fine
-      // and we'll have a phantom charge with no DB row.
+      // and we'll have a phantom charge with no DB row. Also clear the
+      // basket — PayPal HAS the money; the donor's basket must not still
+      // show the items as if the transaction hadn't happened.
       const captureId = e?.paypal_capture_id
       const orderRef  = e?.paypal_order_id || data.orderID
       if (captureId || e?.status === 500) {
@@ -135,6 +152,9 @@ export function PaymentPage() {
           (captureId ? ` PayPal capture: ${captureId}.` : '') +
           ` PayPal order: ${orderRef}.`,
         )
+        // PayPal-captured-but-our-DB-failed: still clear the basket so
+        // the donor doesn't re-attempt and get charged twice.
+        clearBasket()
       } else {
         setError(e instanceof Error ? e.message : 'Payment failed. Please try again.')
       }

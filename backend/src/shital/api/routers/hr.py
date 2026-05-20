@@ -279,11 +279,210 @@ async def create_leave(body: LeaveRequestInput, ctx: CurrentSpace):
     return await request_leave(ctx, body)
 
 
+@router.get("/leave")
+async def list_leave(
+    ctx: CurrentSpace,
+    status: str | None = None,
+    limit: int = 200,
+) -> dict[str, Any]:
+    """List leave requests for the current branch, newest first.
+
+    The admin Leave page was rendering '—' in every stat card and
+    "No leave requests yet" because there was no GET endpoint to call —
+    submissions were saved to leave_requests but never surfaced. This
+    returns the rows + a joined employee name so the table is renderable
+    in one round-trip.
+    """
+    # Make sure the leave_type column (and any other ALTERs added in
+    # _ensure_hr_tables) exists before we SELECT from it — previously
+    # the schema patch only ran on POST /hr/leave, so a fresh backend
+    # that had never received a leave submission 500'd this GET with
+    # `column "leave_type" does not exist`. _ensure_hr_tables is
+    # idempotent + cheap; safe to call on every read path.
+    from shital.capabilities.hr.capabilities import _ensure_hr_tables
+    await _ensure_hr_tables()
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    where = ["e.branch_id = :bid", "e.deleted_at IS NULL"]
+    params: dict[str, Any] = {"bid": ctx.branch_id, "limit": limit}
+    if status:
+        where.append("lr.status = :status")
+        params["status"] = status.upper()
+    async with SessionLocal() as db:
+        result = await db.execute(text(f"""
+            SELECT lr.id, lr.employee_id, e.full_name AS employee_name,
+                   lr.leave_type, lr.start_date, lr.end_date, lr.days,
+                   lr.reason, lr.status,
+                   lr.reviewed_by, lr.reviewed_at,
+                   lr.created_at, lr.updated_at
+            FROM leave_requests lr
+            JOIN employees e ON e.id = lr.employee_id
+            WHERE {' AND '.join(where)}
+            ORDER BY lr.created_at DESC
+            LIMIT :limit
+        """), params)
+        rows = result.mappings().all()
+    items = []
+    for r in rows:
+        d = dict(r)
+        # Stringify the few non-JSON-native types so the frontend doesn't
+        # need a serialiser. dates → 'YYYY-MM-DD'; days → float; uuids → str.
+        for k in ("id", "employee_id"):
+            if d.get(k) is not None:
+                d[k] = str(d[k])
+        for k in ("start_date", "end_date"):
+            if d.get(k) is not None:
+                d[k] = d[k].isoformat()
+        for k in ("reviewed_at", "created_at", "updated_at"):
+            if d.get(k) is not None:
+                d[k] = d[k].isoformat()
+        if d.get("days") is not None:
+            try:
+                d["days"] = float(d["days"])
+            except (TypeError, ValueError):
+                d["days"] = 0
+        items.append(d)
+    return {"items": items, "count": len(items)}
+
+
 @router.post("/leave/{leave_id}/approve")
 async def approve(leave_id: str, ctx: CurrentSpace):
     return await approve_leave(ctx, leave_id)
 
 
+@router.post("/leave/{leave_id}/reject")
+async def reject_leave(leave_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """Mark a pending leave request as REJECTED. Same auth + transition rules
+    as /approve: only operates on PENDING rows; idempotent re-rejects are 404
+    so the admin UI surfaces a clear error instead of silently double-handling."""
+    from datetime import datetime as _dt
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text("""
+                UPDATE leave_requests
+                SET status = 'REJECTED', reviewed_by = :user, reviewed_at = :now, updated_at = :now
+                WHERE id = :id AND status = 'PENDING'
+                RETURNING id
+            """),
+            {"id": leave_id, "user": ctx.user_id, "now": _dt.utcnow()},
+        )
+        if not result.scalar():
+            from fastapi import HTTPException
+            raise HTTPException(404, detail="Leave request not found or already actioned")
+        await db.commit()
+    return {"leave_request_id": leave_id, "status": "REJECTED"}
+
+
 @router.post("/timesheet")
 async def log_timesheet(body: TimeEntryInput, ctx: CurrentSpace):
     return await log_time(ctx, body)
+
+
+@router.get("/timesheets")
+async def list_timesheets(
+    ctx: CurrentSpace,
+    week_offset: int = 0,
+    limit: int = 500,
+) -> dict[str, Any]:
+    """List time entries for the current branch + this-week grid + summary.
+
+    Same fix pattern as `/hr/leave`: the admin Timesheets page was
+    rendering '—' in every cell because no GET endpoint existed —
+    entries were saved to `time_entries` but never surfaced. This
+    returns the raw rows, a per-employee Mon→Sun grid of hours for
+    the requested week, and the summary counters the page shows at
+    the top, in one round-trip.
+
+    `week_offset` lets the UI page backwards (0 = this week, -1 =
+    last week, etc.) — defaults to current week.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import text
+
+    from shital.capabilities.hr.capabilities import _ensure_hr_tables
+    from shital.core.fabrics.database import SessionLocal
+
+    # Idempotent — also runs on POST, but a fresh backend that's never
+    # logged time would 500 this GET with "relation does not exist"
+    # without it (same root cause as the leave-page fix).
+    await _ensure_hr_tables()
+
+    today = datetime.now(UTC).date()
+    # Monday of the requested week (Python: Mon=0, Sun=6)
+    monday = today - timedelta(days=today.weekday()) + timedelta(weeks=week_offset)
+    sunday = monday + timedelta(days=6)
+    # Month boundaries for the "this month" tile
+    month_start = today.replace(day=1)
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT te.id, te.employee_id, e.full_name AS employee_name,
+                   te.date, te.hours_worked, te.description, te.approved,
+                   te.created_at
+            FROM   time_entries te
+            JOIN   employees e ON e.id = te.employee_id
+            WHERE  e.branch_id = :bid AND e.deleted_at IS NULL
+              AND  te.date >= :since
+            ORDER  BY te.date DESC, te.created_at DESC
+            LIMIT  :limit
+        """), {
+            "bid": ctx.branch_id,
+            "since": month_start,
+            "limit": limit,
+        })).mappings().all()
+
+    items: list[dict[str, Any]] = []
+    # weekly_grid[employee_id][weekday_index_0_to_6] = total hours that day
+    weekly_grid: dict[str, dict[str, float]] = {}
+    hours_this_week = 0.0
+    hours_this_month = 0.0
+    staff_today: set[str] = set()
+
+    for r in rows:
+        d = dict(r)
+        for k in ("id", "employee_id"):
+            if d.get(k) is not None:
+                d[k] = str(d[k])
+        if d.get("date") is not None:
+            entry_date = d["date"]
+            d["date"] = entry_date.isoformat()
+        else:
+            continue
+        if d.get("created_at") is not None:
+            d["created_at"] = d["created_at"].isoformat()
+        try:
+            hours = float(d.get("hours_worked") or 0)
+        except (TypeError, ValueError):
+            hours = 0.0
+        d["hours_worked"] = hours
+        items.append(d)
+
+        hours_this_month += hours
+        if monday <= entry_date <= sunday:
+            hours_this_week += hours
+            day_idx = str((entry_date - monday).days)  # 0=Mon..6=Sun
+            emp_id = d["employee_id"]
+            grid_emp = weekly_grid.setdefault(emp_id, {})
+            grid_emp[day_idx] = round(grid_emp.get(day_idx, 0.0) + hours, 2)
+        if entry_date == today:
+            staff_today.add(d["employee_id"])
+
+    return {
+        "items": items,
+        "count": len(items),
+        "week_start": monday.isoformat(),
+        "week_end": sunday.isoformat(),
+        "weekly_grid": weekly_grid,
+        "summary": {
+            "hours_this_week": round(hours_this_week, 2),
+            "hours_this_month": round(hours_this_month, 2),
+            "staff_logged_today": len(staff_today),
+        },
+    }

@@ -820,86 +820,78 @@ export function BasketScreen() {
                 </motion.div>
               ))}
             </AnimatePresence>
+
+            {/* ── Order summary + action buttons — moved INSIDE the items
+                scroll container so they render right under the last item
+                (per user request) instead of being pinned to the bottom
+                of the screen via separate flex-shrink-0 blocks. Any
+                leftover viewport space now falls below this block. ── */}
+            <div className="px-5 py-4" style={{ borderTop: '1px solid #e5e7eb' }}>
+              <div className="flex justify-between items-center py-1.5">
+                <span className="text-sm text-gray-500">Sub Total</span>
+                <span className="text-sm font-semibold text-gray-700">£{total.toFixed(2)}</span>
+              </div>
+              {hasEligible && (
+                <div className="flex justify-between items-center py-1.5">
+                  <span className="text-sm text-green-600">🇬🇧 Gift Aid (on £{eligibleAmt.toFixed(2)})</span>
+                  <span className="text-sm font-semibold text-green-600">+£{giftAidBonus.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center pt-2 mt-1" style={{ borderTop: '2px solid #f3f4f6' }}>
+                <span className="font-black text-gray-900 text-lg">Total</span>
+                <span className="font-black text-gray-900 text-2xl">£{total.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="px-4 pt-3 pb-4" style={{ borderTop: '1px solid #e5e7eb', background: '#fff' }}>
+              <div className="flex gap-2 items-stretch">
+
+                <button
+                  onClick={() => { if (window.confirm('Clear basket and start again?')) { resetKiosk(); setScreen('home') } }}
+                  className="flex-none px-2.5 py-3 rounded-xl border border-gray-200 text-gray-400 font-medium text-[11px] leading-tight active:scale-95 transition-all text-center"
+                  style={{ minWidth: 52 }}
+                >
+                  Start<br/>Again
+                </button>
+
+                <button
+                  onClick={() => setScreen('home')}
+                  className="flex-none px-3 py-3 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm active:scale-95 transition-all"
+                  style={{ minWidth: 72 }}
+                >
+                  ← Back
+                </button>
+
+                <button
+                  onClick={handleNormalCheckout}
+                  className="flex-1 py-3 rounded-xl font-black text-sm active:scale-[0.97] transition-all"
+                  style={hasEligible
+                    ? { border: '2px solid #d1d5db', color: '#374151', background: '#fff' }
+                    : { background: th.langActive, color: '#fff', boxShadow: `0 4px 14px ${th.langActive}50` }
+                  }
+                >
+                  {hasEligible && <div className="text-[10px] font-semibold opacity-60 mb-0.5">Without Gift Aid</div>}
+                  <div>Pay · £{total.toFixed(2)}</div>
+                </button>
+
+                {hasEligible && (
+                  <button
+                    onClick={() => setShowGiftAid(true)}
+                    className="flex-[1.4] py-3 rounded-xl text-white font-black text-sm shadow-lg active:scale-[0.97] transition-all"
+                    style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}
+                  >
+                    <div className="flex items-center justify-center gap-1 mb-0.5">
+                      <span className="text-base">🇬🇧</span>
+                      <span className="text-xs text-green-200">Boost with Gift Aid (£{giftAidBonus.toFixed(2)} for free)</span>
+                    </div>
+                    <div>Temple gets £{(total + giftAidBonus).toFixed(2)}</div>
+                  </button>
+                )}
+
+              </div>
+            </div>
           </>
         )}
-      </div>
-
-      {/* ── Order summary ── */}
-      {items.length > 0 && (
-        <div className="flex-shrink-0 px-5 py-4" style={{ borderTop: '1px solid #e5e7eb' }}>
-          <div className="flex justify-between items-center py-1.5">
-            <span className="text-sm text-gray-500">Sub Total</span>
-            <span className="text-sm font-semibold text-gray-700">£{total.toFixed(2)}</span>
-          </div>
-          {hasEligible && (
-            <div className="flex justify-between items-center py-1.5">
-              <span className="text-sm text-green-600">🇬🇧 Gift Aid (on £{eligibleAmt.toFixed(2)})</span>
-              <span className="text-sm font-semibold text-green-600">+£{giftAidBonus.toFixed(2)}</span>
-            </div>
-          )}
-          <div className="flex justify-between items-center pt-2 mt-1" style={{ borderTop: '2px solid #f3f4f6' }}>
-            <span className="font-black text-gray-900 text-lg">Total</span>
-            <span className="font-black text-gray-900 text-2xl">£{total.toFixed(2)}</span>
-          </div>
-        </div>
-      )}
-
-      {/* ── Bottom buttons — all in one row, graduated sizing ── */}
-      <div
-        className="flex-shrink-0 px-4 pt-3 pb-4"
-        style={{ borderTop: '1px solid #e5e7eb', background: '#fff' }}
-      >
-        <div className="flex gap-2 items-stretch">
-
-          {/* Start Again — smallest */}
-          <button
-            onClick={() => { if (window.confirm('Clear basket and start again?')) { resetKiosk(); setScreen('home') } }}
-            className="flex-none px-2.5 py-3 rounded-xl border border-gray-200 text-gray-400 font-medium text-[11px] leading-tight active:scale-95 transition-all text-center"
-            style={{ minWidth: 52 }}
-          >
-            Start<br/>Again
-          </button>
-
-          {/* Back — slightly larger */}
-          <button
-            onClick={() => setScreen('home')}
-            className="flex-none px-3 py-3 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm active:scale-95 transition-all"
-            style={{ minWidth: 72 }}
-          >
-            ← Back
-          </button>
-
-          {/* Confirm & Pay — medium-large */}
-          {items.length > 0 && (
-            <button
-              onClick={handleNormalCheckout}
-              className="flex-1 py-3 rounded-xl font-black text-sm active:scale-[0.97] transition-all"
-              style={hasEligible
-                ? { border: '2px solid #d1d5db', color: '#374151', background: '#fff' }
-                : { background: th.langActive, color: '#fff', boxShadow: `0 4px 14px ${th.langActive}50` }
-              }
-            >
-              {hasEligible && <div className="text-[10px] font-semibold opacity-60 mb-0.5">Without Gift Aid</div>}
-              <div>Pay · £{total.toFixed(2)}</div>
-            </button>
-          )}
-
-          {/* Boost with Gift Aid — biggest */}
-          {items.length > 0 && hasEligible && (
-            <button
-              onClick={() => setShowGiftAid(true)}
-              className="flex-[1.4] py-3 rounded-xl text-white font-black text-sm shadow-lg active:scale-[0.97] transition-all"
-              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}
-            >
-              <div className="flex items-center justify-center gap-1 mb-0.5">
-                <span className="text-base">🇬🇧</span>
-                <span className="text-xs text-green-200">Boost with Gift Aid (£{giftAidBonus.toFixed(2)} for free)</span>
-              </div>
-              <div>Temple gets £{(total + giftAidBonus).toFixed(2)}</div>
-            </button>
-          )}
-
-        </div>
       </div>
     </motion.div>
   )

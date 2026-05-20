@@ -216,7 +216,8 @@ class CreateEmployeeInput(BaseModel):
 
 class LeaveRequestInput(BaseModel):
     employee_id: str
-    leave_policy_id: str
+    leave_policy_id: str = ""
+    leave_type: str = "annual"  # annual / sick / maternity / paternity / unpaid
     start_date: str
     end_date: str
     reason: str = ""
@@ -402,6 +403,12 @@ async def _ensure_hr_tables() -> None:
                 USING NULLIF(days, '')::NUMERIC;
             END IF;
         END $$""",
+        # leave_type column — the admin form has a dropdown for annual / sick /
+        # maternity / paternity / unpaid and was sending it in the request body,
+        # but the original schema had no column for it so the value got dropped
+        # on the floor on every save. Reporting was impossible. Add it with
+        # IF NOT EXISTS so existing DBs upgrade cleanly.
+        "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS leave_type VARCHAR(50) NOT NULL DEFAULT 'annual'",
     ]
 
     for sql in _ddl:
@@ -662,12 +669,13 @@ async def request_leave(ctx: DigitalSpace, data: LeaveRequestInput) -> dict[str,
         await db.execute(
             text("""
                 INSERT INTO leave_requests
-                (id, employee_id, start_date, end_date, days,
+                (id, employee_id, leave_type, start_date, end_date, days,
                  reason, status, created_at, updated_at)
-                VALUES (:id, :emp, :start, :end, :days, :reason, 'PENDING', :now, :now)
+                VALUES (:id, :emp, :ltype, :start, :end, :days, :reason, 'PENDING', :now, :now)
             """),
             {
                 "id": req_id, "emp": data.employee_id,
+                "ltype": (data.leave_type or "annual").strip().lower(),
                 "start": start, "end": end, "days": str(delta),
                 "reason": data.reason or None, "now": now,
             },

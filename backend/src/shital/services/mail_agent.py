@@ -353,10 +353,14 @@ async def _tool_create_purchase_invoice(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": "supplier_account_id, invoice_number, invoice_date, total_amount, lines all required"}
     new_id = str(uuid.uuid4())
     async with SessionLocal() as db:
+        # Column names match the main `purchase_invoices` schema in main.py
+        # — `total`/`vat_total` (not total_amount/vat_amount), `paid_at`
+        # (not paid_date), `reference` (not payment_reference). `source` is
+        # added by ALTER for this integration.
         await db.execute(text("""
             INSERT INTO purchase_invoices
                 (id, supplier_account_id, invoice_number, invoice_date, due_date,
-                 currency, total_amount, vat_amount, status, notes, source, created_at, updated_at)
+                 currency, total, vat_total, status, notes, source, created_at, updated_at)
             VALUES
                 (:id, :sid, :num, :idate, :ddate, :ccy, :total, :vat,
                  'PENDING_APPROVAL', :notes, 'mail_agent', NOW(), NOW())
@@ -399,10 +403,10 @@ async def _tool_find_open_purchase_invoice(args: dict[str, Any]) -> dict[str, An
         where.append("ca.name ILIKE :sn")
         params["sn"] = f"%{args['supplier_name']}%"
     if args.get("amount") is not None:
-        where.append("ABS(pi.total_amount - :amt) < 0.05")
+        where.append("ABS(pi.total - :amt) < 0.05")
         params["amt"] = args["amount"]
     sql = f"""
-        SELECT pi.id, pi.invoice_number, pi.invoice_date, pi.total_amount,
+        SELECT pi.id, pi.invoice_number, pi.invoice_date, pi.total,
                pi.status, ca.name AS supplier_name
         FROM purchase_invoices pi
         LEFT JOIN crm_accounts ca ON ca.id = pi.supplier_account_id
@@ -416,7 +420,7 @@ async def _tool_find_open_purchase_invoice(args: dict[str, Any]) -> dict[str, An
         "id":             str(r["id"]),
         "invoice_number": r["invoice_number"],
         "invoice_date":   r["invoice_date"].isoformat() if r["invoice_date"] else None,
-        "total":          float(r["total_amount"]) if r["total_amount"] is not None else None,
+        "total":          float(r["total"]) if r["total"] is not None else None,
         "status":         r["status"],
         "supplier":       r["supplier_name"],
     } for r in rows]}
@@ -429,7 +433,7 @@ async def _tool_mark_invoice_paid(args: dict[str, Any]) -> dict[str, Any]:
     async with SessionLocal() as db:
         await db.execute(text("""
             UPDATE purchase_invoices
-            SET status='PAID', paid_date=:pd, payment_reference=:pr, updated_at=NOW()
+            SET status='PAID', paid_at=:pd, reference=:pr, updated_at=NOW()
             WHERE id = :id
         """), {
             "id": iid,

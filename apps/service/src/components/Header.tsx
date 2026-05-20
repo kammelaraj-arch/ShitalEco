@@ -39,44 +39,87 @@ export function Header() {
       style={{ background: 'var(--bg-header)', borderBottom: '1px solid rgba(212,175,55,0.2)' }}>
       <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
 
-        {/* Logo */}
-        <button onClick={() => setScreen('browse')} className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 animate-diya-pulse"
-            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)' }}>
-            <img src={SHITAL_LOGO_URL} alt="SHITAL"
-              className="w-full h-full object-contain p-1"
-              onError={e => {
-                // Network blip / DNS issue — fall back to the temple emoji so
-                // the header never renders a broken-image icon.
-                const el = e.currentTarget
-                el.style.display = 'none'
-                const parent = el.parentElement
-                if (parent && !parent.querySelector('.fallback-emoji')) {
-                  const span = document.createElement('span')
-                  span.className = 'fallback-emoji text-xl'
-                  span.style.color = 'var(--btn-dark)'
-                  span.textContent = '🛕'
-                  parent.appendChild(span)
-                }
-              }} />
-          </div>
-          <div className="hidden sm:block min-w-0">
-            <p className="font-display font-bold text-gold-400 text-sm leading-tight truncate tracking-wide">
+        {/* Logo + branch pill. The branch pill used to be a tiny "change"
+            text link tucked under the temple name — invisible on mobile
+            (the whole block was `hidden sm:block`) and easy to miss on
+            desktop. Donors regularly didn't realise they could switch
+            branches. Now the branch is a real pill button next to the
+            logo, visible on every breakpoint and styled so it reads as
+            "tap me to change branch". */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <button onClick={() => setScreen('browse')} className="flex-shrink-0">
+            <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center animate-diya-pulse"
+              style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)' }}>
+              <img src={SHITAL_LOGO_URL} alt="SHITAL"
+                className="w-full h-full object-contain p-1"
+                onError={e => {
+                  // Network blip / DNS issue — fall back to the temple emoji so
+                  // the header never renders a broken-image icon.
+                  const el = e.currentTarget
+                  el.style.display = 'none'
+                  const parent = el.parentElement
+                  if (parent && !parent.querySelector('.fallback-emoji')) {
+                    const span = document.createElement('span')
+                    span.className = 'fallback-emoji text-xl'
+                    span.style.color = 'var(--btn-dark)'
+                    span.textContent = '🛕'
+                    parent.appendChild(span)
+                  }
+                }} />
+            </div>
+          </button>
+
+          {/* Temple name — desktop only, branch lives in the pill below */}
+          <button onClick={() => setScreen('browse')} className="hidden md:block min-w-0">
+            <p className="font-display font-bold text-gold-400 text-sm leading-tight truncate tracking-wide text-left">
               Shri Shirdi Saibaba Temple
             </p>
-            <div className="flex items-center gap-1.5">
-              <p className="text-xs font-medium truncate" style={{ color: 'var(--text-muted)' }}>
-                {branchName && branchName !== 'All Temples' ? branchName : 'SHITAL'}
-              </p>
-              {!branchLocked && branchName && (
-                <button onClick={handleChangeBranch}
-                  className="text-[10px] text-gold-500 hover:text-gold-300 font-semibold flex-shrink-0">
-                  change
-                </button>
-              )}
+            <p className="text-[10px] font-medium truncate text-left" style={{ color: 'var(--text-muted)' }}>
+              SHITAL · UK Registered Charity
+            </p>
+          </button>
+
+          {/* Branch pill — always visible. Tapping it routes to browse and
+              clears the saved branch so the donor sees the picker. Locked
+              branches (subdomain / kiosk token) render as a static pill
+              without the "change" affordance. */}
+          {!branchLocked ? (
+            <button onClick={handleChangeBranch}
+              className="ml-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition-all active:scale-95 hover:brightness-110 flex-shrink-0"
+              style={{
+                background: 'linear-gradient(135deg,rgba(212,175,55,0.18),rgba(212,175,55,0.10))',
+                border: '1.5px solid rgba(212,175,55,0.45)',
+                color: '#D4AF37',
+              }}
+              title="Tap to change branch"
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+              </svg>
+              <span className="truncate max-w-[110px] sm:max-w-none">
+                {branchName && branchName !== 'All Temples' ? branchName : 'Choose branch'}
+              </span>
+              <span className="opacity-75 text-[10px] uppercase tracking-wider font-extrabold hidden sm:inline">change</span>
+              <svg className="w-2.5 h-2.5 opacity-75" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+          ) : branchName && branchName !== 'All Temples' ? (
+            <div className="ml-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold flex-shrink-0"
+              style={{
+                background: 'rgba(212,175,55,0.10)',
+                border: '1px solid rgba(212,175,55,0.25)',
+                color: 'var(--text-muted)',
+              }}
+              title="Branch locked to this device"
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+              </svg>
+              <span className="truncate max-w-[110px] sm:max-w-none">{branchName}</span>
             </div>
-          </div>
-        </button>
+          ) : null}
+        </div>
 
         {/* Right actions */}
         <div className="flex items-center gap-2">

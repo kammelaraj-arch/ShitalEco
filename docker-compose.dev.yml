@@ -102,6 +102,17 @@ services:
       - backend-dev
     networks:
       - dev-internal
+    # Bulletproof self-recovery: without a healthcheck, docker's
+    # restart:unless-stopped can't tell when nginx inside the container
+    # is wedged (only when the process crashes). The healthcheck makes
+    # docker flip the container to (unhealthy) which deploy.sh's audit
+    # treats as 'needs heal' and the watchdog rotates it on the next sweep.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/admin/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   quick-donation-dev:
     image: ghcr.io/kammelaraj-arch/shitaleco-quick-donation:dev
@@ -142,6 +153,29 @@ services:
     networks:
       - dev-internal
 
+  # Service portal (donation web app) on dev. The image was built with
+  # VITE_BASE=/ for prod, so we serve it at the root of its own port (8082)
+  # rather than behind the dev nginx /service/ prefix — that would break
+  # all asset paths since Vite hard-codes the base into bundle imports.
+  # The SPA's API calls go to /api/v1 (relative) → same origin :8082 →
+  # the service container's nginx. Add /api proxy in service Dockerfile or
+  # rebuild with absolute VITE_API_URL if you need full functionality;
+  # for now the card lets you preview the UI.
+  service-dev:
+    image: ghcr.io/kammelaraj-arch/shitaleco-service:dev
+    restart: unless-stopped
+    ports:
+      - "8082:80"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 48M
+    depends_on:
+      - backend-dev
+    networks:
+      - dev-internal
+
   nginx-dev:
     image: nginx:alpine
     restart: unless-stopped
@@ -164,6 +198,15 @@ services:
       - screen-dev
     networks:
       - dev-internal
+    # Same rationale as admin-dev — nginx-dev had no healthcheck so docker
+    # couldn't tell when the reverse proxy was wedged. wget hits the dev
+    # hub static page which nginx serves directly (no upstream needed).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
 volumes:
   pgdata-dev:
