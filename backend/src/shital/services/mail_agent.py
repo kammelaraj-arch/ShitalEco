@@ -24,7 +24,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from anthropic import AsyncAnthropic
 from anthropic.types import TextBlock, ToolUseBlock
@@ -692,12 +692,19 @@ async def triage_email(mailbox: str, message_meta: dict[str, Any]) -> dict[str, 
         # Capture assistant turn verbatim so tool_use blocks are preserved
         messages.append({"role": "assistant", "content": resp.content})
 
-        tool_uses: list[ToolUseBlock] = [b for b in resp.content if isinstance(b, ToolUseBlock)]
+        # SDK content_block is a Pydantic discriminated union. Narrowing
+        # via `b.type == "tool_use"` is the discriminator the SDK uses
+        # internally — `isinstance(b, ToolUseBlock)` doesn't narrow for
+        # mypy because the union members are TypeAliases under the hood.
+        # We runtime-check `.type` and `cast()` for the type-checker.
+        tool_uses: list[ToolUseBlock] = [
+            cast(ToolUseBlock, b) for b in resp.content if b.type == "tool_use"
+        ]
         if not tool_uses:
             # Pure-text reply with no tool call — extract any text and stop
             for b in resp.content:
-                if isinstance(b, TextBlock):
-                    summary = b.text[:500]
+                if b.type == "text":
+                    summary = cast(TextBlock, b).text[:500]
                     break
             break
 
@@ -705,7 +712,13 @@ async def triage_email(mailbox: str, message_meta: dict[str, Any]) -> dict[str, 
         finished = False
         for tu in tool_uses:
             name = tu.name
-            args: dict[str, Any] = dict(tu.input) if isinstance(tu.input, dict) else {}
+            # tu.input is typed as `object` by the SDK; runtime is always a
+            # JSON dict produced from the tool schema. Cast after the
+            # isinstance gate.
+            raw_input = tu.input
+            args: dict[str, Any] = (
+                cast(dict[str, Any], raw_input) if isinstance(raw_input, dict) else {}
+            )
             try:
                 result = await _dispatch(name, args, mail_agent_message_id=mail_agent_id)
             except Exception as exc:
