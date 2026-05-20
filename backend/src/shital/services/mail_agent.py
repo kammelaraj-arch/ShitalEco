@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from anthropic import AsyncAnthropic
+from anthropic.types import TextBlock, ToolUseBlock
 from sqlalchemy import text
 
 from shital.core.fabrics.config import settings
@@ -691,11 +692,11 @@ async def triage_email(mailbox: str, message_meta: dict[str, Any]) -> dict[str, 
         # Capture assistant turn verbatim so tool_use blocks are preserved
         messages.append({"role": "assistant", "content": resp.content})
 
-        tool_uses = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
+        tool_uses: list[ToolUseBlock] = [b for b in resp.content if isinstance(b, ToolUseBlock)]
         if not tool_uses:
             # Pure-text reply with no tool call — extract any text and stop
             for b in resp.content:
-                if getattr(b, "type", "") == "text":
+                if isinstance(b, TextBlock):
                     summary = b.text[:500]
                     break
             break
@@ -704,7 +705,7 @@ async def triage_email(mailbox: str, message_meta: dict[str, Any]) -> dict[str, 
         finished = False
         for tu in tool_uses:
             name = tu.name
-            args = tu.input or {}
+            args: dict[str, Any] = dict(tu.input) if isinstance(tu.input, dict) else {}
             try:
                 result = await _dispatch(name, args, mail_agent_message_id=mail_agent_id)
             except Exception as exc:
@@ -714,8 +715,8 @@ async def triage_email(mailbox: str, message_meta: dict[str, Any]) -> dict[str, 
             tool_log.append({"turn": turn, "tool": name, "args": args, "result": result})
 
             if name == "finish":
-                classification = args.get("classification") or "other"
-                summary = args.get("summary") or summary
+                classification = str(args.get("classification") or "other")
+                summary = str(args.get("summary") or summary)
                 finished = True
 
             tool_results.append({
