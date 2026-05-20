@@ -92,8 +92,8 @@ async def _token() -> str:
     _token_cache["value"] = body["access_token"]
     _token_cache["exp"]   = now + int(body.get("expires_in", 3600))
     if _token_cache["mode"] != mode:
-        logger.info("mailbox_auth_mode", mode=mode,
-                    user=(settings.MAIL_AGENT_USER if mode == "ropc" else "<app-only>"))
+        who = settings.MAIL_AGENT_USER if mode == "ropc" else "<app-only>"
+        logger.info("mailbox_auth_mode mode=%s user=%s", mode, who)
         _token_cache["mode"] = mode
     return str(body["access_token"])
 
