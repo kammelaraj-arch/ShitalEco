@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     OFFICE365_EMAIL: str = "noreply@shital.org.uk"
     OFFICE365_PASSWORD: str = ""
 
+    # Where volunteer-application notifications go. Empty → falls back to
+    # OFFICE365_EMAIL (the trust's catch-all inbox). Set this to the
+    # safeguarding lead's address once the role exists.
+    VOLUNTEER_NOTIFY_EMAIL: str = ""
+
     # Meta WhatsApp
     META_WHATSAPP_TOKEN: str = ""
     META_WHATSAPP_PHONE_ID: str = ""
