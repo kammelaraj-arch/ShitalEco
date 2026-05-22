@@ -14,6 +14,7 @@ from shital.core.fabrics.cache import cache_get, cache_set
 from shital.core.fabrics.config import settings
 from shital.core.fabrics.database import SessionLocal
 from shital.core.fabrics.secrets import SecretsManager
+from shital.core.space.branches import resolve_branch_code
 from shital.core.space.context import DigitalSpace
 
 router = APIRouter(prefix="/kiosk", tags=["kiosk"])
@@ -1129,14 +1130,6 @@ class QuickDonationRecordInput(BaseModel):
     ga_declared: bool = False
 
 
-# Anonymous kiosk user/branch lookup — maps branch codes to UUIDs at runtime.
-# Falls back to using the code directly (works if DB stores string IDs).
-async def _resolve_branch_uuid(db: Any, branch_code: str) -> str:
-    """Resolve a branch short code (e.g. 'main') to its UUID. Returns the code unchanged if not found."""
-    row = (await db.execute(text("SELECT id FROM branches WHERE branch_id = :code LIMIT 1"), {"code": branch_code})).mappings().first()
-    return str(row["id"]) if row else branch_code
-
-
 async def _resolve_anonymous_user(db: Any) -> str:
     """Get or create a system 'anonymous-kiosk' user for recording anonymous donations."""
     row = (await db.execute(text("SELECT id FROM users WHERE email = 'anonymous-kiosk@shital.org' LIMIT 1"))).mappings().first()
@@ -1170,7 +1163,7 @@ async def record_quick_donation(body: QuickDonationRecordInput):
     now = datetime.utcnow()
     try:
         async with SessionLocal() as db:
-            branch_id = await _resolve_branch_uuid(db, body.branch_id)
+            branch_id = await resolve_branch_code(db, body.branch_id)
             anon_user_id = await _resolve_anonymous_user(db)
 
             # 1. Record in orders table (for order tracking / reconciliation)

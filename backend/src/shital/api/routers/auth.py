@@ -92,9 +92,11 @@ async def refresh(body: RefreshInput):
             {"id": user_id},
         )
         user = result.mappings().first()
+        if not user or not user["is_active"]:
+            raise HTTPException(status_code=401, detail="User not found")
 
-    if not user or not user["is_active"]:
-        raise HTTPException(status_code=401, detail="User not found")
+        from shital.core.space.branches import resolve_branch_code
+        branch_code = await resolve_branch_code(db, user["branch_id"])
 
-    access = _create_access_token(user["id"], user["email"], user["role"], user["branch_id"])
+    access = _create_access_token(user["id"], user["email"], user["role"], branch_code)
     return {"access_token": access, "token_type": "bearer"}

@@ -253,15 +253,18 @@ async def verify_azure_token(body: VerifyTokenInput):
             )
             await db.commit()
 
-    if not user:
-        raise HTTPException(status_code=500, detail="Failed to resolve user record")
+        if not user:
+            raise HTTPException(status_code=500, detail="Failed to resolve user record")
 
-    if not user["is_active"]:
-        raise HTTPException(status_code=403, detail="Account is deactivated. Contact your administrator.")
+        if not user["is_active"]:
+            raise HTTPException(status_code=403, detail="Account is deactivated. Contact your administrator.")
+
+        from shital.core.space.branches import resolve_branch_code
+        branch_code = await resolve_branch_code(db, user["branch_id"])
 
     # ── 6. Issue our own JWT ──────────────────────────────────────────────────
     user_id_str = str(user["id"])
-    access = _create_access_token(user_id_str, user["email"], user["role"], user["branch_id"])
+    access = _create_access_token(user_id_str, user["email"], user["role"], branch_code)
     refresh = _create_refresh_token(user_id_str)
 
     return {
@@ -274,7 +277,7 @@ async def verify_azure_token(body: VerifyTokenInput):
             "email": user["email"],
             "name": user["name"],
             "role": user["role"],
-            "branch_id": user["branch_id"],
+            "branch_id": branch_code,
             "auth_provider": "azure_ad",
         },
     }
