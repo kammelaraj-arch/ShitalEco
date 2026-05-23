@@ -73,7 +73,6 @@ async def login_with_email(ctx: DigitalSpace, data: LoginInput) -> dict[str, Any
 
     from shital.core.fabrics.database import SessionLocal
     from shital.core.fabrics.errors import UnauthorizedError
-
     from shital.core.space.branches import resolve_branch_code
 
     async with SessionLocal() as db:
