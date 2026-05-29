@@ -53,6 +53,28 @@ interface DeployEvent {
   at?: string
 }
 
+interface KioskHealthRow {
+  id: string
+  name: string
+  device_type: string
+  status: string
+  branch_code: string
+  branch_name: string
+  last_seen_at: string | null
+  seconds_since_seen: number | null
+  health: 'ONLINE' | 'STALE' | 'OFFLINE' | 'INACTIVE'
+  reader_label: string | null
+  reader_provider: string | null
+  reader_status: string | null
+  reader_last_seen_at: string | null
+}
+
+interface KioskHealthResponse {
+  kiosks: KioskHealthRow[]
+  summary: { total: number; online: number; stale: number; offline: number; inactive: number }
+  now: string
+}
+
 function fmtAge(iso?: string) {
   if (!iso) return ''
   const t = new Date(iso).getTime()
@@ -107,6 +129,10 @@ export default function OpsPage() {
   const [environments, setEnvironments] = useState<EnvironmentsResponse | null>(null)
   const [deploys, setDeploys] = useState<DeployEvent[] | null>(null)
 
+  // ── Kiosk health (Quick Donation + Full Kiosk fleet) ─────────────────────
+  const [kiosks, setKiosks]       = useState<KioskHealthResponse | null>(null)
+  const [kiosksErr, setKiosksErr] = useState('')
+
   // ── Promote / Snapshots / Restore ────────────────────────────────────────
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [snapshotsErr, setSnapshotsErr] = useState('')
@@ -133,6 +159,22 @@ export default function OpsPage() {
   }, [])
 
   useEffect(() => { loadSnapshots() }, [loadSnapshots])
+
+  const loadKiosks = useCallback(async () => {
+    setKiosksErr('')
+    try {
+      const d = await apiFetch<KioskHealthResponse>('/admin/system/kiosks/status')
+      setKiosks(d)
+    } catch (e) {
+      setKiosksErr(e instanceof Error ? e.message : 'Failed to load kiosk status')
+    }
+  }, [])
+
+  useEffect(() => {
+    loadKiosks()
+    const id = setInterval(loadKiosks, 30_000)
+    return () => clearInterval(id)
+  }, [loadKiosks])
 
   const loadEnvs = useCallback(async () => {
     try {
@@ -393,6 +435,108 @@ export default function OpsPage() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Kiosk fleet health (Quick Donation + Full Kiosk) ─────────────── */}
+      <div className="glass rounded-2xl p-6 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">📟</span>
+            <div>
+              <h2 className="text-white font-bold text-lg">Kiosks</h2>
+              <p className="text-white/40 text-xs">
+                Live status of every configured kiosk + paired card reader.
+                <span className="text-green-400/80"> ONLINE</span> = seen ≤ 5 min,
+                <span className="text-amber-400/80"> STALE</span> = ≤ 60 min,
+                <span className="text-red-400/80"> OFFLINE</span> = longer / never.
+                Auto-refreshes every 30 s.
+              </p>
+            </div>
+          </div>
+          <button onClick={loadKiosks}
+            className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 text-xs hover:bg-white/10">
+            ↻ Refresh
+          </button>
+        </div>
+
+        {kiosksErr && (
+          <p className="text-red-300 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{kiosksErr}</p>
+        )}
+
+        {kiosks && (
+          <div className="flex gap-2 flex-wrap text-xs font-mono">
+            <span className="px-2 py-1 rounded bg-white/5 border border-white/10 text-white/70">Total {kiosks.summary.total}</span>
+            <span className="px-2 py-1 rounded bg-green-500/15 border border-green-500/30 text-green-300">● Online {kiosks.summary.online}</span>
+            <span className="px-2 py-1 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300">● Stale {kiosks.summary.stale}</span>
+            <span className="px-2 py-1 rounded bg-red-500/15 border border-red-500/30 text-red-300">● Offline {kiosks.summary.offline}</span>
+            {kiosks.summary.inactive > 0 && (
+              <span className="px-2 py-1 rounded bg-white/5 border border-white/10 text-white/40">○ Inactive {kiosks.summary.inactive}</span>
+            )}
+          </div>
+        )}
+
+        {kiosks && kiosks.kiosks.length === 0 && !kiosksErr && (
+          <p className="text-white/40 text-sm">No kiosk devices configured yet.</p>
+        )}
+
+        {kiosks && kiosks.kiosks.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-white/40 text-xs uppercase tracking-wider">
+                <tr className="text-left border-b border-white/10">
+                  <th className="py-2 pr-4">Health</th>
+                  <th className="py-2 pr-4">Device</th>
+                  <th className="py-2 pr-4">Branch</th>
+                  <th className="py-2 pr-4">Type</th>
+                  <th className="py-2 pr-4">Last seen</th>
+                  <th className="py-2 pr-4">Card reader</th>
+                </tr>
+              </thead>
+              <tbody className="text-white/80">
+                {kiosks.kiosks.map(k => {
+                  const tone =
+                    k.health === 'ONLINE'  ? 'bg-green-500/15 border-green-500/30 text-green-300' :
+                    k.health === 'STALE'   ? 'bg-amber-500/15 border-amber-500/30 text-amber-300' :
+                    k.health === 'INACTIVE'? 'bg-white/5 border-white/10 text-white/40' :
+                                             'bg-red-500/15 border-red-500/30 text-red-300'
+                  const readerTone =
+                    k.reader_status === 'online' ? 'text-green-400' :
+                    k.reader_status === 'busy'   ? 'text-amber-400' :
+                    k.reader_status === 'offline'? 'text-red-400'   :
+                                                   'text-white/40'
+                  return (
+                    <tr key={k.id} className="border-b border-white/5">
+                      <td className="py-2 pr-4">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${tone}`}>
+                          ● {k.health}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 font-medium">{k.name || <span className="text-white/30 font-mono text-xs">{k.id.slice(0, 8)}</span>}</td>
+                      <td className="py-2 pr-4 text-white/60">{k.branch_name}</td>
+                      <td className="py-2 pr-4 text-white/60 text-xs">{k.device_type || '—'}</td>
+                      <td className="py-2 pr-4 text-white/60 text-xs">
+                        {k.last_seen_at ? fmtAge(k.last_seen_at) : <span className="text-white/30">never</span>}
+                      </td>
+                      <td className="py-2 pr-4 text-xs">
+                        {k.reader_label ? (
+                          <div className="flex items-center gap-2">
+                            <span className={readerTone}>●</span>
+                            <span className="text-white/70">{k.reader_label}</span>
+                            {k.reader_provider && (
+                              <span className="text-white/30 text-[10px] uppercase">{k.reader_provider.replace('stripe_terminal', 'stripe')}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-white/30">unpaired</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

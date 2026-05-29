@@ -22,8 +22,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, status
+from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace
+from shital.core.fabrics.database import SessionLocal
 
 router = APIRouter(prefix="/admin/system", tags=["system"])
 
@@ -352,4 +354,99 @@ async def ops_run(
         "triggered_by": ctx.user_email,
         "triggered_at": datetime.now(UTC).isoformat(),
         **result,  # stdout, stderr, exit_code, duration_ms
+    }
+
+
+# ─── Kiosk health (Quick Donation + Full Kiosk fleet) ─────────────────────────
+# Classification proxies kiosk_devices.last_seen_at — which is bumped whenever
+# the device fetches its config (login / refresh / config poll). No dedicated
+# heartbeat yet, so "online" means "interacted with the API recently".
+
+_KIOSK_ONLINE_MAX_SECONDS = 5 * 60       # ≤ 5 min  → ONLINE
+_KIOSK_STALE_MAX_SECONDS  = 60 * 60      # 5-60 min → STALE; > 60 min → OFFLINE
+
+
+def _classify_seen(seconds_since: int | None) -> str:
+    if seconds_since is None:
+        return "OFFLINE"
+    if seconds_since <= _KIOSK_ONLINE_MAX_SECONDS:
+        return "ONLINE"
+    if seconds_since <= _KIOSK_STALE_MAX_SECONDS:
+        return "STALE"
+    return "OFFLINE"
+
+
+@router.get("/kiosks/status")
+async def kiosks_status(ctx: CurrentSpace) -> dict[str, Any]:
+    """
+    Health snapshot for every configured kiosk (Quick Donation + Full Kiosk)
+    and its paired card reader. ONLINE / STALE / OFFLINE based on last_seen_at.
+    """
+    _require_admin(ctx)
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT
+                kd.id::text                                AS id,
+                COALESCE(kd.name, '')                      AS name,
+                COALESCE(kd.device_type, '')               AS device_type,
+                COALESCE(UPPER(kd.status), 'UNKNOWN')      AS status,
+                kd.branch_id                               AS branch_code,
+                COALESCE(b.name, kd.branch_id)             AS branch_name,
+                kd.last_seen_at                            AS last_seen_at,
+                td.label                                   AS reader_label,
+                COALESCE(td.provider, '')                  AS reader_provider,
+                LOWER(COALESCE(td.status, ''))             AS reader_status,
+                td.last_seen_at                            AS reader_last_seen_at
+            FROM kiosk_devices kd
+            LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+            LEFT JOIN branches b ON b.branch_id = kd.branch_id
+            WHERE kd.deleted_at IS NULL
+            ORDER BY kd.branch_id, kd.device_type, kd.name
+        """))).mappings().all()
+
+    now = datetime.now(UTC)
+    kiosks: list[dict[str, Any]] = []
+    summary = {"total": 0, "online": 0, "stale": 0, "offline": 0, "inactive": 0}
+
+    for r in rows:
+        last_seen = r["last_seen_at"]
+        seconds_since = int((now - last_seen).total_seconds()) if last_seen else None
+        health = _classify_seen(seconds_since)
+
+        reader_seen = r["reader_last_seen_at"]
+        reader_seconds = int((now - reader_seen).total_seconds()) if reader_seen else None
+
+        is_inactive = r["status"] != "ACTIVE"
+        if is_inactive:
+            summary["inactive"] += 1
+        else:
+            summary[health.lower()] += 1
+        summary["total"] += 1
+
+        kiosks.append({
+            "id":               r["id"],
+            "name":             r["name"],
+            "device_type":      r["device_type"],
+            "status":           r["status"],
+            "branch_code":      r["branch_code"],
+            "branch_name":      r["branch_name"],
+            "last_seen_at":     last_seen.isoformat() if last_seen else None,
+            "seconds_since_seen": seconds_since,
+            "health":           "INACTIVE" if is_inactive else health,
+            "reader_label":     r["reader_label"],
+            "reader_provider":  r["reader_provider"] or None,
+            "reader_status":    r["reader_status"] or None,
+            "reader_last_seen_at": reader_seen.isoformat() if reader_seen else None,
+            "reader_seconds_since_seen": reader_seconds,
+        })
+
+    return {
+        "kiosks": kiosks,
+        "summary": summary,
+        "thresholds": {
+            "online_max_seconds": _KIOSK_ONLINE_MAX_SECONDS,
+            "stale_max_seconds":  _KIOSK_STALE_MAX_SECONDS,
+        },
+        "now": now.isoformat(),
     }
