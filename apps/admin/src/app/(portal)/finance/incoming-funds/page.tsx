@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
-  Legend, Cell,
+  Legend, Cell, PieChart, Pie,
 } from 'recharts'
 import { apiFetch } from '@/lib/api'
 
@@ -25,6 +25,26 @@ interface BranchTotals {
   count: number
 }
 
+interface SourceBranchRow {
+  branch_id: string
+  branch_name: string
+  source: string
+  payment_provider: string
+  amount: number
+  gift_aid: number
+  with_gift_aid: number
+  count: number
+}
+
+interface GiftaidRow {
+  branch_id: string
+  branch_name: string
+  giftaid_eligible: boolean
+  amount: number
+  gift_aid: number
+  count: number
+}
+
 interface FundsResponse {
   period: 'day' | 'week' | 'month' | 'quarter' | 'year'
   start_date: string
@@ -32,6 +52,8 @@ interface FundsResponse {
   branch_id:  string | null
   series:     SeriesPoint[]
   by_branch:  BranchTotals[]
+  by_source_branch: SourceBranchRow[]
+  by_giftaid: GiftaidRow[]
   totals:     { amount: number; gift_aid: number; with_gift_aid: number; count: number }
 }
 
@@ -52,6 +74,56 @@ const PERIOD_PRESETS = [
 ]
 
 const BRANCH_COLOURS = ['#f59e0b', '#10b981', '#3b82f6', '#a855f7', '#ef4444', '#14b8a6', '#f97316', '#6366f1']
+
+// Source pie palette + friendly labels. Sources that aren't in the map fall
+// through to the raw string so a new source type still renders, just without
+// a curated label.
+const SOURCE_COLOURS = [
+  '#f59e0b', '#10b981', '#3b82f6', '#a855f7', '#ef4444',
+  '#14b8a6', '#f97316', '#6366f1', '#ec4899', '#84cc16',
+]
+const SOURCE_LABEL: Record<string, string> = {
+  'kiosk':            'Kiosk (full)',
+  'quick-donation':   'Quick Donation kiosk',
+  'service-portal':   'Service portal (PayPal)',
+  'monthly-giving':   'Monthly Giving (recurring)',
+  'manual':           'Manual entry',
+  'paypal':           'PayPal',
+  'cash':             'Cash',
+  'card':             'Card',
+}
+function sourceLabel(s: string): string {
+  return SOURCE_LABEL[s] || s
+}
+
+// Sum rows from `by_source_branch` filtered to one branch (or all). Returns
+// a small array sorted by amount desc — drives both the table and the pie.
+interface SourceTotal { source: string; amount: number; gift_aid: number; count: number }
+function aggregateSources(rows: SourceBranchRow[], branchId: string | null): SourceTotal[] {
+  const acc = new Map<string, SourceTotal>()
+  for (const r of rows) {
+    if (branchId && r.branch_id !== branchId) continue
+    const cur = acc.get(r.source) ?? { source: r.source, amount: 0, gift_aid: 0, count: 0 }
+    cur.amount   += r.amount
+    cur.gift_aid += r.gift_aid
+    cur.count    += r.count
+    acc.set(r.source, cur)
+  }
+  return Array.from(acc.values()).sort((a, b) => b.amount - a.amount)
+}
+
+// Sum Gift-Aid eligibility split (yes/no) per branch or org-wide. Empty
+// arrays default to zero amounts — the pie still renders with placeholder
+// slices so the layout doesn't jump.
+function aggregateGiftaid(rows: GiftaidRow[], branchId: string | null): { eligible: number; not_eligible: number } {
+  let eligible = 0, not_eligible = 0
+  for (const r of rows) {
+    if (branchId && r.branch_id !== branchId) continue
+    if (r.giftaid_eligible) eligible += r.amount
+    else not_eligible += r.amount
+  }
+  return { eligible, not_eligible }
+}
 
 function isoDaysAgo(n: number): string {
   const d = new Date(); d.setUTCDate(d.getUTCDate() - n)
@@ -127,26 +199,6 @@ export default function IncomingFundsPage() {
       'Gift Aid':   s.gift_aid,
       count:        s.count,
     }))
-  }, [data])
-
-  // For the per-branch bar chart, only show top 10 + an "Other" bucket if
-  // there are more — keeps the chart readable even for a 50-branch trust.
-  const branchChartData = useMemo(() => {
-    if (!data) return []
-    const sorted = [...data.by_branch].sort((a, b) => b.amount - a.amount)
-    if (sorted.length <= 10) return sorted
-    const top = sorted.slice(0, 10)
-    const rest = sorted.slice(10)
-    const other = rest.reduce(
-      (acc, b) => ({
-        amount: acc.amount + b.amount,
-        gift_aid: acc.gift_aid + b.gift_aid,
-        with_gift_aid: acc.with_gift_aid + b.with_gift_aid,
-        count: acc.count + b.count,
-      }),
-      { amount: 0, gift_aid: 0, with_gift_aid: 0, count: 0 },
-    )
-    return [...top, { branch_id: '__other__', branch_name: `Other (${rest.length})`, ...other }]
   }, [data])
 
   return (
@@ -252,68 +304,156 @@ export default function IncomingFundsPage() {
         </div>
       </div>
 
-      {/* Per-branch bar (only when not already filtered to one branch) */}
-      {!branchId && (
-        <div className="glass rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="text-white font-bold">By Branch</h2>
-              <p className="text-white/40 text-xs">Donations + Gift Aid across the window above</p>
+      {/* ── Branch breakdown — org-wide card + one card per branch ────────── */}
+      {/* Each card carries the period total, two pies (Gift Aid split, Source split),
+          and a table listing every source contributing to the branch. Hidden when
+          the user has filtered to a single branch — the per-branch card below
+          covers that case on its own. */}
+      {!loading && data && !branchId && (
+        <BranchBreakdownCard
+          branchName="All branches"
+          accent="#f59e0b"
+          totals={data.totals}
+          sources={aggregateSources(data.by_source_branch, null)}
+          giftaidSplit={aggregateGiftaid(data.by_giftaid, null)}
+        />
+      )}
+
+      {!loading && data && data.by_branch.map((b, i) => (
+        <BranchBreakdownCard
+          key={b.branch_id}
+          branchName={b.branch_name}
+          accent={BRANCH_COLOURS[i % BRANCH_COLOURS.length]}
+          totals={b}
+          sources={aggregateSources(data.by_source_branch, b.branch_id)}
+          giftaidSplit={aggregateGiftaid(data.by_giftaid, b.branch_id)}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ─── Branch breakdown card ────────────────────────────────────────────────────
+// Reused for the org-wide row ("All branches") and one per branch. Shows the
+// branch's total for the selected period, two pies (Gift Aid split + source
+// split), and a table listing every source contributing to the branch.
+
+function BranchBreakdownCard({
+  branchName, accent, totals, sources, giftaidSplit,
+}: {
+  branchName:   string
+  accent:       string
+  totals:       { amount: number; gift_aid: number; with_gift_aid: number; count: number }
+  sources:      SourceTotal[]
+  giftaidSplit: { eligible: number; not_eligible: number }
+}) {
+  const giftaidData = [
+    { name: 'Gift Aid eligible',     value: giftaidSplit.eligible,     fill: '#10b981' },
+    { name: 'Not Gift Aid eligible', value: giftaidSplit.not_eligible, fill: '#64748b' },
+  ].filter(d => d.value > 0)
+
+  const sourceData = sources.map((s, i) => ({
+    name:  sourceLabel(s.source),
+    value: s.amount,
+    fill:  SOURCE_COLOURS[i % SOURCE_COLOURS.length],
+  })).filter(d => d.value > 0)
+
+  const empty = totals.amount === 0 && totals.count === 0
+
+  return (
+    <div className="glass rounded-2xl p-5 space-y-4" style={{ borderLeft: `4px solid ${accent}` }}>
+      <div className="flex items-baseline justify-between flex-wrap gap-2">
+        <h2 className="text-white font-bold text-lg">{branchName}</h2>
+        <div className="flex items-baseline gap-3 text-sm">
+          <span className="text-white/40">Period total</span>
+          <span className="text-2xl font-black text-saffron-300">{fmtCurrency(totals.with_gift_aid)}</span>
+          <span className="text-white/40 text-xs">
+            ({fmtCurrency(totals.amount)} donations + {fmtCurrency(totals.gift_aid)} GA · {totals.count} txns)
+          </span>
+        </div>
+      </div>
+
+      {empty ? (
+        <p className="text-white/30 text-sm">No donations in this window.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Gift-Aid pie */}
+            <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <p className="text-white/60 text-xs font-bold uppercase tracking-wider mb-2">Gift Aid split</p>
+              <div style={{ width: '100%', height: 200 }}>
+                {giftaidData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-white/30 text-sm">No data</div>
+                ) : (
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie data={giftaidData} dataKey="value" nameKey="name" outerRadius={75} innerRadius={45} paddingAngle={2}>
+                        {giftaidData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ background: '#0f0008', border: '1px solid rgba(212,175,55,0.3)', borderRadius: 12, color: '#fff' }}
+                        formatter={(v: number) => fmtCurrency(v)}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
             </div>
-          </div>
-          <div style={{ width: '100%', height: Math.max(220, branchChartData.length * 38) }}>
-            {loading ? (
-              <div className="h-full flex items-center justify-center text-white/30 text-sm">Loading…</div>
-            ) : branchChartData.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-white/30 text-sm">No branch totals yet.</div>
-            ) : (
-              <ResponsiveContainer>
-                <BarChart data={branchChartData} layout="vertical" margin={{ top: 5, right: 30, left: 80, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
-                  <XAxis type="number" stroke="rgba(255,255,255,0.5)" fontSize={11} tickFormatter={(v) => `£${v}`} />
-                  <YAxis type="category" dataKey="branch_name" stroke="rgba(255,255,255,0.5)" fontSize={11} width={80} />
-                  <Tooltip
-                    contentStyle={{ background: '#0f0008', border: '1px solid rgba(212,175,55,0.3)', borderRadius: 12, color: '#fff' }}
-                    formatter={(v: number) => fmtCurrency(v)}
-                  />
-                  <Bar dataKey="amount" name="Donations" radius={[0, 6, 6, 0]}>
-                    {branchChartData.map((_, i) => (
-                      <Cell key={i} fill={BRANCH_COLOURS[i % BRANCH_COLOURS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
+
+            {/* Source pie */}
+            <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <p className="text-white/60 text-xs font-bold uppercase tracking-wider mb-2">Source split</p>
+              <div style={{ width: '100%', height: 200 }}>
+                {sourceData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-white/30 text-sm">No data</div>
+                ) : (
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie data={sourceData} dataKey="value" nameKey="name" outerRadius={75} innerRadius={45} paddingAngle={2}>
+                        {sourceData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ background: '#0f0008', border: '1px solid rgba(212,175,55,0.3)', borderRadius: 12, color: '#fff' }}
+                        formatter={(v: number) => fmtCurrency(v)}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* Detail table beneath the chart */}
-          {branchChartData.length > 0 && (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-white/40 text-xs font-bold uppercase tracking-wider">
-                    <th className="px-3 py-2 text-left">Branch</th>
-                    <th className="px-3 py-2 text-right">Donations</th>
-                    <th className="px-3 py-2 text-right">Gift Aid</th>
-                    <th className="px-3 py-2 text-right">Temple receives</th>
-                    <th className="px-3 py-2 text-right"># Txns</th>
+          {/* Source detail table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-white/40 text-xs font-bold uppercase tracking-wider">
+                  <th className="px-3 py-2 text-left">Source</th>
+                  <th className="px-3 py-2 text-right">Donations</th>
+                  <th className="px-3 py-2 text-right">Gift Aid</th>
+                  <th className="px-3 py-2 text-right">Temple receives</th>
+                  <th className="px-3 py-2 text-right"># Txns</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sources.map((s, i) => (
+                  <tr key={s.source} className="border-t border-white/5 hover:bg-white/3">
+                    <td className="px-3 py-2 text-white font-semibold flex items-center gap-2">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: SOURCE_COLOURS[i % SOURCE_COLOURS.length] }} />
+                      {sourceLabel(s.source)}
+                    </td>
+                    <td className="px-3 py-2 text-right text-white/80">{fmtCurrency(s.amount)}</td>
+                    <td className="px-3 py-2 text-right text-green-400">{fmtCurrency(s.gift_aid)}</td>
+                    <td className="px-3 py-2 text-right text-saffron-300 font-bold">{fmtCurrency(s.amount + s.gift_aid)}</td>
+                    <td className="px-3 py-2 text-right text-white/40">{s.count}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {branchChartData.map((b) => (
-                    <tr key={b.branch_id} className="border-t border-white/5 hover:bg-white/3">
-                      <td className="px-3 py-2 text-white font-semibold">{b.branch_name}</td>
-                      <td className="px-3 py-2 text-right text-white/80">{fmtCurrency(b.amount)}</td>
-                      <td className="px-3 py-2 text-right text-green-400">{fmtCurrency(b.gift_aid)}</td>
-                      <td className="px-3 py-2 text-right text-saffron-300 font-bold">{fmtCurrency(b.with_gift_aid)}</td>
-                      <td className="px-3 py-2 text-right text-white/40">{b.count}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   )
