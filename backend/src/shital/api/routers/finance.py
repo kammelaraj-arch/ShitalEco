@@ -571,11 +571,33 @@ async def incoming_funds(
         WHERE  {where_sql}
         GROUP  BY d.branch_id, b.name, giftaid_eligible
     """
+    # Per-device totals within each branch. Rows where kiosk_device_id is
+    # NULL (server portal / PayPal / manual / kiosk binaries that pre-date
+    # the column) bucket as "Unattributed" so the UI can show what hasn't
+    # been wired up. The LEFT JOIN to kiosk_devices preserves deleted
+    # devices that still own historic donations.
+    by_device_branch_sql = f"""
+        SELECT d.branch_id,
+               COALESCE(b.name, d.branch_id)            AS branch_name,
+               d.kiosk_device_id::text                  AS kiosk_device_id,
+               COALESCE(kd.name, '')                    AS device_name,
+               COALESCE(kd.device_type, '')             AS device_type,
+               COALESCE(SUM(d.amount), 0)::numeric      AS amount,
+               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COUNT(*)                                  AS cnt
+        FROM   donations d
+        LEFT   JOIN branches      b  ON b.branch_id = d.branch_id
+        LEFT   JOIN kiosk_devices kd ON kd.id       = d.kiosk_device_id
+        WHERE  {where_sql}
+        GROUP  BY d.branch_id, b.name, d.kiosk_device_id, kd.name, kd.device_type
+        ORDER  BY d.branch_id, amount DESC
+    """
 
     series: list[dict[str, Any]] = []
     by_branch: list[dict[str, Any]] = []
     by_source_branch: list[dict[str, Any]] = []
     by_giftaid: list[dict[str, Any]] = []
+    by_device_branch: list[dict[str, Any]] = []
     totals = {"amount": 0.0, "gift_aid": 0.0, "with_gift_aid": 0.0, "count": 0}
 
     async with SessionLocal() as db:
@@ -641,6 +663,23 @@ async def incoming_funds(
                 "count":            int(r["cnt"] or 0),
             })
 
+        # Per-device breakdown within each branch
+        bd = await db.execute(text(by_device_branch_sql), params)
+        for r in bd.mappings().all():
+            amount   = float(r["amount"] or 0)
+            gift_aid = float(r["gift_aid"] or 0)
+            by_device_branch.append({
+                "branch_id":       r["branch_id"],
+                "branch_name":     r["branch_name"],
+                "kiosk_device_id": r["kiosk_device_id"],   # None for unattributed
+                "device_name":     r["device_name"],
+                "device_type":     r["device_type"],
+                "amount":          round(amount, 2),
+                "gift_aid":        round(gift_aid, 2),
+                "with_gift_aid":   round(amount + gift_aid, 2),
+                "count":           int(r["cnt"] or 0),
+            })
+
     for k in ("amount", "gift_aid", "with_gift_aid"):
         totals[k] = round(totals[k], 2)
 
@@ -653,5 +692,6 @@ async def incoming_funds(
         "by_branch":        by_branch,
         "by_source_branch": by_source_branch,
         "by_giftaid":       by_giftaid,
+        "by_device_branch": by_device_branch,
         "totals":           totals,
     }

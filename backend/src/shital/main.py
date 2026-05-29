@@ -1787,6 +1787,12 @@ async def _patch_schema() -> None:
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_amount  NUMERIC(10,2)",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS next_billing_date    DATE",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS total_payments       INTEGER NOT NULL DEFAULT 0",
+        # Per-device donation attribution. Nullable: server-portal / PayPal /
+        # manual entries have no originating kiosk, and rows pre-dating this
+        # column are left NULL (the Incoming Funds dashboard surfaces them
+        # under "Unattributed"). Indexed for the by-device aggregation.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS kiosk_device_id UUID DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_donations_kiosk_device ON donations(kiosk_device_id) WHERE kiosk_device_id IS NOT NULL",
         # ── Webhook event audit log ───────────────────────────────────────────
         # Every PayPal webhook gets stored here, idempotent on event_id, before
         # we touch any business state. Lets us replay a failed handler without

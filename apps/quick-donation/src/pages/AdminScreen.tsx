@@ -18,6 +18,7 @@ interface LoginResponse {
   reader_provider?: string | null
   sumup_reader_serial?: string | null
   clover_device_id?: string | null
+  kiosk_device_id?: string | null
   show_monthly_giving?: boolean
   enable_gift_aid?: boolean
   tap_and_go?: boolean
@@ -39,7 +40,7 @@ export function AdminScreen() {
   const {
     branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, cloverDeviceId,
     isDeviceLoggedIn, loggedInName, loggedInUsername,
-    setBranchId, setReader, setDeviceFlags, setDeviceLoggedIn, setScreen,
+    setBranchId, setReader, setKioskDeviceId, setDeviceFlags, setDeviceLoggedIn, setScreen,
   } = useDonationStore()
 
   const [syncing, setSyncing] = useState(false)
@@ -91,6 +92,7 @@ export function AdminScreen() {
     const readerLabel = data.reader_label || readerId || sumupSerial || cloverId
     const provider = (sumupSerial ? 'sumup' : cloverId ? 'clover' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
     setReader(readerId, readerLabel, provider, sumupSerial, '', cloverId)
+    setKioskDeviceId(data.kiosk_device_id || '')
 
     setDeviceFlags({
       showMonthlyGiving: data.show_monthly_giving ?? false,
@@ -124,6 +126,7 @@ export function AdminScreen() {
       const syncClover = data.clover_device_id || ''
       const provider = (syncSerial ? 'sumup' : syncClover ? 'clover' : (data.reader_provider || 'stripe_terminal')) as import('../store/donation.store').ReaderProvider
       setReader(data.stripe_reader_id || '', data.reader_label || data.stripe_reader_id || syncSerial || syncClover, provider, syncSerial, '', syncClover)
+      setKioskDeviceId(data.kiosk_device_id || '')
       setDeviceFlags({
         showMonthlyGiving: data.show_monthly_giving ?? false,
         enableGiftAid: data.enable_gift_aid ?? false,

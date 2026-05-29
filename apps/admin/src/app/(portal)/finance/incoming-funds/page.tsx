@@ -45,6 +45,18 @@ interface GiftaidRow {
   count: number
 }
 
+interface DeviceBranchRow {
+  branch_id: string
+  branch_name: string
+  kiosk_device_id: string | null      // null = unattributed (legacy / non-kiosk source)
+  device_name: string
+  device_type: string
+  amount: number
+  gift_aid: number
+  with_gift_aid: number
+  count: number
+}
+
 interface FundsResponse {
   period: 'day' | 'week' | 'month' | 'quarter' | 'year'
   start_date: string
@@ -54,6 +66,7 @@ interface FundsResponse {
   by_branch:  BranchTotals[]
   by_source_branch: SourceBranchRow[]
   by_giftaid: GiftaidRow[]
+  by_device_branch: DeviceBranchRow[]
   totals:     { amount: number; gift_aid: number; with_gift_aid: number; count: number }
 }
 
@@ -123,6 +136,20 @@ function aggregateGiftaid(rows: GiftaidRow[], branchId: string | null): { eligib
     else not_eligible += r.amount
   }
   return { eligible, not_eligible }
+}
+
+// Per-device rows filtered to one branch (or all). Unattributed rows
+// (kiosk_device_id null) are folded into a synthetic "Unattributed" entry
+// so the user sees what hasn't been wired up.
+function deviceRowsForBranch(rows: DeviceBranchRow[], branchId: string | null): DeviceBranchRow[] {
+  const filtered = rows.filter(r => !branchId || r.branch_id === branchId)
+  // Re-label nulls so the table reads naturally.
+  return filtered.map(r => ({
+    ...r,
+    device_name: r.kiosk_device_id
+      ? (r.device_name || r.kiosk_device_id.slice(0, 8))
+      : 'Unattributed (legacy / non-kiosk)',
+  }))
 }
 
 function isoDaysAgo(n: number): string {
@@ -316,6 +343,7 @@ export default function IncomingFundsPage() {
           totals={data.totals}
           sources={aggregateSources(data.by_source_branch, null)}
           giftaidSplit={aggregateGiftaid(data.by_giftaid, null)}
+          devices={deviceRowsForBranch(data.by_device_branch, null)}
         />
       )}
 
@@ -327,6 +355,7 @@ export default function IncomingFundsPage() {
           totals={b}
           sources={aggregateSources(data.by_source_branch, b.branch_id)}
           giftaidSplit={aggregateGiftaid(data.by_giftaid, b.branch_id)}
+          devices={deviceRowsForBranch(data.by_device_branch, b.branch_id)}
         />
       ))}
     </div>
@@ -339,13 +368,14 @@ export default function IncomingFundsPage() {
 // split), and a table listing every source contributing to the branch.
 
 function BranchBreakdownCard({
-  branchName, accent, totals, sources, giftaidSplit,
+  branchName, accent, totals, sources, giftaidSplit, devices,
 }: {
   branchName:   string
   accent:       string
   totals:       { amount: number; gift_aid: number; with_gift_aid: number; count: number }
   sources:      SourceTotal[]
   giftaidSplit: { eligible: number; not_eligible: number }
+  devices:      DeviceBranchRow[]
 }) {
   const giftaidData = [
     { name: 'Gift Aid eligible',     value: giftaidSplit.eligible,     fill: '#10b981' },
@@ -427,6 +457,7 @@ function BranchBreakdownCard({
 
           {/* Source detail table */}
           <div className="overflow-x-auto">
+            <p className="text-white/60 text-xs font-bold uppercase tracking-wider mb-2">By source</p>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-white/40 text-xs font-bold uppercase tracking-wider">
@@ -453,6 +484,44 @@ function BranchBreakdownCard({
               </tbody>
             </table>
           </div>
+
+          {/* Per-device breakdown — rendered only when this branch has any
+              attributed device activity, to keep the card lean on org-wide
+              "All branches" when most rows are unattributed. */}
+          {devices.length > 0 && (
+            <div className="overflow-x-auto">
+              <p className="text-white/60 text-xs font-bold uppercase tracking-wider mb-2">By device</p>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-white/40 text-xs font-bold uppercase tracking-wider">
+                    <th className="px-3 py-2 text-left">Device</th>
+                    <th className="px-3 py-2 text-left">Type</th>
+                    <th className="px-3 py-2 text-right">Donations</th>
+                    <th className="px-3 py-2 text-right">Gift Aid</th>
+                    <th className="px-3 py-2 text-right">Temple receives</th>
+                    <th className="px-3 py-2 text-right"># Txns</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {devices.map((d, i) => (
+                    <tr key={d.kiosk_device_id ?? `unattr-${i}`} className="border-t border-white/5 hover:bg-white/3">
+                      <td className="px-3 py-2 text-white font-semibold">
+                        {d.device_name}
+                        {!d.kiosk_device_id && (
+                          <span className="ml-2 text-[10px] uppercase text-white/30">no device id</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-white/50 text-xs">{d.device_type || '—'}</td>
+                      <td className="px-3 py-2 text-right text-white/80">{fmtCurrency(d.amount)}</td>
+                      <td className="px-3 py-2 text-right text-green-400">{fmtCurrency(d.gift_aid)}</td>
+                      <td className="px-3 py-2 text-right text-saffron-300 font-bold">{fmtCurrency(d.with_gift_aid)}</td>
+                      <td className="px-3 py-2 text-right text-white/40">{d.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
     </div>

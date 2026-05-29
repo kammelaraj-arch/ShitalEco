@@ -25,6 +25,12 @@ export interface DonationState {
   sumupReaderApiId: string       // SumUp reader API id (used in checkout push URL)
   cloverDeviceId: string         // Clover Flex device ID
 
+  // The kiosk_devices.id this kiosk is logged in as. Set from the login
+  // response, sent on every /quick-donation/record so donations carry
+  // per-device attribution for the Incoming Funds dashboard. Empty when
+  // logged in via a legacy account with no kiosk_devices row.
+  kioskDeviceId: string
+
   orderId: string | null
   orderRef: string | null
   paymentIntentId: string | null  // Stripe: payment intent ID; SumUp: checkout ID
@@ -58,6 +64,7 @@ export interface DonationState {
   setAmount: (amount: number) => void
   setBranchId: (id: string) => void
   setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string, sumupApiId?: string, cloverDeviceId?: string) => void
+  setKioskDeviceId: (id: string) => void
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number; confirmationText: string; kioskTheme: string; orgLogoUrl: string; orgName: string; bgColor: string }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string, username?: string) => void
@@ -77,6 +84,7 @@ export const useDonationStore = create<DonationState>()(
       sumupReaderId: '',
       sumupReaderApiId: '',
       cloverDeviceId: '',
+      kioskDeviceId: '',
       orderId: null,
       orderRef: null,
       paymentIntentId: null,
@@ -107,6 +115,7 @@ export const useDonationStore = create<DonationState>()(
       setBranchId: (branchId) => set({ branchId }),
       setReader: (stripeReaderId, stripeReaderLabel, readerProvider = '', sumupReaderId = '', sumupReaderApiId = '', cloverDeviceId = '') =>
         set({ stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, sumupReaderApiId, cloverDeviceId }),
+      setKioskDeviceId: (kioskDeviceId) => set({ kioskDeviceId }),
       setDeviceFlags: (flags) => set(flags),
       setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName, username) => set({
         isDeviceLoggedIn, loggedInName,
@@ -137,6 +146,7 @@ export const useDonationStore = create<DonationState>()(
         sumupReaderId: state.sumupReaderId,
         sumupReaderApiId: state.sumupReaderApiId,
         cloverDeviceId: state.cloverDeviceId,
+        kioskDeviceId: state.kioskDeviceId,
         showMonthlyGiving: state.showMonthlyGiving,
         enableGiftAid: state.enableGiftAid,
         tapAndGo: state.tapAndGo,
