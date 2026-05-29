@@ -816,7 +816,9 @@ async def get_item_image(item_id: str, request: Request):
             {"id": item_id},
         )).mappings().first()
 
-    image_url = (row or {}).get("image_url") or ""
+    if not row:
+        raise HTTPException(status_code=404, detail="No image")
+    image_url = row["image_url"] or ""
     if not image_url:
         raise HTTPException(status_code=404, detail="No image")
 
@@ -826,7 +828,7 @@ async def get_item_image(item_id: str, request: Request):
 
     # 3. Legacy base64 → decode, serve, and migrate to disk in the background.
     etag = '"' + hashlib.md5(  # noqa: S324 - non-security cache key
-        f"{item_id}:{(row or {}).get('updated_at')}".encode()
+        f"{item_id}:{row['updated_at']}".encode()
     ).hexdigest() + '"'
     cache_headers = {"ETag": etag, "Cache-Control": _IMAGE_CACHE_CONTROL}
     if request.headers.get("if-none-match") == etag:
