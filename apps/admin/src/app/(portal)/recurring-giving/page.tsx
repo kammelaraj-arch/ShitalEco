@@ -37,12 +37,22 @@ export default function RecurringGivingPage() {
   const [error, setError]     = useState('')
 
   async function loadTiers() {
-    const r = await fetch(`${API}/admin/giving/tiers`, { headers: authHeaders() })
-    if (r.ok) setTiers((await r.json()).tiers)
+    try {
+      const r = await fetch(`${API}/admin/giving/tiers`, { headers: authHeaders() })
+      if (!r.ok) throw new Error(`Tiers HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      setTiers((await r.json()).tiers)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load tiers')
+    }
   }
   async function loadSubs() {
-    const r = await fetch(`${API}/admin/giving/subscriptions`, { headers: authHeaders() })
-    if (r.ok) setSubs((await r.json()).subscriptions)
+    try {
+      const r = await fetch(`${API}/admin/giving/subscriptions`, { headers: authHeaders() })
+      if (!r.ok) throw new Error(`Subscriptions HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      setSubs((await r.json()).subscriptions)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load subscriptions')
+    }
   }
 
   useEffect(() => { loadTiers(); loadSubs() }, [])
@@ -86,6 +96,12 @@ export default function RecurringGivingPage() {
           + New Tier
         </button>
       </div>
+
+      {error && !showForm && (
+        <p className="text-sm rounded-lg px-3 py-2 bg-red-500/15 text-red-300 border border-red-500/30">
+          {error}
+        </p>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-white/10">

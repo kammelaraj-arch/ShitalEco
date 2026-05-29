@@ -6,11 +6,13 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace
 
+logger = structlog.get_logger()
 router = APIRouter(tags=["recurring-giving"])
 
 _LIVE    = "https://api-m.paypal.com"
@@ -361,7 +363,17 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
             })
             await db.commit()
     except Exception as exc:
-        print(f"[giving/subscribe] PENDING_APPROVAL insert failed (non-fatal): {exc}")
+        # Non-fatal for the donor flow (PayPal subscription still completes),
+        # but the audit row is what the admin Monthly Giving page reads — so
+        # surface it through structlog instead of swallowing into stdout where
+        # it was previously invisible.
+        logger.error(
+            "giving_subscribe_pending_insert_failed",
+            error=str(exc),
+            donor_email=body.donor_email,
+            tier_id=body.tier_id,
+            branch_id=body.branch_id,
+        )
 
     return {
         "plan_id": plan_id,
