@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from shital.api.deps import OptionalSpace, RequiredSpace
+from shital.core.space.branches import resolve_branch_code
 
 router = APIRouter(prefix="/terminal-devices", tags=["terminal-devices"])
 
@@ -198,6 +199,9 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
     now = datetime.utcnow()
 
     async with SessionLocal() as db:
+        # Admin UI sometimes posts the branch UUID instead of the short code.
+        # terminal_devices.branch_id stores the short code, so normalise here.
+        branch_code = await resolve_branch_code(db, body.branch_id)
         await db.execute(
             text("""
                 INSERT INTO terminal_devices (
@@ -216,7 +220,7 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
             """),
             {
                 "id": device_id,
-                "branch_id": body.branch_id,
+                "branch_id": branch_code,
                 "branch_name": body.branch_name,
                 "user_id": body.user_id or None,
                 "user_name": body.user_name,
@@ -268,6 +272,8 @@ async def update_device(device_id: str, body: DeviceUpdate, ctx: RequiredSpace):
     set_clause = ", ".join(f"{k} = :{k}" for k in fields if k != "id")
 
     async with SessionLocal() as db:
+        if "branch_id" in fields:
+            fields["branch_id"] = await resolve_branch_code(db, fields["branch_id"])
         result = await db.execute(
             text(f"""
                 UPDATE terminal_devices

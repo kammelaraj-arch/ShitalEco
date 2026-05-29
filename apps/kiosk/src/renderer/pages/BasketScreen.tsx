@@ -640,7 +640,12 @@ function ContactCaptureScreen({
 // ─── Main BasketScreen — "Your Order" McDonald's style ───────────────────────
 
 export function BasketScreen() {
-  const { language, setScreen, items, removeItem, updateQuantity, theme, setGiftAidDeclaration, setContactInfo, setPendingPayment, resetKiosk } = useKioskStore()
+  const { language, setScreen, items, removeItem, updateQuantity, theme, setGiftAidDeclaration, setContactInfo, setPendingPayment, resetKiosk, cardProvider } = useKioskStore()
+  // Cash-only devices skip the Card/Cash chooser screen — there's only one
+  // path. Devices with any card reader configured route through the chooser
+  // so the customer picks at the final step.
+  const nextScreenAfterConfirm = (): 'checkout' | 'payment-method' =>
+    cardProvider === 'cash' ? 'checkout' : 'payment-method'
   const th = THEMES[theme]
 
   const total        = items.reduce((s, i) => s + i.totalPrice, 0)
@@ -662,7 +667,7 @@ export function BasketScreen() {
       anonymous: info.anonymous, gdprConsent: true, termsConsent: true,
     })
     setPendingPayment(true)
-    setScreen('checkout')
+    setScreen(nextScreenAfterConfirm())
   }
 
   function handleGiftAidConfirm(decl: { fullName: string; postcode: string; address: string; email: string; phone: string; agreed: boolean }) {
@@ -679,7 +684,7 @@ export function BasketScreen() {
       anonymous: false, gdprConsent: true, termsConsent: true,
     })
     setPendingPayment(true)
-    setScreen('checkout')
+    setScreen(nextScreenAfterConfirm())
   }
 
   if (showContactCapture) {

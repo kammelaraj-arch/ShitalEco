@@ -618,11 +618,16 @@ async def list_employees(
     where = " AND ".join(conditions)
     # SELECT * so consumers (admin form) get every field including the Phase 1
     # additions without us having to hand-list every column. Sensitive fields
-    # are stripped via redact_sensitive() per row.
+    # are stripped via redact_sensitive() per row. `manager_id` is aliased to
+    # `reporting_manager_id` because the form names the field that way — the
+    # DB column predates the form. Without the alias, the edit form thinks
+    # the manager was never set and the dropdown shows blank on re-open.
     async with SessionLocal() as db:
         result = await db.execute(
             text(f"""
-                SELECT e.*, e.job_title AS role
+                SELECT e.*,
+                       e.job_title  AS role,
+                       e.manager_id AS reporting_manager_id
                 FROM employees e
                 WHERE {where}
                 ORDER BY e.full_name, e.id

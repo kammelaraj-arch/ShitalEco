@@ -59,7 +59,34 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     except Exception as exc:
         logger.error("function_registry_sync_failed", error=str(exc))
 
+    # ── Mail Agent background poller ─────────────────────────────────────
+    # Disabled when MAIL_AGENT_POLL_SECONDS=0 or MAIL_AGENT_MAILBOXES is empty
+    # (so dev stacks don't burn Anthropic credit unless explicitly enabled).
+    import asyncio as _asyncio
+    _mail_task: _asyncio.Task[None] | None = None
+    if (settings.MAIL_AGENT_POLL_SECONDS > 0
+            and settings.MAIL_AGENT_MAILBOXES.strip()
+            and settings.ANTHROPIC_API_KEY.strip()):
+        async def _mail_loop() -> None:
+            from shital.services.mail_agent import sweep_once
+            # Initial delay so the schema patch + Digital DNA load finish
+            # before the first Graph call (avoids "table not found" races).
+            await _asyncio.sleep(30)
+            while True:
+                try:
+                    res = await sweep_once()
+                    logger.info("mail_agent_sweep", result=res)
+                except Exception as exc:
+                    logger.error("mail_agent_sweep_failed", error=str(exc))
+                await _asyncio.sleep(settings.MAIL_AGENT_POLL_SECONDS)
+        _mail_task = _asyncio.create_task(_mail_loop())
+        logger.info("mail_agent_started",
+                    interval=settings.MAIL_AGENT_POLL_SECONDS,
+                    mailboxes=settings.MAIL_AGENT_MAILBOXES)
+
     yield
+    if _mail_task:
+        _mail_task.cancel()
     logger.info("shital_shutdown")
 
 
@@ -166,6 +193,49 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_assets_branch   ON assets(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_assets_category ON assets(category)",
+        # ── Key Register — custody of physical keys and digital access ──────
+        """CREATE TABLE IF NOT EXISTS key_register (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id VARCHAR(100) NOT NULL DEFAULT 'main',
+            name VARCHAR(200) NOT NULL,
+            key_type VARCHAR(30) NOT NULL DEFAULT 'PHYSICAL_KEY',
+            description TEXT NOT NULL DEFAULT '',
+            holder_employee_id UUID,
+            owner_employee_id UUID,
+            physical_location VARCHAR(200) NOT NULL DEFAULT '',
+            serial_number VARCHAR(100) NOT NULL DEFAULT '',
+            copies_count INTEGER NOT NULL DEFAULT 1,
+            vault_reference VARCHAR(500) NOT NULL DEFAULT '',
+            access_url VARCHAR(500) NOT NULL DEFAULT '',
+            username_hint VARCHAR(200) NOT NULL DEFAULT '',
+            provider VARCHAR(100) NOT NULL DEFAULT '',
+            status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+            issued_date DATE,
+            returned_date DATE,
+            expiry_date DATE,
+            last_rotated_date DATE,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_branch  ON key_register(branch_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_type    ON key_register(key_type) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_status  ON key_register(status)   WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_holder  ON key_register(holder_employee_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_expiry  ON key_register(expiry_date) WHERE expiry_date IS NOT NULL AND deleted_at IS NULL",
+        """CREATE TABLE IF NOT EXISTS key_register_events (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            key_id UUID NOT NULL,
+            event_type VARCHAR(30) NOT NULL,
+            actor_user_id UUID,
+            actor_name VARCHAR(200) NOT NULL DEFAULT '',
+            from_holder_id UUID,
+            to_holder_id UUID,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_keyreg_events_key ON key_register_events(key_id, created_at DESC)",
         """CREATE TABLE IF NOT EXISTS bookings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             branch_id VARCHAR(100) NOT NULL DEFAULT 'main',
@@ -2062,6 +2132,99 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_board_audit_action ON board_audit_log(action)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_entity ON board_audit_log(entity_type, entity_id)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_when   ON board_audit_log(created_at DESC)",
+
+        # ── Mail Agent: agentic email triage of shared mailboxes ─────────────
+        # mail_agent_messages = one row per email the agent has seen. Idempotency
+        # is via UNIQUE (graph_message_id) so the poller can safely re-fetch.
+        # tool_log is the full agent transcript for the audit trail.
+        """CREATE TABLE IF NOT EXISTS mail_agent_messages (
+            id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            mailbox               VARCHAR(254) NOT NULL,
+            graph_message_id      VARCHAR(300) NOT NULL,
+            conversation_id       VARCHAR(300) NOT NULL DEFAULT '',
+            internet_message_id   VARCHAR(500) NOT NULL DEFAULT '',
+            subject               VARCHAR(500) NOT NULL DEFAULT '',
+            sender_email          VARCHAR(254) NOT NULL DEFAULT '',
+            sender_name           VARCHAR(254) NOT NULL DEFAULT '',
+            received_at           TIMESTAMPTZ,
+            classification        VARCHAR(40)  NOT NULL DEFAULT '',
+            agent_summary         TEXT         NOT NULL DEFAULT '',
+            tool_log              JSONB        NOT NULL DEFAULT '[]'::jsonb,
+            status                VARCHAR(20)  NOT NULL DEFAULT 'processing',
+            needs_human_review    BOOLEAN      NOT NULL DEFAULT false,
+            escalation_reason     TEXT         NOT NULL DEFAULT '',
+            suggested_action      TEXT         NOT NULL DEFAULT '',
+            processed_at          TIMESTAMPTZ,
+            created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            UNIQUE (graph_message_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_mail_agent_mbx    ON mail_agent_messages(mailbox)",
+        "CREATE INDEX IF NOT EXISTS idx_mail_agent_status ON mail_agent_messages(status)",
+        "CREATE INDEX IF NOT EXISTS idx_mail_agent_review ON mail_agent_messages(needs_human_review) WHERE needs_human_review = true",
+        "CREATE INDEX IF NOT EXISTS idx_mail_agent_class  ON mail_agent_messages(classification, received_at DESC)",
+
+        # Links from an agent-processed email to the record(s) it created.
+        # Polymorphic via (record_type, record_id) — the admin Inbox page joins
+        # back to whichever table to surface "Open invoice INV-123" etc.
+        """CREATE TABLE IF NOT EXISTS mail_agent_record_links (
+            id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            mail_agent_message_id UUID NOT NULL REFERENCES mail_agent_messages(id) ON DELETE CASCADE,
+            record_type           VARCHAR(40) NOT NULL,
+            record_id             VARCHAR(64) NOT NULL,
+            note                  TEXT NOT NULL DEFAULT '',
+            created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_mail_agent_links_msg ON mail_agent_record_links(mail_agent_message_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mail_agent_links_rec ON mail_agent_record_links(record_type, record_id)",
+
+        # CRM account needs_review flag — set true on accounts auto-created by
+        # the mail agent so a human can sanity-check before they're trusted.
+        "ALTER TABLE crm_accounts ADD COLUMN IF NOT EXISTS needs_review BOOLEAN NOT NULL DEFAULT false",
+        "CREATE INDEX IF NOT EXISTS idx_crm_accounts_needs_review ON crm_accounts(needs_review) WHERE needs_review = true",
+
+        # Cases — complaints, safeguarding, service issues raised by the mail
+        # agent (or manually). Distinct from the CRM accounts table.
+        """CREATE TABLE IF NOT EXISTS cases (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title           VARCHAR(300) NOT NULL DEFAULT '',
+            description     TEXT NOT NULL DEFAULT '',
+            category        VARCHAR(40)  NOT NULL DEFAULT 'other',
+            severity        VARCHAR(20)  NOT NULL DEFAULT 'medium',
+            status          VARCHAR(20)  NOT NULL DEFAULT 'open',
+            customer_email  VARCHAR(254) NOT NULL DEFAULT '',
+            customer_name   VARCHAR(254) NOT NULL DEFAULT '',
+            assignee_user_id UUID,
+            source          VARCHAR(30)  NOT NULL DEFAULT 'manual',
+            branch_id       VARCHAR(64)  NOT NULL DEFAULT '',
+            resolved_at     TIMESTAMPTZ,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_cases_status   ON cases(status)",
+        "CREATE INDEX IF NOT EXISTS idx_cases_severity ON cases(severity)",
+        "CREATE INDEX IF NOT EXISTS idx_cases_category ON cases(category)",
+
+        # Agent tasks — action items raised by the mail agent. Named
+        # agent_tasks (not tasks) to avoid collision with any existing
+        # generic-tasks table the codebase may grow later.
+        """CREATE TABLE IF NOT EXISTS agent_tasks (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title            VARCHAR(300) NOT NULL DEFAULT '',
+            description      TEXT NOT NULL DEFAULT '',
+            due_date         DATE,
+            assignee_user_id UUID,
+            assignee_role    VARCHAR(40) NOT NULL DEFAULT '',
+            priority         VARCHAR(20) NOT NULL DEFAULT 'medium',
+            status           VARCHAR(20) NOT NULL DEFAULT 'open',
+            source           VARCHAR(30) NOT NULL DEFAULT 'manual',
+            completed_at     TIMESTAMPTZ,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_agent_tasks_assignee ON agent_tasks(assignee_user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_tasks_status   ON agent_tasks(status)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_tasks_due      ON agent_tasks(due_date)",
+
         # ── Purchasing & Sales: Purchase Orders + Sales Invoices (MVP) ───────
         # Header + lines pattern. Money columns NUMERIC(12,2), unit_price has
         # 4 dp so per-unit micro-pricing (eg. per-litre fuel) round-trips.
@@ -2318,6 +2481,10 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status)",
         "CREATE INDEX IF NOT EXISTS idx_projects_type   ON projects(project_type)",
         "CREATE INDEX IF NOT EXISTS idx_projects_manager ON projects(manager_user_id)",
+        # mail-agent integration: tag rows it auto-creates so a human can
+        # audit them later. 'manual' (default) vs 'mail_agent' vs 'import'.
+        "ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS source VARCHAR(30) NOT NULL DEFAULT 'manual'",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_source ON purchase_invoices(source) WHERE source <> 'manual'",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
@@ -3135,6 +3302,7 @@ _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
 _mount("shital.api.routers.functions",        "router")
 _mount("shital.api.routers.assets",           "router")
+_mount("shital.api.routers.key_register",     "router")
 _mount("shital.api.routers.bookings_router",  "router")
 _mount("shital.api.routers.documents_router", "router")
 _mount("shital.api.routers.api_keys",         "router")
@@ -3159,6 +3327,7 @@ _mount("shital.api.routers.app_permissions",      "router")
 _mount("shital.api.routers.menus",                 "router")
 _mount("shital.api.routers.system",                "router")
 _mount("shital.api.routers.release_notes",         "router")
+_mount("shital.api.routers.mail_agent",            "router")
 
 
 @app.get("/health", tags=["system"])

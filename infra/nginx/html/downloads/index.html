@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Downloads — Shital Temple ERP</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #1C0000 0%, #2d0a00 50%, #1a0a2e 100%);
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 32px 24px 24px;
+      text-align: center;
+      border-bottom: 1px solid rgba(255,153,51,0.2);
+    }
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    .logo-icon {
+      width: 56px; height: 56px; border-radius: 16px;
+      background: linear-gradient(135deg, #FF9933, #FF6600);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; box-shadow: 0 4px 20px rgba(255,153,51,0.4);
+    }
+    .logo-text { text-align: left; }
+    .logo-text h1 { font-size: 1.6rem; font-weight: 900; color: #FFD700; letter-spacing: -0.5px; }
+    .logo-text p  { font-size: 0.8rem; color: rgba(255,153,51,0.7); margin-top: 2px; }
+    header > p { color: rgba(255,255,255,0.4); font-size: 0.85rem; margin-top: 8px; }
+
+    .back-link {
+      display: inline-block;
+      margin-top: 14px;
+      color: rgba(255,153,51,0.7);
+      text-decoration: none;
+      font-size: 0.8rem;
+    }
+    .back-link:hover { color: #FFD700; }
+
+    main {
+      flex: 1;
+      max-width: 960px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    .section-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,153,51,0.6);
+      margin-bottom: 16px;
+      margin-top: 36px;
+    }
+    .section-title:first-child { margin-top: 0; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+
+    .card {
+      display: flex; flex-direction: column;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 24px 20px;
+      text-decoration: none;
+      color: #fff;
+      transition: transform 0.18s, background 0.18s, border-color 0.18s, box-shadow 0.18s;
+    }
+    a.card { cursor: pointer; }
+    a.card:hover {
+      background: rgba(255,153,51,0.1);
+      border-color: rgba(255,153,51,0.35);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 32px rgba(255,153,51,0.15);
+    }
+    .card-icon { font-size: 2.4rem; margin-bottom: 14px; }
+    .card-name { font-size: 1.05rem; font-weight: 800; color: #fff; margin-bottom: 6px; }
+    .card-desc { font-size: 0.8rem; color: rgba(255,255,255,0.45); line-height: 1.5; flex: 1; }
+    .card-meta {
+      margin-top: 14px;
+      font-size: 0.72rem;
+      color: rgba(255,255,255,0.4);
+      font-family: 'SF Mono', 'Consolas', monospace;
+    }
+    .card-badge {
+      margin-top: 12px; align-self: flex-start;
+      font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
+      padding: 4px 10px; border-radius: 20px;
+    }
+    .badge-available { background: rgba(22,163,74,0.15); color: #4ade80; border: 1px solid rgba(22,163,74,0.3); }
+    .badge-soon      { background: rgba(234,179,8,0.12); color: #fbbf24; border: 1px solid rgba(234,179,8,0.25); }
+
+    .notice {
+      margin-top: 24px;
+      padding: 16px 20px;
+      background: rgba(99,102,241,0.08);
+      border: 1px solid rgba(99,102,241,0.25);
+      border-radius: 12px;
+      color: rgba(255,255,255,0.7);
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+    .notice strong { color: #a5b4fc; }
+
+    footer {
+      text-align: center;
+      padding: 24px;
+      color: rgba(255,255,255,0.2);
+      font-size: 0.75rem;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    footer span { color: rgba(255,153,51,0.5); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">⬇️</div>
+    <div class="logo-text">
+      <h1>Downloads</h1>
+      <p>Shital Temple ERP — Native Apps</p>
+    </div>
+  </div>
+  <p>Install the Shital admin and kiosk apps on your device</p>
+  <a class="back-link" href="/">← Back to platform hub</a>
+</header>
+
+<main>
+
+  <p class="section-title">Available now</p>
+  <div class="grid">
+    <a class="card" href="/downloads/shital-admin.apk" download>
+      <div class="card-icon">🤖</div>
+      <div class="card-name">Shital Admin — Android</div>
+      <div class="card-desc">Full admin app for Android phones and tablets. Manage donations, devices, branches and reports from anywhere.</div>
+      <div class="card-meta">shital-admin.apk</div>
+      <span class="card-badge badge-available">Download APK</span>
+    </a>
+  </div>
+
+  <div class="notice">
+    <strong>Installing on Android:</strong> After downloading, open the APK from your Downloads folder.
+    You may need to allow installs from your browser in <em>Settings → Apps → Special access → Install unknown apps</em>.
+    The app is signed by Shital Temple — only install APKs you got from <code>shital.org.uk</code>.
+  </div>
+
+  <p class="section-title">Coming soon</p>
+  <div class="grid">
+    <div class="card">
+      <div class="card-icon">🍎</div>
+      <div class="card-name">Shital Admin — iOS</div>
+      <div class="card-desc">iPhone and iPad app. Distributed via TestFlight while we finish App Store review.</div>
+      <span class="card-badge badge-soon">In review</span>
+    </div>
+    <div class="card">
+      <div class="card-icon">🪟</div>
+      <div class="card-name">Shital Admin — Windows</div>
+      <div class="card-desc">Desktop app for front-office staff. Offline-capable, integrates with receipt printers.</div>
+      <span class="card-badge badge-soon">Planned</span>
+    </div>
+    <div class="card">
+      <div class="card-icon">🖥️</div>
+      <div class="card-name">Shital Admin — macOS</div>
+      <div class="card-desc">Native macOS build, signed and notarised. Same feature set as the Windows desktop app.</div>
+      <span class="card-badge badge-soon">Planned</span>
+    </div>
+    <div class="card">
+      <div class="card-icon">🖥️</div>
+      <div class="card-name">Kiosk Image — Raspberry Pi</div>
+      <div class="card-desc">Pre-configured SD card image for the donation kiosk hardware, ready to flash.</div>
+      <span class="card-badge badge-soon">Internal only</span>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  &copy; 2026 Shital Temple &nbsp;·&nbsp; <span>Powered by Shital ERP</span> &nbsp;·&nbsp; All rights reserved
+</footer>
+
+</body>
+</html>

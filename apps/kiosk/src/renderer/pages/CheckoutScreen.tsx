@@ -12,7 +12,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 export function CheckoutScreen() {
   const {
     items, setScreen, setOrderResult, setBasketId,
-    branchId, cardProvider,
+    branchId, cardProvider, paymentMethodOverride,
     stripeReaderId, stripeReaderLabel,
     squareDeviceId, squareDeviceName,
     cloverDeviceId, cloverDeviceName,
@@ -21,6 +21,11 @@ export function CheckoutScreen() {
     pendingPayment, setPendingPayment, theme,
     contactInfo, giftAidDeclaration,
   } = useKioskStore()
+  // Customer's pick on PaymentMethodScreen wins over the device's configured
+  // provider. Cash-configured devices have override === null and fall straight
+  // through to the CASH branch via `effectiveProvider === 'cash'`.
+  const effectiveProvider: typeof cardProvider =
+    paymentMethodOverride === 'cash' ? 'cash' : cardProvider
   const th = THEMES[theme]
 
   const total = items.reduce((s, i) => s + i.totalPrice, 0)
@@ -31,19 +36,19 @@ export function CheckoutScreen() {
     setError('')
 
     // ── Pre-flight: validate device config ───────────────────────────────────
-    if (cardProvider === 'stripe_terminal' && (!stripeReaderId || !stripeReaderId.trim())) {
+    if (effectiveProvider === 'stripe_terminal' && (!stripeReaderId || !stripeReaderId.trim())) {
       setError('No Stripe reader configured. Go to Admin Settings → Device Config and assign a reader.')
       return
     }
-    if (cardProvider === 'square' && (!squareDeviceId || !squareDeviceId.trim())) {
+    if (effectiveProvider === 'square' && (!squareDeviceId || !squareDeviceId.trim())) {
       setError('No Square device configured. Go to Admin Settings → Device Config and assign a device.')
       return
     }
-    if (cardProvider === 'clover' && (!cloverDeviceId || !cloverDeviceId.trim())) {
+    if (effectiveProvider === 'clover' && (!cloverDeviceId || !cloverDeviceId.trim())) {
       setError('No Clover device configured. Go to Admin Settings → Device Config and assign a Clover Flex.')
       return
     }
-    if (cardProvider === 'sumup' && (!sumupReaderId || !sumupReaderId.trim())) {
+    if (effectiveProvider === 'sumup' && (!sumupReaderId || !sumupReaderId.trim())) {
       setError('No SumUp reader configured. Go to Admin Settings → Device Config and assign a SumUp reader.')
       return
     }
@@ -114,7 +119,7 @@ export function CheckoutScreen() {
       }
 
       // ── Stripe Terminal ───────────────────────────────────────────────────
-      if (cardProvider === 'stripe_terminal') {
+      if (effectiveProvider === 'stripe_terminal') {
         setStage('Preparing payment…')
         const piRes = await fetch(`${API_BASE}/kiosk/terminal/payment-intent`, {
           method: 'POST',
@@ -153,7 +158,7 @@ export function CheckoutScreen() {
       }
 
       // ── Square Terminal ───────────────────────────────────────────────────
-      if (cardProvider === 'square') {
+      if (effectiveProvider === 'square') {
         setStage('Sending to Square Terminal…')
         const sqRes = await fetch(`${API_BASE}/kiosk/square/terminal-checkout`, {
           method: 'POST',
@@ -180,7 +185,7 @@ export function CheckoutScreen() {
       }
 
       // ── Clover Flex ───────────────────────────────────────────────────────
-      if (cardProvider === 'clover') {
+      if (effectiveProvider === 'clover') {
         setStage('Sending to Clover Flex…')
         const clRes = await fetch(`${API_BASE}/kiosk/clover/payment`, {
           method: 'POST',
@@ -212,7 +217,7 @@ export function CheckoutScreen() {
       }
 
       // ── SumUp Solo ───────────────────────────────────────────────────────
-      if (cardProvider === 'sumup') {
+      if (effectiveProvider === 'sumup') {
         // Save order BEFORE sending to reader so it always appears in admin
         await savePending('SUMUP', '')
 

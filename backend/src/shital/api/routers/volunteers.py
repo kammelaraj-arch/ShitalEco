@@ -24,6 +24,77 @@ from shital.api.deps import CurrentSpace
 router = APIRouter(tags=["volunteers"])
 
 
+async def _send_registration_emails(
+    applicant_email: str, applicant_name: str, reference: str, branch_id: str,
+) -> None:
+    """Best-effort confirmation + safeguarding notification. Never raises:
+    registration is already committed by the time we're called, and a failed
+    SMTP (misconfigured creds, network blip) must not surface as a 5xx to
+    the applicant."""
+    import structlog
+
+    from shital.api.routers.email_templates import _smtp_send
+    from shital.core.fabrics.config import settings
+
+    log = structlog.get_logger()
+    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
+    password   = settings.OFFICE365_PASSWORD
+    if not password:
+        log.info("volunteer_email_skipped_no_smtp", reference=reference)
+        return
+
+    notify_to = settings.VOLUNTEER_NOTIFY_EMAIL.strip() or from_email
+    name = applicant_name.strip() or "there"
+
+    # Applicant confirmation
+    a_subject = f"We've received your volunteer application ({reference})"
+    a_html = f"""
+        <p>Dear {name},</p>
+        <p>Thank you for applying to volunteer with us. Your application
+        reference is <strong>{reference}</strong> — please quote this if you
+        contact us about your application.</p>
+        <p>A trustee will review your application and your two referees, and
+        get back to you by email. This usually takes up to 14 days.</p>
+        <p>Warm regards,<br/>Shital Volunteer Team</p>
+    """.strip()
+    a_text = (
+        f"Dear {name},\n\n"
+        f"Thank you for applying to volunteer with us. Your reference is {reference}.\n"
+        f"A trustee will review your application and contact you within 14 days.\n\n"
+        f"Shital Volunteer Team"
+    )
+
+    # Safeguarding / trustee notification
+    s_subject = f"New volunteer application — {reference} ({applicant_name})"
+    s_html = f"""
+        <p>A new volunteer application has been submitted.</p>
+        <ul>
+          <li><strong>Reference:</strong> {reference}</li>
+          <li><strong>Name:</strong> {applicant_name}</li>
+          <li><strong>Email:</strong> {applicant_email}</li>
+          <li><strong>Branch:</strong> {branch_id or '—'}</li>
+        </ul>
+        <p>Review in Admin → Volunteers and trigger reference requests once
+        you've sanity-checked the form.</p>
+    """.strip()
+    s_text = (
+        f"New volunteer application {reference}\n"
+        f"Name:   {applicant_name}\n"
+        f"Email:  {applicant_email}\n"
+        f"Branch: {branch_id or '—'}\n"
+    )
+
+    for to, subject, html, text_body, kind in [
+        (applicant_email, a_subject, a_html, a_text, "applicant"),
+        (notify_to,       s_subject, s_html, s_text, "safeguarding"),
+    ]:
+        try:
+            await _smtp_send(from_email, password, to, subject, html, text_body)
+            log.info("volunteer_email_sent", kind=kind, reference=reference, to=to)
+        except Exception as exc:
+            log.warning("volunteer_email_failed", kind=kind, reference=reference, error=str(exc))
+
+
 # ─── Models ───────────────────────────────────────────────────────────────────
 
 class VolunteerRegistration(BaseModel):
@@ -329,12 +400,21 @@ async def register_volunteer(
         })
         await db.commit()
 
+    # Best-effort: SMTP failures must not 5xx a committed application.
+    await _send_registration_emails(
+        applicant_email=email_key,
+        applicant_name=f"{body.first_names.strip()} {body.last_name.strip()}".strip(),
+        reference=reference,
+        branch_id=body.branch_id,
+    )
+
     return {
         "success": True,
         "reference_number": reference,
         "message": (
             "Thank you. Your application has been received. "
-            "A trustee will review it and contact you by email."
+            "We've sent a confirmation to your email. "
+            "A trustee will review it and contact you within 14 days."
         ),
     }
 

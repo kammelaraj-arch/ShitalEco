@@ -60,6 +60,7 @@ services:
       DEPLOYER_URL: http://deployer:9000
     volumes:
       - /opt/shitaleco/backups:/opt/shitaleco/backups
+      - /opt/shitaleco/media:/app/media
     depends_on:
       db:
         condition: service_healthy

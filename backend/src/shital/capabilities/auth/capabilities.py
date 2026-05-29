@@ -73,6 +73,7 @@ async def login_with_email(ctx: DigitalSpace, data: LoginInput) -> dict[str, Any
 
     from shital.core.fabrics.database import SessionLocal
     from shital.core.fabrics.errors import UnauthorizedError
+    from shital.core.space.branches import resolve_branch_code
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -86,14 +87,18 @@ async def login_with_email(ctx: DigitalSpace, data: LoginInput) -> dict[str, Any
         )
         user = result.mappings().first()
 
-    if not user or not user["password_hash"]:
-        raise UnauthorizedError("Invalid email or password")
-    if not _verify_password(data.password, user["password_hash"]):
-        raise UnauthorizedError("Invalid email or password")
-    if not user["is_active"]:
-        raise UnauthorizedError("Account is deactivated")
+        if not user or not user["password_hash"]:
+            raise UnauthorizedError("Invalid email or password")
+        if not _verify_password(data.password, user["password_hash"]):
+            raise UnauthorizedError("Invalid email or password")
+        if not user["is_active"]:
+            raise UnauthorizedError("Account is deactivated")
 
-    access = _create_access_token(user["id"], user["email"], user["role"], user["branch_id"])
+        # users.branch_id stores a UUID; the JWT and every downstream
+        # insert expects the short code, so canonicalise here.
+        branch_code = await resolve_branch_code(db, user["branch_id"])
+
+    access = _create_access_token(user["id"], user["email"], user["role"], branch_code)
     refresh = _create_refresh_token(user["id"])
 
     # Update last login
@@ -112,7 +117,7 @@ async def login_with_email(ctx: DigitalSpace, data: LoginInput) -> dict[str, Any
         "token_type": "bearer",
         "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         "user": {"id": user["id"], "email": user["email"], "name": user["name"],
-                 "role": user["role"], "branch_id": user["branch_id"]},
+                 "role": user["role"], "branch_id": branch_code},
     }
 
 

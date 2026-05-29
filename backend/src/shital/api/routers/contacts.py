@@ -66,8 +66,9 @@ async def list_contacts(
                 COUNT(DISTINCT o.id)          AS order_count,
                 COALESCE(SUM(o.total_amount), 0) AS total_donated,
                 COUNT(DISTINCT rgs.id) FILTER (WHERE rgs.status = 'ACTIVE') AS active_subscriptions,
-                (SELECT a.postcode FROM addresses a WHERE a.contact_id = c.id ORDER BY a.created_at DESC LIMIT 1) AS postcode,
-                (SELECT a.uprn     FROM addresses a WHERE a.contact_id = c.id AND a.uprn != '' ORDER BY a.created_at DESC LIMIT 1) AS uprn
+                (SELECT a.postcode  FROM addresses a WHERE a.contact_id = c.id ORDER BY a.created_at DESC LIMIT 1) AS postcode,
+                (SELECT a.formatted FROM addresses a WHERE a.contact_id = c.id ORDER BY a.created_at DESC LIMIT 1) AS address,
+                (SELECT a.uprn      FROM addresses a WHERE a.contact_id = c.id AND a.uprn != '' ORDER BY a.created_at DESC LIMIT 1) AS uprn
             FROM contacts c
             LEFT JOIN orders o   ON o.contact_id = c.id
             LEFT JOIN recurring_giving_subscriptions rgs ON rgs.contact_id = c.id

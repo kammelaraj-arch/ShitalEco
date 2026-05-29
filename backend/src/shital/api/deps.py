@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shital.core.fabrics.config import settings
 from shital.core.fabrics.constants import PERMISSIONS
 from shital.core.fabrics.database import get_db
+from shital.core.space.branches import resolve_branch_code
 from shital.core.space.context import DigitalSpace
 
 security = HTTPBearer(auto_error=False)
@@ -21,6 +22,7 @@ security = HTTPBearer(auto_error=False)
 async def get_current_space(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
+    db: AsyncSession = Depends(get_db),
 ) -> DigitalSpace:
     if not credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -38,7 +40,9 @@ async def get_current_space(
     # Normalise legacy "ADMIN" role → "SUPER_ADMIN" so all permission checks pass
     if role == "ADMIN":
         role = "SUPER_ADMIN"
-    branch_id = payload.get("branch_id") or "main"
+    # Old tokens may carry a UUID; canonicalise to the short code so every
+    # downstream insert that uses ctx.branch_id writes the right value.
+    branch_id = await resolve_branch_code(db, payload.get("branch_id"))
     permissions = [p for p, roles in PERMISSIONS.items() if role in roles]
 
     import uuid
@@ -58,6 +62,7 @@ async def get_current_space(
 async def get_optional_space(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
+    db: AsyncSession = Depends(get_db),
 ) -> DigitalSpace | None:
     if not credentials:
         import uuid
@@ -70,7 +75,7 @@ async def get_optional_space(
             session_id=str(uuid.uuid4()),
             ip_address=request.client.host if request.client else None,
         )
-    return await get_current_space(request, credentials)
+    return await get_current_space(request, credentials, db)
 
 
 CurrentSpace = Annotated[DigitalSpace, Depends(get_current_space)]

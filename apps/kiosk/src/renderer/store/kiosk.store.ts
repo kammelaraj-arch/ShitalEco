@@ -128,7 +128,7 @@ export const IDLE_RING_COLORS: Record<KioskTheme, string> = {
 
 export type KioskScreen =
   | 'setup' | 'idle' | 'language' | 'home' | 'services' | 'service-detail'
-  | 'donate' | 'basket' | 'checkout' | 'payment' | 'confirmation'
+  | 'donate' | 'basket' | 'payment-method' | 'checkout' | 'payment' | 'confirmation'
   | 'admin' | 'admin-pin' | 'soft-donation' | 'project-donation' | 'shop'
   | 'gift-aid' | 'receipt' | 'monthly-giving'
 
@@ -219,6 +219,12 @@ interface KioskState {
   menuCodes: string[]
   menuOptions: { test_print: boolean; theme_cycle: boolean; refresh: boolean; admin: boolean }
   cardProvider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash'
+  // Per-transaction override: customer's pick on the Payment Method screen.
+  // null → use the device-configured cardProvider (legacy path).
+  // 'card' → use cardProvider for this transaction (no-op for card devices).
+  // 'cash' → force the CASH branch regardless of cardProvider.
+  // Cleared by resetKiosk so it never bleeds from one customer to the next.
+  paymentMethodOverride: 'card' | 'cash' | null
   stripeReaderId: string
   stripeReaderLabel: string
   squareDeviceId: string
@@ -261,6 +267,7 @@ interface KioskState {
   setOrgLogoUrl: (url: string) => void
   setMenuCodes: (codes: string[]) => void
   setCardDevice: (provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash', deviceId: string, deviceLabel: string) => void
+  setPaymentMethodOverride: (m: 'card' | 'cash' | null) => void
   setBasketId: (id: string) => void
   addItem: (item: Omit<BasketItem, 'id'>) => void
   removeItem: (id: string) => void
@@ -311,6 +318,8 @@ export const useKioskStore = create<KioskState>()(
   cloverDeviceName: '',
   sumupReaderId: '',
   sumupReaderLabel: '',
+  paymentMethodOverride: null,
+  setPaymentMethodOverride: (paymentMethodOverride) => set({ paymentMethodOverride }),
   setGiftAidDeclaration: (giftAidDeclaration) => set({ giftAidDeclaration }),
   setContactInfo: (contactInfo) => set({ contactInfo }),
   setKioskDevice: (kioskDeviceId, kioskDeviceName) => set({ kioskDeviceId, kioskDeviceName }),
@@ -352,7 +361,7 @@ export const useKioskStore = create<KioskState>()(
   })),
   clearBasket: () => set({ items: [], basketId: null }),
   setOrderResult: (orderId, orderRef, paymentIntent) => set({ orderId, orderRef, paymentIntent }),
-  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, contactInfo: null, pendingPayment: false, receiptSentByConfirm: false }),
+  resetKiosk: () => set({ screen: 'idle', items: [], basketId: null, orderId: null, orderRef: null, paymentIntent: null, giftAidDeclaration: null, contactInfo: null, pendingPayment: false, receiptSentByConfirm: false, paymentMethodOverride: null }),
   get total() { return get().items.reduce((sum, i) => sum + i.totalPrice, 0) },
   get itemCount() { return get().items.reduce((sum, i) => sum + i.quantity, 0) },
     }),

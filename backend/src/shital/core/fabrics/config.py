@@ -39,6 +39,36 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
 
+    # Mail Agent — agentic triage of shared mailboxes
+    # Comma-separated list of mailbox UPNs the agent should poll. Empty → agent disabled.
+    # Service account in Azure AD must have ApplicationAccessPolicy granting access to each.
+    # Pilot scope: accounts@ only — invoices and payment confirmations have the
+    # clearest structured output for an agentic loop to handle well. Once that's
+    # proven (clean classifications, no false-positive invoices, reasonable
+    # supplier matching), add trustees@ and info@ via env var override.
+    MAIL_AGENT_MAILBOXES: str = "accounts@shirdisai.org.uk"
+    MAIL_AGENT_POLL_SECONDS: int = 300        # 5 min; 0 = disabled
+    MAIL_AGENT_MODEL: str = "claude-opus-4-7"  # used for the agentic loop
+    MAIL_AGENT_MAX_ITER: int = 15             # cap tool turns per email
+    # Hard floor on how far back to look on the first sweep. Without this,
+    # a fresh prod install would try to triage years of accounts@ history
+    # on first run — slow, expensive, and mostly noise. After the first
+    # sweep, the poller resumes from the newest processed message and the
+    # floor only matters again if the DB is wiped or the agent is paused
+    # for longer than the floor.
+    MAIL_AGENT_LOOKBACK_DAYS: int = 10
+    # ── Optional service-account auth ─────────────────────────────────────
+    # Either set these two for delegated OAuth (ROPC, "Resource Owner Password
+    # Credentials" grant) using a service account that has been granted
+    # FullAccess on the three shared mailboxes — OR leave them empty and the
+    # mail agent uses app-only auth via MS_CLIENT_SECRET (requires Mail.Read
+    # application permission + ApplicationAccessPolicy in Exchange — the
+    # Microsoft-recommended path but needs an IT admin to set up).
+    # Service account must NOT have MFA enabled or ROPC will fail.
+    MAIL_AGENT_USER:     str = ""             # e.g. svc_emailrouter@shirdisai.org.uk
+    MAIL_AGENT_PASSWORD: str = ""             # set in .env, never in code
+    TEAMS_WEBHOOK_URL: str = ""               # MS Teams Incoming Webhook for alerts
+
     # SendGrid (legacy fallback)
     SENDGRID_API_KEY: str = ""
     SENDGRID_FROM_EMAIL: str = "noreply@shital.org.uk"
@@ -46,6 +76,11 @@ class Settings(BaseSettings):
     # Office 365 SMTP (primary email — overrides SendGrid when password set)
     OFFICE365_EMAIL: str = "noreply@shital.org.uk"
     OFFICE365_PASSWORD: str = ""
+
+    # Where volunteer-application notifications go. Empty → falls back to
+    # OFFICE365_EMAIL (the trust's catch-all inbox). Set this to the
+    # safeguarding lead's address once the role exists.
+    VOLUNTEER_NOTIFY_EMAIL: str = ""
 
     # Meta WhatsApp
     META_WHATSAPP_TOKEN: str = ""
@@ -81,6 +116,10 @@ class Settings(BaseSettings):
 
     # Public base URL (used for webhook return_url)
     SITE_URL: str = "https://shital.org.uk"
+
+    # On-disk media store for item/catalog images (bind-mounted volume in prod
+    # so files survive container recreation). Keeps base64 blobs out of Postgres.
+    MEDIA_DIR: str = "/app/media"
 
     # MeiliSearch
     MEILISEARCH_URL: str = "http://localhost:7700"

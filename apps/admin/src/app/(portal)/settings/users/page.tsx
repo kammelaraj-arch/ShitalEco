@@ -22,24 +22,12 @@ interface User {
   created_at: string
 }
 
-// ─── Role config ──────────────────────────────────────────────────────────────
-
-const ROLES: { id: string; label: string; desc: string; color: string; bg: string; level: number }[] = [
-  { id: 'SUPER_ADMIN',    label: 'Super Admin',    desc: 'Full system access',                  color: '#ef4444', bg: '#fef2f2', level: 100 },
-  { id: 'TRUSTEE',        label: 'Trustee',        desc: 'Governance & finance oversight',       color: '#d97706', bg: '#fffbeb', level: 80 },
-  { id: 'ACCOUNTANT',     label: 'Accountant',     desc: 'Finance read/write access',           color: '#7c3aed', bg: '#f5f3ff', level: 70 },
-  { id: 'HR_MANAGER',     label: 'HR Manager',     desc: 'HR, payroll, employees',              color: '#0891b2', bg: '#ecfeff', level: 65 },
-  { id: 'AUDITOR',        label: 'Auditor',        desc: 'Read-only compliance & finance',      color: '#475569', bg: '#f8fafc', level: 60 },
-  { id: 'BRANCH_MANAGER', label: 'Branch Manager', desc: 'Branch operations & bookings',        color: '#059669', bg: '#f0fdf4', level: 50 },
-  { id: 'STAFF',          label: 'Staff',          desc: 'Bookings, kiosk, general ops',        color: '#2563eb', bg: '#eff6ff', level: 30 },
-  { id: 'VOLUNTEER',      label: 'Volunteer',      desc: 'Limited operational access',          color: '#16a34a', bg: '#f0fdf4', level: 20 },
-  { id: 'DEVOTEE',        label: 'Devotee',        desc: 'Self-service donations & bookings',   color: '#9333ea', bg: '#fdf4ff', level: 10 },
-  { id: 'KIOSK',          label: 'Kiosk',          desc: 'Kiosk terminal access only',          color: '#64748b', bg: '#f8fafc', level: 5 },
-]
-
-function roleInfo(id: string) {
-  return ROLES.find(r => r.id === id) ?? { id, label: id, desc: '', color: '#6b7280', bg: '#f9fafb', level: 0 }
-}
+// ─── Role registry — single source of truth ──────────────────────────────────
+// All admin pages that show or pick a role (Board → Trustees, App Permissions,
+// etc.) import from @/lib/roles. To rename / add / remove a role, edit that
+// file — both this page and the Trustees module re-render automatically.
+import { ROLES, roleInfo, rolesByTier, TIER_ORDER, TIER_LABELS,
+         EXEC_LABELS } from '@/lib/roles'
 
 function RoleBadge({ role }: { role: string }) {
   const r = roleInfo(role)
@@ -406,19 +394,42 @@ export default function UsersPage() {
         <button onClick={load} className="px-4 py-2 rounded-xl bg-white/5 text-white/50 text-sm hover:bg-white/10">↻</button>
       </div>
 
-      {/* Role legend */}
+      {/* Unified roles registry — system permissions AND board positions
+          rendered together, grouped by tier, with exec / non-exec badges
+          where the distinction applies (Charity Commission convention). */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-white font-black text-sm mb-3">Role Permission Levels</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-          {ROLES.map(r => (
-            <div key={r.id} className="flex items-start gap-2.5 py-2 px-3 rounded-xl bg-white/2">
-              <div className="w-2 h-2 rounded-full flex-shrink-0 mt-0.5" style={{ background: r.color }} />
-              <span className="font-bold text-xs flex-shrink-0 w-24" style={{ color: r.color }}>{r.label}</span>
-              <span className="text-white/30 text-xs leading-snug flex-1 min-w-0">{r.desc}</span>
-              <span className="text-white/20 text-xs font-mono flex-shrink-0">L{r.level}</span>
-            </div>
-          ))}
+        <div className="flex items-baseline justify-between mb-4">
+          <h3 className="text-white font-black text-sm">All Roles</h3>
+          <span className="text-white/30 text-xs">Shared by Users, Trustees, App Permissions</span>
         </div>
+        {TIER_ORDER.map(tier => {
+          const items = rolesByTier()[tier]
+          if (items.length === 0) return null
+          return (
+            <div key={tier} className="mb-4 last:mb-0">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-white/30 mb-2">
+                {TIER_LABELS[tier]}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {items.map(r => (
+                  <div key={r.id} className="flex items-start gap-2.5 py-2 px-3 rounded-xl bg-white/2">
+                    <div className="w-2 h-2 rounded-full flex-shrink-0 mt-0.5" style={{ background: r.color }} />
+                    <span className="font-bold text-xs flex-shrink-0 w-28" style={{ color: r.color }}>{r.label}</span>
+                    <span className="text-white/30 text-xs leading-snug flex-1 min-w-0">{r.desc}</span>
+                    {r.exec !== 'na' && (
+                      <span className={`text-[10px] font-bold flex-shrink-0 px-1.5 py-0.5 rounded-full border ${
+                        r.exec === 'exec'
+                          ? 'bg-rose-500/15  text-rose-300  border-rose-500/30'
+                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      }`}>{EXEC_LABELS[r.exec]}</span>
+                    )}
+                    <span className="text-white/20 text-xs font-mono flex-shrink-0">L{r.level}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {/* Users table */}

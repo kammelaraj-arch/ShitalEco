@@ -11,6 +11,7 @@ import { SoftDonationScreen } from './pages/SoftDonationScreen'
 import { ProjectDonationScreen } from './pages/ProjectDonationScreen'
 import { GiftAidScreen } from './pages/GiftAidScreen'
 import { BasketScreen } from './pages/BasketScreen'
+import { PaymentMethodScreen } from './pages/PaymentMethodScreen'
 import { CheckoutScreen } from './pages/CheckoutScreen'
 import { PaymentScreen } from './pages/PaymentScreen'
 import { ConfirmationScreen } from './pages/ConfirmationScreen'
@@ -71,6 +72,7 @@ export function KioskApp() {
       case 'gift-aid':         return <GiftAidScreen key="gift-aid" />
       case 'shop':             return <ShopScreen key="shop" />
       case 'basket':           return <BasketScreen key="basket" />
+      case 'payment-method':   return <PaymentMethodScreen key="payment-method" />
       case 'checkout':         return <CheckoutScreen key="checkout" />
       case 'payment':          return <PaymentScreen key="payment" />
       case 'confirmation':     return <ConfirmationScreen key="confirmation" />

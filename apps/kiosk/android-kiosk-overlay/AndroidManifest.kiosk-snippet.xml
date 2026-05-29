@@ -1,0 +1,87 @@
+<!--
+  These elements get patched INTO the AndroidManifest.xml that Capacitor
+  generates at apps/kiosk/android/app/src/main/AndroidManifest.xml.
+
+  The setup-android-kiosk.sh script applies them automatically. If you ever
+  re-generate the Android project from scratch (`rm -rf android && npx cap
+  add android`), re-run that script to reapply these.
+
+  Sections, in order:
+
+  1) <uses-permission> additions — RECEIVE_BOOT_COMPLETED for the boot
+     receiver. NFC and INTERNET come from Capacitor defaults.
+
+  2) <application> attribute changes — turn on hardware acceleration and
+     set the kiosk launcher icon.
+
+  3) <activity android:name=".MainActivity"> attribute additions:
+       • android:launchMode="singleTask"   — only one instance ever
+       • android:screenOrientation="locked" — pin to whatever the device
+         was first started in (portrait/landscape), no rotate
+       • android:configChanges="..."       — survive locale/keyboard/orient
+         changes without restarting (Stripe Terminal hates restarts)
+       • android:resumeWhilePausing="true" — re-show faster after dialogs
+       • android:showOnLockScreen="true"   — kiosk is always visible
+       • intent-filter additions for ACTION_MAIN + HOME so the kiosk *is*
+         the launcher (when device-owner, this overrides the system launcher)
+
+  4) <receiver> for KioskBootReceiver — registered against BOOT_COMPLETED and
+     LOCKED_BOOT_COMPLETED so the kiosk auto-starts.
+
+  5) <receiver> for KioskDeviceAdminReceiver — required for
+     `dpm set-device-owner` to succeed.
+-->
+
+<!-- 1) PERMISSIONS — add inside <manifest> before <application> -->
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+<uses-permission android:name="android.permission.WAKE_LOCK" />
+<uses-permission android:name="android.permission.NFC" />
+<uses-permission android:name="android.permission.CAMERA" />
+<!-- Bluetooth not requested — Stripe Terminal in this kiosk uses
+     internet-connected readers only (WisePOS E). Add bluetooth perms only
+     if you swap to a BBPOS / Chipper reader. -->
+
+<!-- 3) MAIN ACTIVITY — REPLACE the existing <activity android:name=".MainActivity"> -->
+<activity
+    android:name=".MainActivity"
+    android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density"
+    android:label="@string/title_activity_main"
+    android:launchMode="singleTask"
+    android:resumeWhilePausing="true"
+    android:screenOrientation="locked"
+    android:showOnLockScreen="true"
+    android:exported="true"
+    android:theme="@style/AppTheme.NoActionBarLaunch">
+
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+        <!-- When set as device-owner, replace the system home launcher with us. -->
+        <category android:name="android.intent.category.HOME" />
+        <category android:name="android.intent.category.DEFAULT" />
+    </intent-filter>
+</activity>
+
+<!-- 4 + 5) RECEIVERS — add inside <application>, after <activity> -->
+<receiver
+    android:name=".KioskBootReceiver"
+    android:enabled="true"
+    android:exported="true"
+    android:directBootAware="true">
+    <intent-filter android:priority="999">
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+    </intent-filter>
+</receiver>
+
+<receiver
+    android:name=".KioskDeviceAdminReceiver"
+    android:permission="android.permission.BIND_DEVICE_ADMIN"
+    android:exported="true">
+    <meta-data
+        android:name="android.app.device_admin"
+        android:resource="@xml/device_admin" />
+    <intent-filter>
+        <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+    </intent-filter>
+</receiver>

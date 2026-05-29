@@ -18,6 +18,7 @@ interface Contact {
   total_donated: number
   active_subscriptions: number
   postcode: string | null
+  address: string | null
   created_at: string
 }
 
@@ -238,7 +239,7 @@ export default function ContactsPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
-                  {['Contact', 'Email / Phone', 'Source', 'Branch', 'Orders', 'Total Donated', 'GDPR', 'Joined', ''].map(h => (
+                  {['Contact', 'Email / Phone', 'Address', 'Source', 'Branch', 'Orders', 'Total Donated', 'GDPR', 'Joined', ''].map(h => (
                     <th key={h} className="text-left px-5 py-3 text-white/40 text-xs font-semibold uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
@@ -260,6 +261,10 @@ export default function ContactsPage() {
                     <td className="px-5 py-3.5">
                       <p className="text-white/80 text-sm">{c.email || '—'}</p>
                       <p className="text-white/30 text-xs">{c.phone || ''}</p>
+                    </td>
+                    <td className="px-5 py-3.5 max-w-xs">
+                      <p className="text-white/80 text-sm truncate" title={c.address || ''}>{c.address || '—'}</p>
+                      <p className="text-white/30 text-xs">{c.postcode || ''}</p>
                     </td>
                     <td className="px-5 py-3.5">
                       <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${SOURCE_COLORS[c.first_source || ''] || 'bg-white/5 text-white/40 border-white/10'}`}>
@@ -341,6 +346,7 @@ export default function ContactsPage() {
               <div className="glass rounded-xl p-4 border border-temple-border space-y-2.5">
                 {[
                   ['Phone',    selected.phone],
+                  ['Address',  selected.address],
                   ['Source',   selected.first_source],
                   ['Branch',   selected.first_branch_id],
                   ['GDPR',     selected.gdpr_consent ? 'Consented' : 'Not consented'],

@@ -16,6 +16,11 @@
     "build:electron:arm64": "VITE_ELECTRON=true vite build && electron-builder --linux --arm64",
     "cap:sync": "npx cap sync",
     "cap:android": "npx cap open android",
+    "android:setup":     "bash scripts/setup-android-kiosk.sh",
+    "android:setup:live": "KIOSK_LIVE_URL=https://shital.org.uk/kiosk/ bash scripts/setup-android-kiosk.sh",
+    "android:build:debug":   "cd android && ./gradlew assembleDebug",
+    "android:build:release": "cd android && ./gradlew assembleRelease",
+    "android:provision": "bash scripts/provision-kiosk.sh",
     "preview": "vite preview"
   },
   "dependencies": {

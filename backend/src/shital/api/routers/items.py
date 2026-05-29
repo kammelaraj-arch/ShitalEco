@@ -4,7 +4,9 @@ Admin endpoints require auth. Kiosk endpoints are public (no auth).
 """
 from __future__ import annotations
 
+import base64
 import csv
+import hashlib
 import io
 import json
 import uuid
@@ -13,13 +15,101 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace, OptionalSpace
+from shital.core.fabrics.cache import cache_delete_pattern, cache_get, cache_set
 
 router = APIRouter(prefix="/items", tags=["items"])
+
+# Kiosk catalog list responses are cached in Redis so the home screen's 6
+# parallel fetches don't hit Postgres every load. Short TTL + explicit bust on
+# any catalog write keeps it fresh.
+_KIOSK_CACHE_TTL = 120
+_KIOSK_CACHE_PREFIX = "kiosk:items:"
+# Item images are served once per device then cached hard by the browser.
+_IMAGE_CACHE_CONTROL = "public, max-age=3600"
+
+
+async def _safe_cache_get(key: str) -> Any | None:
+    """Redis read that never breaks the endpoint — a cache miss and a Redis
+    outage both fall through to the DB query."""
+    try:
+        return await cache_get(key)
+    except Exception:
+        return None
+
+
+async def _safe_cache_set(key: str, value: Any, ttl: int) -> None:
+    try:
+        await cache_set(key, value, ttl=ttl)
+    except Exception:
+        pass
+
+
+async def _bust_kiosk_cache() -> None:
+    try:
+        await cache_delete_pattern(f"{_KIOSK_CACHE_PREFIX}*")
+    except Exception:
+        pass
+
+
+_IMAGE_EXT_BY_MIME = {
+    "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png",
+    "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg",
+}
+_MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB upload cap
+
+
+def _media_items_dir() -> str:
+    import os
+
+    from shital.core.fabrics.config import settings
+    d = os.path.join(settings.MEDIA_DIR, "items")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _find_image_file(item_id: str) -> str | None:
+    """Return the on-disk path of an item's stored image, if any."""
+    import glob
+    import os
+
+    from shital.core.fabrics.config import settings
+    matches = glob.glob(os.path.join(settings.MEDIA_DIR, "items", f"{item_id}.*"))
+    return matches[0] if matches and os.path.isfile(matches[0]) else None
+
+
+def _write_image_file(item_id: str, data: bytes, media_type: str) -> str:
+    """Persist image bytes to the media volume, return the file path. Removes
+    any previous extension variant for this item so an update doesn't leave a
+    stale file behind."""
+    import glob
+    import os
+    ext = _IMAGE_EXT_BY_MIME.get(media_type, ".bin")
+    for old in glob.glob(os.path.join(_media_items_dir(), f"{item_id}.*")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    path = os.path.join(_media_items_dir(), f"{item_id}{ext}")
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
+def _strip_inline_images(items: list[dict]) -> list[dict]:
+    """Replace heavy base64 data-URI image_url values with a lightweight URL
+    pointing at GET /items/{id}/image, so list payloads stay small and the
+    actual bytes load lazily + browser-cached. Real http(s) URLs pass through.
+    """
+    for it in items:
+        iu = it.get("image_url") or ""
+        if isinstance(iu, str) and iu.startswith("data:"):
+            it["image_url"] = f"/api/v1/items/{it['id']}/image"
+    return items
 
 
 # ─── Enums ────────────────────────────────────────────────────────────────────
@@ -190,6 +280,7 @@ async def force_catalog_refresh(ctx: CurrentSpace) -> dict[str, str]:
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
         """), {"v": new_version})
         await db.commit()
+    await _bust_kiosk_cache()
     return {"version": new_version}
 
 
@@ -424,6 +515,8 @@ async def import_items_csv(ctx: CurrentSpace, file: UploadFile = File(...)) -> d
         if imported > 0:
             await db.commit()
 
+    if imported > 0:
+        await _bust_kiosk_cache()
     return {"imported": imported, "skipped": len(errors), "errors": errors[:20]}
 
 
@@ -498,6 +591,11 @@ async def kiosk_soft_donations(branch_id: str = "main"):
 
     from shital.core.fabrics.database import SessionLocal
 
+    cache_key = f"{_KIOSK_CACHE_PREFIX}soft-donations:{branch_id}"
+    cached = await _safe_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         async with SessionLocal() as db:
             result = await db.execute(
@@ -517,7 +615,12 @@ async def kiosk_soft_donations(branch_id: str = "main"):
                 {"bid": branch_id},
             )
             rows = result.mappings().all()
-        return {"items": [_row_to_dict(r) for r in rows], "branch_id": branch_id}
+        result_payload = {
+            "items": _strip_inline_images([_row_to_dict(r) for r in rows]),
+            "branch_id": branch_id,
+        }
+        await _safe_cache_set(cache_key, result_payload, _KIOSK_CACHE_TTL)
+        return result_payload
     except Exception:
         return {"items": [], "branch_id": branch_id}
 
@@ -528,6 +631,11 @@ async def kiosk_projects(branch_id: str = "main"):
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+
+    cache_key = f"{_KIOSK_CACHE_PREFIX}projects:{branch_id}"
+    cached = await _safe_cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         async with SessionLocal() as db:
@@ -558,7 +666,13 @@ async def kiosk_projects(branch_id: str = "main"):
             if pid and pid not in seen_project_ids:
                 seen_project_ids.add(pid)
                 projects.append({"id": pid, "name": meta.get("project_name", pid)})
-        return {"items": items, "projects": projects, "branch_id": branch_id}
+        result_payload = {
+            "items": _strip_inline_images(items),
+            "projects": projects,
+            "branch_id": branch_id,
+        }
+        await _safe_cache_set(cache_key, result_payload, _KIOSK_CACHE_TTL)
+        return result_payload
     except Exception:
         return {"items": [], "projects": [], "branch_id": branch_id}
 
@@ -569,6 +683,11 @@ async def kiosk_shop(branch_id: str = "main"):
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+
+    cache_key = f"{_KIOSK_CACHE_PREFIX}shop:{branch_id}"
+    cached = await _safe_cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         async with SessionLocal() as db:
@@ -595,7 +714,9 @@ async def kiosk_shop(branch_id: str = "main"):
             bs = item.get("branch_stock") or {}
             if isinstance(bs, dict) and branch_id in bs:
                 item["stock_qty"] = bs[branch_id]
-        return {"items": items, "branch_id": branch_id}
+        result_payload = {"items": _strip_inline_images(items), "branch_id": branch_id}
+        await _safe_cache_set(cache_key, result_payload, _KIOSK_CACHE_TTL)
+        return result_payload
     except Exception:
         return {"items": [], "branch_id": branch_id}
 
@@ -606,6 +727,11 @@ async def kiosk_general_donations():
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+
+    cache_key = f"{_KIOSK_CACHE_PREFIX}general-donations"
+    cached = await _safe_cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         async with SessionLocal() as db:
@@ -624,9 +750,112 @@ async def kiosk_general_donations():
                 """),
             )
             rows = result.mappings().all()
-        return {"items": [_row_to_dict(r) for r in rows]}
+        result_payload = {"items": _strip_inline_images([_row_to_dict(r) for r in rows])}
+        await _safe_cache_set(cache_key, result_payload, _KIOSK_CACHE_TTL)
+        return result_payload
     except Exception:
         return {"items": []}
+
+
+@router.post("/{item_id}/image")
+async def upload_item_image(item_id: str, ctx: CurrentSpace, file: UploadFile = File(...)):
+    """Admin: store an item image on the media volume (filesystem, not the DB)
+    and point catalog_items.image_url at the serve endpoint."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="Requires SUPER_ADMIN or ADMIN role")
+
+    media_type = (file.content_type or "").lower()
+    if media_type not in _IMAGE_EXT_BY_MIME:
+        raise HTTPException(status_code=415, detail=f"Unsupported image type: {media_type}")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds 8 MB limit")
+
+    _write_image_file(item_id, data, media_type)
+    serve_url = f"/api/v1/items/{item_id}/image"
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text("UPDATE catalog_items SET image_url = :u, updated_at = NOW() "
+                 "WHERE id = :id AND deleted_at IS NULL"),
+            {"u": serve_url, "id": item_id},
+        )
+        await db.commit()
+        if result.rowcount == 0:  # type: ignore[attr-defined]
+            raise HTTPException(status_code=404, detail="Item not found")
+    await _bust_kiosk_cache()
+    return {"id": item_id, "image_url": serve_url}
+
+
+@router.get("/{item_id}/image")
+async def get_item_image(item_id: str, request: Request):
+    """Public: stream an item's image. Serves the file from the media volume
+    when present; otherwise decodes the legacy base64 data-URI from the DB and
+    lazily migrates it to a file so the blob leaves Postgres on first view.
+    Bytes carry an ETag + cache headers so each device fetches an image once."""
+    from fastapi.responses import FileResponse
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    # 1. Already on disk → serve the file directly.
+    path = _find_image_file(item_id)
+    if path:
+        return FileResponse(path, headers={"Cache-Control": _IMAGE_CACHE_CONTROL})
+
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("SELECT image_url, updated_at FROM catalog_items "
+                 "WHERE id = :id AND deleted_at IS NULL"),
+            {"id": item_id},
+        )).mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="No image")
+    image_url = row["image_url"] or ""
+    if not image_url:
+        raise HTTPException(status_code=404, detail="No image")
+
+    # 2. Plain URL (already migrated, or external) → redirect.
+    if not image_url.startswith("data:"):
+        return RedirectResponse(image_url)
+
+    # 3. Legacy base64 → decode, serve, and migrate to disk in the background.
+    etag = '"' + hashlib.md5(  # noqa: S324 - non-security cache key
+        f"{item_id}:{row['updated_at']}".encode()
+    ).hexdigest() + '"'
+    cache_headers = {"ETag": etag, "Cache-Control": _IMAGE_CACHE_CONTROL}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=cache_headers)
+
+    header, _, b64 = image_url.partition(",")
+    media_type = header[len("data:"):].split(";")[0] or "image/png"
+    try:
+        data = base64.b64decode(b64)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail="Invalid image data") from e
+
+    # Lazy migration — best effort, never blocks the response on failure.
+    try:
+        _write_image_file(item_id, data, media_type)
+        async with SessionLocal() as db:
+            await db.execute(
+                text("UPDATE catalog_items SET image_url = :u WHERE id = :id "
+                     "AND image_url LIKE 'data:%'"),
+                {"u": f"/api/v1/items/{item_id}/image", "id": item_id},
+            )
+            await db.commit()
+        await _bust_kiosk_cache()
+    except Exception:
+        pass
+
+    return Response(content=data, media_type=media_type, headers=cache_headers)
 
 
 @router.get("/{item_id}")
@@ -727,6 +956,7 @@ async def create_item(body: ItemCreate, ctx: OptionalSpace):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+    await _bust_kiosk_cache()
     return {"id": item_id, "created": True}
 
 
@@ -797,6 +1027,7 @@ async def update_item(item_id: str, body: ItemUpdate, ctx: OptionalSpace):
         if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Item not found")
 
+    await _bust_kiosk_cache()
     return {"id": item_id, "updated": True}
 
 
@@ -822,6 +1053,7 @@ async def delete_item(item_id: str, ctx: OptionalSpace):
         if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Item not found")
 
+    await _bust_kiosk_cache()
     return {"id": item_id, "deleted": True}
 
 
@@ -929,6 +1161,12 @@ async def kiosk_sponsorship(branch_id: str = "main"):
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+
+    cache_key = f"{_KIOSK_CACHE_PREFIX}sponsorship:{branch_id}"
+    cached = await _safe_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         async with SessionLocal() as db:
             result = await db.execute(
@@ -948,7 +1186,12 @@ async def kiosk_sponsorship(branch_id: str = "main"):
                 {"bid": branch_id},
             )
             rows = result.mappings().all()
-        return {"items": [_row_to_dict(r) for r in rows], "branch_id": branch_id}
+        result_payload = {
+            "items": _strip_inline_images([_row_to_dict(r) for r in rows]),
+            "branch_id": branch_id,
+        }
+        await _safe_cache_set(cache_key, result_payload, _KIOSK_CACHE_TTL)
+        return result_payload
     except Exception:
         return {"items": [], "branch_id": branch_id}
 
