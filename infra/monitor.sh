@@ -144,9 +144,29 @@ check_containers() {
              | grep -v '^$' || true)
     if [ -z "$broken" ]; then
         record containers ok "All shital* containers up" critical
-    else
-        record containers fail "Containers not healthy: $(echo "$broken" | tr '\n' ';' | head -c 300)" critical
+        return
     fi
+
+    # Self-diagnosing alert: include each broken container's restart count +
+    # last 20 log lines so the on-call recipient can triage from the email
+    # alone, instead of round-tripping through the System Ops panel. Each
+    # container's log section is capped so one chatty crash can't swallow
+    # the whole message.
+    local summary detail name restarts logs
+    summary=$(echo "$broken" | tr '\n' ';' | head -c 300)
+    detail=""
+    while IFS= read -r line; do
+        name=$(echo "$line" | awk '{print $1}')
+        [ -z "$name" ] && continue
+        restarts=$(docker inspect --format '{{.RestartCount}}' "$name" 2>/dev/null || echo "?")
+        logs=$(docker logs --tail 20 "$name" 2>&1 | head -c 1500 || true)
+        detail="${detail}
+── ${name} — restarts=${restarts} ──
+${logs}
+"
+    done <<< "$broken"
+
+    record containers fail "Containers not healthy: ${summary}${detail}" critical
 }
 
 check_backup_today() {
@@ -335,10 +355,23 @@ EOF
 
 # ── Weekly digest ───────────────────────────────────────────────────────────
 
+weekly_housekeeping() {
+    # Reclaim disk by pruning dangling (untagged) images only. Container and
+    # volume pruning are deliberately left out — they have bitten us before
+    # (PR #108) when run mid-deploy. Returns the reclaimed bytes string for
+    # inclusion in the digest.
+    local reclaimed
+    reclaimed=$(docker image prune -f 2>&1 | grep -oE 'reclaimed space.*' | head -1)
+    [ -z "$reclaimed" ] && reclaimed="nothing reclaimed"
+    log "HOUSEKEEPING image prune: $reclaimed"
+    echo "$reclaimed"
+}
+
 weekly_digest() {
     local body subject
     subject="[Digest] ShitalEco weekly status — $(date -u +'%Y-%m-%d')"
-    local containers backup_count latest_backup disk_used cert_days orders_week
+    local containers backup_count latest_backup disk_used cert_days orders_week housekeeping
+    housekeeping=$(weekly_housekeeping)
 
     containers=$(docker ps --filter "name=shital" --format '  {{.Names}}: {{.Status}}' || echo "  (docker query failed)")
     backup_count=$(find "$BACKUP_DIR/daily" -name "*.sql.gz" -mtime -7 2>/dev/null | wc -l)
@@ -375,6 +408,9 @@ Orders this week:        $orders_week
 $( [ -f "$BACKUP_DIR/test-restore.log" ] \
    && echo "  $(stat -c %y "$BACKUP_DIR/test-restore.log" | cut -d. -f1)" \
    || echo "  never run" )
+
+── Housekeeping ──
+Docker image prune: $housekeeping
 
 —
 
