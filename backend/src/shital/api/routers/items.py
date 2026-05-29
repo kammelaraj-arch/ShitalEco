@@ -56,6 +56,50 @@ async def _bust_kiosk_cache() -> None:
         pass
 
 
+_IMAGE_EXT_BY_MIME = {
+    "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png",
+    "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg",
+}
+_MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB upload cap
+
+
+def _media_items_dir() -> str:
+    import os
+
+    from shital.core.fabrics.config import settings
+    d = os.path.join(settings.MEDIA_DIR, "items")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _find_image_file(item_id: str) -> str | None:
+    """Return the on-disk path of an item's stored image, if any."""
+    import glob
+    import os
+
+    from shital.core.fabrics.config import settings
+    matches = glob.glob(os.path.join(settings.MEDIA_DIR, "items", f"{item_id}.*"))
+    return matches[0] if matches and os.path.isfile(matches[0]) else None
+
+
+def _write_image_file(item_id: str, data: bytes, media_type: str) -> str:
+    """Persist image bytes to the media volume, return the file path. Removes
+    any previous extension variant for this item so an update doesn't leave a
+    stale file behind."""
+    import glob
+    import os
+    ext = _IMAGE_EXT_BY_MIME.get(media_type, ".bin")
+    for old in glob.glob(os.path.join(_media_items_dir(), f"{item_id}.*")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    path = os.path.join(_media_items_dir(), f"{item_id}{ext}")
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
 def _strip_inline_images(items: list[dict]) -> list[dict]:
     """Replace heavy base64 data-URI image_url values with a lightweight URL
     pointing at GET /items/{id}/image, so list payloads stay small and the
@@ -713,15 +757,57 @@ async def kiosk_general_donations():
         return {"items": []}
 
 
-@router.get("/{item_id}/image")
-async def get_item_image(item_id: str, request: Request):
-    """Public: stream an item's image. Decodes legacy base64 data-URIs stored
-    in catalog_items.image_url so the kiosk catalog payloads don't have to. The
-    bytes are served with an ETag + cache headers so each device fetches an
-    image once. Real http(s) URLs are redirected to."""
+@router.post("/{item_id}/image")
+async def upload_item_image(item_id: str, ctx: CurrentSpace, file: UploadFile = File(...)):
+    """Admin: store an item image on the media volume (filesystem, not the DB)
+    and point catalog_items.image_url at the serve endpoint."""
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="Requires SUPER_ADMIN or ADMIN role")
+
+    media_type = (file.content_type or "").lower()
+    if media_type not in _IMAGE_EXT_BY_MIME:
+        raise HTTPException(status_code=415, detail=f"Unsupported image type: {media_type}")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds 8 MB limit")
+
+    _write_image_file(item_id, data, media_type)
+    serve_url = f"/api/v1/items/{item_id}/image"
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text("UPDATE catalog_items SET image_url = :u, updated_at = NOW() "
+                 "WHERE id = :id AND deleted_at IS NULL"),
+            {"u": serve_url, "id": item_id},
+        )
+        await db.commit()
+        if result.rowcount == 0:  # type: ignore[attr-defined]
+            raise HTTPException(status_code=404, detail="Item not found")
+    await _bust_kiosk_cache()
+    return {"id": item_id, "image_url": serve_url}
+
+
+@router.get("/{item_id}/image")
+async def get_item_image(item_id: str, request: Request):
+    """Public: stream an item's image. Serves the file from the media volume
+    when present; otherwise decodes the legacy base64 data-URI from the DB and
+    lazily migrates it to a file so the blob leaves Postgres on first view.
+    Bytes carry an ETag + cache headers so each device fetches an image once."""
+    from fastapi.responses import FileResponse
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    # 1. Already on disk → serve the file directly.
+    path = _find_image_file(item_id)
+    if path:
+        return FileResponse(path, headers={"Cache-Control": _IMAGE_CACHE_CONTROL})
 
     async with SessionLocal() as db:
         row = (await db.execute(
@@ -734,9 +820,11 @@ async def get_item_image(item_id: str, request: Request):
     if not image_url:
         raise HTTPException(status_code=404, detail="No image")
 
+    # 2. Plain URL (already migrated, or external) → redirect.
     if not image_url.startswith("data:"):
         return RedirectResponse(image_url)
 
+    # 3. Legacy base64 → decode, serve, and migrate to disk in the background.
     etag = '"' + hashlib.md5(  # noqa: S324 - non-security cache key
         f"{item_id}:{(row or {}).get('updated_at')}".encode()
     ).hexdigest() + '"'
@@ -745,11 +833,26 @@ async def get_item_image(item_id: str, request: Request):
         return Response(status_code=304, headers=cache_headers)
 
     header, _, b64 = image_url.partition(",")
-    media_type = header[len("data:"):].split(";")[0] or "application/octet-stream"
+    media_type = header[len("data:"):].split(";")[0] or "image/png"
     try:
         data = base64.b64decode(b64)
     except Exception as e:
         raise HTTPException(status_code=404, detail="Invalid image data") from e
+
+    # Lazy migration — best effort, never blocks the response on failure.
+    try:
+        _write_image_file(item_id, data, media_type)
+        async with SessionLocal() as db:
+            await db.execute(
+                text("UPDATE catalog_items SET image_url = :u WHERE id = :id "
+                     "AND image_url LIKE 'data:%'"),
+                {"u": f"/api/v1/items/{item_id}/image", "id": item_id},
+            )
+            await db.commit()
+        await _bust_kiosk_cache()
+    except Exception:
+        pass
+
     return Response(content=data, media_type=media_type, headers=cache_headers)
 
 

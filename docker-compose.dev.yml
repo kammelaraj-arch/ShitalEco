@@ -68,6 +68,8 @@ services:
       # trailingSlash:true so Azure exact-match accepts it.
       MS_REDIRECT_URI:        ${MS_REDIRECT_URI_DEV:-https://dev.shital.org.uk/admin/auth-callback/}
       DEPLOYER_URL:           ${DEPLOYER_URL:-http://deployer:9000}
+    volumes:
+      - /opt/shitaleco-dev/media:/app/media
     depends_on:
       db-dev:
         condition: service_healthy

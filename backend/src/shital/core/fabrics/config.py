@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     # Public base URL (used for webhook return_url)
     SITE_URL: str = "https://shital.org.uk"
 
+    # On-disk media store for item/catalog images (bind-mounted volume in prod
+    # so files survive container recreation). Keeps base64 blobs out of Postgres.
+    MEDIA_DIR: str = "/app/media"
+
     # MeiliSearch
     MEILISEARCH_URL: str = "http://localhost:7700"
     MEILISEARCH_MASTER_KEY: str = ""
