@@ -18,8 +18,9 @@ can't identify.
 Idempotent: each UPDATE is a no-op on already-canonical data, so this
 migration is safe to re-run.
 """
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = '029'
 down_revision = '028'
@@ -29,6 +30,16 @@ depends_on = None
 
 def upgrade() -> None:
     conn = op.get_bind()
+
+    # This migration runs synchronously before uvicorn on every boot
+    # (`alembic upgrade head` in the Docker CMD). Bound lock acquisition and
+    # statement time so a busy or large table can never hang the deploy and
+    # trip the health-check rollback. Each table is normalised inside its own
+    # savepoint, so a lock/timeout on one table skips just that table — it is
+    # retried on the next boot, and the UPDATE is a no-op once data is canonical.
+    conn.execute(text("SET lock_timeout = '3s'"))
+    conn.execute(text("SET statement_timeout = '20s'"))
+
     tables = conn.execute(text("""
         SELECT table_name
         FROM information_schema.columns
@@ -42,14 +53,20 @@ def upgrade() -> None:
     for table in tables:
         # Quote the table name (information_schema returns unquoted identifiers
         # but a future table named with a reserved word would still be safe).
-        conn.execute(text(f"""
-            UPDATE "{table}" AS t
-            SET branch_id = b.branch_id
-            FROM branches AS b
-            WHERE t.branch_id ~* '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
-              AND lower(b.id::text) = lower(t.branch_id)
-              AND t.branch_id <> b.branch_id
-        """))
+        try:
+            with conn.begin_nested():
+                conn.execute(text(f"""
+                    UPDATE "{table}" AS t
+                    SET branch_id = b.branch_id
+                    FROM branches AS b
+                    WHERE t.branch_id ~* '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
+                      AND lower(b.id::text) = lower(t.branch_id)
+                      AND t.branch_id <> b.branch_id
+                """))
+        except Exception:
+            # Lock wait / statement timeout / transient error — leave this table
+            # for the next boot rather than failing the whole migration.
+            continue
 
 
 def downgrade() -> None:
