@@ -171,8 +171,15 @@ export default function OpsPage() {
   }, [])
 
   useEffect(() => {
+    // Always load once on mount so the panel is populated even out-of-hours.
+    // After that, auto-refresh every 5 min — but only between 08:00 and 22:00
+    // local time, since kiosks aren't operational overnight and the poll is
+    // just noise then. The manual "↻ Refresh" button still works any time.
     loadKiosks()
-    const id = setInterval(loadKiosks, 30_000)
+    const id = setInterval(() => {
+      const h = new Date().getHours()
+      if (h >= 8 && h < 22) loadKiosks()
+    }, 5 * 60 * 1000)
     return () => clearInterval(id)
   }, [loadKiosks])
 
@@ -451,7 +458,7 @@ export default function OpsPage() {
                 <span className="text-green-400/80"> ONLINE</span> = seen ≤ 5 min,
                 <span className="text-amber-400/80"> STALE</span> = ≤ 60 min,
                 <span className="text-red-400/80"> OFFLINE</span> = longer / never.
-                Auto-refreshes every 30 s.
+                Auto-refreshes every 5 min, 08:00–22:00 local.
               </p>
             </div>
           </div>
