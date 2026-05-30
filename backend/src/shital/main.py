@@ -542,6 +542,11 @@ async def _patch_schema() -> None:
         # refresh, admin } booleans. Loaded by the kiosk on login; the gear
         # menu hides items where the value is false.
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS menu_options JSONB NOT NULL DEFAULT '{\"test_print\": true, \"theme_cycle\": true, \"refresh\": true, \"admin\": true}'::jsonb",
+        # Physical location of the device (WGS-84). Nullable — not every kiosk
+        # has GPS set yet. NUMERIC(9,6) gives ~10cm precision and covers any
+        # coordinate on Earth without floating-point drift.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS latitude  NUMERIC(9,6) DEFAULT NULL",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS longitude NUMERIC(9,6) DEFAULT NULL",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_username ON kiosk_devices(device_username) WHERE device_username IS NOT NULL",
         # ── Menu / menu-profile system (per-app, parent/child) ────────────────
         """CREATE TABLE IF NOT EXISTS menus (
