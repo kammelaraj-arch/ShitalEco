@@ -20,8 +20,9 @@ Wrapped in lock_timeout / statement_timeout / per-table savepoints so
 this can never hang container startup (same defensive pattern as 029).
 Idempotent — re-running is a no-op once the data is clean.
 """
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = '030'
 down_revision = '029'
