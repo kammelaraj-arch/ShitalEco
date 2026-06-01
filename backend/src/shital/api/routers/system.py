@@ -357,6 +357,35 @@ async def ops_run(
     }
 
 
+@router.get("/deployer/last-log")
+async def deployer_last_log(ctx: CurrentSpace, tail: int = 200) -> dict[str, Any]:
+    """
+    Surface the tail of the deployer's most-recent deploy.sh run. Lets an
+    operator triage a silent Promote / Re-deploy failure without SSH —
+    server.py used to swallow script output to /dev/null, so failures like
+    bad GHCR auth / missing /workspace mount / immediate `git fetch` crash
+    appeared as "Promote triggered → nothing happens". The deployer now
+    writes to /var/log/shital-deployer/latest.log; this proxies to it.
+    """
+    _require_admin(ctx)
+    deployer_url  = os.environ.get("DEPLOYER_URL", "http://deployer:9000").strip()
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
+    if not deploy_secret:
+        return {"lines": [], "error": "DEPLOY_SECRET not configured"}
+    tail = max(1, min(1000, int(tail)))
+    req = urllib.request.Request(
+        f"{deployer_url}/last-deploy-log?tail={tail}",
+        headers={"X-Deploy-Secret": deploy_secret},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return {"lines": [], "error": f"Deployer HTTP {e.code}"}
+    except Exception as e:
+        return {"lines": [], "error": f"Deployer unreachable: {e}"}
+
+
 # ─── Kiosk health (Quick Donation + Full Kiosk fleet) ─────────────────────────
 # Classification proxies kiosk_devices.last_seen_at — which is bumped whenever
 # the device fetches its config (login / refresh / config poll). No dedicated

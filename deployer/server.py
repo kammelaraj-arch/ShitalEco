@@ -52,10 +52,31 @@ ENV_CONTAINERS = {
 
 
 def run_script(args):
+    # Persist the script's stdout+stderr to a small ring of log files so the
+    # System Ops panel (GET /last-deploy-log) can surface WHY a Promote /
+    # Re-deploy click didn't take effect. Used to be DEVNULL — which is how
+    # silent failures (bad GHCR auth, missing /workspace mount, immediate
+    # `git fetch` crash, etc.) became "Promote triggered → nothing happens".
+    log_dir = "/var/log/shital-deployer"
+    os.makedirs(log_dir, exist_ok=True)
+    ts = _dt.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    safe_args = "-".join(a.lstrip("-").replace("/", "_") for a in args) or "deploy"
+    log_path = os.path.join(log_dir, f"{ts}-{safe_args}.log")
+    # Symlink "latest" so /last-deploy-log doesn't need to scan the directory.
+    latest = os.path.join(log_dir, "latest.log")
+    log_fh = open(log_path, "wb")  # noqa: SIM115 — Popen owns the lifetime
+    try:
+        os.unlink(latest)
+    except FileNotFoundError:
+        pass
+    try:
+        os.symlink(log_path, latest)
+    except OSError:
+        pass
     subprocess.Popen(
         ["/bin/bash", "/app/deploy.sh", *args],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
     )
 
 
@@ -466,6 +487,39 @@ class Handler(BaseHTTPRequestHandler):
                 }
             self._send_json(200, {"environments": envs})
             return
+
+        if self.path.startswith("/last-deploy-log"):
+            # Surface the tail of the most-recent deploy.sh run so the System
+            # Ops panel can show WHY a Promote / Re-deploy click did or didn't
+            # take effect — no SSH needed. Optional ?tail=N (default 200,
+            # capped at 1000) bounds memory.
+            from urllib.parse import parse_qs, urlsplit
+            qs = parse_qs(urlsplit(self.path).query)
+            try:
+                tail = max(1, min(1000, int((qs.get("tail") or ["200"])[0])))
+            except ValueError:
+                tail = 200
+            latest = "/var/log/shital-deployer/latest.log"
+            if not os.path.exists(latest):
+                self._send_json(200, {
+                    "log_path": None,
+                    "lines":    [],
+                    "message":  "No deploy script has run yet on this deployer container.",
+                })
+                return
+            try:
+                with open(latest, "rb") as f:
+                    raw = f.read()
+                body = raw.decode("utf-8", errors="replace").splitlines()
+                self._send_json(200, {
+                    "log_path": os.path.realpath(latest),
+                    "lines":    body[-tail:],
+                    "size":     len(raw),
+                })
+            except OSError as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
         self.send_response(403)
         self.end_headers()
 
