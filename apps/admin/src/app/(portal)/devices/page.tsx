@@ -14,6 +14,8 @@ interface KioskDevice {
   device_type: 'KIOSK' | 'QUICK_DONATION' | 'SMART_DISPLAY'
   branch_id: string
   location: string
+  latitude: number | null
+  longitude: number | null
   status: 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE'
   screen_profile_id: string | null
   peak_start: string
@@ -80,7 +82,7 @@ type DeviceStatus = 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE'
 
 const EMPTY_FORM = {
   name: '', description: '', device_type: 'KIOSK' as DeviceType,
-  branch_id: 'main', location: '', status: 'ACTIVE' as DeviceStatus,
+  branch_id: 'main', location: '', latitude: '' as string | number, longitude: '' as string | number, status: 'ACTIVE' as DeviceStatus,
   screen_profile_id: '', peak_start: '09:00', peak_end: '21:00',
   off_peak_playlist_id: '', default_donate_amount: 5,
   card_reader_id: '',
@@ -181,7 +183,10 @@ export default function DevicesPage() {
     setEditing(d)
     setForm({
       name: d.name, description: d.description, device_type: d.device_type,
-      branch_id: d.branch_id, location: d.location, status: d.status,
+      branch_id: d.branch_id, location: d.location,
+      latitude:  d.latitude  ?? '',
+      longitude: d.longitude ?? '',
+      status: d.status,
       screen_profile_id: d.screen_profile_id || '',
       peak_start: d.peak_start, peak_end: d.peak_end,
       off_peak_playlist_id: d.off_peak_playlist_id || '',
@@ -222,6 +227,9 @@ export default function DevicesPage() {
         off_peak_playlist_id: form.off_peak_playlist_id || null,
         device_username: form.device_username.trim() || null,
         device_password: form.device_password.trim() || null,
+        // Lat/long: empty input → null (clears the value); else parse as number.
+        latitude:  form.latitude  === '' ? null : Number(form.latitude),
+        longitude: form.longitude === '' ? null : Number(form.longitude),
       }
       const bodyWithReader = {
         ...body,
@@ -610,6 +618,59 @@ export default function DevicesPage() {
                       <option value="MAINTENANCE">Maintenance</option>
                     </select>
                   </div>
+                </div>
+
+                {/* GPS coordinates — paired with the human-readable Location.
+                    Clearing both inputs unsets the value (column allows NULL).
+                    "Use my location" calls the browser's Geolocation API and
+                    fills both fields with 6-decimal precision (~10 cm). */}
+                <div className={row}>
+                  <div>
+                    <p className={lbl}>Latitude</p>
+                    <input className={inp} type="number" step="any" min={-90} max={90}
+                      value={form.latitude}
+                      onChange={e => setForm(f => ({ ...f, latitude: e.target.value }))}
+                      placeholder="e.g. 51.557030" />
+                  </div>
+                  <div>
+                    <p className={lbl}>Longitude</p>
+                    <input className={inp} type="number" step="any" min={-180} max={180}
+                      value={form.longitude}
+                      onChange={e => setForm(f => ({ ...f, longitude: e.target.value }))}
+                      placeholder="e.g. -0.291940" />
+                  </div>
+                </div>
+                <div className="-mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!navigator.geolocation) {
+                        alert('Geolocation is not available in this browser')
+                        return
+                      }
+                      navigator.geolocation.getCurrentPosition(
+                        pos => setForm(f => ({
+                          ...f,
+                          latitude:  pos.coords.latitude.toFixed(6),
+                          longitude: pos.coords.longitude.toFixed(6),
+                        })),
+                        err => alert(`Could not get location: ${err.message}`),
+                        { enableHighAccuracy: true, timeout: 10000 },
+                      )
+                    }}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:bg-white/10"
+                  >
+                    📍 Use my current location
+                  </button>
+                  {form.latitude && form.longitude && (
+                    <a
+                      href={`https://www.google.com/maps?q=${form.latitude},${form.longitude}`}
+                      target="_blank" rel="noreferrer"
+                      className="ml-2 text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-saffron-300 hover:bg-white/10"
+                    >
+                      View on map ↗
+                    </a>
+                  )}
                 </div>
 
                 {/* ── Smart Display: profile + peak hours ────────────── */}

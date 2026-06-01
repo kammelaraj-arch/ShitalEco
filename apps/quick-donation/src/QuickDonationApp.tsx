@@ -19,7 +19,7 @@ const THEME_BG: Record<string, string> = {
 }
 
 export function QuickDonationApp() {
-  const { screen, setScreen, isDeviceLoggedIn, _hasHydrated, stripeReaderId, sumupReaderId, cloverDeviceId, kioskTheme, bgColor, loggedInUsername, setDeviceFlags, setBranchId, setReader } = useDonationStore()
+  const { screen, setScreen, isDeviceLoggedIn, _hasHydrated, stripeReaderId, sumupReaderId, cloverDeviceId, kioskTheme, bgColor, loggedInUsername, setDeviceFlags, setBranchId, setReader, setKioskDeviceId } = useDonationStore()
 
   // Any of stripe terminal / sumup / clover counts as "a reader is set up".
   // Without this guard, staff land on the tile screen, tap an amount, and
@@ -44,6 +44,7 @@ export function QuickDonationApp() {
         const cloverId = data.clover_device_id || ''
         const provider = (sumupSerial ? 'sumup' : cloverId ? 'clover' : (data.reader_provider || 'stripe_terminal')) as import('./store/donation.store').ReaderProvider
         setReader(data.stripe_reader_id || '', data.reader_label || data.stripe_reader_id || sumupSerial || cloverId, provider, sumupSerial, '', cloverId)
+        setKioskDeviceId(data.kiosk_device_id || '')
         setDeviceFlags({
           showMonthlyGiving: data.show_monthly_giving ?? false,
           enableGiftAid: data.enable_gift_aid ?? false,

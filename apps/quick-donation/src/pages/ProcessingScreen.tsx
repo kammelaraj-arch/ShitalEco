@@ -23,6 +23,7 @@ export function ProcessingScreen() {
   const {
     amount, branchId, stripeReaderId,
     readerProvider, sumupReaderId, sumupReaderApiId, cloverDeviceId,
+    kioskDeviceId,
     pendingGiftAid,
     setScreen, setOrderResult, setReader,
   } = useDonationStore()
@@ -48,6 +49,7 @@ export function ProcessingScreen() {
           payment_intent_id: paymentRef,
           payment_provider: provider,
           reader_id: readerId,
+          kiosk_device_id: kioskDeviceId,
           ...(pendingGiftAid ? {
             ga_first_name: pendingGiftAid.firstName,
             ga_surname: pendingGiftAid.surname,

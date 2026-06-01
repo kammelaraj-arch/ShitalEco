@@ -47,7 +47,9 @@ class DeviceIn(BaseModel):
     description: str = ""
     device_type: str = "KIOSK"          # KIOSK | QUICK_DONATION | SMART_DISPLAY
     branch_id: str = "main"
-    location: str = ""
+    location: str = ""                  # Human-readable: "Main Entrance"
+    latitude: float | None = None       # WGS-84 lat (-90..90); None = not set
+    longitude: float | None = None      # WGS-84 lng (-180..180); None = not set
     status: str = "ACTIVE"
     # Smart Display
     screen_profile_id: str | None = None
@@ -114,7 +116,7 @@ async def list_devices(
     async with SessionLocal() as db:
         result = await db.execute(
             text(f"""
-                SELECT id, name, description, device_type, branch_id, location,
+                SELECT id, name, description, device_type, branch_id, location, latitude, longitude,
                        status, screen_profile_id, peak_start, peak_end,
                        off_peak_playlist_id, default_donate_amount, card_reader_id,
                        serial_number, ip_address, device_token,
@@ -254,7 +256,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
     async with SessionLocal() as db:
         await db.execute(text("""
             INSERT INTO kiosk_devices
-                (id, name, description, device_type, branch_id, location, status,
+                (id, name, description, device_type, branch_id, location, latitude, longitude, status,
                  screen_profile_id, peak_start, peak_end, off_peak_playlist_id,
                  default_donate_amount, card_reader_id, serial_number, ip_address,
                  device_token, notes, kiosk_theme, org_name, org_logo_url,
@@ -264,7 +266,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  bg_color, menu_options,
                  created_at, updated_at)
             VALUES
-                (:id, :name, :desc, :dtype, :bid, :loc, :status,
+                (:id, :name, :desc, :dtype, :bid, :loc, :lat, :lng, :status,
                  :prof_id, :peak_s, :peak_e, :offpeak_pl,
                  :dda, :card_rid, :serial, :ip,
                  :token, :notes, :ktheme, :oname, :ologo,
@@ -276,6 +278,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
             "dtype": body.device_type, "bid": body.branch_id, "loc": body.location,
+            "lat": body.latitude, "lng": body.longitude,
             "status": body.status, "prof_id": body.screen_profile_id,
             "peak_s": body.peak_start, "peak_e": body.peak_end,
             "offpeak_pl": body.off_peak_playlist_id,
@@ -323,7 +326,9 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
         result = await db.execute(text(f"""
             UPDATE kiosk_devices SET
                 name = :name, description = :desc, device_type = :dtype,
-                branch_id = :bid, location = :loc, status = :status,
+                branch_id = :bid, location = :loc,
+                latitude = :lat, longitude = :lng,
+                status = :status,
                 screen_profile_id = :prof_id, peak_start = :peak_s, peak_end = :peak_e,
                 off_peak_playlist_id = :offpeak_pl, default_donate_amount = :dda,
                 card_reader_id = :card_rid,
@@ -346,6 +351,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
             "dtype": body.device_type, "bid": body.branch_id, "loc": body.location,
+            "lat": body.latitude, "lng": body.longitude,
             "status": body.status, "prof_id": body.screen_profile_id,
             "peak_s": body.peak_start, "peak_e": body.peak_end,
             "offpeak_pl": body.off_peak_playlist_id,

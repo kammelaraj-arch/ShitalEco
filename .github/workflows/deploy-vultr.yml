@@ -157,7 +157,7 @@ jobs:
             # the root cause of "deploy succeeded but prod is on stale code".
             echo "=== Auto-promoting :dev → :latest in GHCR ==="
             PROMOTE_FAIL=0
-            for svc in backend admin quick-donation kiosk screen service; do
+            for svc in backend admin quick-donation kiosk screen service deployer; do
               img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
               if docker pull "${img}:dev" >/dev/null 2>&1; then
                 docker tag "${img}:dev" "${img}:latest"
@@ -185,7 +185,7 @@ jobs:
             fi
 
             # ── Checkpoint: tag :latest as :previous ─────────────────────────
-            for svc in backend admin quick-donation kiosk screen service; do
+            for svc in backend admin quick-donation kiosk screen service deployer; do
               img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
               docker tag "${img}:latest" "${img}:previous" 2>/dev/null || true
             done

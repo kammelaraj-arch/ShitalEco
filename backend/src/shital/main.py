@@ -542,6 +542,11 @@ async def _patch_schema() -> None:
         # refresh, admin } booleans. Loaded by the kiosk on login; the gear
         # menu hides items where the value is false.
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS menu_options JSONB NOT NULL DEFAULT '{\"test_print\": true, \"theme_cycle\": true, \"refresh\": true, \"admin\": true}'::jsonb",
+        # Physical location of the device (WGS-84). Nullable — not every kiosk
+        # has GPS set yet. NUMERIC(9,6) gives ~10cm precision and covers any
+        # coordinate on Earth without floating-point drift.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS latitude  NUMERIC(9,6) DEFAULT NULL",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS longitude NUMERIC(9,6) DEFAULT NULL",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_username ON kiosk_devices(device_username) WHERE device_username IS NOT NULL",
         # ── Menu / menu-profile system (per-app, parent/child) ────────────────
         """CREATE TABLE IF NOT EXISTS menus (
@@ -1777,6 +1782,22 @@ async def _patch_schema() -> None:
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_reason  VARCHAR(500) NOT NULL DEFAULT ''",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancel_reason        VARCHAR(500) NOT NULL DEFAULT ''",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancelled_by         VARCHAR(255) NOT NULL DEFAULT ''",
+        # Payment-tracking columns previously added only via the lazy webhook
+        # ALTER (recurring_giving._ensure_subscription_columns). The admin
+        # /admin/giving/subscriptions SELECT references them, so a DB that
+        # hadn't yet received a PayPal webhook returned 500 — and the Monthly
+        # Giving page silently showed "No subscriptions yet" because the
+        # frontend swallowed non-2xx responses.
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_at      TIMESTAMPTZ",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_amount  NUMERIC(10,2)",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS next_billing_date    DATE",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS total_payments       INTEGER NOT NULL DEFAULT 0",
+        # Per-device donation attribution. Nullable: server-portal / PayPal /
+        # manual entries have no originating kiosk, and rows pre-dating this
+        # column are left NULL (the Incoming Funds dashboard surfaces them
+        # under "Unattributed"). Indexed for the by-device aggregation.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS kiosk_device_id UUID DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_donations_kiosk_device ON donations(kiosk_device_id) WHERE kiosk_device_id IS NOT NULL",
         # ── Webhook event audit log ───────────────────────────────────────────
         # Every PayPal webhook gets stored here, idempotent on event_id, before
         # we touch any business state. Lets us replay a failed handler without

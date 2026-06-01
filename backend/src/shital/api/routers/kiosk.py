@@ -1121,6 +1121,11 @@ class QuickDonationRecordInput(BaseModel):
     payment_intent_id: str = ""
     payment_provider: str = "SUMUP"
     reader_id: str = ""
+    # The kiosk device that captured this donation. Populated from the
+    # /quick-donation/login response, kept in the Zustand store, sent back
+    # so donations.kiosk_device_id carries per-device attribution. Optional
+    # for back-compat: kiosk binaries that don't send it record NULL.
+    kiosk_device_id: str = ""
     # Optional Gift Aid — collected before payment on the kiosk
     ga_first_name: str = ""
     ga_surname: str = ""
@@ -1197,10 +1202,11 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                 text(
                     "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
                     "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
-                    "fee_pct, fee_amount, net_amount, "
+                    "fee_pct, fee_amount, net_amount, kiosk_device_id, "
                     "status, source, idempotency_key, created_at, updated_at) "
                     "VALUES (:id, :uid, :bid, :amount, 'GBP', :ga_elig, 'General Fund', :ref, "
                     ":provider, :pref, :fee_pct, :fee_amount, :net_amount, "
+                    "CAST(NULLIF(:kdid, '') AS UUID), "
                     "'PENDING', 'quick-donation', :ikey, :now, :now) "
                     "ON CONFLICT (idempotency_key) DO NOTHING"
                 ),
@@ -1209,6 +1215,7 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                     "amount": str(total), "ref": body.order_ref,
                     "provider": provider_upper, "pref": body.payment_intent_id,
                     "fee_pct": str(fee_pct), "fee_amount": str(fee_amount), "net_amount": str(net_amount),
+                    "kdid": body.kiosk_device_id or "",
                     "ikey": f"qd-{order_id}", "ga_elig": ga, "now": now,
                 },
             )
@@ -2238,6 +2245,9 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "user": {"id": str(device["id"]), "email": login_input, "name": device["name"], "role": "KIOSK"},
             "branch": {"id": device["branch_id"], "name": device["branch_name"] or device["branch_id"]},
             "profile": None,
+            # Echoed back on every /quick-donation/record call so donations
+            # carry per-device attribution for the Incoming Funds dashboard.
+            "kiosk_device_id": str(device["id"]),
             "stripe_reader_id": device["stripe_reader_id"],
             "reader_label": device["reader_label"],
             "reader_provider": device["reader_provider"],
@@ -2391,6 +2401,10 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         "user": {"id": str(user["id"]), "email": user["email"], "name": user["name"], "role": user["role"]},
         "branch": {"id": branch_code, "name": user["branch_name"] or "Unknown"},
         "profile": profile,
+        # If a kiosk_devices row matched this user (dev_row), surface its id
+        # so /quick-donation/record can attribute donations per-device. NULL
+        # for purely legacy logins with no device row.
+        "kiosk_device_id": str(dev_row["id"]) if dev_row else None,
         "stripe_reader_id": effective_reader_id,
         "reader_label": effective_reader_label,
         "reader_provider": effective_provider,
@@ -2449,6 +2463,7 @@ async def quick_kiosk_refresh_config(username: str):
     return {
         "ok": True,
         "branch": {"id": device["branch_id"], "name": device["branch_name"] or device["branch_id"]},
+        "kiosk_device_id": str(device["id"]),
         "stripe_reader_id": device["stripe_reader_id"],
         "reader_label": device["reader_label"],
         "reader_provider": device["reader_provider"],

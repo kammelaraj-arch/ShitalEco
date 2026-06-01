@@ -531,9 +531,73 @@ async def incoming_funds(
         GROUP  BY d.branch_id, b.name
         ORDER  BY amount DESC
     """
+    # Source × branch breakdown. Each row = (branch, source, payment_provider)
+    # so the UI can list every source within a branch (kiosk, quick-donation,
+    # service-portal, monthly-giving, paypal, cash, etc.). Source is COALESCED
+    # the same way as in /donations so legacy rows that pre-date the column
+    # are still classified meaningfully instead of falling into 'manual'.
+    by_source_branch_sql = f"""
+        SELECT d.branch_id,
+               COALESCE(b.name, d.branch_id)            AS branch_name,
+               COALESCE(d.source,
+                   CASE d.payment_provider
+                       WHEN 'KIOSK'  THEN 'quick-donation'
+                       WHEN 'paypal' THEN 'service-portal'
+                       ELSE 'manual'
+                   END
+               )                                         AS source,
+               COALESCE(d.payment_provider, '')         AS payment_provider,
+               COALESCE(SUM(d.amount), 0)::numeric      AS amount,
+               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COUNT(*)                                  AS cnt
+        FROM   donations d
+        LEFT   JOIN branches b ON b.branch_id = d.branch_id
+        WHERE  {where_sql}
+        GROUP  BY d.branch_id, b.name, source, payment_provider
+        ORDER  BY d.branch_id, amount DESC
+    """
+    # Gift-Aid split (per branch + org-wide). Powers the "Gift Aid vs not"
+    # pie chart. 'eligible' counts both rows where gift_aid_eligible=true
+    # AND rows where the donor declared but the amount is 0 (rare).
+    by_giftaid_sql = f"""
+        SELECT d.branch_id,
+               COALESCE(b.name, d.branch_id)            AS branch_name,
+               COALESCE(d.gift_aid_eligible, false)     AS giftaid_eligible,
+               COALESCE(SUM(d.amount), 0)::numeric      AS amount,
+               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COUNT(*)                                  AS cnt
+        FROM   donations d
+        LEFT   JOIN branches b ON b.branch_id = d.branch_id
+        WHERE  {where_sql}
+        GROUP  BY d.branch_id, b.name, giftaid_eligible
+    """
+    # Per-device totals within each branch. Rows where kiosk_device_id is
+    # NULL (server portal / PayPal / manual / kiosk binaries that pre-date
+    # the column) bucket as "Unattributed" so the UI can show what hasn't
+    # been wired up. The LEFT JOIN to kiosk_devices preserves deleted
+    # devices that still own historic donations.
+    by_device_branch_sql = f"""
+        SELECT d.branch_id,
+               COALESCE(b.name, d.branch_id)            AS branch_name,
+               d.kiosk_device_id::text                  AS kiosk_device_id,
+               COALESCE(kd.name, '')                    AS device_name,
+               COALESCE(kd.device_type, '')             AS device_type,
+               COALESCE(SUM(d.amount), 0)::numeric      AS amount,
+               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COUNT(*)                                  AS cnt
+        FROM   donations d
+        LEFT   JOIN branches      b  ON b.branch_id = d.branch_id
+        LEFT   JOIN kiosk_devices kd ON kd.id       = d.kiosk_device_id
+        WHERE  {where_sql}
+        GROUP  BY d.branch_id, b.name, d.kiosk_device_id, kd.name, kd.device_type
+        ORDER  BY d.branch_id, amount DESC
+    """
 
     series: list[dict[str, Any]] = []
     by_branch: list[dict[str, Any]] = []
+    by_source_branch: list[dict[str, Any]] = []
+    by_giftaid: list[dict[str, Any]] = []
+    by_device_branch: list[dict[str, Any]] = []
     totals = {"amount": 0.0, "gift_aid": 0.0, "with_gift_aid": 0.0, "count": 0}
 
     async with SessionLocal() as db:
@@ -569,15 +633,65 @@ async def incoming_funds(
                 "count":         int(r["cnt"] or 0),
             })
 
+        # Source × branch breakdown
+        sb = await db.execute(text(by_source_branch_sql), params)
+        for r in sb.mappings().all():
+            amount   = float(r["amount"] or 0)
+            gift_aid = float(r["gift_aid"] or 0)
+            by_source_branch.append({
+                "branch_id":        r["branch_id"],
+                "branch_name":      r["branch_name"],
+                "source":           r["source"],
+                "payment_provider": r["payment_provider"],
+                "amount":           round(amount, 2),
+                "gift_aid":         round(gift_aid, 2),
+                "with_gift_aid":    round(amount + gift_aid, 2),
+                "count":            int(r["cnt"] or 0),
+            })
+
+        # Gift-Aid eligibility split
+        ga = await db.execute(text(by_giftaid_sql), params)
+        for r in ga.mappings().all():
+            amount   = float(r["amount"] or 0)
+            gift_aid = float(r["gift_aid"] or 0)
+            by_giftaid.append({
+                "branch_id":        r["branch_id"],
+                "branch_name":      r["branch_name"],
+                "giftaid_eligible": bool(r["giftaid_eligible"]),
+                "amount":           round(amount, 2),
+                "gift_aid":         round(gift_aid, 2),
+                "count":            int(r["cnt"] or 0),
+            })
+
+        # Per-device breakdown within each branch
+        bd = await db.execute(text(by_device_branch_sql), params)
+        for r in bd.mappings().all():
+            amount   = float(r["amount"] or 0)
+            gift_aid = float(r["gift_aid"] or 0)
+            by_device_branch.append({
+                "branch_id":       r["branch_id"],
+                "branch_name":     r["branch_name"],
+                "kiosk_device_id": r["kiosk_device_id"],   # None for unattributed
+                "device_name":     r["device_name"],
+                "device_type":     r["device_type"],
+                "amount":          round(amount, 2),
+                "gift_aid":        round(gift_aid, 2),
+                "with_gift_aid":   round(amount + gift_aid, 2),
+                "count":           int(r["cnt"] or 0),
+            })
+
     for k in ("amount", "gift_aid", "with_gift_aid"):
         totals[k] = round(totals[k], 2)
 
     return {
-        "period":     period,
-        "start_date": start_d.isoformat(),
-        "end_date":   end_d.isoformat(),
-        "branch_id":  branch_id or None,
-        "series":     series,
-        "by_branch":  by_branch,
-        "totals":     totals,
+        "period":           period,
+        "start_date":       start_d.isoformat(),
+        "end_date":         end_d.isoformat(),
+        "branch_id":        branch_id or None,
+        "series":           series,
+        "by_branch":        by_branch,
+        "by_source_branch": by_source_branch,
+        "by_giftaid":       by_giftaid,
+        "by_device_branch": by_device_branch,
+        "totals":           totals,
     }

@@ -159,19 +159,32 @@ jobs:
             docker compose -f docker-compose.dev.yml up -d --remove-orphans
 
             # ── Backend health check ────────────────────────────────────────────
-            # 48 × 5s = 240s. The backend's startup syncs ~30 function_registry
-            # rows synchronously, so cold start is ~90-150s. 120s was too tight.
+            # 90 × 5s = 450s. Cold start on the 2GB VPS runs alembic upgrade
+            # head (re-applies all migrations idempotently), _patch_schema (60+
+            # ALTERs), sync_from_digital_dna, and four seed functions — all
+            # synchronously before /health responds. We observed ~6-8 min in
+            # practice; 240s timed out every push and produced the recurring
+            # "backend health check failed" entries on the System Ops panel
+            # even though the container then came up healthy seconds later.
+            # Matches the prod budget in PR #123 for symmetry.
             echo "=== Waiting for backend-dev health ==="
             DEV_OK=0
-            for i in $(seq 1 48); do
+            for i in $(seq 1 90); do
               sleep 5
               if curl -sf http://localhost:8001/health > /dev/null 2>&1; then
                 DEV_OK=1; break
               fi
-              echo "  attempt $i/48..."
+              # Tail backend logs every 30s so the workflow log shows WHY
+              # startup is slow (helpful when this DOES legitimately fail).
+              if [ $((i % 6)) -eq 0 ]; then
+                echo "  attempt $i/90 — tailing backend-dev logs:"
+                docker compose -f docker-compose.dev.yml logs --tail=10 backend-dev 2>&1 | sed 's/^/    /'
+              else
+                echo "  attempt $i/90..."
+              fi
             done
             if [ "$DEV_OK" -eq 0 ]; then
-              echo "!!! Dev backend failed health check !!!"
+              echo "!!! Dev backend failed health check after 450s !!!"
               docker compose -f docker-compose.dev.yml logs --tail=50 backend-dev
               exit 1
             fi
