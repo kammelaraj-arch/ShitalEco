@@ -307,6 +307,24 @@ jobs:
           cache-from: type=gha,scope=service
           cache-to: type=gha,scope=service,mode=max
 
+      - name: Build & push deployer
+        # Deployer is the in-container HTTP shim behind /promote-prod,
+        # /deploy, /ops/run. Its source (deployer/) used to be deployed by
+        # SSH+manual rebuild; building a :dev image here lets a normal
+        # main-merge deploy pick it up via deploy-vultr.yml's
+        # auto-promote loop. Always build — the deployer changes are rare
+        # but when they happen, they MUST land or the panel buttons stay
+        # broken (the silent /dev/null + "Promote triggered" scenario).
+        uses: docker/build-push-action@v5
+        with:
+          context: deployer
+          file: deployer/Dockerfile
+          push: true
+          tags: ghcr.io/kammelaraj-arch/shitaleco-deployer:${{ steps.tag.outputs.tag }}
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=deployer
+          cache-to: type=gha,scope=deployer,mode=max
+
       - name: Trigger dev deploy
         # Push or manual run → auto-deploy to DEV stack only.
         # Prod is updated via the "Promote to Prod" button in the admin UI,
