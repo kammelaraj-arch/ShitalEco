@@ -31,6 +31,16 @@ def main() -> int:
     manifest_text = args.manifest.read_text()
     snippet_text  = args.snippet.read_text()
 
+    # The snippet starts with a multi-line <!-- ... --> doc comment whose
+    # text happens to mention `<activity android:name=".MainActivity">` and
+    # `<receiver>` literally. Because the regexes below treat the file as
+    # plain text (not XML), they were matching INSIDE the comment, swallowing
+    # the doc text as the "MainActivity block" and producing malformed XML
+    # — silently for the patcher (it printed "patched"), but the Android
+    # manifest merger then failed with "Error parsing AndroidManifest.xml"
+    # on every build for over a month. Strip XML comments up front.
+    snippet_text = re.sub(r"<!--[\s\S]*?-->", "", snippet_text)
+
     if "KioskBootReceiver" in manifest_text:
         print("  manifest already patched — no changes")
         return 0
