@@ -2215,6 +2215,18 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
         if not bcrypt.checkpw(body.password.encode(), device["device_password_hash"].encode()):
             return {"authenticated": False, "error": "Invalid username or password"}
 
+        # Bump last_seen_at so the admin Kiosks panel shows this device as
+        # ONLINE. Previously only /kiosk-devices/by-token/{token} (full kiosk
+        # path) updated this — quick-donation logins never did, which is why
+        # every quick-donation kiosk stuck at "never seen / OFFLINE" even
+        # while actively taking donations.
+        async with SessionLocal() as _db:
+            await _db.execute(
+                text("UPDATE kiosk_devices SET last_seen_at = NOW(), updated_at = NOW() WHERE id = :id"),
+                {"id": device["id"]},
+            )
+            await _db.commit()
+
         # Resolve menu codes from this device's menu_profile_id (or default kiosk profile)
         menu_codes: list[str] = []
         async with SessionLocal() as db:
@@ -2480,6 +2492,15 @@ async def quick_kiosk_check_command(username: str) -> dict[str, Any]:
             """),
             {"uname": uname},
         )).mappings().first()
+        # The kiosk's command-poll IS its heartbeat — bump last_seen_at on
+        # every poll so the admin Kiosks panel reflects "alive right now"
+        # without depending on the user being on the Admin screen.
+        if row:
+            await db.execute(
+                text("UPDATE kiosk_devices SET last_seen_at = NOW() WHERE id = CAST(:id AS UUID)"),
+                {"id": row["id"]},
+            )
+            await db.commit()
     if not row or not row["pending_command"]:
         return {"command": None}
     return {
@@ -2564,6 +2585,15 @@ async def quick_kiosk_refresh_config(username: str):
 
     if not device:
         return {"ok": False, "error": "Device not found"}
+
+    # refresh-config is the kiosk's periodic heartbeat — every poll bumps
+    # last_seen_at so the admin Kiosks panel reflects "alive RIGHT NOW".
+    async with SessionLocal() as _db:
+        await _db.execute(
+            text("UPDATE kiosk_devices SET last_seen_at = NOW() WHERE id = :id"),
+            {"id": device["id"]},
+        )
+        await _db.commit()
 
     return {
         "ok": True,
