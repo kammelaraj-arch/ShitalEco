@@ -2414,6 +2414,111 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
     }
 
 
+# ── Remote command channel ───────────────────────────────────────────────────
+# Single-slot queue per kiosk_device. Admin queues a command (refresh /
+# reload-config / theme-cycle); the kiosk polls /check-command every ~30 s,
+# acts, then /ack-command to clear it. Repeated admin clicks just overwrite —
+# only the latest intent matters.
+
+_ALLOWED_KIOSK_COMMANDS = {"refresh", "reload-config", "theme-cycle"}
+
+
+class KioskCommandInput(BaseModel):
+    command: str   # must be in _ALLOWED_KIOSK_COMMANDS
+
+
+@router.post("/admin/kiosk-devices/{device_id}/command")
+async def queue_kiosk_command(device_id: str, body: KioskCommandInput, ctx: CurrentSpace) -> dict[str, Any]:
+    """Queue a remote command for a kiosk. SUPER_ADMIN / ADMIN only."""
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="admin only")
+    cmd = body.command.strip().lower()
+    if cmd not in _ALLOWED_KIOSK_COMMANDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"command must be one of {sorted(_ALLOWED_KIOSK_COMMANDS)}",
+        )
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text("""
+                UPDATE kiosk_devices
+                SET    pending_command    = :cmd,
+                       pending_command_at = NOW(),
+                       updated_at         = NOW()
+                WHERE  id = CAST(:id AS UUID)
+                  AND  deleted_at IS NULL
+            """),
+            {"id": device_id, "cmd": cmd},
+        )
+        await db.commit()
+    rowcount = getattr(result, "rowcount", 0) or 0
+    if rowcount == 0:
+        raise HTTPException(status_code=404, detail="device not found")
+    return {"ok": True, "device_id": device_id, "command": cmd}
+
+
+@router.get("/quick-donation/check-command")
+async def quick_kiosk_check_command(username: str) -> dict[str, Any]:
+    """
+    Kiosk poll-once endpoint. Returns the pending command for the kiosk whose
+    device_username matches, or null. Idempotent — does NOT clear the command
+    until the kiosk explicitly /ack-command's. That way a brief network blip
+    after the kiosk reloads doesn't lose the command.
+    """
+    uname = username.strip().lower()
+    if not uname:
+        return {"command": None}
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("""
+                SELECT id::text AS id, pending_command, pending_command_at
+                FROM   kiosk_devices
+                WHERE  LOWER(device_username) = :uname
+                  AND  deleted_at IS NULL
+                  AND  UPPER(status) = 'ACTIVE'
+                LIMIT  1
+            """),
+            {"uname": uname},
+        )).mappings().first()
+    if not row or not row["pending_command"]:
+        return {"command": None}
+    return {
+        "device_id":  row["id"],
+        "command":    row["pending_command"],
+        "queued_at":  row["pending_command_at"].isoformat() if row["pending_command_at"] else None,
+    }
+
+
+class KioskAckInput(BaseModel):
+    device_id: str
+    command: str
+
+
+@router.post("/quick-donation/ack-command")
+async def quick_kiosk_ack_command(body: KioskAckInput) -> dict[str, Any]:
+    """
+    Kiosk → backend after it performed the queued command. Only clears
+    pending_command if the column STILL equals what the kiosk echoes back —
+    so if the admin queued a fresher command between poll and ack, we don't
+    accidentally drop it.
+    """
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text("""
+                UPDATE kiosk_devices
+                SET    pending_command    = NULL,
+                       pending_command_at = NULL,
+                       updated_at         = NOW()
+                WHERE  id              = CAST(:id AS UUID)
+                  AND  pending_command = :cmd
+                  AND  deleted_at IS NULL
+            """),
+            {"id": body.device_id, "cmd": body.command},
+        )
+        await db.commit()
+    return {"ok": True, "cleared": bool(getattr(result, "rowcount", 0))}
+
+
 @router.get("/quick-donation/refresh-config")
 async def quick_kiosk_refresh_config(username: str):
     """

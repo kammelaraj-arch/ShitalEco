@@ -132,6 +132,7 @@ export default function OpsPage() {
   // ── Kiosk health (Quick Donation + Full Kiosk fleet) ─────────────────────
   const [kiosks, setKiosks]       = useState<KioskHealthResponse | null>(null)
   const [kiosksErr, setKiosksErr] = useState('')
+  const [kioskCmdBusy, setKioskCmdBusy] = useState<string>('')
 
   // ── Promote / Snapshots / Restore ────────────────────────────────────────
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
@@ -182,6 +183,26 @@ export default function OpsPage() {
     }, 5 * 60 * 1000)
     return () => clearInterval(id)
   }, [loadKiosks])
+
+  // Queue a remote command on a kiosk (refresh / theme-cycle / reload-config).
+  // The kiosk polls /check-command every 30s, so the action lands within
+  // that window. Repeated clicks just overwrite the queued command —
+  // only the latest wins (single-slot by design).
+  async function sendKioskCommand(deviceId: string, command: string, name: string) {
+    if (kioskCmdBusy) return
+    setKioskCmdBusy(deviceId)
+    try {
+      await apiFetch(`/kiosk/admin/kiosk-devices/${deviceId}/command`, {
+        method: 'POST',
+        body: JSON.stringify({ command }),
+      })
+      setActionMsg({ text: `Queued '${command}' on ${name || deviceId.slice(0, 8)} — kiosk picks it up within 30 s`, ok: true })
+    } catch (e) {
+      setActionMsg({ text: e instanceof Error ? e.message : `Failed to queue '${command}'`, ok: false })
+    } finally {
+      setKioskCmdBusy('')
+    }
+  }
 
   const loadEnvs = useCallback(async () => {
     try {
@@ -499,6 +520,7 @@ export default function OpsPage() {
                   <th className="py-2 pr-4">Type</th>
                   <th className="py-2 pr-4">Last seen</th>
                   <th className="py-2 pr-4">Card reader</th>
+                  <th className="py-2 pr-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="text-white/80">
@@ -538,6 +560,26 @@ export default function OpsPage() {
                         ) : (
                           <span className="text-white/30">unpaired</span>
                         )}
+                      </td>
+                      <td className="py-2 pr-4 text-right">
+                        <div className="inline-flex gap-1">
+                          <button
+                            onClick={() => sendKioskCommand(k.id, 'refresh', k.name)}
+                            disabled={kioskCmdBusy === k.id}
+                            title="Reload the kiosk's browser page — picks up new admin config + app updates"
+                            className="px-2 py-1 rounded text-[10px] font-semibold bg-orange-500/15 border border-orange-500/30 text-orange-300 hover:bg-orange-500/25 disabled:opacity-40"
+                          >
+                            {kioskCmdBusy === k.id ? '…' : '🔄 Refresh'}
+                          </button>
+                          <button
+                            onClick={() => sendKioskCommand(k.id, 'theme-cycle', k.name)}
+                            disabled={kioskCmdBusy === k.id}
+                            title="Briefly invert the kiosk's screen colours so you can spot it on-site"
+                            className="px-2 py-1 rounded text-[10px] font-semibold bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 disabled:opacity-40"
+                          >
+                            👀 Ping
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
