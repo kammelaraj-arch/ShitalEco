@@ -383,6 +383,27 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
 
 # ── Regenerate token ──────────────────────────────────────────────────────────
 
+# ── Heartbeat ─────────────────────────────────────────────────────────────────
+# Public (no auth) — kiosks call this every 30s while the app is open. Bumps
+# last_seen_at so the admin Kiosks panel reflects "alive RIGHT NOW". The body
+# is intentionally tiny + non-secret: nothing here lets a 3rd party do anything
+# they couldn't already do by hitting the public config endpoints.
+@router.post("/{device_id}/heartbeat")
+async def kiosk_heartbeat(device_id: str) -> dict[str, Any]:
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text("""
+                UPDATE kiosk_devices
+                SET    last_seen_at = NOW()
+                WHERE  id = CAST(:id AS UUID)
+                  AND  deleted_at IS NULL
+            """),
+            {"id": device_id},
+        )
+        await db.commit()
+    return {"ok": True, "updated": bool(getattr(result, "rowcount", 0))}
+
+
 @router.post("/{device_id}/regen-token")
 async def regen_token(device_id: str, ctx: CurrentSpace) -> dict[str, Any]:
     """Issue a new device token — invalidates the old one immediately."""

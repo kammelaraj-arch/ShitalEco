@@ -20,15 +20,34 @@ import { AdminScreen } from './pages/AdminScreen'
 import { MonthlyGivingScreen } from './pages/MonthlyGivingScreen'
 
 const IDLE_TIMEOUT_MS = 120_000
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
 export function KioskApp() {
-  const { screen, resetKiosk, deviceConfigured, setScreen } = useKioskStore()
+  const { screen, resetKiosk, deviceConfigured, setScreen, kioskDeviceId } = useKioskStore()
   let idleTimeout: ReturnType<typeof setTimeout>
 
   // On startup: if not logged in yet, show login/setup screen
   useEffect(() => {
     if (!deviceConfigured) setScreen('setup')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Heartbeat — every 30 s while the app is open + has a kioskDeviceId.
+  // Bumps kiosk_devices.last_seen_at so the admin Kiosks panel reflects
+  // ONLINE/STALE/OFFLINE accurately. Strictly outside the card-reader
+  // logic (per CLAUDE.md): fire-and-forget POST, ignored on failure
+  // (next tick retries). The /heartbeat endpoint is public — no token
+  // plumbing required for an unauthenticated last-seen bump.
+  useEffect(() => {
+    if (!kioskDeviceId) return
+    const beat = () => {
+      fetch(`${API_BASE}/kiosk-devices/${kioskDeviceId}/heartbeat`, {
+        method: 'POST', cache: 'no-store',
+      }).catch(() => { /* offline — try next tick */ })
+    }
+    beat()
+    const id = setInterval(beat, 30_000)
+    return () => clearInterval(id)
+  }, [kioskDeviceId])
 
   // Daily catalog cache invalidation at local midnight — even if no one
   // touches the kiosk overnight, the next morning's first read gets fresh data.
