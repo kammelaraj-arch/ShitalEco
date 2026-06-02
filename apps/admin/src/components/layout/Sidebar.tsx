@@ -118,6 +118,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/settings/branding',         icon: '🎨', label: 'Branding' },
       { href: '/settings/email-templates',  icon: '📧', label: 'Email Templates' },
       { href: '/settings/sent-emails',      icon: '📨', label: 'Sent Emails' },
+      { href: '/settings/downloads',        icon: '📥', label: 'Software Downloads' },
       { href: '/settings/volunteer-form',   icon: '✍️', label: 'Volunteer Form Text' },
       { href: '/settings/branches',         icon: '🌿', label: 'Branches' },
       { href: '/settings/nominal-codes',    icon: '📚', label: 'Nominal Codes' },
