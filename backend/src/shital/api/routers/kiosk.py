@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from shital.api.deps import OptionalSpace
+from shital.api.deps import CurrentSpace, OptionalSpace
 from shital.core.fabrics.cache import cache_get, cache_set
 from shital.core.fabrics.config import settings
 from shital.core.fabrics.database import SessionLocal
