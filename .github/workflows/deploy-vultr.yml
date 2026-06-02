@@ -168,10 +168,16 @@ jobs:
                   PROMOTE_FAIL=1
                 fi
               else
-                # service is the only one we tolerate missing — only because
-                # this branch may be the very first push that introduces it.
-                # Once it's in the registry we expect it on every deploy.
-                if [ "$svc" = "service" ]; then
+                # 'service' and 'deployer' are tolerated as first-deploy /
+                # race-with-CI: the push trigger on this workflow races with
+                # ci.yml building :dev images for the same commit. The very
+                # first time a new service is added (or when its first build
+                # takes longer than the other images and isn't yet pushed to
+                # GHCR by the time we arrive here), the missing :dev is
+                # expected, not a deploy-blocker. Once present in the registry,
+                # subsequent deploys will pick it up via the workflow_run
+                # trigger that fires after ci.yml completes.
+                if [ "$svc" = "service" ] || [ "$svc" = "deployer" ]; then
                   echo "  ~ ${svc}:dev not in registry — first-deploy path"
                 else
                   echo "  ✗ ${svc}:dev not in registry — CI didn't build it"
