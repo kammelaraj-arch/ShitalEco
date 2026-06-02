@@ -163,44 +163,79 @@ jobs:
           path: apps/kiosk/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-  # ─── Publish APK to a stable GitHub Release download URL ────────────────────
-  # Maintains a rolling `kiosk-latest` tag/release so the APK is always at:
-  #   https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-kiosk-latest.apk
-  # No clicking through Actions runs — bookmark that URL on your phone and tap.
-  publish-android:
-    needs: build-android
+  # ─── Publish ALL installers to a stable GitHub Release ─────────────────────
+  # Maintains a rolling `kiosk-latest` tag/release with consistent filenames:
+  #   shital-kiosk-windows-setup.exe       (Windows x64 NSIS installer)
+  #   shital-kiosk-linux-x64.AppImage      (portable Linux x64)
+  #   shital-kiosk-linux-x64.deb           (Debian / Ubuntu package)
+  #   shital-kiosk-raspberry-pi.deb        (Raspberry Pi 4/5 ARM64)
+  #   shital-kiosk-latest.apk              (Android — sideload)
+  #
+  # Stable download URLs (bookmark these — re-download to update):
+  #   https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/<filename>
+  #
+  # The admin Software Downloads page links directly to these.
+  publish-installers:
+    needs: [build-windows, build-linux-x64, build-linux-arm64, build-android]
+    if: ${{ always() && (needs.build-android.result == 'success' || needs.build-windows.result == 'success' || needs.build-linux-x64.result == 'success' || needs.build-linux-arm64.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download APK artifact
+      - name: Download all installer artifacts
         uses: actions/download-artifact@v4
         with:
-          name: kiosk-android
-          path: ./out
-      - name: Rename APK with commit SHA
+          path: ./artifacts
+      - name: Normalise to stable filenames
+        # Each build job uploads with a different file extension. Rename to
+        # the stable names listed above so the Downloads page can link to
+        # them by predictable URL. If a build job didn't run, its artifact
+        # dir is absent and we skip — previous release asset stays.
         run: |
+          set -e
           mkdir -p release
-          cp out/app-debug.apk release/shital-kiosk-latest.apk
-          cp out/app-debug.apk "release/shital-kiosk-${GITHUB_SHA::7}.apk"
+          ls -R artifacts/ || true
+          if compgen -G "artifacts/kiosk-windows/*.exe" > /dev/null; then
+            cp "$(ls artifacts/kiosk-windows/*.exe | head -1)" release/shital-kiosk-windows-setup.exe
+            echo "✓ Windows installer"
+          fi
+          if compgen -G "artifacts/kiosk-linux-x64/*.AppImage" > /dev/null; then
+            cp "$(ls artifacts/kiosk-linux-x64/*.AppImage | head -1)" release/shital-kiosk-linux-x64.AppImage
+            echo "✓ Linux x64 AppImage"
+          fi
+          if compgen -G "artifacts/kiosk-linux-x64/*.deb" > /dev/null; then
+            cp "$(ls artifacts/kiosk-linux-x64/*.deb | head -1)" release/shital-kiosk-linux-x64.deb
+            echo "✓ Linux x64 .deb"
+          fi
+          if compgen -G "artifacts/kiosk-raspberry-pi/*.deb" > /dev/null; then
+            cp "$(ls artifacts/kiosk-raspberry-pi/*.deb | head -1)" release/shital-kiosk-raspberry-pi.deb
+            echo "✓ Raspberry Pi .deb"
+          fi
+          if [ -f artifacts/kiosk-android/app-debug.apk ]; then
+            cp artifacts/kiosk-android/app-debug.apk release/shital-kiosk-latest.apk
+            cp artifacts/kiosk-android/app-debug.apk "release/shital-kiosk-${GITHUB_SHA::7}.apk"
+            echo "✓ Android APK"
+          fi
           ls -lh release/
-      - name: Move kiosk-latest tag to this commit
-        # `gh release create` would fail if the release already exists — delete
-        # then recreate is the simplest cross-event-type pattern. Tag is
-        # force-moved to the current SHA so anyone who clones can `git checkout
-        # kiosk-latest` to reproduce exactly what's in the released APK.
+      - name: Move kiosk-latest tag and upload assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
+          if [ -z "$(ls -A release/ 2>/dev/null)" ]; then
+            echo "No installers to publish (all build jobs skipped)"
+            exit 0
+          fi
           gh release delete kiosk-latest --cleanup-tag --yes || true
           gh release create kiosk-latest \
-            --title "Kiosk APK — latest build" \
-            --notes "Built from ${GITHUB_SHA::7} on $(date -u +'%Y-%m-%d %H:%M UTC'). Download \`shital-kiosk-latest.apk\` and install on the phone — see apps/kiosk/ANDROID_KIOSK.md for the locked-down provisioning steps." \
+            --title "Kiosk installers — latest build" \
+            --notes "Built from ${GITHUB_SHA::7} on $(date -u +'%Y-%m-%d %H:%M UTC')." \
             --target "$GITHUB_SHA" \
-            release/shital-kiosk-latest.apk \
-            "release/shital-kiosk-${GITHUB_SHA::7}.apk"
-      - name: Print download URL
+            release/*
+      - name: Print download URLs
         run: |
+          BASE="https://github.com/${{ github.repository }}/releases/download/kiosk-latest"
           echo ""
-          echo "📲  APK download URL (stable):"
-          echo "    https://github.com/${{ github.repository }}/releases/download/kiosk-latest/shital-kiosk-latest.apk"
-          echo ""
+          echo "📦  Stable download URLs:"
+          for f in release/*; do
+            [ -f "$f" ] && echo "    ${BASE}/$(basename "$f")"
+          done

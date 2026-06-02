@@ -547,6 +547,12 @@ async def _patch_schema() -> None:
         # coordinate on Earth without floating-point drift.
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS latitude  NUMERIC(9,6) DEFAULT NULL",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS longitude NUMERIC(9,6) DEFAULT NULL",
+        # Remote-command channel. Admin queues a command here; the kiosk polls
+        # /quick-donation/check-command every ~30s, acts (e.g. reload), then
+        # acks to clear the column. Single-slot (no queue) by design — repeated
+        # admin clicks just overwrite; the kiosk only needs the latest intent.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS pending_command    VARCHAR(50)  DEFAULT NULL",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS pending_command_at TIMESTAMPTZ  DEFAULT NULL",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_username ON kiosk_devices(device_username) WHERE device_username IS NOT NULL",
         # ── Menu / menu-profile system (per-app, parent/child) ────────────────
         """CREATE TABLE IF NOT EXISTS menus (

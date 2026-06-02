@@ -147,6 +147,53 @@ jobs:
             echo "$GH_PAT" | docker login ghcr.io -u kammelaraj-arch --password-stdin
             echo "Logged in to GHCR"
 
+            # ── Pre-promote snapshot ─────────────────────────────────────────
+            # Capture the about-to-be-replaced state so the System Ops →
+            # Promote Snapshots panel can list it (and Restore can roll back).
+            # Two parts: a pg_dump of the live DB + a :promote-<ts> tag on the
+            # current :latest of every service image. The deployer's
+            # /snapshots endpoint lists BOTH sources, so an image-only entry
+            # (pg_dump failure) is still surfaced for image-rollback.
+            #
+            # Until now snapshots were ONLY taken by deploy.sh --promote-prod
+            # (the panel button → deployer container path). Every successful
+            # merge-driven deploy bypassed snapshotting entirely, which is
+            # why the panel showed "No snapshots yet" despite months of
+            # successful deploys.
+            SNAP_TS=$(date -u +'%Y%m%dT%H%M%SZ')
+            SNAP_SHA="${GITHUB_SHA:0:7}"
+            SNAP_DIR=/opt/shitaleco/backups
+            mkdir -p "$SNAP_DIR"
+            echo "=== Pre-promote snapshot ${SNAP_TS} (${SNAP_SHA}) ==="
+            SNAP_DB="${SNAP_DIR}/promote-${SNAP_TS}-${SNAP_SHA}.sql.gz"
+            SNAP_ERR="${SNAP_DIR}/promote-${SNAP_TS}-pg_dump.log"
+            if docker compose -f docker-compose.prod.yml exec -T db \
+                 pg_dump -U shitaleco_db_user -d shitaleco_db 2>"$SNAP_ERR" \
+               | gzip > "$SNAP_DB" && [ -s "$SNAP_DB" ]; then
+              rm -f "$SNAP_ERR"
+              echo "  ✓ DB dump → ${SNAP_DB} ($(du -h "$SNAP_DB" | cut -f1))"
+            else
+              rm -f "$SNAP_DB"
+              echo "  ✗ DB dump failed — see ${SNAP_ERR}; continuing with image-only snapshot"
+            fi
+            # Image tag snapshot — runs even if pg_dump failed, so an image-
+            # only rollback is still possible.
+            for svc in backend admin quick-donation kiosk screen service deployer; do
+              img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+              if docker tag "${img}:latest" "${img}:promote-${SNAP_TS}" 2>/dev/null; then
+                echo "  ✓ tagged ${svc}:promote-${SNAP_TS}"
+              fi
+            done
+            # GC: keep last 10 snapshot dumps + image tags
+            ls -1t "${SNAP_DIR}"/promote-*.sql.gz 2>/dev/null \
+              | tail -n +11 | xargs -r rm -f
+            for svc in backend admin quick-donation kiosk screen service deployer; do
+              img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
+              docker images "${img}" --format '{{.Tag}}' 2>/dev/null \
+                | grep '^promote-' | sort -r | tail -n +11 \
+                | while read -r tag; do docker rmi "${img}:${tag}" >/dev/null 2>&1 || true; done
+            done
+
             # ── Auto-promote :dev → :latest in GHCR ──────────────────────────
             # CI pushes fresh :dev images on every main merge; this step copies
             # them to :latest in the registry so prod's pull below picks them up.

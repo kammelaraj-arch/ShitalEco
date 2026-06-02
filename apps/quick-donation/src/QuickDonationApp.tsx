@@ -64,6 +64,54 @@ export function QuickDonationApp() {
     // mount-only, so a logout / reader-cleared mid-session left staff stuck.
   }, [_hasHydrated, isDeviceLoggedIn, hasAnyReader, loggedInUsername]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Remote-command poll. Admin queues a command via the System Ops panel;
+  // we poll every 30 s, act on it, then ack so it's cleared. Allowlist
+  // matches the backend: refresh = full reload, reload-config = re-pull
+  // device flags only, theme-cycle = sanity blink (used to identify a
+  // device from afar).
+  useEffect(() => {
+    if (!_hasHydrated || !loggedInUsername) return
+    const ack = async (id: string, cmd: string) => {
+      try {
+        await fetch(`${API_BASE}/kiosk/quick-donation/ack-command`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: id, command: cmd }),
+        })
+      } catch { /* non-fatal — next poll will re-act if not cleared */ }
+    }
+    const tick = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/kiosk/quick-donation/check-command?username=${encodeURIComponent(loggedInUsername)}`,
+          { cache: 'no-store' },
+        )
+        if (!res.ok) return
+        const data = await res.json()
+        if (!data.command || !data.device_id) return
+        if (data.command === 'refresh') {
+          await ack(data.device_id, data.command)
+          // Short delay so the ack flushes before the page reloads.
+          setTimeout(() => window.location.reload(), 250)
+        } else if (data.command === 'reload-config') {
+          // Re-pull device flags; ack first so a queued newer command isn't
+          // overwritten by our own write.
+          await ack(data.device_id, data.command)
+          fetch(`${API_BASE}/kiosk/quick-donation/refresh-config?username=${encodeURIComponent(loggedInUsername)}`)
+            .then(r => r.json()).then(d => { if (d.ok && d.branch) setBranchId(d.branch.id) }).catch(() => {})
+        } else if (data.command === 'theme-cycle') {
+          // Brief visual blink so an operator can identify the device.
+          document.body.style.filter = 'invert(1)'
+          setTimeout(() => { document.body.style.filter = '' }, 700)
+          await ack(data.device_id, data.command)
+        }
+      } catch { /* offline — try again next tick */ }
+    }
+    const id = setInterval(tick, 30_000)
+    tick()  // also fire immediately on mount
+    return () => clearInterval(id)
+  }, [_hasHydrated, loggedInUsername, setBranchId])
+
   const background = useMemo(() => {
     if (bgColor) return bgColor
     return THEME_BG[kioskTheme] ?? THEME_BG.saffron

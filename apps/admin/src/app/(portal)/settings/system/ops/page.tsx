@@ -132,6 +132,17 @@ export default function OpsPage() {
   // ── Kiosk health (Quick Donation + Full Kiosk fleet) ─────────────────────
   const [kiosks, setKiosks]       = useState<KioskHealthResponse | null>(null)
   const [kiosksErr, setKiosksErr] = useState('')
+  const [kioskCmdBusy, setKioskCmdBusy] = useState<string>('')
+
+  // ── Live deploy status (driven by post-Promote polling) ──────────────────
+  // 'idle'  → no recent action
+  // 'in_progress' → Promote button clicked, watching for outcome
+  // 'success'     → prod commit changed within the budget
+  // 'rolled_back' → prod commit unchanged + a rolled_back event arrived
+  // 'timeout'     → no signal either way within 8 min (rare — usually
+  //                 means deploy-vultr.yml is still running)
+  const [deployStatus, setDeployStatus] = useState<'idle' | 'in_progress' | 'success' | 'rolled_back' | 'timeout'>('idle')
+  const [deployStatusMsg, setDeployStatusMsg] = useState<string>('')
 
   // ── Promote / Snapshots / Restore ────────────────────────────────────────
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
@@ -183,6 +194,26 @@ export default function OpsPage() {
     return () => clearInterval(id)
   }, [loadKiosks])
 
+  // Queue a remote command on a kiosk (refresh / theme-cycle / reload-config).
+  // The kiosk polls /check-command every 30s, so the action lands within
+  // that window. Repeated clicks just overwrite the queued command —
+  // only the latest wins (single-slot by design).
+  async function sendKioskCommand(deviceId: string, command: string, name: string) {
+    if (kioskCmdBusy) return
+    setKioskCmdBusy(deviceId)
+    try {
+      await apiFetch(`/kiosk/admin/kiosk-devices/${deviceId}/command`, {
+        method: 'POST',
+        body: JSON.stringify({ command }),
+      })
+      setActionMsg({ text: `Queued '${command}' on ${name || deviceId.slice(0, 8)} — kiosk picks it up within 30 s`, ok: true })
+    } catch (e) {
+      setActionMsg({ text: e instanceof Error ? e.message : `Failed to queue '${command}'`, ok: false })
+    } finally {
+      setKioskCmdBusy('')
+    }
+  }
+
   const loadEnvs = useCallback(async () => {
     try {
       const [vRes, eRes, dRes] = await Promise.all([
@@ -222,8 +253,51 @@ export default function OpsPage() {
     })
   }
 
+  // Poll for the actual outcome of a promote click. Watches prod's git_sha
+  // and the deploys log every 8 s for up to 8 min. Resolves to:
+  //   'success'     — prod commit moved off the pre-promote SHA
+  //   'rolled_back' — deploys log shows a rolled_back/promote_partial event
+  //                   AND prod commit unchanged
+  //   'timeout'     — neither signal arrived (usually means deploy-vultr.yml
+  //                   is still mid-way; another refresh in a few min sorts it)
+  async function watchPromoteOutcome(preSha: string) {
+    const deadline = Date.now() + 8 * 60 * 1000
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 8000))
+      try {
+        const [eRes, dRes] = await Promise.all([
+          fetch(`${API_BASE}/admin/system/environments`, { headers: { Authorization: `Bearer ${getToken()}` } }),
+          fetch(`${API_BASE}/admin/system/deploys?limit=5&env=prod`, { headers: { Authorization: `Bearer ${getToken()}` } }),
+        ])
+        if (eRes.ok) {
+          const env: EnvironmentsResponse = await eRes.json()
+          setEnvironments(env)
+          const curSha = env.environments?.prod?.git_sha || ''
+          if (curSha && curSha !== preSha) {
+            setDeployStatus('success')
+            setDeployStatusMsg(`Prod moved from ${preSha.slice(0, 7)} → ${curSha.slice(0, 7)}.`)
+            await loadSnapshots()
+            return
+          }
+        }
+        if (dRes.ok) {
+          const dep: { deploys: DeployEvent[] } = await dRes.json()
+          const ev = (dep.deploys || []).find(d => d.status && d.status !== 'success')
+          if (ev && (ev.status === 'rolled_back' || ev.status === 'promote_partial')) {
+            setDeployStatus('rolled_back')
+            setDeployStatusMsg(`${ev.status === 'rolled_back' ? 'Rolled back' : 'Promote partial'}: ${ev.message || ev.short || ev.sha?.slice(0, 7) || ''}`)
+            return
+          }
+        }
+      } catch { /* network blip — keep polling */ }
+    }
+    setDeployStatus('timeout')
+    setDeployStatusMsg('No success / rollback signal in 8 min. deploy-vultr.yml may still be running — refresh in a couple of minutes.')
+  }
+
   function openPromoteDialog() {
     setActionMsg(null); setPinValue(''); setConfirmInput('')
+    setDeployStatus('idle'); setDeployStatusMsg('')
     setPinDialog({
       title: '🚀 Promote DEV → PROD',
       description:
@@ -231,14 +305,23 @@ export default function OpsPage() {
         'A snapshot is saved automatically — you can restore via the Snapshots panel below if anything goes wrong.',
       confirmKeyword: 'PROMOTE',
       onConfirm: async (pin) => {
+        // Snapshot prod's current SHA BEFORE triggering, so the watcher can
+        // tell whether the deploy actually moved prod or rolled back.
+        const preSha = environments?.environments?.prod?.git_sha || ''
         const res = await fetch(`${API_BASE}/admin/system/deploy/prod`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${getToken()}`, 'X-Admin-Pin': pin },
         })
         const d = await res.json()
         if (!res.ok || !d.ok) throw new Error(d.detail || `Failed (HTTP ${res.status})`)
-        setActionMsg({ text: 'Promote triggered. Containers will restart in 1–2 min.', ok: true })
-        setTimeout(() => { loadSnapshots(); loadEnvs() }, 60_000)
+        setActionMsg({ text: 'Promote triggered — watching for outcome (up to 8 min)…', ok: true })
+        setDeployStatus('in_progress')
+        setDeployStatusMsg(`Watching prod for change from ${preSha ? preSha.slice(0, 7) : '(unknown)'}…`)
+        // Fire-and-forget — runs in the background, updates state as it goes.
+        watchPromoteOutcome(preSha).catch(() => {
+          setDeployStatus('timeout')
+          setDeployStatusMsg('Watcher errored — refresh manually.')
+        })
       },
     })
   }
@@ -338,6 +421,28 @@ export default function OpsPage() {
           <p className={`text-sm rounded-lg px-3 py-2 ${actionMsg.ok ? 'bg-green-500/15 text-green-300 border border-green-500/30' : 'bg-red-500/15 text-red-300 border border-red-500/30'}`}>
             {actionMsg.text}
           </p>
+        )}
+
+        {/* Live promote-status banner — populated by watchPromoteOutcome.
+            Tells the operator within 8 min whether the click actually moved
+            prod (success), got auto-rolled-back (rolled_back), or is still
+            in flight (timeout = "no signal yet"). Closes the silent-promote
+            visibility gap that bit us repeatedly. */}
+        {deployStatus !== 'idle' && (
+          <div className={`rounded-lg px-3 py-2 text-sm border ${
+            deployStatus === 'in_progress' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' :
+            deployStatus === 'success'     ? 'bg-green-500/15 text-green-300 border-green-500/30' :
+            deployStatus === 'rolled_back' ? 'bg-red-500/15 text-red-300 border-red-500/30'       :
+                                             'bg-white/5 text-white/60 border-white/10'
+          }`}>
+            <span className="font-bold mr-2">
+              {deployStatus === 'in_progress' ? '⏳ Deploy in progress' :
+               deployStatus === 'success'     ? '✓ Deploy succeeded'   :
+               deployStatus === 'rolled_back' ? '↩ Deploy rolled back' :
+                                                '⚠ Deploy status unknown'}
+            </span>
+            <span className="opacity-80">{deployStatusMsg}</span>
+          </div>
         )}
 
         {environments?.error && (
@@ -499,6 +604,7 @@ export default function OpsPage() {
                   <th className="py-2 pr-4">Type</th>
                   <th className="py-2 pr-4">Last seen</th>
                   <th className="py-2 pr-4">Card reader</th>
+                  <th className="py-2 pr-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="text-white/80">
@@ -538,6 +644,26 @@ export default function OpsPage() {
                         ) : (
                           <span className="text-white/30">unpaired</span>
                         )}
+                      </td>
+                      <td className="py-2 pr-4 text-right">
+                        <div className="inline-flex gap-1">
+                          <button
+                            onClick={() => sendKioskCommand(k.id, 'refresh', k.name)}
+                            disabled={kioskCmdBusy === k.id}
+                            title="Reload the kiosk's browser page — picks up new admin config + app updates"
+                            className="px-2 py-1 rounded text-[10px] font-semibold bg-orange-500/15 border border-orange-500/30 text-orange-300 hover:bg-orange-500/25 disabled:opacity-40"
+                          >
+                            {kioskCmdBusy === k.id ? '…' : '🔄 Refresh'}
+                          </button>
+                          <button
+                            onClick={() => sendKioskCommand(k.id, 'theme-cycle', k.name)}
+                            disabled={kioskCmdBusy === k.id}
+                            title="Briefly invert the kiosk's screen colours so you can spot it on-site"
+                            className="px-2 py-1 rounded text-[10px] font-semibold bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 disabled:opacity-40"
+                          >
+                            👀 Ping
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
