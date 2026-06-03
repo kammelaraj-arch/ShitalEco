@@ -78,7 +78,7 @@ export default function SentEmailsPage() {
       if (templateKey)  qs.set('template_key',  templateKey)
       if (search)       qs.set('search',        search)
       const d = await apiFetch<{ items: SentEmailRow[]; total: number }>(
-        `/email-templates/sent?${qs}`
+        `/admin/email-templates/sent?${qs}`
       )
       setItems(d.items); setTotal(d.total)
     } catch (e) {
@@ -101,7 +101,7 @@ export default function SentEmailsPage() {
 
   async function openRow(id: string) {
     try {
-      const d = await apiFetch<SentDetail>(`/email-templates/sent/${id}`)
+      const d = await apiFetch<SentDetail>(`/admin/email-templates/sent/${id}`)
       setOpen(d)
     } catch (e) {
       setMsg({ text: e instanceof Error ? e.message : 'Failed to load email', ok: false })
@@ -112,7 +112,7 @@ export default function SentEmailsPage() {
     if (!confirm('Resend this email? The original row stays — a new attempt is recorded.')) return
     setResend(id); setMsg(null)
     try {
-      const res = await fetch(`${API_BASE}/email-templates/sent/${id}/resend`, {
+      const res = await fetch(`${API_BASE}/admin/email-templates/sent/${id}/resend`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
       })
