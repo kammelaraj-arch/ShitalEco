@@ -130,9 +130,16 @@ jobs:
         run: pnpm run build:web
       - name: Add Android platform (generates android/ project)
         working-directory: apps/kiosk
+        env:
+          # Build a thin loader APK that points the WebView at the live web
+          # kiosk — installed app stays in sync with shital.org.uk/kiosk/ on
+          # every web deploy, no APK rebuild / reinstall needed.
+          KIOSK_LIVE_URL: "https://shital.org.uk/kiosk/"
         run: npx cap add android
       - name: Sync web assets into Android project
         working-directory: apps/kiosk
+        env:
+          KIOSK_LIVE_URL: "https://shital.org.uk/kiosk/"
         run: npx cap sync android --inline
       - name: Apply kiosk-mode overlay
         working-directory: apps/kiosk
