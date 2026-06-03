@@ -448,6 +448,114 @@ async def _patch_schema() -> None:
         # Link catalog_items to a project (optional)
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS project_id VARCHAR(60) NOT NULL DEFAULT ''",
         "CREATE INDEX IF NOT EXISTS idx_catalog_items_project ON catalog_items(project_id)",
+
+        # ── Project Management extensions ────────────────────────────────────
+        # Three named owner roles (each is a users.id reference, nullable so
+        # an early-stage project doesn't have to fill every slot).
+        # Plus budget_total (committed budget), status (lifecycle), and
+        # risk_level (operator-set RAG).
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_manager_id UUID DEFAULT NULL",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS business_owner_id  UUID DEFAULT NULL",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS tech_owner_id      UUID DEFAULT NULL",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_total       NUMERIC(14,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS status             VARCHAR(20)   NOT NULL DEFAULT 'DRAFT'",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS risk_level         VARCHAR(20)   NOT NULL DEFAULT 'GREEN'",
+
+        # Team assignments — many-to-many between projects and users with a
+        # role per assignment (DEVELOPER, ANALYST, FINANCE, STAKEHOLDER, etc.).
+        """CREATE TABLE IF NOT EXISTS project_assignments (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            user_id      UUID NOT NULL,
+            role         VARCHAR(40)  NOT NULL DEFAULT 'TEAM_MEMBER',
+            notes        TEXT         NOT NULL DEFAULT '',
+            assigned_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            removed_at   TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_assignments_proj ON project_assignments(project_id) WHERE removed_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_assignments_user ON project_assignments(user_id)    WHERE removed_at IS NULL",
+
+        # Activity log — every status change, comment, milestone update.
+        # actor_id is the user who logged the activity (nullable for system
+        # events). kind discriminates: NOTE / STATUS_CHANGE / MILESTONE /
+        # EXPENSE / INVOICE / RISK.
+        """CREATE TABLE IF NOT EXISTS project_activities (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            actor_id     UUID DEFAULT NULL,
+            actor_email  VARCHAR(255) NOT NULL DEFAULT '',
+            kind         VARCHAR(30)  NOT NULL DEFAULT 'NOTE',
+            title        VARCHAR(255) NOT NULL DEFAULT '',
+            body         TEXT         NOT NULL DEFAULT '',
+            related_id   VARCHAR(100) NOT NULL DEFAULT '',
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_activities_proj ON project_activities(project_id, created_at DESC)",
+
+        # Risk register — one row per identified risk. likelihood + impact
+        # are 1-5 scales; risk_score = likelihood * impact, computed as
+        # generated column so the UI can sort/filter without recomputing.
+        """CREATE TABLE IF NOT EXISTS project_risks (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title        VARCHAR(255) NOT NULL,
+            description  TEXT         NOT NULL DEFAULT '',
+            likelihood   INTEGER      NOT NULL DEFAULT 3 CHECK (likelihood BETWEEN 1 AND 5),
+            impact       INTEGER      NOT NULL DEFAULT 3 CHECK (impact     BETWEEN 1 AND 5),
+            risk_score   INTEGER      GENERATED ALWAYS AS (likelihood * impact) STORED,
+            mitigation   TEXT         NOT NULL DEFAULT '',
+            owner_id     UUID DEFAULT NULL,
+            status       VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            closed_at    TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_risks_proj ON project_risks(project_id, status)",
+
+        # Expense line items — actual spending against the project. category
+        # is operator-set (LABOUR / MATERIALS / SERVICES / TRAVEL / OTHER).
+        # invoice_ref links to project_invoices.invoice_no when sourced from
+        # a vendor invoice.
+        """CREATE TABLE IF NOT EXISTS project_expenses (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            spent_on     DATE         NOT NULL,
+            category     VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+            vendor       VARCHAR(255) NOT NULL DEFAULT '',
+            description  TEXT         NOT NULL DEFAULT '',
+            amount       NUMERIC(14,2) NOT NULL DEFAULT 0,
+            currency     VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            invoice_ref  VARCHAR(100) NOT NULL DEFAULT '',
+            recorded_by  UUID DEFAULT NULL,
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at   TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_expenses_proj ON project_expenses(project_id, spent_on DESC) WHERE deleted_at IS NULL",
+
+        # Vendor invoice tracker per project. status: RECEIVED / APPROVED /
+        # PAID / DISPUTED / CANCELLED.
+        """CREATE TABLE IF NOT EXISTS project_invoices (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id    UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            vendor        VARCHAR(255) NOT NULL,
+            invoice_no    VARCHAR(100) NOT NULL DEFAULT '',
+            invoice_date  DATE,
+            due_date      DATE,
+            paid_date     DATE,
+            amount        NUMERIC(14,2) NOT NULL DEFAULT 0,
+            currency      VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            status        VARCHAR(20)  NOT NULL DEFAULT 'RECEIVED',
+            file_url      TEXT         NOT NULL DEFAULT '',
+            notes         TEXT         NOT NULL DEFAULT '',
+            recorded_by   UUID DEFAULT NULL,
+            created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at    TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_invoices_proj   ON project_invoices(project_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_invoices_status ON project_invoices(status)    WHERE deleted_at IS NULL",
+
         # ── Recurring Payments — financial obligations tracker ─────────────────
         """CREATE TABLE IF NOT EXISTS recurring_payments (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -3321,7 +3429,8 @@ _mount("shital.api.routers.nominal_codes",    "router")
 _mount("shital.api.routers.purchasing",       "router")
 _mount("shital.api.routers.gl",               "router")
 _mount("shital.api.routers.budgets",          "router")
-_mount("shital.api.routers.project_costing",  "router")
+_mount("shital.api.routers.project_costing",   "router")
+_mount("shital.api.routers.project_management","router")
 _mount("shital.api.routers.reports",          "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.hr_alerts",        "router")
