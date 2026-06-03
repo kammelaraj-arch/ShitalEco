@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import date as _date
-from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
