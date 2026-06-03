@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "description": "Shital Temple Self-Service Kiosk \u2014 runs on Web, Android, Windows, Linux/Pi",
-  "main": "src/main/main.js",
+  "main": "src/main/main.cjs",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:web": "vite",
@@ -90,7 +90,7 @@
       "icon": "public/icon.png"
     },
     "extraMetadata": {
-      "main": "src/main/main.js"
+      "main": "src/main/main.cjs"
     },
     "nsis": {
       "oneClick": false,
