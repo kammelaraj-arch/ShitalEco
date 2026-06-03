@@ -367,6 +367,24 @@ export default function IncomingFundsPage() {
 // branch's total for the selected period, two pies (Gift Aid split + source
 // split), and a table listing every source contributing to the branch.
 
+// Recharts label renderer that prints the slice value (currency-formatted)
+// inside the slice when there's room, otherwise outside with a leader line.
+// Returning `false` from the renderer suppresses 0-value slices' labels.
+function renderPieValueLabel({ cx, cy, midAngle, innerRadius, outerRadius, value }: {
+  cx: number; cy: number; midAngle: number; innerRadius: number; outerRadius: number; value: number;
+}) {
+  if (!value) return null
+  const RAD = Math.PI / 180
+  const r = innerRadius + (outerRadius - innerRadius) * 0.65
+  const x = cx + r * Math.cos(-midAngle * RAD)
+  const y = cy + r * Math.sin(-midAngle * RAD)
+  return (
+    <text x={x} y={y} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700}>
+      {new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(value)}
+    </text>
+  )
+}
+
 function BranchBreakdownCard({
   branchName, accent, totals, sources, giftaidSplit, devices,
 }: {
@@ -417,7 +435,7 @@ function BranchBreakdownCard({
                 ) : (
                   <ResponsiveContainer>
                     <PieChart>
-                      <Pie data={giftaidData} dataKey="value" nameKey="name" outerRadius={75} innerRadius={45} paddingAngle={2}>
+                      <Pie data={giftaidData} dataKey="value" nameKey="name" outerRadius={75} innerRadius={45} paddingAngle={2} label={renderPieValueLabel} labelLine={false}>
                         {giftaidData.map((d, i) => <Cell key={i} fill={d.fill} />)}
                       </Pie>
                       <Tooltip
@@ -440,7 +458,7 @@ function BranchBreakdownCard({
                 ) : (
                   <ResponsiveContainer>
                     <PieChart>
-                      <Pie data={sourceData} dataKey="value" nameKey="name" outerRadius={75} innerRadius={45} paddingAngle={2}>
+                      <Pie data={sourceData} dataKey="value" nameKey="name" outerRadius={75} innerRadius={45} paddingAngle={2} label={renderPieValueLabel} labelLine={false}>
                         {sourceData.map((d, i) => <Cell key={i} fill={d.fill} />)}
                       </Pie>
                       <Tooltip

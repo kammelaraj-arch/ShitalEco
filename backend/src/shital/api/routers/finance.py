@@ -512,7 +512,14 @@ async def incoming_funds(
     series_sql = f"""
         SELECT date_trunc(:period, d.created_at)::date  AS bucket,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               -- Gift Aid is computed on read (25% of any donation flagged
+               -- gift_aid_eligible). The donations.gift_aid_amount column
+               -- exists in the schema but no INSERT site ever populates it,
+               -- so it's been stuck at 0 — making the dashboard show "GA £0"
+               -- even on receipts where the donor ticked the box. Computing
+               -- it from amount + eligibility works retroactively, no
+               -- backfill migration needed.
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         WHERE  {where_sql}
@@ -523,7 +530,7 @@ async def incoming_funds(
         SELECT d.branch_id,
                COALESCE(b.name, d.branch_id)            AS branch_name,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         LEFT   JOIN branches b ON b.branch_id = d.branch_id
@@ -548,7 +555,7 @@ async def incoming_funds(
                )                                         AS source,
                COALESCE(d.payment_provider, '')         AS payment_provider,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         LEFT   JOIN branches b ON b.branch_id = d.branch_id
@@ -564,7 +571,7 @@ async def incoming_funds(
                COALESCE(b.name, d.branch_id)            AS branch_name,
                COALESCE(d.gift_aid_eligible, false)     AS giftaid_eligible,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         LEFT   JOIN branches b ON b.branch_id = d.branch_id
@@ -583,7 +590,7 @@ async def incoming_funds(
                COALESCE(kd.name, '')                    AS device_name,
                COALESCE(kd.device_type, '')             AS device_type,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         LEFT   JOIN branches      b  ON b.branch_id = d.branch_id
