@@ -111,7 +111,7 @@ jobs:
             inject PAYPAL_CLIENT_ID       "$PAYPAL_CLIENT_ID"
             inject PAYPAL_CLIENT_SECRET   "$PAYPAL_CLIENT_SECRET"
             inject GITHUB_TOKEN           "$GH_PAT"
-            inject CORS_ORIGINS           "https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,https://dev.shital.org.uk"
+            inject CORS_ORIGINS           "https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,https://dev.shital.org.uk,https://localhost,capacitor://localhost,http://localhost"
             inject MS_REDIRECT_URI        "https://admin.shital.org.uk/auth-callback"
 
             # ── Weekly cron to prune dangling images (idempotent) ────────────
