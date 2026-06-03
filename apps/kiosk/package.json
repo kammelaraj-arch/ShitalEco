@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "private": true,
-  "description": "Shital Temple Self-Service Kiosk — runs on Web, Android, Windows, Linux/Pi",
+  "description": "Shital Temple Self-Service Kiosk \u2014 runs on Web, Android, Windows, Linux/Pi",
   "main": "src/main/main.js",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
@@ -16,9 +16,9 @@
     "build:electron:arm64": "VITE_ELECTRON=true vite build && electron-builder --linux --arm64",
     "cap:sync": "npx cap sync",
     "cap:android": "npx cap open android",
-    "android:setup":     "bash scripts/setup-android-kiosk.sh",
+    "android:setup": "bash scripts/setup-android-kiosk.sh",
     "android:setup:live": "KIOSK_LIVE_URL=https://shital.org.uk/kiosk/ bash scripts/setup-android-kiosk.sh",
-    "android:build:debug":   "cd android && ./gradlew assembleDebug",
+    "android:build:debug": "cd android && ./gradlew assembleDebug",
     "android:build:release": "cd android && ./gradlew assembleRelease",
     "android:provision": "bash scripts/provision-kiosk.sh",
     "preview": "vite preview"
@@ -52,19 +52,56 @@
   "build": {
     "appId": "org.shital.kiosk",
     "productName": "Shital Kiosk",
-    "directories": { "output": "dist-electron" },
-    "files": ["dist/**/*", "src/main/**/*"],
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "src/main/**/*"
+    ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "public/icon.png"
     },
     "linux": {
       "target": [
-        { "target": "deb", "arch": ["x64", "arm64"] },
-        { "target": "AppImage", "arch": ["x64", "arm64"] }
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "public/icon.png"
     },
-    "extraMetadata": { "main": "src/main/main.js" }
+    "extraMetadata": {
+      "main": "src/main/main.js"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": false,
+      "include": "build/installer.nsh",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Shital Kiosk"
+    }
   }
 }
