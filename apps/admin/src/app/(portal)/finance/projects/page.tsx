@@ -200,7 +200,7 @@ export default function ProjectCostingPage() {
               <tr key={p.id} onClick={() => openDetail(p)} className="border-b border-white/5 hover:bg-white/3 cursor-pointer transition-colors">
                 <td className="px-4 py-3 text-white font-mono text-xs font-bold">
                   {p.project_id}
-                  <a href={`/finance/projects/${p.id}`} onClick={e => e.stopPropagation()}
+                  <a href={`/finance/projects/detail?id=${p.id}`} onClick={e => e.stopPropagation()}
                      className="ml-2 text-[10px] text-saffron-300 hover:underline">Detail ↗</a>
                 </td>
                 <td className="px-4 py-3 text-white/80 text-sm">{p.name}</td>
