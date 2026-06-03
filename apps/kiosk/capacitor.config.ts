@@ -32,6 +32,15 @@ const config: CapacitorConfig = {
       backgroundColor: '#FF6B00',
       showSpinner: false,
     },
+    // Route fetch()/XHR through Android's native HTTP stack so requests come
+    // from the app process (not the WebView's https://localhost origin) — the
+    // backend sees them as plain server-to-server calls and CORS preflight is
+    // not involved. Without this, every cross-origin API call fails with
+    // TypeError ("Cannot reach server") unless every kiosk WebView origin is
+    // explicitly listed in the backend's CORS_ORIGINS.
+    CapacitorHttp: {
+      enabled: true,
+    },
     // Keep screen on while the kiosk is in lock-task mode (handled by
     // FLAG_KEEP_SCREEN_ON in MainActivity — plugin not required).
   },
