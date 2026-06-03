@@ -41,6 +41,173 @@ async def list_templates():
     return {"templates": [dict(r) for r in rows]}
 
 
+# ── Admin: outgoing email audit + resend ─────────────────────────────────────
+
+@router.get("/sent")
+async def admin_list_sent_emails(
+    status_filter: str = "", template_key: str = "", search: str = "",
+    related_type: str = "", related_id: str = "",
+    limit: int = 100, offset: int = 0,
+) -> dict[str, Any]:
+    """Paginated audit log of every email send_template() handled.
+
+    Surfaces failures (status=FAILED) so trustees can spot delivery issues
+    and resend by id. The same endpoint works for status=SENT review.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    where: list[str] = []
+    params: dict[str, Any] = {
+        "limit": min(max(1, limit), 500),
+        "offset": max(0, offset),
+    }
+    if status_filter.strip():
+        where.append("status = :status")
+        params["status"] = status_filter.strip().upper()
+    if template_key.strip():
+        where.append("template_key = :tkey")
+        params["tkey"] = template_key.strip()
+    if related_type.strip():
+        where.append("related_type = :rtype")
+        params["rtype"] = related_type.strip()
+    if related_id.strip():
+        where.append("related_id = :rid")
+        params["rid"] = related_id.strip()
+    if search.strip():
+        where.append("(LOWER(to_email) LIKE :search OR LOWER(subject) LIKE :search)")
+        params["search"] = f"%{search.strip().lower()}%"
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+
+    async with SessionLocal() as db:
+        rows = await db.execute(text(f"""
+            SELECT id, template_key, to_email, subject, status, error,
+                   attempts, last_attempt_at, sent_at,
+                   related_type, related_id, created_at
+            FROM   sent_emails
+            {where_sql}
+            ORDER  BY created_at DESC
+            LIMIT  :limit OFFSET :offset
+        """), params)
+        items: list[dict[str, Any]] = []
+        for r in rows.mappings():
+            d = dict(r)
+            d["id"] = str(d["id"])
+            for k in ("created_at", "last_attempt_at", "sent_at"):
+                if d.get(k):
+                    d[k] = d[k].isoformat()
+            items.append(d)
+
+        total = (await db.execute(
+            text(f"SELECT COUNT(*) AS c FROM sent_emails {where_sql}"),
+            params,
+        )).mappings().one()
+
+    return {"items": items, "total": int(total["c"])}
+
+
+@router.get("/sent/{sent_id}")
+async def admin_get_sent_email(sent_id: str) -> dict[str, Any]:
+    """Full row including body + variables, for a 'view raw' admin panel."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("SELECT * FROM sent_emails WHERE id::text = :id"),
+            {"id": sent_id},
+        )).mappings().one_or_none()
+    if not row:
+        raise HTTPException(404, detail="Email not found")
+    rec = dict(row)
+    rec["id"] = str(rec["id"])
+    for k in ("created_at", "updated_at", "last_attempt_at", "sent_at"):
+        if rec.get(k):
+            rec[k] = rec[k].isoformat()
+    return rec
+
+
+@router.post("/sent/{sent_id}/resend")
+async def admin_resend_sent_email(sent_id: str) -> dict[str, Any]:
+    """Re-render and re-send a previously-attempted email.
+
+    If the template still exists and is active, we render the CURRENT
+    template against the stored variables (so admin edits to the template
+    take effect on resend). If not, we fall back to the body we stored on
+    the original attempt.
+
+    Resend creates a NEW sent_emails row rather than mutating the original
+    so the audit trail remains immutable. The new row's
+    related_type='resend' / related_id=<original id> stitches the chain.
+    """
+    import json
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        original = (await db.execute(
+            text("""
+                SELECT template_key, to_email, subject, html_body, text_body,
+                       variables, related_type, related_id, triggered_by
+                FROM   sent_emails
+                WHERE  id::text = :id
+            """),
+            {"id": sent_id},
+        )).mappings().one_or_none()
+    if not original:
+        raise HTTPException(404, detail="Email not found")
+
+    raw_vars = original["variables"] or {}
+    if isinstance(raw_vars, str):
+        try:
+            raw_vars = json.loads(raw_vars)
+        except Exception:
+            raw_vars = {}
+
+    # Try to re-render against the current template; if missing/inactive,
+    # fall back to the stored body so we can still get the email out.
+    subject = original["subject"]
+    html_body = original["html_body"]
+    text_body = original["text_body"]
+    if original["template_key"]:
+        async with SessionLocal() as db:
+            r = await db.execute(text("""
+                SELECT subject, html_body, text_body
+                FROM   email_templates
+                WHERE  template_key = :key AND is_active LIMIT 1
+            """), {"key": original["template_key"]})
+            tpl = r.mappings().first()
+        if tpl:
+            merged = {**_default_vars(), **raw_vars}
+            subject, html_body, text_body = render_template(dict(tpl), merged)
+
+    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
+    password   = settings.OFFICE365_PASSWORD
+
+    new_id = await _record_pending(
+        original["template_key"] or "", original["to_email"], from_email,
+        subject, html_body, text_body, raw_vars,
+        related_type="resend", related_id=sent_id,
+        triggered_by=original["triggered_by"] or "",
+    )
+
+    if not password:
+        await _record_result(new_id, False, "OFFICE365_PASSWORD not set")
+        return {"sent": False, "reason": "Email not configured", "sent_email_id": new_id}
+
+    try:
+        await _smtp_send(from_email, password, original["to_email"], subject, html_body, text_body)
+        await _record_result(new_id, True)
+        return {"sent": True, "to": original["to_email"], "sent_email_id": new_id}
+    except Exception as exc:
+        await _record_result(new_id, False, str(exc))
+        return {"sent": False, "error": str(exc), "sent_email_id": new_id}
+
+
 @router.get("/{template_key}")
 async def get_template(template_key: str):
     from sqlalchemy import text
@@ -342,173 +509,6 @@ async def send_template(
     except Exception as exc:
         await _record_result(row_id, False, str(exc))
         return {"sent": False, "error": str(exc), "template": template_key, "sent_email_id": row_id}
-
-
-# ── Admin: outgoing email audit + resend ─────────────────────────────────────
-
-@router.get("/sent")
-async def admin_list_sent_emails(
-    status_filter: str = "", template_key: str = "", search: str = "",
-    related_type: str = "", related_id: str = "",
-    limit: int = 100, offset: int = 0,
-) -> dict[str, Any]:
-    """Paginated audit log of every email send_template() handled.
-
-    Surfaces failures (status=FAILED) so trustees can spot delivery issues
-    and resend by id. The same endpoint works for status=SENT review.
-    """
-    from sqlalchemy import text
-
-    from shital.core.fabrics.database import SessionLocal
-
-    where: list[str] = []
-    params: dict[str, Any] = {
-        "limit": min(max(1, limit), 500),
-        "offset": max(0, offset),
-    }
-    if status_filter.strip():
-        where.append("status = :status")
-        params["status"] = status_filter.strip().upper()
-    if template_key.strip():
-        where.append("template_key = :tkey")
-        params["tkey"] = template_key.strip()
-    if related_type.strip():
-        where.append("related_type = :rtype")
-        params["rtype"] = related_type.strip()
-    if related_id.strip():
-        where.append("related_id = :rid")
-        params["rid"] = related_id.strip()
-    if search.strip():
-        where.append("(LOWER(to_email) LIKE :search OR LOWER(subject) LIKE :search)")
-        params["search"] = f"%{search.strip().lower()}%"
-    where_sql = "WHERE " + " AND ".join(where) if where else ""
-
-    async with SessionLocal() as db:
-        rows = await db.execute(text(f"""
-            SELECT id, template_key, to_email, subject, status, error,
-                   attempts, last_attempt_at, sent_at,
-                   related_type, related_id, created_at
-            FROM   sent_emails
-            {where_sql}
-            ORDER  BY created_at DESC
-            LIMIT  :limit OFFSET :offset
-        """), params)
-        items: list[dict[str, Any]] = []
-        for r in rows.mappings():
-            d = dict(r)
-            d["id"] = str(d["id"])
-            for k in ("created_at", "last_attempt_at", "sent_at"):
-                if d.get(k):
-                    d[k] = d[k].isoformat()
-            items.append(d)
-
-        total = (await db.execute(
-            text(f"SELECT COUNT(*) AS c FROM sent_emails {where_sql}"),
-            params,
-        )).mappings().one()
-
-    return {"items": items, "total": int(total["c"])}
-
-
-@router.get("/sent/{sent_id}")
-async def admin_get_sent_email(sent_id: str) -> dict[str, Any]:
-    """Full row including body + variables, for a 'view raw' admin panel."""
-    from sqlalchemy import text
-
-    from shital.core.fabrics.database import SessionLocal
-    async with SessionLocal() as db:
-        row = (await db.execute(
-            text("SELECT * FROM sent_emails WHERE id::text = :id"),
-            {"id": sent_id},
-        )).mappings().one_or_none()
-    if not row:
-        raise HTTPException(404, detail="Email not found")
-    rec = dict(row)
-    rec["id"] = str(rec["id"])
-    for k in ("created_at", "updated_at", "last_attempt_at", "sent_at"):
-        if rec.get(k):
-            rec[k] = rec[k].isoformat()
-    return rec
-
-
-@router.post("/sent/{sent_id}/resend")
-async def admin_resend_sent_email(sent_id: str) -> dict[str, Any]:
-    """Re-render and re-send a previously-attempted email.
-
-    If the template still exists and is active, we render the CURRENT
-    template against the stored variables (so admin edits to the template
-    take effect on resend). If not, we fall back to the body we stored on
-    the original attempt.
-
-    Resend creates a NEW sent_emails row rather than mutating the original
-    so the audit trail remains immutable. The new row's
-    related_type='resend' / related_id=<original id> stitches the chain.
-    """
-    import json
-
-    from sqlalchemy import text
-
-    from shital.core.fabrics.config import settings
-    from shital.core.fabrics.database import SessionLocal
-
-    async with SessionLocal() as db:
-        original = (await db.execute(
-            text("""
-                SELECT template_key, to_email, subject, html_body, text_body,
-                       variables, related_type, related_id, triggered_by
-                FROM   sent_emails
-                WHERE  id::text = :id
-            """),
-            {"id": sent_id},
-        )).mappings().one_or_none()
-    if not original:
-        raise HTTPException(404, detail="Email not found")
-
-    raw_vars = original["variables"] or {}
-    if isinstance(raw_vars, str):
-        try:
-            raw_vars = json.loads(raw_vars)
-        except Exception:
-            raw_vars = {}
-
-    # Try to re-render against the current template; if missing/inactive,
-    # fall back to the stored body so we can still get the email out.
-    subject = original["subject"]
-    html_body = original["html_body"]
-    text_body = original["text_body"]
-    if original["template_key"]:
-        async with SessionLocal() as db:
-            r = await db.execute(text("""
-                SELECT subject, html_body, text_body
-                FROM   email_templates
-                WHERE  template_key = :key AND is_active LIMIT 1
-            """), {"key": original["template_key"]})
-            tpl = r.mappings().first()
-        if tpl:
-            merged = {**_default_vars(), **raw_vars}
-            subject, html_body, text_body = render_template(dict(tpl), merged)
-
-    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
-    password   = settings.OFFICE365_PASSWORD
-
-    new_id = await _record_pending(
-        original["template_key"] or "", original["to_email"], from_email,
-        subject, html_body, text_body, raw_vars,
-        related_type="resend", related_id=sent_id,
-        triggered_by=original["triggered_by"] or "",
-    )
-
-    if not password:
-        await _record_result(new_id, False, "OFFICE365_PASSWORD not set")
-        return {"sent": False, "reason": "Email not configured", "sent_email_id": new_id}
-
-    try:
-        await _smtp_send(from_email, password, original["to_email"], subject, html_body, text_body)
-        await _record_result(new_id, True)
-        return {"sent": True, "to": original["to_email"], "sent_email_id": new_id}
-    except Exception as exc:
-        await _record_result(new_id, False, str(exc))
-        return {"sent": False, "error": str(exc), "sent_email_id": new_id}
 
 
 # ── Canonical entity reference types for sent_emails.related_type ─────────────
