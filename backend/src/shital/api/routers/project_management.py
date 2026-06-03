@@ -944,9 +944,11 @@ async def list_approvals(project_uuid: str, ctx: CurrentSpace) -> dict[str, Any]
             requires = True
             why = f"budget {budget:.0f} > {APPROVAL_THRESHOLD_GBP} threshold"
         elif ptype == "CAPITAL":
-            requires = True; why = "capital project"
+            requires = True
+            why = "capital project"
         elif ftype in ("RESTRICTED", "ENDOWMENT"):
-            requires = True; why = f"{ftype.lower()} fund"
+            requires = True
+            why = f"{ftype.lower()} fund"
     return {
         "items":             [_serialise(dict(r)) for r in rows],
         "approval_required": requires,
