@@ -563,6 +563,117 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_project_invoices_proj   ON project_invoices(project_id) WHERE deleted_at IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_project_invoices_status ON project_invoices(status)    WHERE deleted_at IS NULL",
 
+        # ── Phase 1b/1c — reuse-existing linking ─────────────────────────────
+        # Link expenses + invoices to the existing crm_accounts CRM (where
+        # vendor/supplier/partner already live as account_type values). Keep
+        # the free-text vendor column for back-compat — populate either.
+        "ALTER TABLE project_expenses ADD COLUMN IF NOT EXISTS vendor_account_id UUID DEFAULT NULL",
+        "ALTER TABLE project_invoices ADD COLUMN IF NOT EXISTS vendor_account_id UUID DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_expenses_vendor ON project_expenses(vendor_account_id) WHERE vendor_account_id IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_invoices_vendor ON project_invoices(vendor_account_id) WHERE vendor_account_id IS NOT NULL",
+
+        # Reuse the donations table for incoming-funds attribution per project.
+        # Today the dashboard guesses by `purpose` text-match against the
+        # project name; making this an explicit FK lets restricted-fund
+        # projects show their actual donor-restricted intake without text
+        # heuristics. Nullable so general donations stay project-agnostic.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS project_id UUID DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_donations_project ON donations(project_id) WHERE project_id IS NOT NULL",
+
+        # Milestones — the work breakdown the operator asked for. Each row is
+        # a deliverable with an owner + due date. status moves through
+        # PENDING / IN_PROGRESS / DONE / SKIPPED; pct_complete is 0-100 for
+        # finer reporting on the dashboard.
+        """CREATE TABLE IF NOT EXISTS project_milestones (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title        VARCHAR(255) NOT NULL,
+            description  TEXT         NOT NULL DEFAULT '',
+            owner_id     UUID DEFAULT NULL,
+            due_date     DATE,
+            status       VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            pct_complete INTEGER      NOT NULL DEFAULT 0 CHECK (pct_complete BETWEEN 0 AND 100),
+            completed_at TIMESTAMPTZ  DEFAULT NULL,
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at   TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_milestones_proj ON project_milestones(project_id, due_date) WHERE deleted_at IS NULL",
+
+        # Documents — charter, contracts, grant agreements, signed approvals.
+        # file_url is intentionally an external URL (SharePoint, Drive, S3)
+        # rather than a binary in PG — uploaders elsewhere already populate
+        # similar URL columns this way.
+        """CREATE TABLE IF NOT EXISTS project_documents (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title        VARCHAR(255) NOT NULL,
+            kind         VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+            file_url     TEXT         NOT NULL DEFAULT '',
+            version      VARCHAR(50)  NOT NULL DEFAULT '',
+            uploaded_by  UUID DEFAULT NULL,
+            uploaded_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at   TIMESTAMPTZ  DEFAULT NULL,
+            notes        TEXT         NOT NULL DEFAULT ''
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_documents_proj ON project_documents(project_id) WHERE deleted_at IS NULL",
+
+        # Budget breakdown — one row per category (LABOUR / MATERIALS /
+        # SERVICES / TRAVEL / OTHER, matching the project_expenses category
+        # enum). Variance reporting joins this against the expense rollup
+        # for per-category over/under spend.
+        """CREATE TABLE IF NOT EXISTS project_budget_items (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            category     VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+            description  TEXT         NOT NULL DEFAULT '',
+            amount       NUMERIC(14,2) NOT NULL DEFAULT 0,
+            currency     VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_budget_items_proj ON project_budget_items(project_id, category)",
+
+        # Project partners — join to crm_accounts (NOT a new vendors table).
+        # The relationship value distinguishes between PARTNER (collaborating
+        # charity), GRANTOR (funded us), BENEFICIARY (we serve them),
+        # SPONSOR (gave us in-kind / cash without restriction), SUPPLIER.
+        # account_type on crm_accounts already filters vendor/supplier/etc.;
+        # this table records the per-project relationship.
+        """CREATE TABLE IF NOT EXISTS project_partners (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            account_id   UUID NOT NULL REFERENCES crm_accounts(id) ON DELETE CASCADE,
+            relationship VARCHAR(40)  NOT NULL DEFAULT 'PARTNER',
+            start_date   DATE,
+            end_date     DATE,
+            notes        TEXT         NOT NULL DEFAULT '',
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            removed_at   TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_partners_proj    ON project_partners(project_id)    WHERE removed_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_partners_account ON project_partners(account_id)    WHERE removed_at IS NULL",
+
+        # Approval workflow — single-step trustee/admin approval pattern.
+        # kind: START (DRAFT → ACTIVE), CHANGE_BUDGET, CHANGE_SCOPE, CLOSE.
+        # status: PENDING → APPROVED | REJECTED | WITHDRAWN.
+        # Project status transitions to ACTIVE are gated on an APPROVED
+        # 'START' row when budget_total > APPROVAL_THRESHOLD_GBP OR
+        # project_type='CAPITAL' OR fund_type IN (RESTRICTED, ENDOWMENT).
+        """CREATE TABLE IF NOT EXISTS project_approvals (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            kind            VARCHAR(40)  NOT NULL DEFAULT 'START',
+            requested_by    UUID DEFAULT NULL,
+            requested_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            request_reason  TEXT         NOT NULL DEFAULT '',
+            status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            approver_id     UUID DEFAULT NULL,
+            decided_at      TIMESTAMPTZ  DEFAULT NULL,
+            decision_reason TEXT         NOT NULL DEFAULT ''
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_approvals_proj ON project_approvals(project_id, status)",
+
         # ── Recurring Payments — financial obligations tracker ─────────────────
         """CREATE TABLE IF NOT EXISTS recurring_payments (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
