@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace
+from shital.api.routers.notifications import notify, notify_many
 from shital.core.fabrics.database import SessionLocal
 
 router = APIRouter(tags=["project-management"])
@@ -214,6 +215,10 @@ async def create_assignment(project_uuid: str, body: AssignmentIn, ctx: CurrentS
             VALUES (CAST(:id AS UUID), CAST(:pid AS UUID), CAST(:uid AS UUID), :role, :notes, NOW())
         """), {"id": new_id, "pid": project_uuid, "uid": body.user_id, "role": body.role.upper(), "notes": body.notes})
         await _log_activity(db, project_uuid, ctx, "ASSIGNMENT", f"Added team member ({body.role})", "")
+        # Notify the user they've been assigned.
+        await notify(db, body.user_id, "ASSIGNMENT",
+                     f"You've been assigned to a project as {body.role}",
+                     body.notes, f"/finance/projects/{project_uuid}")
         await db.commit()
     return {"id": new_id}
 
@@ -323,6 +328,18 @@ async def create_risk(project_uuid: str, body: RiskIn, ctx: CurrentSpace) -> dic
                "l": body.likelihood, "i": body.impact, "m": body.mitigation,
                "oid": body.owner_id or "", "s": body.status.upper()})
         await _log_activity(db, project_uuid, ctx, "RISK", f"Logged risk: {body.title}", "", new_id)
+        # High-severity risks (score >= 15) notify the project_manager + risk owner.
+        risk_score = body.likelihood * body.impact
+        if risk_score >= 15:
+            pm = (await db.execute(text(
+                "SELECT project_manager_id::text AS pm FROM projects WHERE id = CAST(:p AS UUID)"
+            ), {"p": project_uuid})).mappings().first()
+            recipients = [body.owner_id, pm["pm"] if pm else None]
+            await notify_many(db, recipients, kind="RISK",
+                              title=f"High-severity risk logged ({risk_score}/25)",
+                              body=body.title,
+                              link_url=f"/finance/projects/{project_uuid}",
+                              severity="WARNING")
         await db.commit()
     return {"id": new_id}
 
@@ -972,6 +989,18 @@ async def request_approval(project_uuid: str, body: ApprovalRequestIn, ctx: Curr
         await _log_activity(db, project_uuid, ctx, "APPROVAL",
                             f"Approval requested ({body.kind})",
                             body.request_reason, new_id)
+        # Approval requests notify the business_owner + project_manager so
+        # they see the inbound work item.
+        owners = (await db.execute(text("""
+            SELECT business_owner_id::text AS bo, project_manager_id::text AS pm, name
+            FROM   projects WHERE id = CAST(:p AS UUID)
+        """), {"p": project_uuid})).mappings().first()
+        if owners:
+            await notify_many(db, [owners["bo"], owners["pm"]], kind="APPROVAL",
+                              title=f"Approval requested: {body.kind} on {owners['name']}",
+                              body=body.request_reason,
+                              link_url=f"/finance/projects/{project_uuid}",
+                              severity="WARNING")
         await db.commit()
     return {"id": new_id}
 
@@ -996,6 +1025,16 @@ async def decide_approval(project_uuid: str, ap_id: str, body: ApprovalDecisionI
         await _log_activity(db, project_uuid, ctx, "APPROVAL",
                             f"Approval {new_status.lower()}",
                             body.decision_reason, ap_id)
+        # Notify the original requester of the decision.
+        req = (await db.execute(text(
+            "SELECT requested_by::text AS rb FROM project_approvals WHERE id = CAST(:i AS UUID)"
+        ), {"i": ap_id})).mappings().first()
+        if req:
+            await notify(db, req["rb"], "APPROVAL",
+                         f"Approval {new_status.lower()}",
+                         body.decision_reason,
+                         f"/finance/projects/{project_uuid}",
+                         "SUCCESS" if new_status == "APPROVED" else "ERROR")
         await db.commit()
     if not getattr(result, "rowcount", 0):
         raise HTTPException(status_code=404, detail="approval not found or already decided")

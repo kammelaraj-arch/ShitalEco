@@ -674,6 +674,26 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_project_approvals_proj ON project_approvals(project_id, status)",
 
+        # ── Phase 3B — In-app notifications ──────────────────────────────────
+        # Per-user fan-out. kind discriminates: ASSIGNMENT / RISK / APPROVAL /
+        # MILESTONE / INVOICE / FUNDING / SYSTEM. link_url is a relative
+        # path the header bell links to when the user clicks the row.
+        # read_at NULL → unread; mark-read flips it. Auto-collapse old rows
+        # via a periodic job (skipped for now — table size is fine for years).
+        """CREATE TABLE IF NOT EXISTS notifications (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id     UUID NOT NULL,
+            kind        VARCHAR(40)  NOT NULL DEFAULT 'SYSTEM',
+            title       VARCHAR(255) NOT NULL,
+            body        TEXT         NOT NULL DEFAULT '',
+            link_url    VARCHAR(500) NOT NULL DEFAULT '',
+            severity    VARCHAR(20)  NOT NULL DEFAULT 'INFO',
+            read_at     TIMESTAMPTZ  DEFAULT NULL,
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, created_at DESC) WHERE read_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_user_all    ON notifications(user_id, created_at DESC)",
+
         # ── Recurring Payments — financial obligations tracker ─────────────────
         """CREATE TABLE IF NOT EXISTS recurring_payments (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -3549,6 +3569,7 @@ _mount("shital.api.routers.gl",               "router")
 _mount("shital.api.routers.budgets",          "router")
 _mount("shital.api.routers.project_costing",   "router")
 _mount("shital.api.routers.project_management","router")
+_mount("shital.api.routers.notifications",     "router")
 _mount("shital.api.routers.reports",          "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.hr_alerts",        "router")
