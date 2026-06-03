@@ -55,6 +55,8 @@ async def project_summary(project_uuid: str, ctx: CurrentSpace) -> dict[str, Any
             SELECT p.id::text, p.project_id, p.name, p.description, p.branch_id,
                    p.goal_amount, p.budget_total, p.status, p.risk_level,
                    p.start_date, p.end_date, p.is_active,
+                   p.parent_project_id::text   AS parent_project_id,
+                   parent.name                 AS parent_project_name,
                    p.project_manager_id::text  AS project_manager_id,
                    p.business_owner_id::text   AS business_owner_id,
                    p.tech_owner_id::text       AS tech_owner_id,
@@ -63,6 +65,7 @@ async def project_summary(project_uuid: str, ctx: CurrentSpace) -> dict[str, Any
                    tw.name  AS tech_owner_name,      tw.email AS tech_owner_email,
                    p.created_at, p.updated_at
             FROM projects p
+            LEFT JOIN projects parent ON parent.id = p.parent_project_id
             LEFT JOIN users pm ON pm.id = p.project_manager_id
             LEFT JOIN users bo ON bo.id = p.business_owner_id
             LEFT JOIN users tw ON tw.id = p.tech_owner_id
@@ -70,6 +73,15 @@ async def project_summary(project_uuid: str, ctx: CurrentSpace) -> dict[str, Any
         """), {"id": project_uuid})).mappings().first()
         if not proj:
             raise HTTPException(status_code=404, detail="project not found")
+
+        # Immediate children — for the tree view in the detail page header.
+        children = (await db.execute(text("""
+            SELECT id::text, name, status, COALESCE(risk_level,'GREEN') AS risk_level
+            FROM   projects
+            WHERE  parent_project_id = CAST(:id AS UUID)
+              AND  is_active = true
+            ORDER  BY name
+        """), {"id": project_uuid})).mappings().all()
 
         # Rolled-up financials. expenses = sum of project_expenses; donations
         # = sum of donations whose purpose matches this project's name (best-
@@ -96,8 +108,53 @@ async def project_summary(project_uuid: str, ctx: CurrentSpace) -> dict[str, Any
         "team_size":      int(rolls["team_size"]),
         "open_risks":     int(rolls["open_risks"]),
         "activity_count": int(rolls["activity_count"]),
+        "sub_projects":   [dict(c) for c in children],
     })
     return out
+
+
+# ─── Parent link ─────────────────────────────────────────────────────────────
+
+class ParentIn(BaseModel):
+    parent_project_id: str | None = None   # None clears the link
+
+
+@router.patch("/admin/projects/{project_uuid}/parent")
+async def set_parent(project_uuid: str, body: ParentIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Set or clear the parent project. Guards against self-parenting and
+    cycles — the new parent cannot be the project itself nor a descendant."""
+    _require_admin(ctx)
+    new_parent = (body.parent_project_id or "").strip() or None
+    if new_parent and new_parent == project_uuid:
+        raise HTTPException(status_code=400, detail="project cannot be its own parent")
+    async with SessionLocal() as db:
+        if new_parent:
+            # Cycle check: walk up from new_parent — if we hit project_uuid,
+            # reject. Bounded to 50 hops so a corrupt loop in the data
+            # doesn't run forever.
+            cur = new_parent
+            for _ in range(50):
+                row = (await db.execute(text(
+                    "SELECT parent_project_id::text AS p FROM projects WHERE id = CAST(:id AS UUID)"
+                ), {"id": cur})).mappings().first()
+                if not row or not row["p"]:
+                    break
+                if row["p"] == project_uuid:
+                    raise HTTPException(status_code=400, detail="would create a cycle")
+                cur = row["p"]
+        result = await db.execute(text("""
+            UPDATE projects SET
+                parent_project_id = CASE WHEN :p <> '' THEN CAST(:p AS UUID) ELSE NULL END,
+                updated_at = NOW()
+            WHERE id = CAST(:id AS UUID)
+        """), {"id": project_uuid, "p": new_parent or ""})
+        await _log_activity(db, project_uuid, ctx, "STATUS_CHANGE",
+                            f"Parent project {'set' if new_parent else 'cleared'}",
+                            new_parent or "")
+        await db.commit()
+    if not getattr(result, "rowcount", 0):
+        raise HTTPException(status_code=404, detail="project not found")
+    return {"ok": True, "parent_project_id": new_parent}
 
 
 # ─── Assignments ─────────────────────────────────────────────────────────────

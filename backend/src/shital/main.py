@@ -460,6 +460,13 @@ async def _patch_schema() -> None:
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_total       NUMERIC(14,2) NOT NULL DEFAULT 0",
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS status             VARCHAR(20)   NOT NULL DEFAULT 'DRAFT'",
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS risk_level         VARCHAR(20)   NOT NULL DEFAULT 'GREEN'",
+        # Parent project for hierarchy — programmes → projects → sub-projects.
+        # Nullable: a top-level project has no parent. ON DELETE SET NULL so
+        # deleting a parent doesn't cascade-destroy its children — they just
+        # become top-level. The summary endpoint surfaces both the parent's
+        # name and the immediate-child list so the UI can render a tree.
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS parent_project_id  UUID DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_project_id) WHERE parent_project_id IS NOT NULL",
 
         # Team assignments — many-to-many between projects and users with a
         # role per assignment (DEVELOPER, ANALYST, FINANCE, STAKEHOLDER, etc.).
