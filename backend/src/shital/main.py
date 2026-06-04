@@ -2850,6 +2850,7 @@ async def _seed_api_key_metadata() -> None:
         ("SUMUP_ACCESS_TOKEN",       "SumUp Personal API key (sup_pk_...)",            "SumUp",     True),
         ("SUMUP_MERCHANT_CODE",      "SumUp merchant code (e.g. M602X5FC)",            "SumUp",     False),
         ("MEILISEARCH_MASTER_KEY",   "MeiliSearch master key",                         "Other",     True),
+        ("VULTR_API_KEY",            "Vultr Personal Access Token — pulls real hosting cost into Finance → Hosting Costs",              "Hosting",   True),
     ]
 
     async with SessionLocal() as db:
@@ -3611,6 +3612,7 @@ _mount("shital.api.routers.screen",           "router")
 _mount("shital.api.routers.branches",         "router")
 _mount("shital.api.routers.projects",             "router")
 _mount("shital.api.routers.recurring_payments",   "router")
+_mount("shital.api.routers.hosting",              "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")

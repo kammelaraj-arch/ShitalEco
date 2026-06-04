@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     # Rules mode is free to run; covers ~80% of UK invoices and stages the
     # rest for manual review through the same inbox UI.
     MAIL_AGENT_MODE: str = "auto"
+
+    # Vultr API token (Personal Access Token from my.vultr.com/settings).
+    # Used by services/vultr.py to pull real hosting cost into the
+    # Finance → Hosting Costs page. Can also be set via Admin → API Keys
+    # (the encrypted store wins over this env var).
+    VULTR_API_KEY: str = ""
     # Hard floor on how far back to look on the first sweep. Without this,
     # a fresh prod install would try to triage years of accounts@ history
     # on first run — slow, expensive, and mostly noise. After the first

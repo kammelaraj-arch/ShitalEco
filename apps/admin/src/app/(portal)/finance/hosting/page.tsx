@@ -65,12 +65,27 @@ function monthlyEquiv(p: RecurringPayment): number {
   return Number(p.amount) * mult
 }
 
+interface VultrSnapshot {
+  account: { name?: string; email?: string; balance?: number; pending_charges?: number }
+  instances: Array<{ id: string; label?: string; main_ip?: string; region?: string; plan?: string; ram?: number; vcpu_count?: number; disk?: number; monthly_cost?: number }>
+  monthly_forecast_usd: number
+  monthly_forecast_gbp: number
+  last_30_days_charge_usd: number
+  last_30_days_charge_gbp: number
+  usd_to_gbp_rate: number
+}
+
 export default function HostingCostsPage() {
   const [items, setItems] = useState<RecurringPayment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<RecurringPayment | null>(null)
+  const [vultr, setVultr] = useState<VultrSnapshot | null>(null)
+  const [vultrErr, setVultrErr] = useState('')
+  const [vultrLoading, setVultrLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState('')
   const [form, setForm] = useState({
     name: '', category: 'HOSTING' as HostingCategory, payee: '',
     amount: '', currency: 'GBP', frequency: 'MONTHLY' as Frequency,
@@ -92,6 +107,31 @@ export default function HostingCostsPage() {
     } finally { setLoading(false) }
   }, [])
   useEffect(() => { load() }, [load])
+
+  const loadVultr = useCallback(async () => {
+    setVultrLoading(true); setVultrErr('')
+    try {
+      const snap = await apiFetch<VultrSnapshot>('/admin/hosting/vultr/snapshot')
+      setVultr(snap)
+    } catch (e) {
+      // 400 means no API key configured — that's fine, just don't show the panel.
+      setVultrErr(e instanceof Error ? e.message : 'Vultr fetch failed')
+      setVultr(null)
+    } finally { setVultrLoading(false) }
+  }, [])
+  useEffect(() => { loadVultr() }, [loadVultr])
+
+  async function syncVultr() {
+    setSyncing(true); setSyncMsg('')
+    try {
+      const r = await apiFetch<{ created: number; updated: number; instances_seen: number }>(
+        '/admin/hosting/vultr/sync', { method: 'POST' })
+      setSyncMsg(`Synced ${r.instances_seen} Vultr instance(s): ${r.created} new, ${r.updated} updated.`)
+      await load()
+    } catch (e) {
+      setSyncMsg(e instanceof Error ? e.message : 'Sync failed')
+    } finally { setSyncing(false) }
+  }
 
   function openNew() {
     setEditing(null)
@@ -168,6 +208,65 @@ export default function HostingCostsPage() {
         <KPI label="Annualised" value={fmt(annualTotal)} hint="× 12 from monthly equiv" />
         <KPI label="Renewals next 60d" value={String(renewalsDue.length)} hint={renewalsDue[0] ? `Next: ${fmtDate(renewalsDue[0].renewal_date)}` : 'None due'} />
         <KPI label="Categories used" value={`${Object.keys(byCategory).length}/${HOSTING_CATEGORIES.length}`} hint="of the IT cost categories" />
+      </div>
+
+      {/* Vultr live panel */}
+      <div className="rounded-2xl p-4 bg-white/3 border border-white/10">
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+          <div>
+            <h3 className="text-white font-black text-base">☁️ Vultr — live spend</h3>
+            <p className="text-white/40 text-xs mt-0.5">Pulled directly from the Vultr API. Sync to copy each instance into the table below.</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={loadVultr} disabled={vultrLoading}
+              className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white text-xs font-bold hover:bg-white/10 disabled:opacity-40">
+              {vultrLoading ? 'Refreshing…' : '🔄 Refresh'}
+            </button>
+            <button onClick={syncVultr} disabled={syncing || !vultr}
+              className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-xs font-bold disabled:opacity-40">
+              {syncing ? 'Syncing…' : '⬇ Sync instances → cost lines'}
+            </button>
+          </div>
+        </div>
+        {!vultr && !vultrLoading && (
+          <div className="text-amber-300 text-xs bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+            <p className="font-bold mb-1">Vultr not connected.</p>
+            <p>{vultrErr || 'Add your Vultr API key at '}<Link href="/settings/api-keys" className="text-saffron-300 hover:underline">Settings → API Keys</Link>{' (key: VULTR_API_KEY). Get one at '}<a href="https://my.vultr.com/settings/#settingsapi" target="_blank" rel="noreferrer" className="text-saffron-300 hover:underline">my.vultr.com/settings/#settingsapi</a>.</p>
+          </div>
+        )}
+        {vultr && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <KPI label="Instances" value={String(vultr.instances.length)} hint={vultr.account.name || vultr.account.email || '—'} />
+              <KPI label="Monthly forecast" value={fmt(vultr.monthly_forecast_gbp)} hint={`$${vultr.monthly_forecast_usd.toFixed(2)} @ ${vultr.usd_to_gbp_rate} GBP/USD`} />
+              <KPI label="Actual last 30d" value={fmt(vultr.last_30_days_charge_gbp)} hint={`$${vultr.last_30_days_charge_usd.toFixed(2)} charged`} />
+              <KPI label="Credit balance" value={fmt(((vultr.account.balance || 0) * vultr.usd_to_gbp_rate))} hint={`pending $${(vultr.account.pending_charges || 0).toFixed(2)}`} />
+            </div>
+            {vultr.instances.length > 0 && (
+              <table className="w-full text-xs mt-4">
+                <thead><tr className="text-left text-white/40 uppercase tracking-wider border-b border-white/5">
+                  <th className="py-2">Instance</th><th className="py-2">Plan</th><th className="py-2">Region</th><th className="py-2">vCPU / RAM / Disk</th><th className="py-2 text-right">$ / mo</th>
+                </tr></thead>
+                <tbody>
+                  {vultr.instances.map(i => (
+                    <tr key={i.id} className="border-b border-white/5">
+                      <td className="py-2 text-white">{i.label || i.main_ip || i.id.slice(0,8)}<p className="text-white/40 font-mono">{i.main_ip}</p></td>
+                      <td className="py-2 text-white/60 font-mono">{i.plan}</td>
+                      <td className="py-2 text-white/60">{i.region}</td>
+                      <td className="py-2 text-white/60">{i.vcpu_count}c / {((i.ram||0)/1024).toFixed(1)} GB / {i.disk} GB</td>
+                      <td className="py-2 text-right text-saffron-300 font-mono font-bold">${(i.monthly_cost||0).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+        {syncMsg && (
+          <p className={`text-xs mt-3 rounded-lg p-2 ${syncMsg.startsWith('Synced') ? 'bg-green-500/10 text-green-300 border border-green-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
+            {syncMsg}
+          </p>
+        )}
       </div>
 
       {/* Per-category split */}
