@@ -46,10 +46,17 @@ class Settings(BaseSettings):
     # clearest structured output for an agentic loop to handle well. Once that's
     # proven (clean classifications, no false-positive invoices, reasonable
     # supplier matching), add trustees@ and info@ via env var override.
-    MAIL_AGENT_MAILBOXES: str = "accounts@shirdisai.org.uk"
+    MAIL_AGENT_MAILBOXES: str = "accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
     MAIL_AGENT_POLL_SECONDS: int = 300        # 5 min; 0 = disabled
     MAIL_AGENT_MODEL: str = "claude-opus-4-7"  # used for the agentic loop
     MAIL_AGENT_MAX_ITER: int = 15             # cap tool turns per email
+    # Pipeline selector:
+    #   "agent" — Claude agentic triage (needs ANTHROPIC_API_KEY)
+    #   "rules" — deterministic pdfplumber + regex + rapidfuzz vendor match
+    #   "auto"  — Claude if a key is configured, otherwise rules (default)
+    # Rules mode is free to run; covers ~80% of UK invoices and stages the
+    # rest for manual review through the same inbox UI.
+    MAIL_AGENT_MODE: str = "auto"
     # Hard floor on how far back to look on the first sweep. Without this,
     # a fresh prod install would try to triage years of accounts@ history
     # on first run — slow, expensive, and mostly noise. After the first

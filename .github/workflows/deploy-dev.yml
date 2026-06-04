@@ -132,6 +132,8 @@ jobs:
             # Same secret the prod deployer expects — without this, dev backend
             # gets HTTP 403 when querying http://deployer:9000/status.
             inject .env.dev DEPLOY_SECRET          "$DEPLOY_SECRET"
+            inject .env.dev MAIL_AGENT_MAILBOXES   "accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
+            inject .env.dev MAIL_AGENT_MODE        "auto"
 
             set -a; source .env.dev; set +a
             ufw allow 8080/tcp 2>/dev/null || true

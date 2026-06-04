@@ -113,6 +113,8 @@ jobs:
             inject GITHUB_TOKEN           "$GH_PAT"
             inject CORS_ORIGINS           "https://shital.org.uk,https://admin.shital.org.uk,https://kiosk.shital.org.uk,https://donate.shital.org.uk,https://screen.shital.org.uk,https://dev.shital.org.uk,https://localhost,capacitor://localhost,http://localhost"
             inject MS_REDIRECT_URI        "https://admin.shital.org.uk/auth-callback"
+            inject MAIL_AGENT_MAILBOXES   "accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
+            inject MAIL_AGENT_MODE        "auto"
 
             # ── Weekly cron to prune dangling images (idempotent) ────────────
             cat > /etc/cron.d/docker-prune << 'CRONEOF'

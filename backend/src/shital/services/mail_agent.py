@@ -809,9 +809,15 @@ async def sweep_once() -> dict[str, Any]:
 
         processed = 0
         skipped   = 0
+        # Mode-aware dispatch: rules-based extractor when no LLM key (or
+        # MAIL_AGENT_MODE=rules), Claude agentic loop otherwise. Imported
+        # lazily to avoid a hard dep on this module from
+        # mail_agent_rules.py.
+        from shital.services.mail_agent_rules import triage_email_dispatch
+
         # Oldest-first so escalation order is chronological
         for m in reversed(msgs):
-            r = await triage_email(mailbox, m)
+            r = await triage_email_dispatch(mailbox, m)
             if r.get("skipped"):
                 skipped += 1
             else:
