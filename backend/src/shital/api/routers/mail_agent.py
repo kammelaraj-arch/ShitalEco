@@ -149,12 +149,37 @@ async def clear_review(ctx: CurrentSpace, mid: str) -> dict[str, Any]:
 
 
 @router.post("/sweep")
-async def sweep_now(ctx: CurrentSpace) -> dict[str, Any]:
+async def sweep_now(ctx: CurrentSpace, lookback_days: int = 0,
+                    ignore_seen: bool = False) -> dict[str, Any]:
     """Manually trigger one poll of all configured mailboxes. Useful for
-    testing — the background loop also runs every MAIL_AGENT_POLL_SECONDS."""
+    testing — the background loop also runs every MAIL_AGENT_POLL_SECONDS.
+
+    Query params (both optional):
+      lookback_days — override the default MAIL_AGENT_LOOKBACK_DAYS for
+                      this call (e.g. ?lookback_days=20 to scan the last
+                      20 days regardless of cursor)
+      ignore_seen  — when true, skips the "last processed cursor" so the
+                      poller re-walks the whole window. Idempotency in
+                      triage_email() still prevents duplicate invoices.
+    """
     _require(ctx)
     from shital.services.mail_agent import sweep_once
-    return await sweep_once()
+    return await sweep_once(
+        lookback_days_override=lookback_days or None,
+        ignore_seen=ignore_seen,
+    )
+
+
+@router.post("/deep-sweep")
+async def deep_sweep(ctx: CurrentSpace, days: int = 20) -> dict[str, Any]:
+    """Catch-up scan: re-walk the last `days` days of every watched
+    mailbox, ignoring the per-mailbox cursor. Capped at 90 days. Designed
+    for "go look at everything from the last 3 weeks" when first turning
+    the agent on or after the operator added a new mailbox."""
+    _require(ctx)
+    days = max(1, min(int(days), 90))
+    from shital.services.mail_agent import sweep_once
+    return await sweep_once(lookback_days_override=days, ignore_seen=True)
 
 
 @router.post("/triage/{mailbox}/{message_id}")

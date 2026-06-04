@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     # sweep, the poller resumes from the newest processed message and the
     # floor only matters again if the DB is wiped or the agent is paused
     # for longer than the floor.
-    MAIL_AGENT_LOOKBACK_DAYS: int = 10
+    MAIL_AGENT_LOOKBACK_DAYS: int = 20
     # ── Optional service-account auth ─────────────────────────────────────
     # Either set these two for delegated OAuth (ROPC, "Resource Owner Password
     # Credentials" grant) using a service account that has been granted

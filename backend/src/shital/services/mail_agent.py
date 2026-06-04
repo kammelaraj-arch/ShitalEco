@@ -767,9 +767,20 @@ async def _finalise(mail_agent_id: str, *, classification: str, summary: str,
 
 # ─── Mailbox sweep ──────────────────────────────────────────────────────────
 
-async def sweep_once() -> dict[str, Any]:
+async def sweep_once(lookback_days_override: int | None = None,
+                     ignore_seen: bool = False) -> dict[str, Any]:
     """Poll all configured mailboxes, triage anything new. Returns per-mailbox
-    counts so the dashboard can show last-sweep summary."""
+    counts so the dashboard can show last-sweep summary.
+
+    `lookback_days_override` — when supplied, replaces MAIL_AGENT_LOOKBACK_DAYS
+    for THIS run only. Useful when the operator wants a deep catch-up sweep
+    ("scan the last 20 days") without changing the default.
+
+    `ignore_seen` — when True, ignores the "last processed message" cursor
+    and re-walks every message within the lookback window. The idempotency
+    check inside triage_email() still prevents duplicate purchase_invoices
+    rows; this just gives the poller a chance to re-look at older emails
+    that were skipped by the cursor."""
     mailboxes = [m.strip() for m in (settings.MAIL_AGENT_MAILBOXES or "").split(",") if m.strip()]
     if not mailboxes:
         return {"skipped": "no MAIL_AGENT_MAILBOXES configured"}
@@ -781,27 +792,36 @@ async def sweep_once() -> dict[str, Any]:
     # where the agent has been paused longer than the floor, this keeps the
     # backlog bounded.
     from datetime import timedelta
-    floor_dt = datetime.now(UTC) - timedelta(days=settings.MAIL_AGENT_LOOKBACK_DAYS)
+    lookback = int(lookback_days_override) if lookback_days_override else settings.MAIL_AGENT_LOOKBACK_DAYS
+    floor_dt = datetime.now(UTC) - timedelta(days=lookback)
     floor_iso = floor_dt.isoformat().replace("+00:00", "Z")
 
     for mailbox in mailboxes:
         # Resume from last successful processed message, but never further
-        # back than the lookback floor.
-        async with SessionLocal() as db:
-            row = (await db.execute(text("""
-                SELECT MAX(received_at) AS last_rcv
-                FROM mail_agent_messages
-                WHERE mailbox = :mb AND status = 'done'
-            """), {"mb": mailbox})).first()
-        last_rcv: datetime | None = row[0] if row else None
-        if last_rcv is None:
+        # back than the lookback floor. `ignore_seen` skips the cursor so we
+        # walk the full window.
+        if ignore_seen:
             since = floor_iso
         else:
-            last_rcv_utc = last_rcv.astimezone(UTC)
-            effective_since = max(last_rcv_utc, floor_dt)
-            since = effective_since.isoformat().replace("+00:00", "Z")
+            async with SessionLocal() as db:
+                row = (await db.execute(text("""
+                    SELECT MAX(received_at) AS last_rcv
+                    FROM mail_agent_messages
+                    WHERE mailbox = :mb AND status = 'done'
+                """), {"mb": mailbox})).first()
+            last_rcv: datetime | None = row[0] if row else None
+            if last_rcv is None:
+                since = floor_iso
+            else:
+                last_rcv_utc = last_rcv.astimezone(UTC)
+                effective_since = max(last_rcv_utc, floor_dt)
+                since = effective_since.isoformat().replace("+00:00", "Z")
         try:
-            msgs = await mb.list_new_messages(mailbox, since_iso=since)
+            # Deep-sweep mode (20-day catch-up via the inbox UI) needs a
+            # bigger pull than the default 25; an idle 5-min cadence only
+            # ever has a handful so the bigger cap is harmless there too.
+            top_cap = 500 if (ignore_seen or lookback > 10) else 25
+            msgs = await mb.list_new_messages(mailbox, since_iso=since, top=top_cap)
         except Exception as exc:
             logger.exception("mail_agent.list_failed", extra={"mailbox": mailbox})
             out["mailboxes"][mailbox] = {"error": str(exc)}

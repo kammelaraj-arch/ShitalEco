@@ -97,6 +97,19 @@ export default function AIInboxPage() {
     } finally { setSweeping(false) }
   }
 
+  async function deepSweep() {
+    if (!confirm('Scan the last 20 days of every watched mailbox? This may take a couple of minutes.')) return
+    setSweeping(true)
+    try {
+      const res = await fetch(`${API}/mail-agent/deep-sweep?days=20`,
+        { method: 'POST', headers: authHeaders() })
+      if (!res.ok) throw new Error(`${res.status}`)
+      await load()
+    } catch (e: unknown) {
+      setError(`Deep sweep failed: ${e instanceof Error ? e.message : 'unknown'}`)
+    } finally { setSweeping(false) }
+  }
+
   async function clearReview(id: string) {
     try {
       await fetch(`${API}/mail-agent/clear-review/${id}`, { method: 'POST', headers: authHeaders() })
@@ -124,6 +137,11 @@ export default function AIInboxPage() {
           <button onClick={sweep} disabled={sweeping}
             className="px-4 py-2 rounded-xl bg-saffron-gradient text-white text-sm font-bold shadow-saffron hover:opacity-90 disabled:opacity-40">
             {sweeping ? 'Sweeping…' : '🔄 Sweep mailboxes now'}
+          </button>
+          <button onClick={deepSweep} disabled={sweeping}
+            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-sm font-bold hover:bg-white/10 disabled:opacity-40"
+            title="Re-scan the last 20 days, ignoring the per-mailbox cursor. Use after turning the agent on or adding a new mailbox.">
+            ⏪ Deep sweep (20 days)
           </button>
           <button onClick={load}
             className="px-4 py-2 rounded-xl border border-white/10 text-white/60 text-sm font-medium hover:bg-white/5">↻ Refresh</button>

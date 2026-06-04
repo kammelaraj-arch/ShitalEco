@@ -152,6 +152,41 @@ def _norm_date(s: str) -> str | None:
 
 # ─── PDF text extraction ─────────────────────────────────────────────────────
 
+# ─── HTML stripping ──────────────────────────────────────────────────────────
+
+# Many invoices arrive as HTML email bodies (Stripe, GoCardless, Amazon
+# Business, GoDaddy, AWS, MS Azure). The same regex pipeline that handles
+# PDF text works fine on plain text — we just need to strip the markup.
+_HTML_SCRIPT_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+_HTML_BR_RE     = re.compile(r"<br\s*/?>|</p>|</div>|</tr>|</h[1-6]>", re.IGNORECASE)
+_HTML_TAG_RE    = re.compile(r"<[^>]+>")
+_HTML_ENTITIES  = {
+    "&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">",
+    "&quot;": '"', "&#39;": "'", "&apos;": "'", "&pound;": "£",
+    "&euro;":  "€", "&dollar;": "$", "&copy;": "©",
+}
+
+
+def _html_to_text(html: str) -> str:
+    """Plain-text view of HTML — strip <script>/<style>, convert block tags
+    to newlines, strip all other tags, decode the common entities."""
+    if not html:
+        return ""
+    s = _HTML_SCRIPT_RE.sub("", html)
+    s = _HTML_BR_RE.sub("\n", s)
+    s = _HTML_TAG_RE.sub("", s)
+    for k, v in _HTML_ENTITIES.items():
+        s = s.replace(k, v)
+    # Numeric entities (&#x163; / &#163;)
+    s = re.sub(r"&#x([0-9a-fA-F]+);", lambda m: chr(int(m.group(1), 16)), s)
+    s = re.sub(r"&#(\d+);", lambda m: chr(int(m.group(1))), s)
+    # Collapse whitespace to keep regex anchors predictable, but preserve
+    # newlines (the vendor-guess heuristic needs them).
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r"\n\s*\n+", "\n\n", s)
+    return s.strip()
+
+
 def _pdf_to_text(data: bytes) -> str:
     """Best-effort: extract text from a PDF byte string. Empty string when
     the PDF is image-only (needs OCR) or unreadable. Imported lazily so
@@ -364,27 +399,31 @@ async def triage_email_rules(mailbox: str, message_meta: dict[str, Any]) -> dict
     img_atts = [a for a in atts_meta if (a.get("contentType") or "").lower()
                 in {"image/png", "image/jpeg", "image/jpg", "image/webp"}]
 
-    if not pdf_atts and not img_atts:
-        await _finalise_rules(mail_agent_id, "other",
-                              "No PDF/image attachments — rules pipeline only handles invoice files.",
-                              "done", [])
-        return {"id": mail_agent_id, "classification": "other", "skipped": True}
-
-    if not pdf_atts and img_atts:
-        await _finalise_rules(mail_agent_id, "needs_review",
-                              f"{len(img_atts)} image attachment(s) — image OCR not enabled. Manual review needed.",
-                              "needs_review", [])
-        return {"id": mail_agent_id, "classification": "needs_review", "skipped": True}
-
-    # Process each PDF — the first one that yields a usable invoice wins
+    # ── Build a pool of candidate text sources, in extraction-priority order:
+    #    1. each PDF (most accurate — original invoice document)
+    #    2. the email body itself (online services like Stripe / PayPal /
+    #       Amazon Business / GoCardless email the full invoice in HTML
+    #       and only attach a PDF as a nicety — sometimes no PDF at all).
+    #    First one to yield a usable invoice wins.
     tool_log: list[dict[str, Any]] = []
+    try:
+        full_msg = await mb.get_message_body(mailbox, msg_id)
+    except Exception as exc:  # noqa: BLE001
+        tool_log.append({"tool": "get_message_body", "error": str(exc)})
+        full_msg = {}
+    body_obj  = (full_msg.get("body") or {})
+    body_kind = (body_obj.get("contentType") or "text").lower()
+    body_raw  = body_obj.get("content") or ""
+    body_text = _html_to_text(body_raw) if body_kind == "html" else body_raw
+
+    candidate_sources: list[tuple[str, str, str]] = []  # (kind, label, text)
     for a in pdf_atts:
         try:
-            full = await mb.get_attachment(mailbox, msg_id, a["id"])
+            full_att = await mb.get_attachment(mailbox, msg_id, a["id"])
         except Exception as exc:  # noqa: BLE001
-            tool_log.append({"tool": "get_attachment", "error": str(exc)})
+            tool_log.append({"tool": "get_attachment", "error": str(exc), "filename": a.get("name")})
             continue
-        b64 = full.get("contentBytes") or ""
+        b64 = full_att.get("contentBytes") or ""
         if not b64:
             continue
         pdf_text = _pdf_to_text(base64.b64decode(b64))
@@ -392,9 +431,28 @@ async def triage_email_rules(mailbox: str, message_meta: dict[str, Any]) -> dict
             tool_log.append({"tool": "pdf_extract", "filename": a.get("name"),
                              "result": "empty (likely scan — OCR needed)"})
             continue
-        fields = await _extract_invoice_from_text(pdf_text, sender_domain=sender_domain)
+        candidate_sources.append(("pdf", a.get("name") or "attachment.pdf", pdf_text))
+
+    if body_text.strip():
+        # Body usually has lots of marketing fluff — capping prevents the
+        # vendor-guess heuristic latching onto headers/footers.
+        candidate_sources.append(("body", "email body", body_text[:25000]))
+
+    if not candidate_sources:
+        if img_atts:
+            await _finalise_rules(mail_agent_id, "needs_review",
+                                  f"{len(img_atts)} image attachment(s) only — image OCR not enabled. Manual review needed.",
+                                  "needs_review", tool_log)
+            return {"id": mail_agent_id, "classification": "needs_review", "skipped": True}
+        await _finalise_rules(mail_agent_id, "other",
+                              "No usable text in PDF attachments or email body.",
+                              "done", tool_log)
+        return {"id": mail_agent_id, "classification": "other", "skipped": True}
+
+    for src_kind, src_label, src_text in candidate_sources:
+        fields = await _extract_invoice_from_text(src_text, sender_domain=sender_domain)
         tool_log.append({"tool": "extract_invoice_fields",
-                         "filename": a.get("name"), "fields": fields})
+                         "source": src_kind, "label": src_label, "fields": fields})
 
         # Need at least a total + (number OR date) to create a row
         if not fields.get("total_amount"):
@@ -429,24 +487,26 @@ async def triage_email_rules(mailbox: str, message_meta: dict[str, Any]) -> dict
                 "ccy":   fields.get("currency") or "GBP",
                 "total": fields.get("total_amount") or 0,
                 "vat":   fields.get("vat_amount") or 0,
-                "notes": (f"Extracted by rules. Vendor guess: {fields.get('vendor_name', '?')}. "
+                "notes": (f"Extracted by rules from {src_kind} ({src_label}). "
+                          f"Vendor guess: {fields.get('vendor_name', '?')}. "
                           f"Source email: {message_meta.get('subject', '')}."),
             })
             await db.commit()
         tool_log.append({"tool": "create_purchase_invoice", "id": new_id,
-                         "status": "PENDING_APPROVAL"})
+                         "source": src_kind, "status": "PENDING_APPROVAL"})
 
-        summary = (f"Invoice extracted: {fields.get('invoice_number', '?')} "
-                   f"from {fields.get('vendor_name', '?')} for "
+        summary = (f"Invoice extracted from {src_kind}: "
+                   f"{fields.get('invoice_number', '?')} from "
+                   f"{fields.get('vendor_name', '?')} for "
                    f"{fields.get('currency', '£')}{fields.get('total_amount', '?')}. "
                    f"{'Supplier auto-matched.' if supplier_match else 'Supplier needs manual link.'}")
         await _finalise_rules(mail_agent_id, "invoice", summary, "done", tool_log)
         return {"id": mail_agent_id, "classification": "invoice",
                 "agent_summary": summary, "invoice_id": new_id}
 
-    # Got PDFs but no extraction worked
+    # Got candidate text but no extraction worked
     await _finalise_rules(mail_agent_id, "needs_review",
-                          "PDF found but the rules extractor couldn't find an invoice total. Manual review needed.",
+                          "Text extracted but no invoice total / number / date found. Manual review needed.",
                           "needs_review", tool_log)
     return {"id": mail_agent_id, "classification": "needs_review", "skipped": True}
 
