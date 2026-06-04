@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Shital TV — Live Bhajans · Aarti · Festivals</title>
+  <meta name="description" content="Watch live bhajans, aarti and festival broadcasts from Shirdi Sai Temple. Donate while watching to support the temple.">
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    *,*:before,*:after { box-sizing: border-box }
+    html, body { margin: 0; padding: 0; background: #0a0606; color: #fff; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif }
+    a { color: #fbbf24 }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 16px }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0 16px; border-bottom: 1px solid rgba(255,255,255,.08) }
+    header h1 { margin: 0; font-size: 18px; font-weight: 900; letter-spacing: -.01em }
+    header h1 small { display: block; font-size: 11px; font-weight: 500; color: rgba(255,255,255,.5); margin-top: 2px }
+    .live-pill { background: rgba(239,68,68,.18); color: #fca5a5; border: 1px solid rgba(239,68,68,.4); padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase }
+    .live-pill.off { background: rgba(255,255,255,.05); color: rgba(255,255,255,.4); border-color: rgba(255,255,255,.1) }
+    .live-pill .dot { display: inline-block; width: 6px; height: 6px; background: currentColor; border-radius: 50%; margin-right: 6px; vertical-align: middle; animation: pulse 1.6s infinite }
+    @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+
+    main { display: grid; grid-template-columns: 1fr 320px; gap: 16px; margin-top: 16px }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr } }
+
+    .player { background: #000; aspect-ratio: 16/9; border-radius: 12px; overflow: hidden; position: relative }
+    .player iframe { width: 100%; height: 100%; border: 0 }
+    .player .placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center }
+    .player .placeholder .icon { font-size: 56px; margin-bottom: 12px }
+    .player .placeholder h2 { margin: 0 0 8px; font-size: 22px; font-weight: 800 }
+    .player .placeholder p { margin: 0; color: rgba(255,255,255,.55); max-width: 28em; line-height: 1.5 }
+    .player .placeholder .countdown { margin-top: 16px; font-size: 14px; color: #fbbf24; font-weight: 700; letter-spacing: .02em }
+
+    .now-strip { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px }
+    .now-strip .title { font-size: 18px; font-weight: 800 }
+    .now-strip .sub { font-size: 12px; color: rgba(255,255,255,.45) }
+    .cast-btn { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer }
+
+    .donate { background: linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%); border-radius: 12px; padding: 16px; color: #1a0a00 }
+    .donate h3 { margin: 0 0 6px; font-size: 14px; font-weight: 900; text-transform: uppercase; letter-spacing: .05em }
+    .donate p { margin: 0 0 12px; font-size: 12px; opacity: .8 }
+    .donate .amounts { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; margin-bottom: 8px }
+    .donate .amounts a { background: rgba(0,0,0,.15); color: #1a0a00; text-decoration: none; padding: 10px 0; border-radius: 8px; text-align: center; font-weight: 800; font-size: 14px }
+    .donate .amounts a:hover { background: rgba(0,0,0,.25) }
+    .donate .custom { display: block; background: #1a0a00; color: #fbbf24; text-decoration: none; padding: 12px; border-radius: 8px; text-align: center; font-weight: 700 }
+
+    .panel { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 14px; margin-top: 12px }
+    .panel h3 { margin: 0 0 10px; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.5) }
+    .sched { display: flex; flex-direction: column; gap: 6px }
+    .sched-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: rgba(255,255,255,.03); border-radius: 8px; border-left: 3px solid transparent }
+    .sched-row.now { background: rgba(239,68,68,.1); border-left-color: #ef4444 }
+    .sched-row .time { font-family: ui-monospace, monospace; font-size: 12px; color: #fbbf24; min-width: 50px; font-weight: 700 }
+    .sched-row .title { flex: 1; font-size: 13px }
+    .sched-row .kind { font-size: 10px; color: rgba(255,255,255,.4); text-transform: uppercase; letter-spacing: .04em }
+    .empty { padding: 16px; text-align: center; color: rgba(255,255,255,.35); font-size: 12px }
+
+    .archive { display: grid; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); gap: 12px; margin-top: 16px }
+    .archive-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; overflow: hidden; cursor: pointer; transition: transform .15s, background .15s }
+    .archive-card:hover { transform: translateY(-2px); background: rgba(255,255,255,.07) }
+    .archive-card .thumb { width: 100%; aspect-ratio: 16/9; background: #1a0a00 center/cover no-repeat; display: flex; align-items: center; justify-content: center; font-size: 32px; color: rgba(255,255,255,.2) }
+    .archive-card .info { padding: 10px 12px }
+    .archive-card .info .t { font-size: 13px; font-weight: 700; margin-bottom: 4px; line-height: 1.3 }
+    .archive-card .info .m { font-size: 11px; color: rgba(255,255,255,.4) }
+
+    footer { margin: 32px 0 16px; text-align: center; color: rgba(255,255,255,.35); font-size: 11px }
+    footer a { color: rgba(255,255,255,.55); margin: 0 8px }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>📺 Shital TV<small>Live bhajans · aarti · festivals from Shirdi Sai Temple</small></h1>
+      <span id="live-pill" class="live-pill off"><span class="dot"></span><span id="live-text">Checking…</span></span>
+    </header>
+
+    <main>
+      <section>
+        <div class="player" id="player">
+          <div class="placeholder">
+            <div class="icon">🕉</div>
+            <h2>Connecting…</h2>
+            <p>Loading the temple TV channel.</p>
+          </div>
+        </div>
+        <div class="now-strip">
+          <div>
+            <div class="title" id="now-title">—</div>
+            <div class="sub" id="now-sub"></div>
+          </div>
+          <button class="cast-btn" id="cast-btn" onclick="alert('Cast: tap your TV remote\\'s YouTube icon and search for our channel, OR open YouTube on your TV → Library → see the live stream.')">📡 Watch on TV</button>
+        </div>
+        <div class="panel">
+          <h3>📚 Recent broadcasts</h3>
+          <div class="archive" id="archive"><div class="empty">No archive yet.</div></div>
+        </div>
+      </section>
+
+      <aside>
+        <div class="donate">
+          <h3>🙏 Donate while you watch</h3>
+          <p>Your gift supports daily aarti, bhajans, and the temple's outreach.</p>
+          <div class="amounts">
+            <a href="https://service.shital.org.uk/?amount=5">£5</a>
+            <a href="https://service.shital.org.uk/?amount=11">£11</a>
+            <a href="https://service.shital.org.uk/?amount=21">£21</a>
+            <a href="https://service.shital.org.uk/?amount=51">£51</a>
+          </div>
+          <a class="custom" href="https://service.shital.org.uk/">Choose amount →</a>
+        </div>
+
+        <div class="panel">
+          <h3>📅 Today's schedule</h3>
+          <div class="sched" id="schedule"><div class="empty">Loading…</div></div>
+        </div>
+
+        <div class="panel">
+          <h3>ℹ️ About</h3>
+          <p style="font-size:12px;color:rgba(255,255,255,.55);margin:0">
+            Shital TV is the online TV channel of the Shirdi Sai Temple network. Live broadcasts daily 8 AM – 9 PM UK time. All times shown in London time.
+          </p>
+        </div>
+      </aside>
+    </main>
+
+    <footer>
+      <a href="/">Home</a> · <a href="https://service.shital.org.uk/">Donate</a> · <a href="https://shital.org.uk/admin">Admin</a>
+    </footer>
+  </div>
+
+<script>
+(function () {
+  const API = '/api/v1';
+  const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+  function setLive(state, text) {
+    var pill = document.getElementById('live-pill');
+    var txt  = document.getElementById('live-text');
+    pill.classList.toggle('off', state !== 'LIVE');
+    txt.textContent = text;
+  }
+
+  function renderPlayer(html) {
+    document.getElementById('player').innerHTML = html;
+  }
+
+  function ytEmbed(videoId, isLive) {
+    if (!videoId) return '';
+    var src = 'https://www.youtube.com/embed/' + encodeURIComponent(videoId) +
+              '?autoplay=1&rel=0&modestbranding=1' + (isLive ? '&controls=1' : '');
+    return '<iframe src="' + src + '" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+  }
+
+  function placeholder(icon, title, body, countdown) {
+    return '<div class="placeholder"><div class="icon">' + icon + '</div>' +
+           '<h2>' + title + '</h2><p>' + body + '</p>' +
+           (countdown ? '<div class="countdown">' + countdown + '</div>' : '') +
+           '</div>';
+  }
+
+  function fmtTime(s) {
+    if (!s) return '';
+    var t = s.split(':');
+    return (t[0] || '') + ':' + (t[1] || '00');
+  }
+
+  function nextOccurrence(dow, hhmm) {
+    var now = new Date();
+    var today = (now.getDay() + 6) % 7;  // JS: Sun=0; we use Mon=0
+    var parts = hhmm.split(':');
+    var target = new Date(now);
+    target.setHours(parts[0], parts[1] || 0, 0, 0);
+    var add = ((dow - today) + 7) % 7;
+    if (add === 0 && target.getTime() <= now.getTime()) add = 7;
+    target.setDate(target.getDate() + add);
+    return target;
+  }
+
+  function countdownText(target) {
+    var ms = target.getTime() - Date.now();
+    if (ms <= 0) return '';
+    var hrs = Math.floor(ms / 3.6e6);
+    var min = Math.floor((ms % 3.6e6) / 6e4);
+    if (hrs >= 24) return 'in ' + Math.floor(hrs / 24) + ' day(s)';
+    if (hrs > 0) return 'starts in ' + hrs + 'h ' + min + 'm';
+    return 'starts in ' + min + ' min';
+  }
+
+  async function loadNow() {
+    try {
+      var r = await fetch(API + '/broadcast/now');
+      if (!r.ok) throw new Error(r.status);
+      var d = await r.json();
+
+      if (d.state === 'LIVE') {
+        var ev = d.event || {};
+        setLive('LIVE', 'Live now');
+        if (ev.youtube_video_id) {
+          renderPlayer(ytEmbed(ev.youtube_video_id, true));
+        } else {
+          renderPlayer(placeholder('🔴', 'Live now', ev.title || 'Live broadcast in progress.', ''));
+        }
+        document.getElementById('now-title').textContent = ev.title || 'Live broadcast';
+        document.getElementById('now-sub').textContent = (ev.branch_id ? ev.branch_id + ' · ' : '') + (ev.description || '');
+      } else if (d.state === 'SCHEDULED_NOW') {
+        var b = d.block || {};
+        setLive('SCHEDULED', 'On air');
+        if (b.asset_yt) {
+          renderPlayer(ytEmbed(b.asset_yt, false));
+        } else {
+          renderPlayer(placeholder('📺', b.asset_title || b.title_override || 'Now playing',
+            (b.asset_kind || 'Scheduled programme') + ' from the temple archive.', ''));
+        }
+        document.getElementById('now-title').textContent = b.asset_title || b.title_override || 'Scheduled programme';
+        document.getElementById('now-sub').textContent = (b.asset_kind || '') + ' · ' + fmtTime(b.start_time);
+      } else if (d.state === 'UPCOMING') {
+        var u = d.block || {};
+        setLive('OFFLINE', 'Off-air');
+        var when = nextOccurrence(u.day_of_week, u.start_time);
+        renderPlayer(placeholder('🕉', 'Off air now',
+          'Next broadcast: <b>' + (u.asset_title || u.title_override || 'Programme') + '</b> at ' + fmtTime(u.start_time) + ' on ' + DAY_NAMES[u.day_of_week] + '.',
+          countdownText(when)));
+        document.getElementById('now-title').textContent = 'Next: ' + (u.asset_title || u.title_override || 'Programme');
+        document.getElementById('now-sub').textContent = DAY_NAMES[u.day_of_week] + ' ' + fmtTime(u.start_time);
+      } else {
+        setLive('OFFLINE', 'Off-air');
+        renderPlayer(placeholder('🕉', 'TV channel coming soon',
+          'The temple TV channel will broadcast live bhajans daily 8 AM – 9 PM UK time once the YouTube channel is set up.', ''));
+      }
+    } catch (e) {
+      setLive('OFFLINE', 'Off-air');
+      renderPlayer(placeholder('🕉', 'TV channel coming soon',
+        'The temple TV channel will broadcast live bhajans daily 8 AM – 9 PM UK time once the YouTube channel is set up.', ''));
+    }
+  }
+
+  async function loadSchedule() {
+    try {
+      var r = await fetch(API + '/broadcast/schedule');
+      if (!r.ok) throw new Error(r.status);
+      var d = await r.json();
+      var todayIdx = (new Date().getDay() + 6) % 7;
+      var todayItems = (d.items || []).filter(function (x) { return x.day_of_week === todayIdx; })
+        .sort(function (a, b) { return (a.start_time || '').localeCompare(b.start_time || ''); });
+      var box = document.getElementById('schedule');
+      if (todayItems.length === 0) {
+        box.innerHTML = '<div class="empty">No scheduled programmes today.</div>';
+        return;
+      }
+      var nowM = (new Date()).getHours() * 60 + (new Date()).getMinutes();
+      box.innerHTML = todayItems.map(function (x) {
+        var parts = (x.start_time || '0:0').split(':');
+        var startM = parseInt(parts[0], 10) * 60 + parseInt(parts[1] || 0, 10);
+        var endM = startM + (x.duration_min || 30);
+        var isNow = nowM >= startM && nowM < endM;
+        return '<div class="sched-row' + (isNow ? ' now' : '') + '">' +
+               '<span class="time">' + fmtTime(x.start_time) + '</span>' +
+               '<span class="title">' + (x.asset_title || x.title_override || 'Programme') + '</span>' +
+               '<span class="kind">' + (x.asset_kind || '').toLowerCase() + '</span>' +
+               '</div>';
+      }).join('');
+    } catch (e) {
+      document.getElementById('schedule').innerHTML = '<div class="empty">Schedule unavailable.</div>';
+    }
+  }
+
+  async function loadArchive() {
+    try {
+      var r = await fetch(API + '/broadcast/archive?limit=12');
+      if (!r.ok) throw new Error(r.status);
+      var d = await r.json();
+      var box = document.getElementById('archive');
+      if (!d.items || d.items.length === 0) {
+        box.innerHTML = '<div class="empty">No past broadcasts yet — the archive fills up as live sessions end.</div>';
+        return;
+      }
+      box.innerHTML = d.items.map(function (x) {
+        var thumb = x.youtube_video_id
+          ? 'background-image:url(https://i.ytimg.com/vi/' + x.youtube_video_id + '/hqdefault.jpg)'
+          : '';
+        var url = x.youtube_video_id
+          ? 'https://youtube.com/watch?v=' + x.youtube_video_id
+          : (x.recording_url || '#');
+        return '<a class="archive-card" href="' + url + '" target="_blank" rel="noreferrer">' +
+               '<div class="thumb" style="' + thumb + '">' + (thumb ? '' : '🎬') + '</div>' +
+               '<div class="info"><div class="t">' + (x.title || 'Past broadcast') + '</div>' +
+               '<div class="m">' + (x.branch_id || '') + (x.viewer_count_peak ? ' · ' + x.viewer_count_peak + ' viewers' : '') + '</div></div>' +
+               '</a>';
+      }).join('');
+    } catch (e) {
+      document.getElementById('archive').innerHTML = '<div class="empty">Archive unavailable.</div>';
+    }
+  }
+
+  loadNow(); loadSchedule(); loadArchive();
+  setInterval(loadNow, 60_000);  // re-check live status every minute
+})();
+</script>
+</body>
+</html>
