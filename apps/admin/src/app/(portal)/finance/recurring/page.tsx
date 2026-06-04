@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 
-const CATEGORIES = ['RENT','RATES','LEASE','UTILITIES','HMRC_VAT','HMRC_PAYE','HMRC_CORP_TAX','INSURANCE','PAYROLL','OTHER']
+const CATEGORIES = ['RENT','RATES','LEASE','UTILITIES','HMRC_VAT','HMRC_PAYE','HMRC_CORP_TAX','INSURANCE','PAYROLL','HOSTING','SOFTWARE','DOMAIN','PROFESSIONAL','OTHER']
 const CRITICAL_CATS = new Set(['RENT','LEASE','HMRC_VAT','HMRC_PAYE','HMRC_CORP_TAX'])
 const FREQUENCIES = ['DAILY','WEEKLY','MONTHLY','QUARTERLY','BIANNUAL','ANNUAL']
 
@@ -17,6 +17,10 @@ const CAT_COLORS: Record<string,string> = {
   HMRC_CORP_TAX:'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30',
   INSURANCE:'bg-teal-500/20 text-teal-300 border-teal-500/30',
   PAYROLL:'bg-green-500/20 text-green-300 border-green-500/30',
+  HOSTING:'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+  SOFTWARE:'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+  DOMAIN:'bg-sky-500/20 text-sky-300 border-sky-500/30',
+  PROFESSIONAL:'bg-amber-500/20 text-amber-300 border-amber-500/30',
   OTHER:'bg-white/5 text-white/40 border-white/10',
 }
 
