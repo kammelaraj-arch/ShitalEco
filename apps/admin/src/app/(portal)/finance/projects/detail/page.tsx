@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { apiFetch } from '@/lib/api'
+import { UserPicker } from '@/components/ui/UserPicker'
+import { AccountPicker } from '@/components/ui/AccountPicker'
 
 // ─── Types (match the backend serialisation) ────────────────────────────────
 
@@ -182,11 +184,17 @@ export default function ProjectDetailPage() {
           <KPI label="Open invoices"   value={fmtCurrency(summary.open_invoices)} hint={`Team ${summary.team_size} · Risks ${summary.open_risks}`} />
         </div>
 
-        {/* Owners */}
+        {/* Owners — click any card to assign / change the person */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <OwnerCard role="Project Manager"  name={summary.project_manager_name}  email={summary.project_manager_email} />
-          <OwnerCard role="Business Owner"   name={summary.business_owner_name}   email={summary.business_owner_email} />
-          <OwnerCard role="Tech Owner"       name={summary.tech_owner_name}       email={summary.tech_owner_email} />
+          <OwnerEditor projectId={id} role="Project Manager" field="project_manager_id"
+            current={summary.project_manager_id ? { id: summary.project_manager_id, name: summary.project_manager_name || '', email: summary.project_manager_email || '' } : null}
+            onSaved={loadSummary} />
+          <OwnerEditor projectId={id} role="Business Owner"  field="business_owner_id"
+            current={summary.business_owner_id ? { id: summary.business_owner_id, name: summary.business_owner_name || '', email: summary.business_owner_email || '' } : null}
+            onSaved={loadSummary} />
+          <OwnerEditor projectId={id} role="Tech Owner"      field="tech_owner_id"
+            current={summary.tech_owner_id ? { id: summary.tech_owner_id, name: summary.tech_owner_name || '', email: summary.tech_owner_email || '' } : null}
+            onSaved={loadSummary} />
         </div>
 
         {/* Sub-projects */}
@@ -250,12 +258,49 @@ function KPI({ label, value, hint }: { label: string; value: string; hint?: stri
     </div>
   )
 }
-function OwnerCard({ role, name, email }: { role: string; name: string | null; email: string | null }) {
+function OwnerEditor({ projectId, role, field, current, onSaved }: {
+  projectId: string
+  role: string
+  field: 'project_manager_id' | 'business_owner_id' | 'tech_owner_id'
+  current: { id: string; name: string; email: string } | null
+  onSaved: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  async function save(sel: { id: string; name: string; email: string } | null) {
+    setSaving(true)
+    try {
+      await apiFetch(`/admin/projects/${projectId}/owners`, {
+        method: 'PATCH',
+        body: JSON.stringify({ [field]: sel?.id || '' }),
+      })
+      onSaved(); setEditing(false)
+    } finally { setSaving(false) }
+  }
   return (
     <div className="rounded-xl p-3 bg-white/5 border border-white/10">
-      <p className="text-white/40 text-[10px] uppercase tracking-wider">{role}</p>
-      <p className="text-white font-semibold text-sm">{name || <span className="text-white/30">— unassigned</span>}</p>
-      {email && <p className="text-white/40 text-xs">{email}</p>}
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <p className="text-white/40 text-[10px] uppercase tracking-wider">{role}</p>
+        {!editing && (
+          <button onClick={() => setEditing(true)} className="text-saffron-300 text-[10px] hover:underline">
+            {current ? 'Change' : 'Assign'}
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="space-y-1">
+          <UserPicker value={current ? { id: current.id, name: current.name, email: current.email } : null} onChange={save} placeholder="Search & assign…" />
+          <div className="flex justify-between text-[10px]">
+            <button onClick={() => save(null)} disabled={saving} className="text-red-400 hover:underline">Clear</button>
+            <button onClick={() => setEditing(false)} className="text-white/40 hover:text-white/70">Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <p className="text-white font-semibold text-sm">{current?.name || <span className="text-white/30">— unassigned</span>}</p>
+          {current?.email && <p className="text-white/40 text-xs">{current.email}</p>}
+        </>
+      )}
     </div>
   )
 }
@@ -304,24 +349,27 @@ function useList<T>(url: string, key: string = 'items') {
 
 function TeamTab({ projectId, setMsg, onChange }: { projectId: string; setMsg: (m: { text: string; ok: boolean }) => void; onChange: () => void }) {
   const { items, reload } = useList<Assignment>(`/admin/projects/${projectId}/assignments`)
-  const [userId, setUserId] = useState(''); const [role, setRole] = useState('TEAM_MEMBER'); const [notes, setNotes] = useState('')
+  const [picked, setPicked] = useState<{ id: string; name: string; email: string } | null>(null)
+  const [role, setRole] = useState('TEAM_MEMBER'); const [notes, setNotes] = useState('')
   async function add() {
-    if (!userId.trim()) { setMsg({ text: 'user_id required (paste a users.id UUID)', ok: false }); return }
-    try { await apiFetch(`/admin/projects/${projectId}/assignments`, { method: 'POST', body: JSON.stringify({ user_id: userId.trim(), role: role.trim(), notes }) })
-      setMsg({ text: 'Added', ok: true }); setUserId(''); setNotes(''); reload(); onChange() }
+    if (!picked) { setMsg({ text: 'Pick a person first', ok: false }); return }
+    try { await apiFetch(`/admin/projects/${projectId}/assignments`, { method: 'POST', body: JSON.stringify({ user_id: picked.id, role: role.trim(), notes }) })
+      setMsg({ text: 'Added', ok: true }); setPicked(null); setNotes(''); reload(); onChange() }
     catch (e) { setMsg({ text: e instanceof Error ? e.message : 'Failed', ok: false }) }
   }
   async function remove(aid: string) {
     if (!confirm('Remove this team member?')) return
-    try { await fetch(`/api/v1/admin/projects/${projectId}/assignments/${aid}`, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem('shital_access_token') || ''}` } })
+    try { await apiFetch(`/admin/projects/${projectId}/assignments/${aid}`, { method: 'DELETE' })
       setMsg({ text: 'Removed', ok: true }); reload(); onChange() }
     catch { setMsg({ text: 'Failed', ok: false }) }
   }
   return <CardWrap>
-    <SectionHeader title="Team" count={items.length} />
+    <SectionHeader title="Team" count={items.length} action={<Link href="/users" className="text-xs text-saffron-300 hover:underline">+ Add user →</Link>} />
     <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-      <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" placeholder="user_id (UUID)" value={userId} onChange={e => setUserId(e.target.value)} />
-      <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" placeholder="role e.g. DEVELOPER" value={role} onChange={e => setRole(e.target.value)} />
+      <UserPicker value={picked} onChange={setPicked} placeholder="Search for a person…" />
+      <select className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" value={role} onChange={e => setRole(e.target.value)}>
+        {['PROJECT_MANAGER','BUSINESS_OWNER','TECH_OWNER','DEVELOPER','ANALYST','TESTER','TEAM_MEMBER','OBSERVER'].map(r => <option key={r} value={r}>{r}</option>)}
+      </select>
       <div className="flex gap-2">
         <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white flex-1" placeholder="notes (optional)" value={notes} onChange={e => setNotes(e.target.value)} />
         <button onClick={add} className="px-4 py-2 rounded-lg bg-saffron-gradient text-white text-sm font-bold">+ Add</button>
@@ -499,11 +547,12 @@ function ExpensesTab({ projectId, setMsg, onChange }: { projectId: string; setMs
 
 function InvoicesTab({ projectId, setMsg, onChange }: { projectId: string; setMsg: (m: { text: string; ok: boolean }) => void; onChange: () => void }) {
   const { items, reload } = useList<Invoice>(`/admin/projects/${projectId}/invoices`)
-  const [vendor, setVendor] = useState(''); const [no, setNo] = useState(''); const [date, setDate] = useState(''); const [due, setDue] = useState(''); const [amt, setAmt] = useState('')
+  const [vendorPick, setVendorPick] = useState<{ id: string; name: string } | null>(null)
+  const [no, setNo] = useState(''); const [date, setDate] = useState(''); const [due, setDue] = useState(''); const [amt, setAmt] = useState('')
   async function add() {
-    if (!vendor.trim() || !amt) return
-    try { await apiFetch(`/admin/projects/${projectId}/invoices`, { method: 'POST', body: JSON.stringify({ vendor, invoice_no: no, invoice_date: date || null, due_date: due || null, amount: Number(amt) }) })
-      setVendor(''); setNo(''); setDate(''); setDue(''); setAmt(''); reload(); onChange() }
+    if (!vendorPick || !amt) { setMsg({ text: 'Pick a vendor and enter an amount', ok: false }); return }
+    try { await apiFetch(`/admin/projects/${projectId}/invoices`, { method: 'POST', body: JSON.stringify({ vendor: vendorPick.name, invoice_no: no, invoice_date: date || null, due_date: due || null, amount: Number(amt) }) })
+      setVendorPick(null); setNo(''); setDate(''); setDue(''); setAmt(''); reload(); onChange() }
     catch (e) { setMsg({ text: e instanceof Error ? e.message : 'Failed', ok: false }) }
   }
   async function markPaid(inv: Invoice) {
@@ -511,9 +560,9 @@ function InvoicesTab({ projectId, setMsg, onChange }: { projectId: string; setMs
       reload(); onChange() } catch { /* ignore */ }
   }
   return <CardWrap>
-    <SectionHeader title="Vendor invoices" count={items.length} />
+    <SectionHeader title="Vendor invoices" count={items.length} action={<Link href="/accounts" className="text-xs text-saffron-300 hover:underline">+ New vendor →</Link>} />
     <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-      <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white md:col-span-2" placeholder="vendor" value={vendor} onChange={e => setVendor(e.target.value)} />
+      <div className="md:col-span-2"><AccountPicker accountType="supplier" value={vendorPick} onChange={setVendorPick} placeholder="Search vendor…" /></div>
       <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" placeholder="invoice #" value={no} onChange={e => setNo(e.target.value)} />
       <input type="date" className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" value={date} onChange={e => setDate(e.target.value)} />
       <input type="date" className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" value={due} onChange={e => setDue(e.target.value)} />
@@ -577,17 +626,18 @@ function FundingTab({ projectId }: { projectId: string }) {
 
 function PartnersTab({ projectId, setMsg, onChange }: { projectId: string; setMsg: (m: { text: string; ok: boolean }) => void; onChange: () => void }) {
   const { items, reload } = useList<Partner>(`/admin/projects/${projectId}/partners`)
-  const [accountId, setAccountId] = useState(''); const [rel, setRel] = useState('PARTNER'); const [notes, setNotes] = useState('')
+  const [picked, setPicked] = useState<{ id: string; name: string } | null>(null)
+  const [rel, setRel] = useState('PARTNER'); const [notes, setNotes] = useState('')
   async function add() {
-    if (!accountId.trim()) return
-    try { await apiFetch(`/admin/projects/${projectId}/partners`, { method: 'POST', body: JSON.stringify({ account_id: accountId.trim(), relationship: rel, notes }) })
-      setAccountId(''); setNotes(''); reload(); onChange() }
+    if (!picked) { setMsg({ text: 'Pick a CRM account first', ok: false }); return }
+    try { await apiFetch(`/admin/projects/${projectId}/partners`, { method: 'POST', body: JSON.stringify({ account_id: picked.id, relationship: rel, notes }) })
+      setPicked(null); setNotes(''); reload(); onChange() }
     catch (e) { setMsg({ text: e instanceof Error ? e.message : 'Failed', ok: false }) }
   }
   return <CardWrap>
-    <SectionHeader title="Partners + suppliers" count={items.length} action={<Link href="/accounts" className="text-xs text-saffron-300 hover:underline">Manage accounts →</Link>} />
+    <SectionHeader title="Partners + suppliers" count={items.length} action={<Link href="/accounts" className="text-xs text-saffron-300 hover:underline">+ New account →</Link>} />
     <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-      <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" placeholder="crm_accounts.id" value={accountId} onChange={e => setAccountId(e.target.value)} />
+      <AccountPicker accountType="any" value={picked} onChange={setPicked} placeholder="Search CRM accounts…" />
       <select className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" value={rel} onChange={e => setRel(e.target.value)}>{['PARTNER','GRANTOR','BENEFICIARY','SPONSOR','SUPPLIER'].map(r => <option key={r}>{r}</option>)}</select>
       <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" placeholder="notes" value={notes} onChange={e => setNotes(e.target.value)} />
       <button onClick={add} className="px-4 py-2 rounded-lg bg-saffron-gradient text-white text-sm font-bold">+ Add</button>

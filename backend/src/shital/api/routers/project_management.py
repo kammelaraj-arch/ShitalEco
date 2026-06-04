@@ -182,6 +182,56 @@ async def set_parent(project_uuid: str, body: ParentIn, ctx: CurrentSpace) -> di
 
 # ─── Assignments ─────────────────────────────────────────────────────────────
 
+class OwnersIn(BaseModel):
+    project_manager_id: str | None = None
+    business_owner_id: str | None = None
+    tech_owner_id: str | None = None
+
+
+@router.patch("/admin/projects/{project_uuid}/owners")
+async def set_owners(project_uuid: str, body: OwnersIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Set or clear PM / Business Owner / Tech Owner in one call. Any field
+    omitted in the request is left unchanged; passing an empty string clears
+    that role."""
+    _require_admin(ctx)
+
+    def _norm(v: str | None) -> tuple[bool, str | None]:
+        # (touched?, value) — None means "field not in body, don't touch"
+        if v is None:
+            return False, None
+        v = v.strip()
+        return True, (v or None)
+
+    pm_t, pm = _norm(body.project_manager_id)
+    bo_t, bo = _norm(body.business_owner_id)
+    tw_t, tw = _norm(body.tech_owner_id)
+
+    sets: list[str] = []
+    params: dict[str, Any] = {"id": project_uuid}
+    if pm_t:
+        sets.append("project_manager_id = CASE WHEN :pm <> '' THEN CAST(:pm AS UUID) ELSE NULL END")
+        params["pm"] = pm or ""
+    if bo_t:
+        sets.append("business_owner_id  = CASE WHEN :bo <> '' THEN CAST(:bo AS UUID) ELSE NULL END")
+        params["bo"] = bo or ""
+    if tw_t:
+        sets.append("tech_owner_id      = CASE WHEN :tw <> '' THEN CAST(:tw AS UUID) ELSE NULL END")
+        params["tw"] = tw or ""
+    if not sets:
+        return {"ok": True, "updated": 0}
+    sets.append("updated_at = NOW()")
+
+    async with SessionLocal() as db:
+        result = await db.execute(text(
+            f"UPDATE projects SET {', '.join(sets)} WHERE id = CAST(:id AS UUID)"
+        ), params)
+        await _log_activity(db, project_uuid, ctx, "STATUS_CHANGE", "Project owners updated", "")
+        await db.commit()
+    if not getattr(result, "rowcount", 0):
+        raise HTTPException(status_code=404, detail="project not found")
+    return {"ok": True, "updated": 1}
+
+
 class AssignmentIn(BaseModel):
     user_id: str
     role: str = "TEAM_MEMBER"
