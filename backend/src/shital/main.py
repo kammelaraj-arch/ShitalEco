@@ -618,6 +618,31 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_project_documents_proj ON project_documents(project_id) WHERE deleted_at IS NULL",
 
+        # ── Tasks ────────────────────────────────────────────────────────
+        # The Activity log records what HAPPENED (immutable timeline). Tasks
+        # record what NEEDS TO HAPPEN — assigned work with a due date and
+        # status that the team progresses. Kept deliberately small: one
+        # assignee, status enum, no sub-tasks. Adding a CHECKLIST kind to
+        # project_activities was considered and rejected because tasks need
+        # mutable state.
+        """CREATE TABLE IF NOT EXISTS project_tasks (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title           VARCHAR(255) NOT NULL,
+            description     TEXT         NOT NULL DEFAULT '',
+            assignee_id     UUID DEFAULT NULL,
+            due_date        DATE DEFAULT NULL,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'TODO',
+            priority        VARCHAR(20)  NOT NULL DEFAULT 'MEDIUM',
+            created_by      UUID DEFAULT NULL,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            completed_at    TIMESTAMPTZ DEFAULT NULL,
+            deleted_at      TIMESTAMPTZ DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_tasks_proj      ON project_tasks(project_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_tasks_assignee  ON project_tasks(assignee_id) WHERE deleted_at IS NULL AND status <> 'DONE'",
+
         # Budget breakdown — one row per category (LABOUR / MATERIALS /
         # SERVICES / TRAVEL / OTHER, matching the project_expenses category
         # enum). Variance reporting joins this against the expense rollup

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { apiFetch } from '@/lib/api'
@@ -29,6 +29,7 @@ interface Summary {
 }
 
 interface Assignment { id: string; user_id: string; user_name: string; user_email: string; role: string; notes: string; assigned_at: string }
+interface Task { id: string; title: string; description: string; assignee_id: string | null; assignee_name: string | null; assignee_email: string | null; due_date: string | null; status: string; priority: string; created_at: string; completed_at: string | null }
 interface Activity   { id: string; actor_email: string; kind: string; title: string; body: string; created_at: string }
 interface Milestone  { id: string; title: string; description: string; owner_name: string | null; due_date: string | null; status: string; pct_complete: number }
 interface Risk       { id: string; title: string; description: string; likelihood: number; impact: number; risk_score: number; mitigation: string; owner_name: string | null; status: string }
@@ -47,14 +48,15 @@ interface VendorRollupResp { vendors: VendorRollupRow[]; unlinked_invoices: numb
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const TABS = [
-  'overview', 'team', 'milestones', 'risks',
+  'overview', 'team', 'tasks', 'milestones', 'risks',
   'budget', 'expenses', 'invoices', 'funding',
   'partners', 'vendors', 'documents', 'activity', 'approvals',
 ] as const
 type Tab = typeof TABS[number]
 
 const TAB_LABEL: Record<Tab, string> = {
-  overview: '🏠 Overview', team: '👥 Team', milestones: '🎯 Milestones', risks: '⚠️ Risks',
+  overview: '🏠 Overview', team: '👥 Team', tasks: '✅ Tasks',
+  milestones: '🎯 Milestones', risks: '⚠️ Risks',
   budget: '📊 Budget', expenses: '💸 Expenses', invoices: '📑 Invoices', funding: '🎁 Funding',
   partners: '🤝 Partners', vendors: '🏷️ Vendors', documents: '📄 Documents', activity: '📜 Activity',
   approvals: '✅ Approvals',
@@ -234,6 +236,7 @@ export default function ProjectDetailPage() {
 
       {tab === 'overview'   && <OverviewTab   s={summary} />}
       {tab === 'team'       && <TeamTab       projectId={id} setMsg={setActionMsg} onChange={loadSummary} />}
+      {tab === 'tasks'      && <TasksTab      projectId={id} setMsg={setActionMsg} onChange={loadSummary} />}
       {tab === 'milestones' && <MilestonesTab projectId={id} setMsg={setActionMsg} onChange={loadSummary} />}
       {tab === 'risks'      && <RisksTab      projectId={id} setMsg={setActionMsg} onChange={loadSummary} />}
       {tab === 'budget'     && <BudgetTab     projectId={id} setMsg={setActionMsg} onChange={loadSummary} />}
@@ -425,6 +428,91 @@ function TeamTab({ projectId, setMsg, onChange }: { projectId: string; setMsg: (
           <td className="py-2 text-right"><button onClick={() => remove(a.id)} className="text-red-400 text-xs hover:underline">Remove</button></td>
         </tr>)}
         {items.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-white/30">No team members yet.</td></tr>}
+      </tbody>
+    </table>
+  </CardWrap>
+}
+
+// ─── Tasks ──────────────────────────────────────────────────────────────────
+
+const TASK_STATUSES   = ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'] as const
+const TASK_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const
+const PRIORITY_TONE: Record<string, string> = {
+  LOW:    'bg-white/5 border-white/10 text-white/50',
+  MEDIUM: 'bg-blue-500/15 border-blue-500/30 text-blue-300',
+  HIGH:   'bg-amber-500/15 border-amber-500/30 text-amber-300',
+  URGENT: 'bg-red-500/15 border-red-500/30 text-red-300',
+}
+const TASK_STATUS_TONE: Record<string, string> = {
+  TODO:        'bg-white/10 border-white/20 text-white/70',
+  IN_PROGRESS: 'bg-amber-500/15 border-amber-500/30 text-amber-300',
+  BLOCKED:     'bg-red-500/15 border-red-500/30 text-red-300',
+  DONE:        'bg-green-500/15 border-green-500/30 text-green-300',
+  CANCELLED:   'bg-white/5 border-white/10 text-white/40',
+}
+
+function TasksTab({ projectId, setMsg, onChange }: { projectId: string; setMsg: (m: { text: string; ok: boolean }) => void; onChange: () => void }) {
+  const { items, reload } = useList<Task>(`/admin/projects/${projectId}/tasks`)
+  const [title, setTitle] = useState('')
+  const [assignee, setAssignee] = useState<{ id: string; name: string; email: string } | null>(null)
+  const [due, setDue] = useState('')
+  const [priority, setPriority] = useState('MEDIUM')
+  async function add() {
+    if (!title.trim()) return
+    try {
+      await apiFetch(`/admin/projects/${projectId}/tasks`, { method: 'POST',
+        body: JSON.stringify({ title, assignee_id: assignee?.id || null, due_date: due || null, priority }) })
+      setTitle(''); setAssignee(null); setDue(''); setPriority('MEDIUM')
+      reload(); onChange()
+    } catch (e) { setMsg({ text: e instanceof Error ? e.message : 'Failed', ok: false }) }
+  }
+  async function setStatus(t: Task, status: string) {
+    try {
+      await apiFetch(`/admin/projects/${projectId}/tasks/${t.id}`, { method: 'PATCH',
+        body: JSON.stringify({ title: t.title, description: t.description, assignee_id: t.assignee_id, due_date: t.due_date, status, priority: t.priority }) })
+      reload(); onChange()
+    } catch { /* ignore */ }
+  }
+  async function remove(t: Task) {
+    if (!confirm(`Delete task "${t.title}"?`)) return
+    try { await apiFetch(`/admin/projects/${projectId}/tasks/${t.id}`, { method: 'DELETE' }); reload(); onChange() }
+    catch { setMsg({ text: 'Failed to delete', ok: false }) }
+  }
+  const open = items.filter(t => t.status !== 'DONE' && t.status !== 'CANCELLED').length
+  return <CardWrap>
+    <SectionHeader title="Tasks" count={items.length} action={<span className="text-white/40 text-xs">{open} open</span>} />
+    <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
+      <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white md:col-span-2" placeholder="Task title…" value={title} onChange={e => setTitle(e.target.value)} />
+      <div className="md:col-span-2"><UserPicker value={assignee} onChange={setAssignee} placeholder="Assign to…" /></div>
+      <input type="date" className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" value={due} onChange={e => setDue(e.target.value)} />
+      <div className="flex gap-2">
+        <select className="bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-sm text-white flex-1" value={priority} onChange={e => setPriority(e.target.value)}>
+          {TASK_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <button onClick={add} className="px-3 py-2 rounded-lg bg-saffron-gradient text-white text-sm font-bold">+</button>
+      </div>
+    </div>
+    <table className="w-full text-sm">
+      <thead><tr className="text-left text-white/40 text-xs uppercase tracking-wider border-b border-white/10">
+        <th className="py-2">Task</th><th className="py-2">Assignee</th><th className="py-2">Due</th><th className="py-2">Pri</th><th className="py-2">Status</th><th className="py-2"></th>
+      </tr></thead>
+      <tbody>
+        {items.map(t => {
+          const overdue = t.due_date && t.status !== 'DONE' && t.status !== 'CANCELLED' && new Date(t.due_date) < new Date(new Date().toDateString())
+          return <tr key={t.id} className="border-b border-white/5">
+            <td className="py-2 text-white">{t.title}{t.description && <p className="text-white/40 text-xs">{t.description}</p>}</td>
+            <td className="py-2 text-white/80 text-xs">{t.assignee_name || <span className="text-white/30">unassigned</span>}{t.assignee_email && <p className="text-white/40">{t.assignee_email}</p>}</td>
+            <td className={`py-2 text-xs ${overdue ? 'text-red-400 font-bold' : 'text-white/60'}`}>{fmtDate(t.due_date)}{overdue && ' ⚠'}</td>
+            <td className="py-2"><Badge value={t.priority} tone={PRIORITY_TONE[t.priority] || ''} /></td>
+            <td className="py-2">
+              <select value={t.status} onChange={e => setStatus(t, e.target.value)} className={`bg-white/5 border rounded px-2 py-1 text-xs text-white ${TASK_STATUS_TONE[t.status]?.split(' ')[1] || 'border-white/10'}`}>
+                {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </td>
+            <td className="py-2 text-right"><button onClick={() => remove(t)} className="text-red-400 text-xs hover:underline">✕</button></td>
+          </tr>
+        })}
+        {items.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-white/30">No tasks yet — add the first one above.</td></tr>}
       </tbody>
     </table>
   </CardWrap>
@@ -733,19 +821,43 @@ function VendorsTab({ projectId }: { projectId: string }) {
 function DocumentsTab({ projectId, setMsg, onChange }: { projectId: string; setMsg: (m: { text: string; ok: boolean }) => void; onChange: () => void }) {
   const { items, reload } = useList<Document>(`/admin/projects/${projectId}/documents`)
   const [title, setTitle] = useState(''); const [kind, setKind] = useState('OTHER'); const [url, setUrl] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   async function add() {
     if (!title.trim() || !url.trim()) return
     try { await apiFetch(`/admin/projects/${projectId}/documents`, { method: 'POST', body: JSON.stringify({ title, kind, file_url: url }) })
       setTitle(''); setUrl(''); reload(); onChange() }
     catch (e) { setMsg({ text: e instanceof Error ? e.message : 'Failed', ok: false }) }
   }
+  async function upload(file: File) {
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('title', title.trim() || file.name)
+      fd.append('kind', kind)
+      const res = await fetch(`/api/v1/admin/projects/${projectId}/documents/upload`, {
+        method: 'POST', body: fd,
+        headers: { Authorization: `Bearer ${localStorage.getItem('shital_access_token') || ''}` },
+      })
+      if (!res.ok) throw new Error(`Upload failed (${res.status})`)
+      setTitle(''); reload(); onChange()
+      setMsg({ text: `Uploaded ${file.name}`, ok: true })
+    } catch (e) { setMsg({ text: e instanceof Error ? e.message : 'Upload failed', ok: false }) }
+    finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = '' }
+  }
   return <CardWrap>
     <SectionHeader title="Documents" count={items.length} />
     <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-      <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" placeholder="title" value={title} onChange={e => setTitle(e.target.value)} />
+      <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" placeholder="title (used for both upload + URL)" value={title} onChange={e => setTitle(e.target.value)} />
       <select className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" value={kind} onChange={e => setKind(e.target.value)}>{['CHARTER','CONTRACT','REPORT','INVOICE','OTHER'].map(k => <option key={k}>{k}</option>)}</select>
       <input className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" placeholder="https:// file URL (SharePoint / Drive)" value={url} onChange={e => setUrl(e.target.value)} />
-      <button onClick={add} className="px-4 py-2 rounded-lg bg-saffron-gradient text-white text-sm font-bold">+ Add</button>
+      <button onClick={add} disabled={!title.trim() || !url.trim()} className="px-4 py-2 rounded-lg bg-saffron-gradient text-white text-sm font-bold disabled:opacity-40">+ Add link</button>
+    </div>
+    <div className="flex items-center gap-2 -mt-2">
+      <span className="text-white/40 text-xs">…or upload a file directly:</span>
+      <input ref={fileInputRef} type="file" onChange={e => { const f = e.target.files?.[0]; if (f) upload(f) }} className="text-xs text-white/60 file:bg-saffron-gradient file:text-white file:text-xs file:font-bold file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:mr-2 file:cursor-pointer" />
+      {uploading && <span className="text-saffron-300 text-xs">Uploading…</span>}
     </div>
     <div className="space-y-2">
       {items.map(d => <a key={d.id} href={d.file_url} target="_blank" rel="noreferrer" className="block rounded-xl p-3 bg-white/5 border border-white/10 hover:bg-white/10">

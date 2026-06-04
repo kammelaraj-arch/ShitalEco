@@ -29,6 +29,8 @@ interface Project {
   image_url: string
   created_at: string
   updated_at: string
+  parent_project_id?: string | null
+  parent_project_name?: string | null
 }
 
 interface PLItem { code_id: string; code: string; code_name: string; code_type: string; amount: number }
@@ -195,15 +197,16 @@ export default function ProjectCostingPage() {
               <th className="text-left px-4 py-3">Name</th>
               <th className="text-left px-4 py-3">Branch</th>
               <th className="text-left px-4 py-3">Type</th>
+              <th className="text-left px-4 py-3">Parent</th>
               <th className="text-right px-4 py-3">Budget</th>
               <th className="text-right px-4 py-3">Goal</th>
               <th className="text-center px-4 py-3">Status</th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={7} className="px-4 py-10 text-center text-white/30 text-sm">Loading…</td></tr>}
+            {loading && <tr><td colSpan={8} className="px-4 py-10 text-center text-white/30 text-sm">Loading…</td></tr>}
             {!loading && items.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-12 text-center text-white/30 text-sm">No projects. Click + New Project to start tracking one.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-12 text-center text-white/30 text-sm">No projects. Click + New Project to start tracking one.</td></tr>
             )}
             {items.map(p => (
               <tr key={p.id} onClick={() => openDetail(p)} className="border-b border-white/5 hover:bg-white/3 cursor-pointer transition-colors">
@@ -215,6 +218,9 @@ export default function ProjectCostingPage() {
                 <td className="px-4 py-3 text-white/80 text-sm">{p.name}</td>
                 <td className="px-4 py-3 text-white/50 text-xs">{p.branch_id}</td>
                 <td className="px-4 py-3 text-white/50 text-xs">{p.project_type}</td>
+                <td className="px-4 py-3 text-xs" onClick={e => e.stopPropagation()}>
+                  <ParentCell project={p} onChanged={load} />
+                </td>
                 <td className="px-4 py-3 text-right text-white/70 font-mono text-sm">{fmt(p.budget_amount)}</td>
                 <td className="px-4 py-3 text-right text-white/70 font-mono text-sm">{fmt(p.goal_amount)}</td>
                 <td className="px-4 py-3 text-center">
@@ -239,6 +245,37 @@ export default function ProjectCostingPage() {
         onSetStatus={setStatus} onDeactivate={deactivate}
       />
     </div>
+  )
+}
+
+function ParentCell({ project, onChanged }: { project: Project; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false)
+  async function save(sel: { id: string; name: string } | null) {
+    try {
+      await apiFetch(`/admin/projects/${project.id}/parent`, {
+        method: 'PATCH',
+        body: JSON.stringify({ parent_project_id: sel?.id || null }),
+      })
+      setEditing(false); onChanged()
+    } catch { /* surfaced upstream */ }
+  }
+  if (editing) {
+    return (
+      <div className="w-56">
+        <ProjectPicker
+          value={project.parent_project_id ? { id: project.parent_project_id, name: project.parent_project_name || '' } : null}
+          onChange={save} excludeId={project.id} placeholder="Search…"
+        />
+        <button onClick={() => setEditing(false)} className="text-white/40 text-[10px] hover:underline mt-1">Cancel</button>
+      </div>
+    )
+  }
+  return (
+    <button onClick={() => setEditing(true)} className="text-left">
+      {project.parent_project_name
+        ? <span className="text-saffron-300 text-xs hover:underline">{project.parent_project_name}</span>
+        : <span className="text-white/30 text-xs hover:text-saffron-300">+ Set</span>}
+    </button>
   )
 }
 

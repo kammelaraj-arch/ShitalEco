@@ -12,7 +12,7 @@ import uuid
 from datetime import date as _date
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -1141,3 +1141,238 @@ async def change_status(project_uuid: str, body: StatusChangeIn, ctx: CurrentSpa
                             f"Status → {new_status}", "")
         await db.commit()
     return {"ok": True, "status": new_status}
+
+
+# ─── Tasks ───────────────────────────────────────────────────────────────────
+# Activity records what HAPPENED (immutable). Tasks record what NEEDS to
+# happen — assignee + due_date + status that moves TODO → IN_PROGRESS → DONE.
+
+class TaskIn(BaseModel):
+    title: str
+    description: str = ""
+    assignee_id: str | None = None
+    due_date: str | None = None
+    status: str = "TODO"
+    priority: str = "MEDIUM"
+
+
+_TASK_STATUSES   = {"TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"}
+_TASK_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "URGENT"}
+
+
+@router.get("/admin/projects/{project_uuid}/tasks")
+async def list_tasks(project_uuid: str, ctx: CurrentSpace, status: str = "") -> dict[str, Any]:
+    """List tasks for a project, optionally filtered by status. Open ones
+    (anything not DONE/CANCELLED) sort to the top by due_date."""
+    where = "t.project_id = CAST(:p AS UUID) AND t.deleted_at IS NULL"
+    params: dict[str, Any] = {"p": project_uuid}
+    if status:
+        where += " AND t.status = :s"
+        params["s"] = status.upper()
+    async with SessionLocal() as db:
+        rows = (await db.execute(text(f"""
+            SELECT t.id::text, t.title, t.description, t.assignee_id::text AS assignee_id,
+                   t.due_date, t.status, t.priority, t.created_at, t.updated_at, t.completed_at,
+                   u.full_name AS assignee_name, u.email AS assignee_email
+            FROM project_tasks t
+            LEFT JOIN users u ON u.id = t.assignee_id
+            WHERE {where}
+            ORDER BY (CASE WHEN t.status IN ('DONE','CANCELLED') THEN 1 ELSE 0 END),
+                     t.due_date NULLS LAST, t.created_at DESC
+        """), params)).mappings().all()
+    return {"items": [_serialise(dict(r)) for r in rows]}
+
+
+@router.post("/admin/projects/{project_uuid}/tasks", status_code=201)
+async def create_task(project_uuid: str, body: TaskIn, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    if not body.title.strip():
+        raise HTTPException(400, detail="title required")
+    status = (body.status or "TODO").upper()
+    if status not in _TASK_STATUSES:
+        raise HTTPException(400, detail=f"status must be one of {sorted(_TASK_STATUSES)}")
+    priority = (body.priority or "MEDIUM").upper()
+    if priority not in _TASK_PRIORITIES:
+        raise HTTPException(400, detail=f"priority must be one of {sorted(_TASK_PRIORITIES)}")
+
+    new_id = str(uuid.uuid4())
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO project_tasks (id, project_id, title, description, assignee_id,
+                                       due_date, status, priority, created_by)
+            VALUES (CAST(:id AS UUID), CAST(:p AS UUID), :t, :d,
+                    CASE WHEN :a <> '' THEN CAST(:a AS UUID) ELSE NULL END,
+                    CASE WHEN :due <> '' THEN CAST(:due AS DATE) ELSE NULL END,
+                    :s, :pr, CAST(:cb AS UUID))
+        """), {
+            "id": new_id, "p": project_uuid, "t": body.title.strip(),
+            "d": body.description or "", "a": body.assignee_id or "",
+            "due": body.due_date or "", "s": status, "pr": priority,
+            "cb": getattr(ctx, "user_id", None) or "",
+        })
+        await _log_activity(db, project_uuid, ctx, "TASK_CREATED", body.title, "", new_id)
+        # Notify assignee if any
+        if body.assignee_id:
+            await notify(db, body.assignee_id, "TASK_ASSIGNED",
+                         f"You have a new task: {body.title.strip()[:120]}",
+                         body.description or "",
+                         link_url=f"/admin/finance/projects/detail?id={project_uuid}",
+                         severity="INFO")
+        await db.commit()
+    return {"id": new_id, "ok": True}
+
+
+@router.patch("/admin/projects/{project_uuid}/tasks/{task_id}")
+async def update_task(project_uuid: str, task_id: str, body: TaskIn, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    status = (body.status or "TODO").upper()
+    if status not in _TASK_STATUSES:
+        raise HTTPException(400, detail=f"status must be one of {sorted(_TASK_STATUSES)}")
+    priority = (body.priority or "MEDIUM").upper()
+    if priority not in _TASK_PRIORITIES:
+        raise HTTPException(400, detail=f"priority must be one of {sorted(_TASK_PRIORITIES)}")
+
+    async with SessionLocal() as db:
+        # Capture previous assignee so we can notify the new one only when changed
+        prev = (await db.execute(text(
+            "SELECT assignee_id::text AS a, status FROM project_tasks WHERE id = CAST(:id AS UUID)"
+        ), {"id": task_id})).mappings().first()
+        prev_assignee = (prev or {}).get("a")
+
+        result = await db.execute(text("""
+            UPDATE project_tasks SET
+                title       = :t,
+                description = :d,
+                assignee_id = CASE WHEN :a <> '' THEN CAST(:a AS UUID) ELSE NULL END,
+                due_date    = CASE WHEN :due <> '' THEN CAST(:due AS DATE) ELSE NULL END,
+                status      = :s,
+                priority    = :pr,
+                completed_at = CASE WHEN :s = 'DONE' AND completed_at IS NULL THEN NOW()
+                                    WHEN :s <> 'DONE' THEN NULL
+                                    ELSE completed_at END,
+                updated_at  = NOW()
+            WHERE id = CAST(:id AS UUID) AND project_id = CAST(:p AS UUID) AND deleted_at IS NULL
+        """), {
+            "id": task_id, "p": project_uuid, "t": body.title.strip(),
+            "d": body.description or "", "a": body.assignee_id or "",
+            "due": body.due_date or "", "s": status, "pr": priority,
+        })
+        if not getattr(result, "rowcount", 0):
+            raise HTTPException(status_code=404, detail="task not found")
+        if body.assignee_id and body.assignee_id != prev_assignee:
+            await notify(db, body.assignee_id, "TASK_ASSIGNED",
+                         f"Task assigned to you: {body.title.strip()[:120]}",
+                         body.description or "",
+                         link_url=f"/admin/finance/projects/detail?id={project_uuid}",
+                         severity="INFO")
+        await _log_activity(db, project_uuid, ctx, "TASK_UPDATED", body.title, f"→ {status}", task_id)
+        await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/admin/projects/{project_uuid}/tasks/{task_id}", status_code=204)
+async def delete_task(project_uuid: str, task_id: str, ctx: CurrentSpace) -> None:
+    _require_admin(ctx)
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            UPDATE project_tasks SET deleted_at = NOW()
+            WHERE id = CAST(:id AS UUID) AND project_id = CAST(:p AS UUID) AND deleted_at IS NULL
+        """), {"id": task_id, "p": project_uuid})
+        await db.commit()
+    if not getattr(result, "rowcount", 0):
+        raise HTTPException(status_code=404, detail="task not found")
+
+
+# ─── Document upload ─────────────────────────────────────────────────────────
+# The Documents tab previously accepted a free-text URL only (SharePoint /
+# Drive link). This endpoint lets the operator upload an actual file too —
+# stored on the same MEDIA_DIR volume that catalog_items/<id>.<ext> uses, and
+# the served URL goes into project_documents.file_url so the existing list
+# endpoint just works.
+
+@router.post("/admin/projects/{project_uuid}/documents/upload", status_code=201)
+async def upload_document(
+    project_uuid: str,
+    ctx: CurrentSpace,
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    kind: str = Form("OTHER"),
+) -> dict[str, Any]:
+    import os
+
+    from shital.core.fabrics.config import settings as _settings
+    _require_admin(ctx)
+    if not title.strip():
+        title = (file.filename or "document").rsplit(".", 1)[0]
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, detail="empty file")
+    if len(data) > 25 * 1024 * 1024:  # 25 MB
+        raise HTTPException(413, detail="file too large (25 MB max)")
+
+    doc_id = str(uuid.uuid4())
+    media_dir = os.path.join(_settings.MEDIA_DIR, "projects", project_uuid)
+    os.makedirs(media_dir, exist_ok=True)
+    # Preserve extension so the browser picks the right content-type on
+    # FileResponse below.
+    ext = ""
+    if file.filename and "." in file.filename:
+        ext = "." + file.filename.rsplit(".", 1)[1].lower()[:10]
+    file_path = os.path.join(media_dir, f"{doc_id}{ext}")
+    with open(file_path, "wb") as f:
+        f.write(data)
+    serve_url = f"/api/v1/admin/projects/{project_uuid}/documents/{doc_id}/file"
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO project_documents (id, project_id, title, kind, file_url, uploaded_by)
+            VALUES (CAST(:id AS UUID), CAST(:p AS UUID), :t, :k, :u, CAST(:by AS UUID))
+        """), {
+            "id": doc_id, "p": project_uuid, "t": title.strip()[:255],
+            "k": (kind or "OTHER").upper(), "u": serve_url,
+            "by": getattr(ctx, "user_id", None) or "",
+        })
+        await _log_activity(db, project_uuid, ctx, "DOC_UPLOADED", title.strip(), f"{len(data)} bytes", doc_id)
+        await db.commit()
+    return {"id": doc_id, "file_url": serve_url, "size": len(data)}
+
+
+@router.get("/admin/projects/{project_uuid}/documents/{doc_id}/file")
+async def download_document(project_uuid: str, doc_id: str, ctx: CurrentSpace):
+    import glob
+    import os
+
+    from fastapi.responses import FileResponse
+
+    from shital.core.fabrics.config import settings as _settings
+    _require_admin(ctx)
+    pattern = os.path.join(_settings.MEDIA_DIR, "projects", project_uuid, f"{doc_id}.*")
+    matches = glob.glob(pattern)
+    if not matches:
+        raise HTTPException(404, detail="file not found on disk")
+    return FileResponse(matches[0])
+
+
+# ─── Donations tagging ───────────────────────────────────────────────────────
+# Lets the operator attribute a single donation to a project (or unset it).
+# Re-uses donations.project_id which is already on the table — this endpoint
+# is just the UI-friendly hook.
+
+class DonationProjectIn(BaseModel):
+    project_id: str | None = None
+
+
+@router.patch("/admin/donations/{donation_id}/project")
+async def tag_donation_to_project(donation_id: str, body: DonationProjectIn, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_admin(ctx)
+    new = (body.project_id or "").strip() or None
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            UPDATE donations SET
+                project_id = CASE WHEN :p <> '' THEN CAST(:p AS UUID) ELSE NULL END
+            WHERE id = CAST(:id AS UUID)
+        """), {"id": donation_id, "p": new or ""})
+        await db.commit()
+    if not getattr(result, "rowcount", 0):
+        raise HTTPException(404, detail="donation not found")
+    return {"ok": True, "project_id": new}

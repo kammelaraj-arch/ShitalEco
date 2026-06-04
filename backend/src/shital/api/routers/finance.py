@@ -148,9 +148,12 @@ async def list_donations(
                 c.email          AS contact_email,
                 'one-time'       AS donation_type,
                 d.created_at,
-                d.updated_at
+                d.updated_at,
+                d.project_id::text                AS project_id,
+                pr.name                           AS project_name
             FROM donations d
-            LEFT JOIN contacts c ON c.id = d.contact_id
+            LEFT JOIN contacts c  ON c.id  = d.contact_id
+            LEFT JOIN projects pr ON pr.id = d.project_id
             WHERE d.deleted_at IS NULL
               AND d.created_at >= :from_dt
               AND d.created_at < :to_dt
@@ -181,7 +184,9 @@ async def list_donations(
                 COALESCE(c2.email,     rgs.donor_email)  AS contact_email,
                 'recurring'::varchar                      AS donation_type,
                 rgs.created_at,
-                rgs.updated_at
+                rgs.updated_at,
+                NULL::text                                AS project_id,
+                NULL::varchar                             AS project_name
             FROM recurring_giving_subscriptions rgs
             LEFT JOIN recurring_giving_tiers t  ON t.id  = rgs.tier_id
             LEFT JOIN contacts              c2  ON c2.id = rgs.contact_id

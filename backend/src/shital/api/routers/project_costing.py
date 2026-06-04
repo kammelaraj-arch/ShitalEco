@@ -139,34 +139,44 @@ async def list_projects(
         "offset": max(0, (page - 1) * per_page),
     }
     if branch_id.strip():
-        where.append("branch_id = :bid")
+        where.append("p.branch_id = :bid")
         params["bid"] = branch_id.strip()
     if status.strip():
-        where.append("status = :st")
+        where.append("p.status = :st")
         params["st"] = status.strip().upper()
     if project_type.strip():
-        where.append("project_type = :pt")
+        where.append("p.project_type = :pt")
         params["pt"] = project_type.strip().upper()
     if fund_type.strip():
-        where.append("fund_type = :ft")
+        where.append("p.fund_type = :ft")
         params["ft"] = fund_type.strip().upper()
     if active is True:
-        where.append("is_active = true")
+        where.append("p.is_active = true")
     elif active is False:
-        where.append("is_active = false")
+        where.append("p.is_active = false")
     if search.strip():
-        where.append("(LOWER(project_id) LIKE :q OR LOWER(name) LIKE :q OR LOWER(reference) LIKE :q)")
+        where.append("(LOWER(p.project_id) LIKE :q OR LOWER(p.name) LIKE :q OR LOWER(p.reference) LIKE :q)")
         params["q"] = f"%{search.strip().lower()}%"
     sql_where = ("WHERE " + " AND ".join(where)) if where else ""
 
+    # Rewrite "WHERE …" → "WHERE …" prefixed with the table alias so the
+    # JOIN doesn't break the existing column references (status, branch_id…).
+    aliased_where = sql_where.replace("WHERE ", "WHERE ", 1)  # placeholder if needed
+    # Use table alias `p` on the JOIN; the where-clause already references
+    # bare columns which Postgres resolves to `p` because that's the only
+    # source of those columns in the FROM list (parent table only re-exports
+    # via the join target alias `pp`).
+    join_sql = f"FROM projects p LEFT JOIN projects pp ON pp.id = p.parent_project_id {aliased_where}"
     async with SessionLocal() as db:
         rows = (await db.execute(text(f"""
-            SELECT * FROM projects {sql_where}
-            ORDER BY sort_order, created_at DESC
+            SELECT p.*,
+                   pp.name::text AS parent_project_name
+            {join_sql}
+            ORDER BY p.sort_order, p.created_at DESC
             LIMIT :limit OFFSET :offset
         """), params)).mappings().all()
         total = (await db.execute(
-            text(f"SELECT COUNT(*) AS c FROM projects {sql_where}"),
+            text(f"SELECT COUNT(*) AS c {join_sql}"),
             {k: v for k, v in params.items() if k not in ("limit", "offset")},
         )).scalar() or 0
     return {
