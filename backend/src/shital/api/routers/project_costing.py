@@ -32,8 +32,29 @@ from shital.api.deps import CurrentSpace
 
 router = APIRouter(tags=["project-costing"])
 
-VALID_STATUSES = {"ACTIVE", "PLANNING", "ON_HOLD", "COMPLETED", "CANCELLED"}
-VALID_TYPES    = {"GENERAL", "CAPITAL", "RESTRICTED_FUND", "EVENT", "GRANT", "OUTREACH"}
+VALID_STATUSES = {"DRAFT", "ACTIVE", "PLANNING", "ON_HOLD", "COMPLETED", "CANCELLED"}
+# Project type drives approval rules + which financial reports the project
+# rolls into. Anything not in this set is rejected at create / update.
+# Keep in sync with apps/admin/src/app/(portal)/finance/projects/page.tsx
+# and apps/admin/src/app/(portal)/help/glossary/page.tsx.
+VALID_TYPES = {
+    "GENERAL",          # default catch-all
+    "CAPITAL",          # buildings, equipment, long-life assets
+    "OPERATIONAL",      # day-to-day running improvements
+    "RESTRICTED_FUND",  # donor-restricted programme
+    "EVENT",            # one-off time-bounded occasion
+    "FUNDRAISING",      # campaign to raise money
+    "GRANT",            # externally funded with reporting obligations
+    "OUTREACH",         # charitable programme delivered to beneficiaries
+    "TECHNOLOGY",       # software / digital infrastructure work
+    "MAINTENANCE",      # repairs, upkeep, BAU fixes
+    "TRAINING",         # staff / volunteer skill development
+    "MARKETING",        # awareness, comms, campaigns (non-fundraising)
+    "RESEARCH",         # studies, feasibility, surveys
+    "PARTNERSHIP",      # joint initiative with another org
+    "EMERGENCY",        # urgent response (e.g. disaster relief)
+    "COMPLIANCE",       # audit, regulatory, governance
+}
 VALID_FUNDS    = {"UNRESTRICTED", "RESTRICTED", "ENDOWMENT"}
 PRIVILEGED     = {"SUPER_ADMIN", "ADMIN", "ACCOUNTANT", "AUDITOR"}
 WRITERS        = {"SUPER_ADMIN", "ADMIN", "ACCOUNTANT"}

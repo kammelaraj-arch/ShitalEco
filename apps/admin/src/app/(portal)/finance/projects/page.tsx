@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { Pagination } from '@/components/ui/Pagination'
+import { ProjectPicker } from '@/components/ui/ProjectPicker'
 
 interface Branch { branch_id: string; name: string; is_active?: boolean }
 
@@ -49,7 +50,14 @@ interface TimelineRow {
   branch_id: string; fund_type: string
 }
 
-const PROJECT_TYPES = ['GENERAL', 'CAPITAL', 'RESTRICTED_FUND', 'EVENT', 'GRANT', 'OUTREACH']
+// Keep in sync with backend VALID_TYPES in
+// backend/src/shital/api/routers/project_costing.py and the glossary.
+const PROJECT_TYPES = [
+  'GENERAL', 'CAPITAL', 'OPERATIONAL', 'RESTRICTED_FUND',
+  'EVENT', 'FUNDRAISING', 'GRANT', 'OUTREACH',
+  'TECHNOLOGY', 'MAINTENANCE', 'TRAINING', 'MARKETING',
+  'RESEARCH', 'PARTNERSHIP', 'EMERGENCY', 'COMPLIANCE',
+]
 const STATUSES      = ['ACTIVE', 'PLANNING', 'ON_HOLD', 'COMPLETED', 'CANCELLED']
 const FUND_TYPES    = ['UNRESTRICTED', 'RESTRICTED', 'ENDOWMENT']
 
@@ -250,6 +258,7 @@ function ProjectForm({ open, onClose, onSaved, branches }: {
   const [endDate, setEndDate] = useState('')
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
+  const [parent, setParent] = useState<{ id: string; name: string; project_id: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -257,7 +266,7 @@ function ProjectForm({ open, onClose, onSaved, branches }: {
     if (!name.trim()) { setError('Name is required'); return }
     setSaving(true); setError('')
     try {
-      await apiFetch('/admin/projects', {
+      const created = await apiFetch<{ id?: string }>('/admin/projects', {
         method: 'POST',
         body: JSON.stringify({
           project_id: projectId, name, description, branch_id: branchId,
@@ -267,6 +276,17 @@ function ProjectForm({ open, onClose, onSaved, branches }: {
           reference, notes,
         }),
       })
+      // Backend create endpoint doesn't accept parent_project_id, so wire
+      // it up as a second call via the PATCH /parent endpoint. Skipped if
+      // the user didn't pick a parent.
+      if (parent && created?.id) {
+        try {
+          await apiFetch(`/admin/projects/${created.id}/parent`, {
+            method: 'PATCH',
+            body: JSON.stringify({ parent_project_id: parent.id }),
+          })
+        } catch { /* non-fatal — project still created */ }
+      }
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create project')
@@ -347,6 +367,12 @@ function ProjectForm({ open, onClose, onSaved, branches }: {
                   <label className={lbl}>End date</label>
                   <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className={inp} />
                 </div>
+              </div>
+
+              <div>
+                <label className={lbl}>Parent project (optional)</label>
+                <ProjectPicker value={parent} onChange={setParent} placeholder="Leave blank for top-level project…" />
+                <p className="text-white/30 text-[10px] mt-1">Link this project under an existing one to form a programme / sub-project hierarchy.</p>
               </div>
 
               <div>

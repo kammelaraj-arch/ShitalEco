@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { apiFetch } from '@/lib/api'
 import { UserPicker } from '@/components/ui/UserPicker'
 import { AccountPicker } from '@/components/ui/AccountPicker'
+import { ProjectPicker } from '@/components/ui/ProjectPicker'
 
 // ─── Types (match the backend serialisation) ────────────────────────────────
 
@@ -174,6 +175,7 @@ export default function ProjectDetailPage() {
             </p>
             {summary.description && <p className="text-white/60 text-sm mt-3 max-w-3xl">{summary.description}</p>}
           </div>
+          <ParentEditor projectId={id} current={summary.parent_project_id ? { id: summary.parent_project_id, name: summary.parent_project_name || '' } : null} onSaved={loadSummary} />
         </div>
 
         {/* KPI strip */}
@@ -258,6 +260,41 @@ function KPI({ label, value, hint }: { label: string; value: string; hint?: stri
     </div>
   )
 }
+function ParentEditor({ projectId, current, onSaved }: {
+  projectId: string
+  current: { id: string; name: string } | null
+  onSaved: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  async function save(sel: { id: string; name: string } | null) {
+    setSaving(true)
+    try {
+      await apiFetch(`/admin/projects/${projectId}/parent`, {
+        method: 'PATCH',
+        body: JSON.stringify({ parent_project_id: sel?.id || null }),
+      })
+      onSaved(); setEditing(false)
+    } finally { setSaving(false) }
+  }
+  if (!editing) {
+    return (
+      <button onClick={() => setEditing(true)} className="text-saffron-300 text-xs hover:underline shrink-0">
+        {current ? 'Change parent' : '+ Set parent project'}
+      </button>
+    )
+  }
+  return (
+    <div className="w-full sm:w-80 space-y-1">
+      <ProjectPicker value={current} onChange={save} excludeId={projectId} placeholder="Search for a parent project…" />
+      <div className="flex justify-between text-[10px]">
+        <button onClick={() => save(null)} disabled={saving} className="text-red-400 hover:underline">Clear parent</button>
+        <button onClick={() => setEditing(false)} className="text-white/40 hover:text-white/70">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 function OwnerEditor({ projectId, role, field, current, onSaved }: {
   projectId: string
   role: string
