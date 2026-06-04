@@ -643,6 +643,75 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_project_tasks_proj      ON project_tasks(project_id) WHERE deleted_at IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_project_tasks_assignee  ON project_tasks(assignee_id) WHERE deleted_at IS NULL AND status <> 'DONE'",
 
+        # ── TV / Broadcast channel ───────────────────────────────────────
+        # The temple's online TV channel runs through YouTube Live as the
+        # streaming backend; the admin keeps the content library, schedule
+        # and playout log so we own the "what's playing now" question
+        # independently of YouTube's API. Donations and viewer metrics tie
+        # back here. Public viewer lives at apps/tv/.
+        """CREATE TABLE IF NOT EXISTS broadcast_assets (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title           VARCHAR(255) NOT NULL,
+            description     TEXT         NOT NULL DEFAULT '',
+            kind            VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+            language        VARCHAR(20)  NOT NULL DEFAULT 'en',
+            branch_id       VARCHAR(100) DEFAULT NULL,
+            source_url      TEXT         NOT NULL DEFAULT '',
+            youtube_video_id VARCHAR(40) DEFAULT NULL,
+            duration_seconds INTEGER     NOT NULL DEFAULT 0,
+            thumbnail_url   TEXT         NOT NULL DEFAULT '',
+            rights_cleared  BOOLEAN      NOT NULL DEFAULT true,
+            tags            JSONB        NOT NULL DEFAULT '[]'::jsonb,
+            uploaded_by     UUID DEFAULT NULL,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at      TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_assets_kind     ON broadcast_assets(kind)     WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_assets_branch   ON broadcast_assets(branch_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_assets_yt       ON broadcast_assets(youtube_video_id) WHERE youtube_video_id IS NOT NULL",
+        # Schedule = recurring weekly grid. day_of_week 0=Mon … 6=Sun.
+        """CREATE TABLE IF NOT EXISTS broadcast_schedule_blocks (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id       VARCHAR(100) DEFAULT NULL,
+            day_of_week     SMALLINT     NOT NULL,
+            start_time      TIME         NOT NULL,
+            duration_min    INTEGER      NOT NULL DEFAULT 30,
+            asset_id        UUID REFERENCES broadcast_assets(id) ON DELETE SET NULL,
+            title_override  VARCHAR(255) NOT NULL DEFAULT '',
+            is_live_slot    BOOLEAN      NOT NULL DEFAULT false,
+            recurring       BOOLEAN      NOT NULL DEFAULT true,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at      TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_schedule_dow    ON broadcast_schedule_blocks(day_of_week, start_time) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_schedule_branch ON broadcast_schedule_blocks(branch_id) WHERE deleted_at IS NULL",
+        # Live broadcasts — actual occurrences (vs the recurring schedule).
+        # A row is created when something actually goes live, capturing the
+        # YouTube stream id + viewer peak for reporting.
+        """CREATE TABLE IF NOT EXISTS broadcast_live_events (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id       VARCHAR(100) DEFAULT NULL,
+            project_id      UUID DEFAULT NULL,
+            title           VARCHAR(255) NOT NULL,
+            description     TEXT         NOT NULL DEFAULT '',
+            scheduled_at    TIMESTAMPTZ  DEFAULT NULL,
+            started_at      TIMESTAMPTZ  DEFAULT NULL,
+            ended_at        TIMESTAMPTZ  DEFAULT NULL,
+            platform        VARCHAR(20)  NOT NULL DEFAULT 'youtube',
+            youtube_video_id VARCHAR(40) DEFAULT NULL,
+            stream_url      TEXT         NOT NULL DEFAULT '',
+            recording_url   TEXT         NOT NULL DEFAULT '',
+            viewer_count_peak INTEGER    NOT NULL DEFAULT 0,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'SCHEDULED',
+            created_by      UUID DEFAULT NULL,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_live_status  ON broadcast_live_events(status, scheduled_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_live_branch  ON broadcast_live_events(branch_id, scheduled_at DESC)",
+
         # Budget breakdown — one row per category (LABOUR / MATERIALS /
         # SERVICES / TRAVEL / OTHER, matching the project_expenses category
         # enum). Variance reporting joins this against the expense rollup
@@ -3613,6 +3682,7 @@ _mount("shital.api.routers.branches",         "router")
 _mount("shital.api.routers.projects",             "router")
 _mount("shital.api.routers.recurring_payments",   "router")
 _mount("shital.api.routers.hosting",              "router")
+_mount("shital.api.routers.broadcast",            "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
