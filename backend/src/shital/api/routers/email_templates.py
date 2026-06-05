@@ -99,9 +99,13 @@ async def admin_list_sent_emails(
                     d[k] = d[k].isoformat()
             items.append(d)
 
+        # Count query only takes the filter params — limit / offset aren't
+        # bound here and SQLAlchemy will reject the extras on some
+        # configurations. Pass a copy without them.
+        count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
         total = (await db.execute(
             text(f"SELECT COUNT(*) AS c FROM sent_emails {where_sql}"),
-            params,
+            count_params,
         )).mappings().one()
 
     return {"items": items, "total": int(total["c"])}
