@@ -246,6 +246,34 @@ async def _patch_schema() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_keyreg_events_key ON key_register_events(key_id, created_at DESC)",
+        # ── Per-set holdings (a single key definition may have N sets each
+        # held by a different person, each with their own undertaking +
+        # issue/return dates). This replaces the single holder_employee_id
+        # for new code; the legacy column stays as a denormalised "current
+        # primary holder" for back-compat with the existing list view.
+        """CREATE TABLE IF NOT EXISTS key_holdings (
+            id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            key_id                   UUID NOT NULL REFERENCES key_register(id) ON DELETE CASCADE,
+            set_number               INTEGER NOT NULL DEFAULT 1,
+            holder_employee_id       UUID,
+            issued_date              DATE,
+            returned_date            DATE,
+            expected_return_date     DATE,
+            status                   VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+            undertaking_required     BOOLEAN NOT NULL DEFAULT true,
+            undertaking_sent_at      TIMESTAMPTZ,
+            undertaking_signed_at    TIMESTAMPTZ,
+            undertaking_signed_name  VARCHAR(200) NOT NULL DEFAULT '',
+            undertaking_pdf_url      TEXT NOT NULL DEFAULT '',
+            notes                    TEXT NOT NULL DEFAULT '',
+            created_by_user_id       UUID,
+            created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at               TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_key_holdings_key      ON key_holdings(key_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_key_holdings_holder   ON key_holdings(holder_employee_id) WHERE deleted_at IS NULL AND status = 'ACTIVE'",
+        "CREATE INDEX IF NOT EXISTS idx_key_holdings_undersnd ON key_holdings(key_id) WHERE deleted_at IS NULL AND undertaking_required = true AND undertaking_signed_at IS NULL",
         """CREATE TABLE IF NOT EXISTS bookings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             branch_id VARCHAR(100) NOT NULL DEFAULT 'main',

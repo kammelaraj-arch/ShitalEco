@@ -776,6 +776,12 @@ export default function KeyRegisterPage() {
               />
             </div>
 
+            {/* Per-set holdings — only relevant when editing an existing
+                physical key (need the key_id to attach holdings to). */}
+            {editing && PHYSICAL_TYPES.has(form.key_type) && (
+              <HoldingsManager keyId={editing.id} />
+            )}
+
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => { setShowForm(false); setForm(EMPTY) }}
@@ -829,5 +835,306 @@ export default function KeyRegisterPage() {
         </div>
       )}
     </div>
+  )
+}
+
+// ─── Per-set Holdings Manager ────────────────────────────────────────────────
+// Renders inside the Edit Key drawer. Lists all sets of the key, who's holding
+// each one, undertaking status, and lets the operator issue / return / mark-lost
+// each one individually. Same employee picker as the main holder field.
+
+interface Holding {
+  id: string
+  set_number: number
+  holder_employee_id: string | null
+  holder_name: string | null
+  holder_email: string | null
+  holder_phone: string | null
+  holder_address: string | null
+  holder_employee_number: string | null
+  holder_job_title: string | null
+  issued_date: string | null
+  returned_date: string | null
+  expected_return_date: string | null
+  status: string
+  undertaking_required: boolean
+  undertaking_sent_at: string | null
+  undertaking_signed_at: string | null
+  undertaking_signed_name: string
+  undertaking_pdf_url: string
+  notes: string
+  created_at: string
+}
+
+function HoldingsManager({ keyId }: { keyId: string }) {
+  const [holdings, setHoldings] = useState<Holding[]>([])
+  const [loading, setLoading] = useState(true)
+  const [adding, setAdding] = useState(false)
+  const [empQuery, setEmpQuery] = useState('')
+  const [empResults, setEmpResults] = useState<EmployeeOption[]>([])
+  const [pick, setPick] = useState<EmployeeOption | null>(null)
+  const [setNumber, setSetNumber] = useState(1)
+  const [issuedDate, setIssuedDate] = useState('')
+  const [expectedReturnDate, setExpectedReturnDate] = useState('')
+  const [requireUndertaking, setRequireUndertaking] = useState(true)
+  const [notes, setNotes] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await apiFetch<{ items: Holding[] }>(`/key-register/${keyId}/holdings`)
+      setHoldings(data.items || [])
+    } catch { setHoldings([]) } finally { setLoading(false) }
+  }, [keyId])
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (empQuery.trim().length < 2) { setEmpResults([]); return }
+    const t = setTimeout(async () => {
+      try {
+        const r = await apiFetch<{ items?: EmployeeOption[] }>(
+          `/hr/employees/search?q=${encodeURIComponent(empQuery.trim())}`)
+        setEmpResults(r.items || [])
+      } catch { setEmpResults([]) }
+    }, 200)
+    return () => clearTimeout(t)
+  }, [empQuery])
+
+  async function addHolding() {
+    if (!pick) { alert('Pick a person first'); return }
+    try {
+      await apiFetch(`/key-register/${keyId}/holdings`, {
+        method: 'POST',
+        body: JSON.stringify({
+          holder_employee_id: pick.id,
+          set_number: setNumber,
+          issued_date: issuedDate,
+          expected_return_date: expectedReturnDate,
+          undertaking_required: requireUndertaking,
+          notes,
+        }),
+      })
+      setAdding(false); setPick(null); setEmpQuery(''); setSetNumber(setNumber + 1)
+      setIssuedDate(''); setExpectedReturnDate(''); setNotes('')
+      load()
+    } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
+  }
+  async function markReturned(h: Holding) {
+    const note = prompt('Optional note for return (e.g. condition):') || ''
+    try {
+      await apiFetch(`/key-register/${keyId}/holdings/${h.id}/return`, {
+        method: 'POST', body: JSON.stringify({ returned_date: new Date().toISOString().slice(0,10), notes: note }),
+      })
+      load()
+    } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
+  }
+  async function markLost(h: Holding) {
+    const note = prompt('Loss circumstances:') || ''
+    if (!note) return
+    try {
+      await apiFetch(`/key-register/${keyId}/holdings/${h.id}/mark-lost`, {
+        method: 'POST', body: JSON.stringify({ notes: note }),
+      })
+      load()
+    } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
+  }
+  async function markSigned(h: Holding) {
+    const name = prompt(`Holder's printed name (${h.holder_name || 'the holder'} signs):`, h.holder_name || '') || ''
+    if (!name) return
+    const url = prompt('Optional URL to scanned PDF (SharePoint / Drive):') || ''
+    try {
+      await apiFetch(`/key-register/${keyId}/holdings/${h.id}/undertaking/mark-signed`, {
+        method: 'POST', body: JSON.stringify({ signed_by_name: name, pdf_url: url }),
+      })
+      load()
+    } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
+  }
+  async function removeHolding(h: Holding) {
+    if (!confirm('Remove this holding row (only if created in error — audit history will be lost)?')) return
+    try {
+      await apiFetch(`/key-register/${keyId}/holdings/${h.id}`, { method: 'DELETE' })
+      load()
+    } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
+  }
+
+  const active = holdings.filter(h => h.status === 'ACTIVE')
+  const past = holdings.filter(h => h.status !== 'ACTIVE')
+
+  return (
+    <div className="mt-5 rounded-lg p-4 bg-white/3 border border-white/10 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h3 className="text-white font-bold text-sm">👥 Holders ({active.length} active)</h3>
+          <p className="text-white/40 text-[10px]">Each set has its own holder, issue date and undertaking.</p>
+        </div>
+        <button
+          onClick={() => setAdding(s => !s)}
+          className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-xs font-bold"
+        >{adding ? 'Cancel' : '+ Add holder'}</button>
+      </div>
+
+      {adding && (
+        <div className="rounded-lg p-3 bg-white/5 border border-white/10 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">Person</label>
+              {pick ? (
+                <div className="flex items-center gap-2 bg-white/5 border border-saffron-400/40 rounded px-2 py-1.5">
+                  <span className="text-white text-sm flex-1">{pick.full_name}</span>
+                  <button onClick={() => setPick(null)} className="text-white/40 hover:text-red-400">×</button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <input
+                    value={empQuery}
+                    onChange={e => setEmpQuery(e.target.value)}
+                    placeholder="Search employee…"
+                    className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded text-white text-sm"
+                  />
+                  {empResults.length > 0 && (
+                    <div className="absolute z-20 mt-1 w-full bg-slate-800 border border-white/10 rounded max-h-40 overflow-y-auto">
+                      {empResults.map(e => (
+                        <button key={e.id} onClick={() => { setPick(e); setEmpQuery(''); setEmpResults([]) }}
+                          className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/10">
+                          {e.full_name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">Set #</label>
+              <input type="number" min={1} value={setNumber} onChange={e => setSetNumber(parseInt(e.target.value) || 1)}
+                className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">Issued date</label>
+              <input type="date" value={issuedDate} onChange={e => setIssuedDate(e.target.value)}
+                className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">Expected return</label>
+              <input type="date" value={expectedReturnDate} onChange={e => setExpectedReturnDate(e.target.value)}
+                className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded text-white text-sm" />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-white/70 text-xs">
+            <input type="checkbox" checked={requireUndertaking} onChange={e => setRequireUndertaking(e.target.checked)} />
+            Require signed undertaking from this holder
+          </label>
+          <input value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="Notes (optional) — e.g. handed over by Anil at trustee meeting"
+            className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded text-white text-sm" />
+          <button onClick={addHolding} className="px-3 py-1.5 rounded bg-saffron-gradient text-white text-xs font-bold">
+            Assign holder
+          </button>
+        </div>
+      )}
+
+      {loading && <p className="text-white/30 text-xs text-center py-3">Loading holders…</p>}
+
+      {!loading && active.length === 0 && !adding && (
+        <p className="text-white/30 text-xs text-center py-3">No active holders. Click "+ Add holder" to assign a set.</p>
+      )}
+
+      {active.map(h => (
+        <HoldingRow key={h.id} h={h}
+          onReturn={() => markReturned(h)}
+          onLost={() => markLost(h)}
+          onMarkSigned={() => markSigned(h)}
+          onDelete={() => removeHolding(h)}
+        />
+      ))}
+
+      {past.length > 0 && (
+        <details>
+          <summary className="text-white/50 text-xs cursor-pointer hover:text-white">
+            📦 Past holdings ({past.length})
+          </summary>
+          <div className="space-y-2 mt-2">
+            {past.map(h => <HoldingRow key={h.id} h={h} historical />)}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function HoldingRow({ h, onReturn, onLost, onMarkSigned, onDelete, historical }: {
+  h: Holding
+  onReturn?: () => void
+  onLost?: () => void
+  onMarkSigned?: () => void
+  onDelete?: () => void
+  historical?: boolean
+}) {
+  const underPending = h.undertaking_required && !h.undertaking_signed_at
+  const overdue = h.expected_return_date && h.status === 'ACTIVE' &&
+                  new Date(h.expected_return_date) < new Date()
+  return (
+    <div className={`rounded-lg p-3 border ${historical ? 'bg-white/3 border-white/5' : underPending ? 'bg-amber-500/5 border-amber-500/30' : 'bg-white/5 border-white/10'}`}>
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-saffron-300 text-xs font-mono">Set #{h.set_number}</span>
+            <span className="text-white text-sm font-semibold">{h.holder_name || 'No holder'}</span>
+            {h.holder_job_title && <span className="text-white/40 text-[10px]">· {h.holder_job_title}</span>}
+            <StatusPill status={h.status} />
+            {underPending && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                Undertaking pending
+              </span>
+            )}
+            {h.undertaking_signed_at && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-300 border border-green-500/30">
+                ✓ Signed
+              </span>
+            )}
+            {overdue && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/30">
+                ⚠ Overdue return
+              </span>
+            )}
+          </div>
+          <div className="text-white/50 text-[10px] mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            {h.holder_email && <span>📧 {h.holder_email}</span>}
+            {h.holder_phone && <span>📞 {h.holder_phone}</span>}
+            {h.issued_date && <span>📅 Issued {h.issued_date}</span>}
+            {h.expected_return_date && <span>↩ Expected back {h.expected_return_date}</span>}
+            {h.returned_date && <span>✓ Returned {h.returned_date}</span>}
+          </div>
+          {h.holder_address && (
+            <p className="text-white/40 text-[10px] mt-1">🏠 {h.holder_address}</p>
+          )}
+          {h.notes && <p className="text-white/50 text-xs mt-1 italic">{h.notes}</p>}
+        </div>
+        {!historical && (
+          <div className="flex gap-1 flex-shrink-0">
+            {underPending && onMarkSigned && (
+              <button onClick={onMarkSigned} className="px-2 py-1 text-[10px] rounded bg-green-500/15 text-green-300 border border-green-500/30 hover:bg-green-500/25">
+                Mark signed
+              </button>
+            )}
+            {onReturn && <button onClick={onReturn} className="px-2 py-1 text-[10px] rounded bg-white/5 text-white/70 border border-white/10 hover:bg-white/10">Return</button>}
+            {onLost && <button onClick={onLost} className="px-2 py-1 text-[10px] rounded bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25">Mark lost</button>}
+            {onDelete && <button onClick={onDelete} className="px-2 py-1 text-[10px] rounded text-white/40 hover:text-red-400">×</button>}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StatusPill({ status }: { status: string }) {
+  const tone = status === 'ACTIVE'   ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+             : status === 'RETURNED' ? 'bg-white/5 text-white/50 border-white/10'
+             : status === 'LOST'     ? 'bg-red-500/15 text-red-300 border-red-500/30'
+             : 'bg-white/5 text-white/50 border-white/10'
+  return (
+    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${tone}`}>
+      {status}
+    </span>
   )
 }

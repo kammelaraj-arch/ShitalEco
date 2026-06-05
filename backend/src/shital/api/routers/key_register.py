@@ -632,3 +632,206 @@ async def mark_undertaking_signed(key_id: str, body: UndertakingMarkIn,
                          notes=f"Signed by {body.signed_by_name or 'holder'}")
         await db.commit()
     return {"ok": True, "key_id": key_id}
+
+
+# ─── Multi-holder / per-set holdings ─────────────────────────────────────────
+# A single key (definition) can have multiple physical sets, each held by a
+# different person at the same time (e.g. 5 sets of the donation-box key, one
+# with each trustee). Each holding has its own undertaking + issue/return
+# dates. The parent key_register row stays as the "what this key unlocks"
+# definition; key_holdings rows are the per-set custody records.
+
+class HoldingIn(BaseModel):
+    holder_employee_id: str
+    set_number: int = 1
+    issued_date: str = ""
+    expected_return_date: str = ""
+    undertaking_required: bool = True
+    notes: str = ""
+
+
+class HoldingReturnIn(BaseModel):
+    returned_date: str = ""
+    notes: str = ""
+
+
+@router.get("/{key_id}/holdings")
+async def list_holdings(key_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """All sets of this key — active + historical. Returns holder contact
+    details inline so the operator can email / phone holders directly from
+    the list (e.g. for return chasing)."""
+    async with SessionLocal() as db:
+        # Verify the key exists in this branch first
+        owner = (await db.execute(text(
+            "SELECT id FROM key_register WHERE id=:id AND branch_id=:bid AND deleted_at IS NULL"
+        ), {"id": key_id, "bid": ctx.branch_id})).first()
+        if not owner:
+            raise HTTPException(404, detail="Key not found")
+        rows = (await db.execute(text("""
+            SELECT h.id::text, h.key_id::text, h.set_number,
+                   h.holder_employee_id::text AS holder_employee_id,
+                   h.issued_date::text AS issued_date,
+                   h.returned_date::text AS returned_date,
+                   h.expected_return_date::text AS expected_return_date,
+                   h.status,
+                   h.undertaking_required,
+                   h.undertaking_sent_at::text AS undertaking_sent_at,
+                   h.undertaking_signed_at::text AS undertaking_signed_at,
+                   h.undertaking_signed_name,
+                   h.undertaking_pdf_url,
+                   h.notes, h.created_at, h.updated_at,
+                   e.full_name AS holder_name,
+                   e.email     AS holder_email,
+                   e.phone     AS holder_phone,
+                   e.address   AS holder_address,
+                   e.employee_number AS holder_employee_number,
+                   e.job_title AS holder_job_title
+            FROM key_holdings h
+            LEFT JOIN employees e ON e.id = h.holder_employee_id
+            WHERE h.key_id = CAST(:kid AS UUID)
+              AND h.deleted_at IS NULL
+            ORDER BY h.status, h.set_number, h.issued_date DESC NULLS LAST
+        """), {"kid": key_id})).mappings().all()
+    items = []
+    for r in rows:
+        d = dict(r)
+        for k in ("created_at", "updated_at"):
+            if d.get(k) is not None and hasattr(d[k], "isoformat"):
+                d[k] = d[k].isoformat()
+        items.append(d)
+    return {"items": items}
+
+
+@router.post("/{key_id}/holdings", status_code=201)
+async def add_holding(key_id: str, body: HoldingIn,
+                      ctx: CurrentSpace) -> dict[str, Any]:
+    """Assign a new physical set to a holder. Each call creates a separate
+    holding so 5 trustees holding 5 sets = 5 calls / 5 rows."""
+    if not body.holder_employee_id:
+        raise HTTPException(400, detail="holder_employee_id required")
+    async with SessionLocal() as db:
+        owner = (await db.execute(text(
+            "SELECT id FROM key_register WHERE id=:id AND branch_id=:bid AND deleted_at IS NULL"
+        ), {"id": key_id, "bid": ctx.branch_id})).first()
+        if not owner:
+            raise HTTPException(404, detail="Key not found")
+        new_id = str(uuid.uuid4())
+        await db.execute(text("""
+            INSERT INTO key_holdings
+                (id, key_id, set_number, holder_employee_id,
+                 issued_date, expected_return_date,
+                 undertaking_required, notes,
+                 created_by_user_id)
+            VALUES (CAST(:id AS UUID), CAST(:kid AS UUID), :sn,
+                    CAST(:hid AS UUID),
+                    NULLIF(:iss,'')::date, NULLIF(:exp,'')::date,
+                    :req, :notes,
+                    NULLIF(:uid,'')::uuid)
+        """), {
+            "id": new_id, "kid": key_id,
+            "sn": max(1, int(body.set_number or 1)),
+            "hid": body.holder_employee_id,
+            "iss": body.issued_date or date.today().isoformat(),
+            "exp": body.expected_return_date or "",
+            "req": bool(body.undertaking_required),
+            "notes": body.notes or "",
+            "uid": (getattr(ctx, "user_id", None) or "")
+                if getattr(ctx, "user_id", "") not in ("", "anonymous") else "",
+        })
+        await _log_event(db, key_id=key_id, event_type="HOLDING_CREATED", ctx=ctx,
+                         to_holder_id=body.holder_employee_id,
+                         notes=f"Set #{body.set_number} issued")
+        await db.commit()
+    return {"id": new_id, "ok": True}
+
+
+@router.post("/{key_id}/holdings/{holding_id}/return", status_code=200)
+async def return_holding(key_id: str, holding_id: str, body: HoldingReturnIn,
+                         ctx: CurrentSpace) -> dict[str, Any]:
+    """Mark a holding as returned. Captures the date and an optional note;
+    leaves the row in place so the audit trail stays intact."""
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            UPDATE key_holdings SET
+                returned_date = NULLIF(:rd,'')::date,
+                status        = 'RETURNED',
+                notes         = CASE WHEN :n <> '' THEN
+                    CASE WHEN notes <> '' THEN notes || E'\n' || :n ELSE :n END
+                    ELSE notes END,
+                updated_at    = NOW()
+            WHERE id = CAST(:id AS UUID) AND key_id = CAST(:kid AS UUID)
+              AND deleted_at IS NULL
+        """), {"id": holding_id, "kid": key_id,
+               "rd": body.returned_date or date.today().isoformat(),
+               "n": body.notes or ""})
+        if not getattr(result, "rowcount", 0):
+            raise HTTPException(404, detail="Holding not found")
+        await _log_event(db, key_id=key_id, event_type="HOLDING_RETURNED", ctx=ctx,
+                         notes=body.notes or "Returned")
+        await db.commit()
+    return {"ok": True}
+
+
+@router.post("/{key_id}/holdings/{holding_id}/mark-lost", status_code=200)
+async def mark_holding_lost(key_id: str, holding_id: str, body: HoldingReturnIn,
+                            ctx: CurrentSpace) -> dict[str, Any]:
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            UPDATE key_holdings SET status = 'LOST',
+                notes = CASE WHEN :n <> '' THEN
+                    CASE WHEN notes <> '' THEN notes || E'\n' || :n ELSE :n END
+                    ELSE notes END,
+                updated_at = NOW()
+            WHERE id = CAST(:id AS UUID) AND key_id = CAST(:kid AS UUID)
+              AND deleted_at IS NULL
+        """), {"id": holding_id, "kid": key_id, "n": body.notes or ""})
+        if not getattr(result, "rowcount", 0):
+            raise HTTPException(404, detail="Holding not found")
+        await _log_event(db, key_id=key_id, event_type="HOLDING_LOST", ctx=ctx,
+                         notes=body.notes or "Reported lost")
+        await db.commit()
+    return {"ok": True}
+
+
+@router.post("/{key_id}/holdings/{holding_id}/undertaking/mark-signed", status_code=200)
+async def mark_holding_undertaking_signed(key_id: str, holding_id: str,
+                                          body: UndertakingMarkIn,
+                                          ctx: CurrentSpace) -> dict[str, Any]:
+    """Per-holding undertaking — each set has its own signed undertaking
+    because each holder signs separately."""
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            UPDATE key_holdings SET
+                undertaking_signed_at   = NOW(),
+                undertaking_signed_name = :nm,
+                undertaking_pdf_url     = COALESCE(NULLIF(:url, ''), undertaking_pdf_url),
+                updated_at              = NOW()
+            WHERE id = CAST(:id AS UUID) AND key_id = CAST(:kid AS UUID)
+              AND deleted_at IS NULL
+        """), {"id": holding_id, "kid": key_id,
+               "nm": (body.signed_by_name or "")[:200],
+               "url": body.pdf_url or ""})
+        if not getattr(result, "rowcount", 0):
+            raise HTTPException(404, detail="Holding not found")
+        await _log_event(db, key_id=key_id, event_type="HOLDING_UNDERTAKING_SIGNED",
+                         ctx=ctx, notes=f"Signed by {body.signed_by_name or 'holder'}")
+        await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{key_id}/holdings/{holding_id}", status_code=200)
+async def delete_holding(key_id: str, holding_id: str,
+                         ctx: CurrentSpace) -> dict[str, Any]:
+    """Soft-delete a holding (e.g. created in error). Audit trail preserved."""
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            UPDATE key_holdings SET deleted_at = NOW()
+            WHERE id = CAST(:id AS UUID) AND key_id = CAST(:kid AS UUID)
+              AND deleted_at IS NULL
+        """), {"id": holding_id, "kid": key_id})
+        if not getattr(result, "rowcount", 0):
+            raise HTTPException(404, detail="Holding not found")
+        await _log_event(db, key_id=key_id, event_type="HOLDING_DELETED", ctx=ctx,
+                         notes="Holding row removed")
+        await db.commit()
+    return {"ok": True}
