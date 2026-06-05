@@ -1237,7 +1237,7 @@ async def update_task(project_uuid: str, task_id: str, body: TaskIn, ctx: Curren
         prev = (await db.execute(text(
             "SELECT assignee_id::text AS a, status FROM project_tasks WHERE id = CAST(:id AS UUID)"
         ), {"id": task_id})).mappings().first()
-        prev_assignee = (prev or {}).get("a")
+        prev_assignee = prev["a"] if prev else None
 
         result = await db.execute(text("""
             UPDATE project_tasks SET

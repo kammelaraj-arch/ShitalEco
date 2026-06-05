@@ -249,7 +249,8 @@ async def upload_document(
             "SELECT folder_name, is_confidential_default, default_review_months "
             "FROM document_categories WHERE code = :c"
         ), {"c": cat})).mappings().first()
-    folder = (cat_row or {}).get("folder_name", "other") or "other"
+    cat_dict: dict[str, Any] = dict(cat_row) if cat_row else {}
+    folder = cat_dict.get("folder_name", "other") or "other"
     doc_id = str(uuid.uuid4())
     media_dir = os.path.join(settings.MEDIA_DIR, "documents", folder)
     os.makedirs(media_dir, exist_ok=True)
@@ -260,12 +261,12 @@ async def upload_document(
     with open(file_path, "wb") as f:
         f.write(data)
     serve_url = f"/api/v1/documents/{doc_id}/file"
-    confidential = bool(is_confidential or (cat_row or {}).get("is_confidential_default", False))
+    confidential = bool(is_confidential or cat_dict.get("is_confidential_default", False))
     review = review_due
-    if not review and cat_row and cat_row.get("default_review_months"):
+    if not review and cat_dict.get("default_review_months"):
         from dateutil.relativedelta import relativedelta  # type: ignore[import-untyped]
         try:
-            review = (datetime.utcnow() + relativedelta(months=int(cat_row["default_review_months"]))).date().isoformat()
+            review = (datetime.utcnow() + relativedelta(months=int(cat_dict["default_review_months"]))).date().isoformat()
         except Exception:  # noqa: BLE001
             review = ""
     async with SessionLocal() as db:
@@ -358,9 +359,10 @@ async def store_generated_document(
                 "SELECT folder_name, is_confidential_default "
                 "FROM document_categories WHERE code = :c"
             ), {"c": cat})).mappings().first()
-        folder = (cat_row or {}).get("folder_name", "other") or "other"
+        cat_dict: dict[str, Any] = dict(cat_row) if cat_row else {}
+        folder = cat_dict.get("folder_name", "other") or "other"
         confidential = (is_confidential if is_confidential is not None
-                        else bool((cat_row or {}).get("is_confidential_default", False)))
+                        else bool(cat_dict.get("is_confidential_default", False)))
         doc_id = str(uuid.uuid4())
         media_dir = os.path.join(settings.MEDIA_DIR, "documents", folder)
         os.makedirs(media_dir, exist_ok=True)
