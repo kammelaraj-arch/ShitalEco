@@ -325,6 +325,33 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_documents_branch   ON documents(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category)",
+        # DMS expansion — link a document to another record (a key_holding,
+        # an employee, a project), mark confidential / system-generated,
+        # and remember the disk path so the download endpoint can stream
+        # the file without re-deriving it.
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS linked_entity_type VARCHAR(40) NOT NULL DEFAULT ''",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS linked_entity_id   VARCHAR(64) NOT NULL DEFAULT ''",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_confidential    BOOLEAN     NOT NULL DEFAULT false",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_generated       BOOLEAN     NOT NULL DEFAULT false",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS generated_by       VARCHAR(80) NOT NULL DEFAULT ''",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_path          TEXT        NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS idx_documents_linked ON documents(linked_entity_type, linked_entity_id) WHERE deleted_at IS NULL AND linked_entity_id <> ''",
+        # Category lookup — formal codes with display labels, icons, and a
+        # folder name used when laying files out on disk. Seeded with the
+        # canonical charity categories; admins can add more via the API.
+        """CREATE TABLE IF NOT EXISTS document_categories (
+            code                  VARCHAR(40)  PRIMARY KEY,
+            label                 VARCHAR(120) NOT NULL,
+            description           TEXT         NOT NULL DEFAULT '',
+            icon                  VARCHAR(8)   NOT NULL DEFAULT '📄',
+            folder_name           VARCHAR(60)  NOT NULL DEFAULT 'general',
+            default_review_months INTEGER      NOT NULL DEFAULT 0,
+            is_confidential_default BOOLEAN    NOT NULL DEFAULT false,
+            sort_order            INTEGER      NOT NULL DEFAULT 100,
+            is_active             BOOLEAN      NOT NULL DEFAULT true,
+            created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
         # Gift Aid submissions history table
         """CREATE TABLE IF NOT EXISTS gift_aid_submissions (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2927,6 +2954,7 @@ async def _patch_schema() -> None:
     await _seed_catalog()
     await _seed_email_templates()
     await _seed_release_notes()
+    await _seed_document_categories()
 
 
 async def _seed_api_key_metadata() -> None:
@@ -3546,6 +3574,65 @@ _{{ branch_name }} — Registered UK Charity_"""
                 logger.error("email_template_seed_failed", template_key=t.get("key"), error=str(exc))
         await db.commit()
     logger.info("email_templates_seeded")
+
+
+async def _seed_document_categories() -> None:
+    """Seed the canonical charity document categories. Admins can later
+    add/edit through the API, but these are always present after boot.
+
+    Each category gets a folder_name that the DMS uses to lay files out
+    on disk as MEDIA_DIR/documents/{folder_name}/{doc_id}.<ext> — so the
+    on-disk structure mirrors the logical structure and back-end staff
+    can navigate the file tree directly when needed."""
+    cats = [
+        # code, label, description, icon, folder, review_months, confidential, sort
+        ("GOVERNANCE",         "Governance & Trustees", "Trustee resolutions, board minutes, AGM packs, Charity Commission filings.", "🏛️", "governance",        0,  False, 10),
+        ("COMPLIANCE",         "Compliance & Safety",   "Safeguarding, GDPR, fire safety, health & safety, risk assessments, DBS checks.", "✅", "compliance",        12, True,  20),
+        ("HR",                 "HR & Employment",       "Employment contracts, job descriptions, performance reviews, disciplinary records.", "👥", "hr",                0,  True,  30),
+        ("PAYROLL",            "Payroll",               "Payslips, P60s, NI records, pension contributions.",                                    "💷", "payroll",           0,  True,  31),
+        ("FINANCE",            "Finance",               "Annual accounts, audit reports, management accounts, ledgers, bank statements.",     "📊", "finance",          12, True,  40),
+        ("INSURANCE",          "Insurance",             "Public liability, employers' liability, buildings, contents — policies + claims.",   "🛡️", "insurance",         12, False, 50),
+        ("POLICIES",           "Policies",              "Written organisational policies — data protection, child safety, conflict of interest.","📜", "policies",          24, False, 60),
+        ("CONTRACTS",          "Contracts & Agreements","Supplier contracts, MOUs, lease agreements, professional service agreements.",      "📝", "contracts",         12, False, 70),
+        ("CERTIFICATES",       "Certificates & Licences","Charity registration, VAT, fundraising licences, gift aid claims, HMRC.",            "🏅", "certificates",      24, False, 80),
+        ("KEY_UNDERTAKINGS",   "Key Undertakings",      "Signed undertakings from key holders. Auto-generated when a holder e-signs.",        "🔑", "key-undertakings",  0,  False, 90),
+        ("VOLUNTEER_AGREEMENTS","Volunteer Agreements", "Signed volunteer agreements, role descriptions, induction records.",                  "🙋", "volunteer-agreements",0, True,  100),
+        ("DONOR_CORRESPONDENCE","Donor Correspondence", "Major donor thank-you letters, pledge agreements, grant correspondence.",            "💌", "donors",            0,  True,  110),
+        ("LEGAL",              "Legal",                 "Legal advice, opinions, court documents, lawyer correspondence.",                    "⚖️", "legal",             0,  True,  120),
+        ("BUILDING",           "Building & Property",   "Title deeds, planning permission, lease documents, surveys, EPC.",                   "🏗️", "building",          0,  False, 130),
+        ("PROJECTS",           "Project Records",       "Project charters, closure reports, lessons-learned — official records only.",        "📁", "projects",          0,  False, 140),
+        ("TRAINING",           "Training & Development","Training records, attendance certificates, CPD logs.",                               "🎓", "training",          24, False, 150),
+        ("IT",                 "IT & Systems",          "IT policies, system architecture, recovery procedures, backup logs.",               "💻", "it",                12, False, 160),
+        ("EVENTS",             "Events & Festivals",    "Event plans, run sheets, festival programs, post-event reports.",                   "🎉", "events",            0,  False, 170),
+        ("MEDIA",              "Media & Communications","Press releases, photos, video releases, marketing assets, brand guidelines.",       "📸", "media",             0,  False, 180),
+        ("OTHER",              "Other",                 "Documents that don't fit any other category.",                                       "📄", "other",             0,  False, 999),
+    ]
+    async with SessionLocal() as db:
+        for c in cats:
+            try:
+                await db.execute(text("""
+                    INSERT INTO document_categories
+                        (code, label, description, icon, folder_name,
+                         default_review_months, is_confidential_default,
+                         sort_order, is_active)
+                    VALUES (:code, :lab, :desc, :icon, :folder,
+                            :rev, :conf, :sort, true)
+                    ON CONFLICT (code) DO UPDATE SET
+                        label                  = EXCLUDED.label,
+                        description            = EXCLUDED.description,
+                        icon                   = EXCLUDED.icon,
+                        folder_name            = EXCLUDED.folder_name,
+                        default_review_months  = EXCLUDED.default_review_months,
+                        is_confidential_default= EXCLUDED.is_confidential_default,
+                        sort_order             = EXCLUDED.sort_order,
+                        is_active              = true,
+                        updated_at             = NOW()
+                """), {"code": c[0], "lab": c[1], "desc": c[2], "icon": c[3],
+                       "folder": c[4], "rev": c[5], "conf": c[6], "sort": c[7]})
+            except Exception as exc:  # noqa: BLE001
+                logger.error("doc_category_seed_failed", code=c[0], error=str(exc))
+        await db.commit()
+    logger.info("document_categories_seeded")
 
 
 async def _seed_release_notes() -> None:

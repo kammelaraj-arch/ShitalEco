@@ -1099,6 +1099,16 @@ function HoldingRow({ h, onReturn, onLost, onMarkSigned, onSendEmail, onDelete, 
   onDelete?: () => void
   historical?: boolean
 }) {
+  // Look up the linked PDF (filed in the DMS) for this holding so we can show
+  // "📄 View signed PDF" inline. Best-effort — silently hides if none yet.
+  const [pdfUrl, setPdfUrl] = useState<string>('')
+  useEffect(() => {
+    if (!h.undertaking_signed_at) { setPdfUrl(''); return }
+    apiFetch<{ documents: Array<{ id: string; file_url: string }> }>(
+      `/documents?linked_entity_type=key_holding&linked_entity_id=${encodeURIComponent(h.id)}&limit=1`
+    ).then(d => setPdfUrl((d.documents?.[0]?.file_url) || '')).catch(() => setPdfUrl(''))
+  }, [h.id, h.undertaking_signed_at])
+
   const underPending = h.undertaking_required && !h.undertaking_signed_at
   const overdue = h.expected_return_date && h.status === 'ACTIVE' &&
                   new Date(h.expected_return_date) < new Date()
@@ -1120,6 +1130,12 @@ function HoldingRow({ h, onReturn, onLost, onMarkSigned, onSendEmail, onDelete, 
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-300 border border-green-500/30">
                 ✓ Signed
               </span>
+            )}
+            {pdfUrl && (
+              <a href={pdfUrl} target="_blank" rel="noreferrer"
+                className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:bg-blue-500/25">
+                📄 View PDF
+              </a>
             )}
             {overdue && (
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/30">

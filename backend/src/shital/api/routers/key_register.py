@@ -1050,10 +1050,17 @@ async def public_sign_undertaking(
     if png and not png.startswith("data:image/"):
         png = ""
     async with SessionLocal() as db:
-        row = (await db.execute(text(
-            "SELECT id::text, key_id::text FROM key_holdings "
-            "WHERE undertaking_token = :tok AND deleted_at IS NULL"
-        ), {"tok": token})).mappings().first()
+        row = (await db.execute(text("""
+            SELECT h.id::text, h.key_id::text, h.set_number, h.issued_date::text,
+                   k.name AS key_name, k.key_type, k.serial_number,
+                   k.branch_id, k.physical_location,
+                   e.full_name AS holder_name, e.address AS holder_address,
+                   e.employee_number
+            FROM key_holdings h
+            JOIN key_register k ON k.id = h.key_id
+            LEFT JOIN employees e ON e.id = h.holder_employee_id
+            WHERE h.undertaking_token = :tok AND h.deleted_at IS NULL
+        """), {"tok": token})).mappings().first()
         if not row:
             raise HTTPException(404, detail="Invalid or expired token")
         await db.execute(text("""
@@ -1079,7 +1086,139 @@ async def public_sign_undertaking(
                "who": body.signed_by_name.strip()[:200],
                "notes": f"E-signed by {body.signed_by_name.strip()} (IP {ip})"})
         await db.commit()
+
+    # Generate a PDF copy of the signed undertaking and file it under
+    # Documents → Key Undertakings, linked back to this holding so the
+    # admin shows "📄 View signed PDF" inline. Best-effort: failure
+    # here does NOT roll back the sign action — the e-signature is
+    # already recorded.
+    try:
+        await _generate_signed_undertaking_pdf(
+            holding_id=row["id"], key_id=row["key_id"],
+            branch_id=row["branch_id"],
+            key_name=row["key_name"], key_type=row["key_type"],
+            serial_number=row["serial_number"] or "",
+            physical_location=row["physical_location"] or "",
+            holder_name=row["holder_name"] or body.signed_by_name.strip(),
+            holder_address=row["holder_address"] or "",
+            employee_number=row["employee_number"] or "",
+            set_number=row["set_number"],
+            issued_date=row["issued_date"],
+            signed_by_name=body.signed_by_name.strip(),
+            signed_ip=ip, signed_ua=ua,
+            signature_png=png,
+        )
+    except Exception:  # noqa: BLE001
+        # Logged inside the helper; the sign action stays committed.
+        pass
+
     return {"ok": True}
+
+
+async def _generate_signed_undertaking_pdf(
+    *, holding_id: str, key_id: str, branch_id: str,
+    key_name: str, key_type: str, serial_number: str, physical_location: str,
+    holder_name: str, holder_address: str, employee_number: str,
+    set_number: int, issued_date: str | None,
+    signed_by_name: str, signed_ip: str, signed_ua: str, signature_png: str,
+) -> None:
+    """Render the signed undertaking as a PDF and file it via the DMS so
+    it lives under Documents → Key Undertakings, linked to the holding."""
+    import logging as _log
+    _logger = _log.getLogger("shital.key_register")
+    try:
+        from weasyprint import HTML  # type: ignore[import-untyped]
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("weasyprint not available — undertaking PDF not generated: %s", exc)
+        return
+
+    today = date.today().isoformat()
+    nice_type = (key_type or "key").replace("_", " ").title()
+    sig_img_html = (
+        f"<div style='margin-top:24px'><b>Signature:</b><br>"
+        f"<img src='{signature_png}' style='max-height:80px;border:1px solid #ddd;background:#fff;padding:4px;border-radius:4px' /></div>"
+    ) if signature_png else ""
+    html = f"""
+    <html><head><meta charset="utf-8"><title>Signed Undertaking — {key_name}</title>
+    <style>
+      body {{ font: 11pt/1.45 "Helvetica", Arial, sans-serif; color: #1a1a1a; padding: 24mm 18mm; }}
+      h1   {{ color: #b35c00; margin: 0 0 4pt; font-size: 18pt; }}
+      h2   {{ font-size: 11pt; margin: 18pt 0 6pt; text-transform: uppercase; letter-spacing: 1pt; color: #666; border-bottom: 1px solid #e6dccd; padding-bottom: 4pt; }}
+      table.kv {{ width: 100%; border-collapse: collapse; margin: 6pt 0; }}
+      table.kv td {{ padding: 3pt 8pt 3pt 0; vertical-align: top; }}
+      table.kv td:first-child {{ width: 35%; color: #666; }}
+      .terms li {{ margin: 4pt 0; }}
+      .audit {{ background: #faf7f1; border: 1px solid #e6dccd; padding: 10pt; border-radius: 4pt; font-size: 9.5pt; margin-top: 14pt; }}
+      .sigblock {{ margin-top: 22pt; padding-top: 14pt; border-top: 2px solid #b35c00; }}
+      .sigblock b {{ color: #1a1a1a; }}
+    </style></head><body>
+    <h1>🕉 Shital — Key Undertaking</h1>
+    <div style="color:#666;font-size:10pt;margin-bottom:14pt;">
+      Shirdi Sai Temple · Branch: <b>{branch_id}</b> · Generated {today}
+    </div>
+
+    <h2>Item</h2>
+    <table class="kv">
+      <tr><td>Name</td><td><b>{key_name}</b></td></tr>
+      <tr><td>Type</td><td>{nice_type}</td></tr>
+      <tr><td>Set number</td><td>#{set_number}</td></tr>
+      <tr><td>Serial / key number</td><td>{serial_number or '—'}</td></tr>
+      <tr><td>Physical location</td><td>{physical_location or '—'}</td></tr>
+      <tr><td>Issued on</td><td>{issued_date or today}</td></tr>
+    </table>
+
+    <h2>Holder</h2>
+    <table class="kv">
+      <tr><td>Name</td><td><b>{holder_name}</b></td></tr>
+      <tr><td>Employee number</td><td>{employee_number or '—'}</td></tr>
+      <tr><td>Address on file</td><td>{(holder_address or '—').replace(chr(10), '<br>')}</td></tr>
+    </table>
+
+    <h2>Conditions accepted</h2>
+    <ol class="terms">
+      <li>I will keep this item secure at all times and will not lend it to or share it with any unauthorised person.</li>
+      <li>I will not duplicate, copy or modify the item or its codes without prior written approval from the trustees.</li>
+      <li>I will return the item promptly on request, when my role ends, or when otherwise asked by an authorised trustee.</li>
+      <li>I will report loss, theft or damage of the item to the trustees within 24 hours of becoming aware.</li>
+      <li>I understand that misuse of the item may result in disciplinary action and/or recovery of replacement / re-keying costs from me.</li>
+    </ol>
+
+    <div class="sigblock">
+      <b>Signed by:</b> {signed_by_name}<br>
+      <b>Date / time:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}<br>
+      {sig_img_html}
+    </div>
+
+    <div class="audit">
+      <b>Audit trail</b><br>
+      Holding ID: {holding_id}<br>
+      Signed via secure email link (IP {signed_ip or 'unknown'})<br>
+      User agent: {(signed_ua or 'unknown')[:200]}
+    </div>
+    </body></html>
+    """
+    try:
+        pdf_bytes = HTML(string=html).write_pdf()
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("weasyprint render failed: %s", exc)
+        return
+    try:
+        from shital.api.routers.documents_router import store_generated_document
+        await store_generated_document(
+            branch_id=branch_id or "main",
+            title=f"Signed Undertaking — {key_name} (set #{set_number}) — {signed_by_name}",
+            category="KEY_UNDERTAKINGS",
+            file_bytes=pdf_bytes or b"",
+            file_name=f"key-undertaking-{holding_id[:8]}.pdf",
+            mime_type="application/pdf",
+            generated_by="key_register.esign",
+            linked_entity_type="key_holding",
+            linked_entity_id=holding_id,
+            description=f"E-signed by {signed_by_name} on {today}. Linked to key {key_name}.",
+            is_confidential=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("DMS store failed for signed undertaking: %s", exc)
 
 
 def register_public_router(app: Any) -> None:
