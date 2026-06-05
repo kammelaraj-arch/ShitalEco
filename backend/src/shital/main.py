@@ -274,6 +274,16 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_key_holdings_key      ON key_holdings(key_id) WHERE deleted_at IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_key_holdings_holder   ON key_holdings(holder_employee_id) WHERE deleted_at IS NULL AND status = 'ACTIVE'",
         "CREATE INDEX IF NOT EXISTS idx_key_holdings_undersnd ON key_holdings(key_id) WHERE deleted_at IS NULL AND undertaking_required = true AND undertaking_signed_at IS NULL",
+        # E-signature columns — when the operator emails the holder for
+        # online signing, we mint a token, snapshot the recipient email,
+        # and (on sign) capture the typed name + IP + user agent + a
+        # base64 PNG of any drawn signature as evidence.
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_token            VARCHAR(64) DEFAULT NULL",
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_email_sent_to    VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_signed_ip        VARCHAR(64)  NOT NULL DEFAULT ''",
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_signed_ua        TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_signature_png    TEXT         NOT NULL DEFAULT ''",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_key_holdings_token ON key_holdings(undertaking_token) WHERE undertaking_token IS NOT NULL",
         """CREATE TABLE IF NOT EXISTS bookings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             branch_id VARCHAR(100) NOT NULL DEFAULT 'main',
@@ -3465,6 +3475,48 @@ _{{ branch_name }} — Registered UK Charity_"""
             ),
             "variables": '["referee_name","applicant_name","response_url","charity_number"]',
         },
+        {
+            # Sent when a trustee clicks "Email undertaking" on a key holding.
+            # Variables: {{ holder_name }}, {{ key_name }}, {{ key_type_label }},
+            #            {{ set_number }}, {{ sign_url }}, {{ custom_message }}.
+            # Server falls back to a hard-coded body when this template is
+            # missing or its bodies are blank — but editing it from Email
+            # Templates admin lets trustees set the right tone without a deploy.
+            "key": "key_undertaking",
+            "name": "Key Undertaking — Sign Online",
+            "subject": "Please sign your key undertaking — {{ key_name }}",
+            "html_body": (
+                "<p>Dear {{ holder_name }},</p>"
+                "<p>You have been issued a <b>{{ key_type_label }}</b> "
+                "(<b>{{ key_name }}</b>, set #{{ set_number }}) at Shital — "
+                "Shirdi Sai Temple.</p>"
+                "<p>Please sign the undertaking for this item using the secure link below. "
+                "It only takes a minute:</p>"
+                "<p style='text-align:center;margin:24px 0;'>"
+                "<a href='{{ sign_url }}' style='background:#FF6B00;color:#fff;"
+                "text-decoration:none;padding:12px 28px;border-radius:8px;"
+                "font-weight:700;display:inline-block;'>Sign Undertaking →</a></p>"
+                "{{ custom_message_html }}"
+                "<p style='color:#888;font-size:12px;margin-top:32px;'>"
+                "If you did not expect this email, please reply to let us know.<br>"
+                "Thank you for your service to the temple.<br>"
+                "— Trustees, Shital</p>"
+            ),
+            "text_body": (
+                "Dear {{ holder_name }},\n\n"
+                "You have been issued a {{ key_type_label }} "
+                "({{ key_name }}, set #{{ set_number }}) at Shital — "
+                "Shirdi Sai Temple.\n\n"
+                "Please sign the undertaking for this item using the secure "
+                "link below. It only takes a minute:\n\n"
+                "    {{ sign_url }}\n\n"
+                "{{ custom_message }}\n\n"
+                "If you did not expect this email, please reply to let us know.\n\n"
+                "Thank you for your service to the temple.\n"
+                "Trustees, Shital."
+            ),
+            "variables": '["holder_name","key_name","key_type_label","set_number","sign_url","custom_message","custom_message_html"]',
+        },
     ]
 
     async with SessionLocal() as db:
@@ -3711,6 +3763,14 @@ _mount("shital.api.routers.email_templates",  "router")
 _mount("shital.api.routers.functions",        "router")
 _mount("shital.api.routers.assets",           "router")
 _mount("shital.api.routers.key_register",     "router")
+# Wire the public e-signature endpoints (/public/key-undertaking/{token})
+# alongside the prefixed router so the holder's signing link works without
+# auth or branch scoping.
+try:
+    from shital.api.routers.key_register import register_public_router as _krpub
+    _krpub(app)
+except Exception as _exc:  # noqa: BLE001
+    logger.error("key_register_public_mount_failed", error=str(_exc))
 _mount("shital.api.routers.bookings_router",  "router")
 _mount("shital.api.routers.documents_router", "router")
 _mount("shital.api.routers.api_keys",         "router")

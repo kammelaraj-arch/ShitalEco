@@ -22,7 +22,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -835,3 +835,254 @@ async def delete_holding(key_id: str, holding_id: str,
                          notes="Holding row removed")
         await db.commit()
     return {"ok": True}
+
+
+# ─── E-signature: send undertaking by email, holder signs online ─────────────
+# Replaces the print-and-sign loop with a self-service link the holder taps.
+#
+# Flow:
+#   1. Trustee clicks "Email undertaking" → POST /holdings/{id}/undertaking/send-email
+#      → mints a 32-char token, snapshots the holder's email from their
+#      employee record, sends a templated email through send_raw_email().
+#   2. Holder opens link  https://shital.org.uk/key-undertaking/{token}
+#      → public GET /public/key-undertaking/{token} returns the undertaking
+#      text + key context for the page to render.
+#   3. Holder types their name (and optionally draws a signature on the
+#      canvas), taps Sign.
+#      → public POST /public/key-undertaking/{token}/sign captures the
+#      typed name, signed timestamp, request IP, user agent, and any
+#      drawn-signature PNG base64.
+#   4. Admin re-opens the key — status shows "Signed online (Anil Patel,
+#      14 Mar 2026)" with a link to the captured evidence.
+
+import secrets as _secrets
+
+
+class SendUndertakingEmailIn(BaseModel):
+    custom_message: str = ""        # optional note from the trustee to the holder
+    override_email: str = ""        # optional override if the employee record's email is stale
+
+
+@router.post("/{key_id}/holdings/{holding_id}/undertaking/send-email")
+async def send_undertaking_email(
+    key_id: str, holding_id: str, body: SendUndertakingEmailIn, ctx: CurrentSpace
+) -> dict[str, Any]:
+    """Mint a single-use signing token and email the holder a link to sign
+    the undertaking online. Re-callable — each call generates a fresh token
+    (the previous link goes dead) so trustees can re-send if the holder
+    misplaced the email."""
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT h.id::text, h.key_id::text, h.set_number,
+                   h.holder_employee_id::text AS holder_employee_id,
+                   k.name AS key_name, k.key_type, k.serial_number,
+                   k.branch_id, k.physical_location, h.issued_date::text,
+                   e.full_name AS holder_name, e.email AS holder_email,
+                   e.address AS holder_address
+            FROM key_holdings h
+            JOIN key_register k ON k.id = h.key_id
+            LEFT JOIN employees e ON e.id = h.holder_employee_id
+            WHERE h.id = CAST(:hid AS UUID)
+              AND h.key_id = CAST(:kid AS UUID)
+              AND k.branch_id = :bid
+              AND h.deleted_at IS NULL
+              AND k.deleted_at IS NULL
+        """), {"hid": holding_id, "kid": key_id, "bid": ctx.branch_id})).mappings().first()
+        if not row:
+            raise HTTPException(404, detail="Holding not found")
+        recipient = (body.override_email.strip() or row["holder_email"] or "").strip()
+        if not recipient:
+            raise HTTPException(400, detail="No email on file for this holder. Either set one on the employee record or pass override_email.")
+
+        token = _secrets.token_urlsafe(32)[:64]
+        await db.execute(text("""
+            UPDATE key_holdings SET
+                undertaking_token         = :tok,
+                undertaking_email_sent_to = :em,
+                undertaking_sent_at       = NOW(),
+                updated_at                = NOW()
+            WHERE id = CAST(:id AS UUID)
+        """), {"id": holding_id, "tok": token, "em": recipient})
+        await _log_event(db, key_id=key_id, event_type="UNDERTAKING_EMAILED", ctx=ctx,
+                         notes=f"Sent to {recipient}")
+        await db.commit()
+
+    # Build the email — prefers the admin-editable email_templates row
+    # with key="key_undertaking"; falls back to a hardcoded body if the
+    # template doesn't exist or has been blanked.
+    sign_url = f"https://service.shital.org.uk/key-undertaking/{token}"
+    custom = (body.custom_message or "").strip()
+    key_type_label = (row['key_type'] or 'key').replace('_', ' ').title()
+    template_vars = {
+        "holder_name":          row['holder_name'] or 'colleague',
+        "key_name":             row['key_name'] or '',
+        "key_type_label":       key_type_label,
+        "set_number":           str(row['set_number']),
+        "sign_url":             sign_url,
+        "custom_message":       custom,
+        "custom_message_html":  f"<p style='color:#666'>{custom}</p>" if custom else "",
+    }
+    sent_ok = False
+    template_err = ""
+    try:
+        from shital.api.routers.email_templates import send_template
+        res = await send_template(
+            template_key="key_undertaking",
+            to_email=recipient,
+            variables=template_vars,
+            related_type="key_holding",
+            related_id=holding_id,
+            triggered_by=getattr(ctx, "user_email", "") or "system",
+        )
+        sent_ok = bool(res.get("sent"))
+        if not sent_ok:
+            template_err = res.get("reason") or "template send returned sent=false"
+    except Exception as exc:  # noqa: BLE001
+        template_err = str(exc)
+    if not sent_ok:
+        # Template path failed (template missing / send error). Try the
+        # hardcoded fallback so the holder still gets the link.
+        try:
+            from shital.api.routers.email_templates import send_raw_email
+            await send_raw_email(
+                to_email=recipient,
+                subject=f"Please sign your key undertaking — {row['key_name']}",
+                html_body=(
+                    f"<p>Dear {template_vars['holder_name']},</p>"
+                    f"<p>You have been issued a <b>{key_type_label}</b> "
+                    f"(<b>{row['key_name']}</b>, set #{row['set_number']}) at "
+                    f"Shital — Shirdi Sai Temple.</p>"
+                    f"<p>Please sign the undertaking using the secure link "
+                    f"below. It only takes a minute:</p>"
+                    f"<p style='text-align:center;margin:24px 0;'>"
+                    f"<a href='{sign_url}' style='background:#FF6B00;color:#fff;"
+                    f"text-decoration:none;padding:12px 28px;border-radius:8px;"
+                    f"font-weight:700;display:inline-block;'>Sign Undertaking →</a></p>"
+                    + (f"<p style='color:#666'>{custom}</p>" if custom else "")
+                    + "<p style='color:#888;font-size:12px;margin-top:32px;'>"
+                    "Thank you for your service to the temple.<br>"
+                    "— Trustees, Shital</p>"
+                ),
+                text_body=(
+                    f"Dear {template_vars['holder_name']},\n\n"
+                    f"You have been issued a {key_type_label} ({row['key_name']}, "
+                    f"set #{row['set_number']}) at Shital — Shirdi Sai Temple.\n\n"
+                    f"Please sign at:\n    {sign_url}\n\n"
+                    + (f"{custom}\n\n" if custom else "")
+                    + "Thank you for your service to the temple.\n"
+                    "Trustees, Shital."
+                ),
+                related_type="key_holding",
+                related_id=holding_id,
+                triggered_by=getattr(ctx, "user_email", "") or "system",
+                template_key="key_undertaking",
+            )
+        except Exception as exc2:  # noqa: BLE001
+            return {"ok": False, "token": token, "sign_url": sign_url,
+                    "error": f"Email send failed: {exc2} (template path also failed: {template_err})"}
+    return {"ok": True, "token": token, "sign_url": sign_url,
+            "sent_to": recipient}
+
+
+# ─── Public (no-auth) endpoints used by the signing page ────────────────────
+
+_public_router = APIRouter(prefix="/public/key-undertaking", tags=["key-undertaking-public"])
+
+
+@_public_router.get("/{token}")
+async def public_get_undertaking(token: str) -> dict[str, Any]:
+    """Return the undertaking text + key context for the signing page. No
+    auth — knowledge of the token is the auth."""
+    if not token or len(token) < 16:
+        raise HTTPException(400, detail="Invalid token")
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT h.id::text, h.set_number, h.issued_date::text,
+                   h.undertaking_signed_at::text,
+                   h.undertaking_signed_name,
+                   k.name AS key_name, k.key_type, k.serial_number,
+                   k.branch_id, k.physical_location,
+                   e.full_name AS holder_name, e.address AS holder_address,
+                   e.employee_number
+            FROM key_holdings h
+            JOIN key_register k ON k.id = h.key_id
+            LEFT JOIN employees e ON e.id = h.holder_employee_id
+            WHERE h.undertaking_token = :tok
+              AND h.deleted_at IS NULL
+              AND k.deleted_at IS NULL
+        """), {"tok": token})).mappings().first()
+    if not row:
+        raise HTTPException(404, detail="This link is not valid (may have expired or been re-sent)")
+    return {
+        "holding_id":   row["id"],
+        "set_number":   row["set_number"],
+        "key_name":     row["key_name"],
+        "key_type":     row["key_type"],
+        "serial_number": row["serial_number"],
+        "branch_id":    row["branch_id"],
+        "physical_location": row["physical_location"],
+        "issued_date":  row["issued_date"],
+        "holder_name":  row["holder_name"],
+        "holder_address": row["holder_address"],
+        "employee_number": row["employee_number"],
+        "already_signed":   row["undertaking_signed_at"] is not None,
+        "signed_at":        row["undertaking_signed_at"],
+        "signed_name":      row["undertaking_signed_name"],
+    }
+
+
+class PublicSignIn(BaseModel):
+    signed_by_name: str
+    signature_png: str = ""    # data URL base64; empty if typed-name only
+
+
+@_public_router.post("/{token}/sign")
+async def public_sign_undertaking(
+    token: str, body: PublicSignIn, request: Request
+) -> dict[str, Any]:
+    """Capture the holder's signature. Records typed name, signing IP and
+    user agent for audit. No auth — token is the credential."""
+    if not body.signed_by_name.strip():
+        raise HTTPException(400, detail="Please type your name to sign")
+    ip = (request.client.host if request.client else "")[:64]
+    ua = (request.headers.get("user-agent") or "")[:1000]
+    png = body.signature_png or ""
+    if png and not png.startswith("data:image/"):
+        png = ""
+    async with SessionLocal() as db:
+        row = (await db.execute(text(
+            "SELECT id::text, key_id::text FROM key_holdings "
+            "WHERE undertaking_token = :tok AND deleted_at IS NULL"
+        ), {"tok": token})).mappings().first()
+        if not row:
+            raise HTTPException(404, detail="Invalid or expired token")
+        await db.execute(text("""
+            UPDATE key_holdings SET
+                undertaking_signed_at      = NOW(),
+                undertaking_signed_name    = :nm,
+                undertaking_signed_ip      = :ip,
+                undertaking_signed_ua      = :ua,
+                undertaking_signature_png  = :png,
+                updated_at                 = NOW()
+            WHERE id = CAST(:id AS UUID)
+        """), {"id": row["id"], "nm": body.signed_by_name.strip()[:200],
+               "ip": ip, "ua": ua, "png": png})
+        # Append audit event (note: ctx is anonymous; actor_user_id stays NULL)
+        await db.execute(text("""
+            INSERT INTO key_register_events
+                (id, key_id, event_type, actor_user_id, actor_name,
+                 from_holder_id, to_holder_id, notes, created_at)
+            VALUES (gen_random_uuid(), CAST(:kid AS UUID),
+                    'UNDERTAKING_ESIGNED', NULL, :who,
+                    NULL, NULL, :notes, NOW())
+        """), {"kid": row["key_id"],
+               "who": body.signed_by_name.strip()[:200],
+               "notes": f"E-signed by {body.signed_by_name.strip()} (IP {ip})"})
+        await db.commit()
+    return {"ok": True}
+
+
+def register_public_router(app: Any) -> None:
+    """Helper invoked from main.py after the prefixed router is mounted,
+    so the /public path is reachable without /key-register/ scoping."""
+    app.include_router(_public_router, prefix="/api/v1")

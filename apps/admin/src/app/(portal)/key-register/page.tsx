@@ -939,6 +939,8 @@ function HoldingsManager({ keyId }: { keyId: string }) {
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
   }
   async function markSigned(h: Holding) {
+    // Manual override — only used when the holder physically signed paper.
+    // Preferred path is sendUndertakingEmail() which lets them e-sign online.
     const name = prompt(`Holder's printed name (${h.holder_name || 'the holder'} signs):`, h.holder_name || '') || ''
     if (!name) return
     const url = prompt('Optional URL to scanned PDF (SharePoint / Drive):') || ''
@@ -946,6 +948,31 @@ function HoldingsManager({ keyId }: { keyId: string }) {
       await apiFetch(`/key-register/${keyId}/holdings/${h.id}/undertaking/mark-signed`, {
         method: 'POST', body: JSON.stringify({ signed_by_name: name, pdf_url: url }),
       })
+      load()
+    } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
+  }
+  async function sendUndertakingEmail(h: Holding) {
+    if (!h.holder_email) {
+      const o = prompt('No email on file for this holder. Type the email to send the undertaking link to:')
+      if (!o) return
+      const note = prompt('Optional message to include in the email (or leave blank):') || ''
+      try {
+        const r = await apiFetch<{ ok: boolean; sent_to?: string; error?: string }>(
+          `/key-register/${keyId}/holdings/${h.id}/undertaking/send-email`,
+          { method: 'POST', body: JSON.stringify({ custom_message: note, override_email: o }) })
+        if (r.ok) alert(`Email sent to ${r.sent_to}`); else alert(r.error || 'Send failed')
+        load()
+      } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
+      return
+    }
+    if (!confirm(`Email the undertaking link to ${h.holder_email}? They will sign online.`)) return
+    const note = prompt('Optional message to include in the email (or leave blank):') || ''
+    try {
+      const r = await apiFetch<{ ok: boolean; sent_to?: string; error?: string }>(
+        `/key-register/${keyId}/holdings/${h.id}/undertaking/send-email`,
+        { method: 'POST', body: JSON.stringify({ custom_message: note }) })
+      if (r.ok) alert(`Email sent to ${r.sent_to}. They'll receive a secure link to sign.`)
+      else alert(r.error || 'Send failed')
       load()
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
   }
@@ -1044,6 +1071,7 @@ function HoldingsManager({ keyId }: { keyId: string }) {
           onReturn={() => markReturned(h)}
           onLost={() => markLost(h)}
           onMarkSigned={() => markSigned(h)}
+          onSendEmail={() => sendUndertakingEmail(h)}
           onDelete={() => removeHolding(h)}
         />
       ))}
@@ -1062,11 +1090,12 @@ function HoldingsManager({ keyId }: { keyId: string }) {
   )
 }
 
-function HoldingRow({ h, onReturn, onLost, onMarkSigned, onDelete, historical }: {
+function HoldingRow({ h, onReturn, onLost, onMarkSigned, onSendEmail, onDelete, historical }: {
   h: Holding
   onReturn?: () => void
   onLost?: () => void
   onMarkSigned?: () => void
+  onSendEmail?: () => void
   onDelete?: () => void
   historical?: boolean
 }) {
@@ -1084,7 +1113,7 @@ function HoldingRow({ h, onReturn, onLost, onMarkSigned, onDelete, historical }:
             <StatusPill status={h.status} />
             {underPending && (
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                Undertaking pending
+                {h.undertaking_sent_at ? '✉ Email sent — awaiting sign' : 'Undertaking pending'}
               </span>
             )}
             {h.undertaking_signed_at && (
@@ -1112,9 +1141,16 @@ function HoldingRow({ h, onReturn, onLost, onMarkSigned, onDelete, historical }:
         </div>
         {!historical && (
           <div className="flex gap-1 flex-shrink-0">
+            {underPending && onSendEmail && (
+              <button onClick={onSendEmail} title="Email a secure online-sign link to the holder"
+                className="px-2 py-1 text-[10px] rounded bg-saffron-500/15 text-saffron-300 border border-saffron-400/30 hover:bg-saffron-500/25">
+                {h.undertaking_sent_at ? '↻ Re-send link' : '✉ Email to sign'}
+              </button>
+            )}
             {underPending && onMarkSigned && (
-              <button onClick={onMarkSigned} className="px-2 py-1 text-[10px] rounded bg-green-500/15 text-green-300 border border-green-500/30 hover:bg-green-500/25">
-                Mark signed
+              <button onClick={onMarkSigned} title="Manual override — only use when the holder signed paper"
+                className="px-2 py-1 text-[10px] rounded bg-white/5 text-white/60 border border-white/10 hover:bg-white/10">
+                Mark signed (paper)
               </button>
             )}
             {onReturn && <button onClick={onReturn} className="px-2 py-1 text-[10px] rounded bg-white/5 text-white/70 border border-white/10 hover:bg-white/10">Return</button>}
