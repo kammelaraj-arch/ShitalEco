@@ -10,11 +10,20 @@ interface KeyRow {
   description: string
   holder_employee_id: string | null
   holder_name: string | null
+  holder_email: string | null
+  holder_phone: string | null
+  holder_address: string | null
+  holder_employee_number: string | null
+  holder_job_title: string | null
   owner_employee_id: string | null
   owner_name: string | null
+  owner_email: string | null
+  owner_phone: string | null
   physical_location: string
   serial_number: string
   copies_count: number
+  total_sets: number
+  sets_in_vault: number
   vault_reference: string
   access_url: string
   username_hint: string
@@ -25,6 +34,11 @@ interface KeyRow {
   expiry_date: string | null
   last_rotated_date: string | null
   notes: string
+  undertaking_required: boolean
+  undertaking_signed_at: string | null
+  undertaking_signed_name: string
+  undertaking_pdf_url: string
+  undertaking_sent_at: string | null
   created_at: string
   updated_at: string
 }
@@ -54,6 +68,7 @@ interface EmployeeOption {
 interface KeyForm {
   name: string
   key_type: string
+  branch_id: string
   description: string
   holder_employee_id: string
   holder_name: string
@@ -62,6 +77,8 @@ interface KeyForm {
   physical_location: string
   serial_number: string
   copies_count: number
+  total_sets: number
+  sets_in_vault: number
   vault_reference: string
   access_url: string
   username_hint: string
@@ -69,19 +86,40 @@ interface KeyForm {
   issued_date: string
   expiry_date: string
   notes: string
+  undertaking_required: boolean
 }
 
 const EMPTY: KeyForm = {
-  name: '', key_type: 'PHYSICAL_KEY', description: '',
+  name: '', key_type: 'PROPERTY_KEY', branch_id: 'main', description: '',
   holder_employee_id: '', holder_name: '',
   owner_employee_id: '', owner_name: '',
   physical_location: '', serial_number: '', copies_count: 1,
+  total_sets: 1, sets_in_vault: 0,
   vault_reference: '', access_url: '', username_hint: '', provider: '',
   issued_date: '', expiry_date: '', notes: '',
+  undertaking_required: true,
 }
 
 const TYPE_LABEL: Record<string, string> = {
-  PHYSICAL_KEY:        '🔑 Physical key',
+  // Physical — what they unlock
+  PROPERTY_KEY:        '🏛️ Property / building key',
+  ROOM_KEY:            '🚪 Room key',
+  OFFICE_KEY:          '🏢 Office key',
+  SHRINE_KEY:          '🕉️ Shrine / sanctum key',
+  DONATION_BOX_KEY:    '💰 Donation / hundi box key',
+  CUPBOARD_KEY:        '🗄️ Cupboard key',
+  LOCKER_KEY:          '🔒 Locker key',
+  DRAWER_KEY:          '🗃️ Drawer key',
+  SAFE_KEY:            '🛡️ Safe key',
+  VAULT_KEY:           '🏦 Vault key',
+  CCTV_ROOM_KEY:       '📹 CCTV room key',
+  STORAGE_KEY:         '📦 Storage room key',
+  GATE_KEY:            '🚧 Gate key',
+  PADLOCK_KEY:         '🔐 Padlock key',
+  VEHICLE_KEY:         '🚗 Vehicle key',
+  MAILBOX_KEY:         '📮 Mailbox key',
+  PHYSICAL_KEY:        '🔑 Other physical key',
+  // Digital
   DIGITAL_CREDENTIAL:  '🔐 Digital credential',
   DOMAIN:              '🌐 Domain',
   SSL_CERTIFICATE:     '📜 SSL certificate',
@@ -91,6 +129,30 @@ const TYPE_LABEL: Record<string, string> = {
   API_KEY:             '🗝️ API key (reference)',
   OTHER:               '📎 Other',
 }
+
+// Used by the type dropdown to render <optgroup> sections so the list of
+// 25+ types is browsable instead of one long flat list.
+const TYPE_GROUPS: Array<{ label: string; types: string[] }> = [
+  { label: 'Physical — Property & Rooms',
+    types: ['PROPERTY_KEY', 'ROOM_KEY', 'OFFICE_KEY', 'SHRINE_KEY', 'CCTV_ROOM_KEY', 'STORAGE_KEY', 'GATE_KEY'] },
+  { label: 'Physical — Containers',
+    types: ['DONATION_BOX_KEY', 'CUPBOARD_KEY', 'LOCKER_KEY', 'DRAWER_KEY', 'SAFE_KEY', 'VAULT_KEY', 'PADLOCK_KEY', 'MAILBOX_KEY'] },
+  { label: 'Physical — Other',
+    types: ['VEHICLE_KEY', 'PHYSICAL_KEY'] },
+  { label: 'Digital credentials',
+    types: ['DIGITAL_CREDENTIAL', 'DOMAIN', 'SSL_CERTIFICATE', 'HOSTING_ACCOUNT', 'SAAS_SUBSCRIPTION', 'CRYPTO_KEY', 'API_KEY'] },
+  { label: 'Other',
+    types: ['OTHER'] },
+]
+
+// Which types are "physical" — drives form-field visibility and the
+// "undertaking required" default.
+const PHYSICAL_TYPES = new Set([
+  'PROPERTY_KEY', 'ROOM_KEY', 'OFFICE_KEY', 'SHRINE_KEY', 'DONATION_BOX_KEY',
+  'CUPBOARD_KEY', 'LOCKER_KEY', 'DRAWER_KEY', 'SAFE_KEY', 'VAULT_KEY',
+  'CCTV_ROOM_KEY', 'STORAGE_KEY', 'GATE_KEY', 'PADLOCK_KEY', 'VEHICLE_KEY',
+  'MAILBOX_KEY', 'PHYSICAL_KEY',
+])
 
 const STATUS_COLOR: Record<string, string> = {
   ACTIVE:   'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
@@ -164,17 +226,22 @@ export default function KeyRegisterPage() {
   const openEdit = (k: KeyRow) => {
     setEditing(k)
     setForm({
-      name: k.name, key_type: k.key_type, description: k.description,
+      name: k.name, key_type: k.key_type,
+      branch_id: k.branch_id || 'main',
+      description: k.description,
       holder_employee_id: k.holder_employee_id || '',
       holder_name: k.holder_name || '',
       owner_employee_id: k.owner_employee_id || '',
       owner_name: k.owner_name || '',
       physical_location: k.physical_location, serial_number: k.serial_number,
       copies_count: k.copies_count || 1,
+      total_sets: k.total_sets || 1,
+      sets_in_vault: k.sets_in_vault || 0,
       vault_reference: k.vault_reference, access_url: k.access_url,
       username_hint: k.username_hint, provider: k.provider,
       issued_date: k.issued_date || '', expiry_date: k.expiry_date || '',
       notes: k.notes,
+      undertaking_required: k.undertaking_required !== false,
     })
     setShowForm(true)
   }
@@ -247,7 +314,7 @@ export default function KeyRegisterPage() {
     }
   }
 
-  const isDigital = form.key_type !== 'PHYSICAL_KEY' && form.key_type !== 'OTHER'
+  const isDigital = !PHYSICAL_TYPES.has(form.key_type) && form.key_type !== 'OTHER'
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -423,25 +490,50 @@ export default function KeyRegisterPage() {
             </h2>
 
             {/* Type & name */}
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
+            <div className="grid grid-cols-3 gap-3 mb-3">
+              <div className="col-span-1">
                 <label className="block text-xs text-white/60 mb-1">Type *</label>
                 <select
                   value={form.key_type}
-                  onChange={e => setForm(p => ({ ...p, key_type: e.target.value }))}
+                  onChange={e => {
+                    const nt = e.target.value
+                    setForm(p => ({
+                      ...p, key_type: nt,
+                      // Default-on undertaking for physical keys, off for digital
+                      undertaking_required: PHYSICAL_TYPES.has(nt) ? p.undertaking_required : false,
+                    }))
+                  }}
                   className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white text-sm"
                 >
-                  {Object.entries(TYPE_LABEL).map(([k, v]) => (
-                    <option key={k} value={k}>{v}</option>
+                  {TYPE_GROUPS.map(g => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.types.map(t => <option key={t} value={t}>{TYPE_LABEL[t] || t}</option>)}
+                    </optgroup>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Branch *</label>
+                <input
+                  value={form.branch_id}
+                  onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))}
+                  placeholder="main, leicester, reading, mk"
+                  list="branch-list"
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white text-sm"
+                />
+                <datalist id="branch-list">
+                  <option value="main" />
+                  <option value="leicester" />
+                  <option value="reading" />
+                  <option value="mk" />
+                </datalist>
               </div>
               <div>
                 <label className="block text-xs text-white/60 mb-1">Name *</label>
                 <input
                   value={form.name}
                   onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                  placeholder={form.key_type === 'PHYSICAL_KEY' ? 'Front door key' : 'shital.org.uk PayPal admin'}
+                  placeholder={PHYSICAL_TYPES.has(form.key_type) ? 'e.g. Main shrine — front door' : 'shital.org.uk PayPal admin'}
                   className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white text-sm"
                 />
               </div>
@@ -525,7 +617,7 @@ export default function KeyRegisterPage() {
             </div>
 
             {/* Physical fields */}
-            {form.key_type === 'PHYSICAL_KEY' && (
+            {PHYSICAL_TYPES.has(form.key_type) && (
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div className="col-span-2">
                   <label className="block text-xs text-white/60 mb-1">Physical location</label>
@@ -541,6 +633,7 @@ export default function KeyRegisterPage() {
                   <input
                     value={form.serial_number}
                     onChange={e => setForm(p => ({ ...p, serial_number: e.target.value }))}
+                    placeholder="stamped on the key"
                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white text-sm"
                   />
                 </div>
@@ -552,6 +645,52 @@ export default function KeyRegisterPage() {
                     onChange={e => setForm(p => ({ ...p, copies_count: parseInt(e.target.value) || 1 }))}
                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white text-sm"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">Total sets owned</label>
+                  <input
+                    type="number" min={1}
+                    value={form.total_sets}
+                    onChange={e => setForm(p => ({ ...p, total_sets: parseInt(e.target.value) || 1 }))}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white text-sm"
+                  />
+                  <p className="text-[10px] text-white/40 mt-1">e.g. 5 if we own 5 physical copies</p>
+                </div>
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">Sets in vault / unissued</label>
+                  <input
+                    type="number" min={0}
+                    value={form.sets_in_vault}
+                    onChange={e => setForm(p => ({ ...p, sets_in_vault: parseInt(e.target.value) || 0 }))}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white text-sm"
+                  />
+                  <p className="text-[10px] text-white/40 mt-1">spare copies sitting in the safe</p>
+                </div>
+
+                {/* Holder contact card — shown inline when a person is selected */}
+                {form.holder_employee_id && (
+                  <div className="col-span-2 rounded-lg p-3 bg-white/5 border border-white/10">
+                    <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Holder contact (from employee record)</p>
+                    <p className="text-white font-semibold text-sm">{form.holder_name}</p>
+                    <p className="text-white/60 text-xs">Employee details auto-populated. Edit on the Employees page if anything's out of date.</p>
+                  </div>
+                )}
+
+                {/* Undertaking */}
+                <div className="col-span-2 rounded-lg p-3 bg-saffron-500/10 border border-saffron-400/30">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.undertaking_required}
+                      onChange={e => setForm(p => ({ ...p, undertaking_required: e.target.checked }))}
+                      className="mt-0.5"
+                    />
+                    <span className="text-white/80 text-sm">
+                      <span className="font-bold">Require signed undertaking</span> — generate a printable
+                      undertaking the holder signs before taking the key. The status will
+                      show "Undertaking pending" until you mark it signed.
+                    </span>
+                  </label>
                 </div>
               </div>
             )}

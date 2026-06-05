@@ -224,6 +224,16 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_keyreg_status  ON key_register(status)   WHERE deleted_at IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_keyreg_holder  ON key_register(holder_employee_id) WHERE deleted_at IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_keyreg_expiry  ON key_register(expiry_date) WHERE expiry_date IS NOT NULL AND deleted_at IS NULL",
+        # ── Expansion fields added 2026: track total sets vs in-vault, plus
+        # the per-holder undertaking that trustees increasingly require for
+        # physical keys to property / shrines / donation boxes.
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS total_sets               INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS sets_in_vault            INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_required     BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_signed_at    TIMESTAMPTZ DEFAULT NULL",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_signed_name  VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_pdf_url      TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_sent_at      TIMESTAMPTZ DEFAULT NULL",
         """CREATE TABLE IF NOT EXISTS key_register_events (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             key_id UUID NOT NULL,
