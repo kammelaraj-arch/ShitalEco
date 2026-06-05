@@ -400,11 +400,35 @@ async def now_playing(branch_id: str = "") -> dict[str, Any]:
     """What's on the TV channel RIGHT NOW. Public — no auth.
 
     Priority order:
-      1. An in-progress LIVE event for this branch
-      2. An in-progress LIVE event for any branch (if no branch filter)
-      3. The scheduled block in the current time-of-day window
-      4. The next upcoming scheduled block (countdown view)
+      1. The YouTube channel is actively live-streaming (detected via the
+         Data API — picks up any "Go Live" from YouTube Studio without
+         the operator having to create a broadcast_live_events row first).
+      2. An in-progress LIVE event for this branch (admin-managed)
+      3. An in-progress LIVE event for any branch (if no branch filter)
+      4. The scheduled block in the current time-of-day window
+      5. The next upcoming scheduled block (countdown view)
     """
+    # 0. YouTube live-detection. If the temple's channel is actively
+    # broadcasting, surface that as the LIVE state regardless of whether
+    # the admin has created a broadcast_live_events row.
+    try:
+        from shital.services.youtube import check_live
+        yt = await check_live()
+        if yt.get("is_live") and yt.get("video_id"):
+            return {
+                "state": "LIVE",
+                "event": {
+                    "title":            yt.get("title") or "Live broadcast",
+                    "youtube_video_id": yt["video_id"],
+                    "platform":         "youtube",
+                    "branch_id":        branch_id or None,
+                    "source":           "youtube_auto_detect",
+                    "thumbnail_url":    yt.get("thumbnail_url") or "",
+                },
+            }
+    except Exception:  # noqa: BLE001
+        # Detection is best-effort; fall through to DB state on failure.
+        pass
     now = datetime.now(UTC)
     branch_filter = (branch_id or "").strip() or None
 

@@ -2996,6 +2996,9 @@ async def _seed_api_key_metadata() -> None:
         ("SUMUP_MERCHANT_CODE",      "SumUp merchant code (e.g. M602X5FC)",            "SumUp",     False),
         ("MEILISEARCH_MASTER_KEY",   "MeiliSearch master key",                         "Other",     True),
         ("VULTR_API_KEY",            "Vultr Personal Access Token — pulls real hosting cost into Finance → Hosting Costs",              "Hosting",   True),
+        ("YOUTUBE_CHANNEL_ID",       "YouTube channel ID (UC...) for the temple's TV channel — drives live-status detection on shital.org.uk/tv", "TV",        False),
+        ("YOUTUBE_CHANNEL_HANDLE",   "YouTube channel handle, e.g. @ShirdiSaiTempleUK — used for the 'Watch on YouTube' link",                  "TV",        False),
+        ("YOUTUBE_DATA_API_KEY",     "YouTube Data API v3 key (AIzaSy...) — free from console.cloud.google.com",                              "TV",        True),
     ]
 
     async with SessionLocal() as db:
