@@ -855,7 +855,7 @@ async def delete_holding(key_id: str, holding_id: str,
 #   4. Admin re-opens the key — status shows "Signed online (Anil Patel,
 #      14 Mar 2026)" with a link to the captured evidence.
 
-import secrets as _secrets
+import secrets as _secrets  # noqa: E402 — kept here for proximity to the e-sign flow it serves
 
 
 class SendUndertakingEmailIn(BaseModel):

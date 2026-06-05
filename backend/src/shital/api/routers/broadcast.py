@@ -73,9 +73,11 @@ async def list_assets(ctx: CurrentSpace, kind: str = "", branch_id: str = "",
     where = ["deleted_at IS NULL"]
     params: dict[str, Any] = {"lim": max(1, min(int(limit), 500))}
     if kind:
-        where.append("kind = :k"); params["k"] = kind.upper()
+        where.append("kind = :k")
+        params["k"] = kind.upper()
     if branch_id:
-        where.append("branch_id = :b"); params["b"] = branch_id
+        where.append("branch_id = :b")
+        params["b"] = branch_id
     if search.strip():
         where.append("(LOWER(title) LIKE :q OR LOWER(description) LIKE :q)")
         params["q"] = f"%{search.strip().lower()}%"
@@ -295,9 +297,11 @@ async def list_live(ctx: CurrentSpace, status: str = "", branch_id: str = "",
     where = ["1=1"]
     params: dict[str, Any] = {"lim": max(1, min(int(limit), 200))}
     if status:
-        where.append("status = :st"); params["st"] = status.upper()
+        where.append("status = :st")
+        params["st"] = status.upper()
     if branch_id:
-        where.append("branch_id = :b"); params["b"] = branch_id
+        where.append("branch_id = :b")
+        params["b"] = branch_id
     sql = f"""
         SELECT id::text, branch_id, project_id::text AS project_id, title,
                description, scheduled_at, started_at, ended_at, platform,
@@ -521,7 +525,8 @@ async def public_archive(kind: str = "", limit: int = 50) -> dict[str, Any]:
         asset_where = ["deleted_at IS NULL", "rights_cleared = true"]
         params: dict[str, Any] = {"lim": max(1, min(int(limit), 200))}
         if kind:
-            asset_where.append("kind = :k"); params["k"] = kind.upper()
+            asset_where.append("kind = :k")
+            params["k"] = kind.upper()
         asset_rows = (await db.execute(text(f"""
             SELECT id::text, title, description, branch_id, created_at AS ended_at,
                    youtube_video_id, source_url AS recording_url,

@@ -153,11 +153,14 @@ async def list_documents(ctx: CurrentSpace, category: str = "",
     conditions = ["d.branch_id = :bid", "d.deleted_at IS NULL"]
     params: dict[str, Any] = {"bid": ctx.branch_id, "lim": max(1, min(int(limit), 500))}
     if category:
-        conditions.append("d.category = :cat"); params["cat"] = category.upper()
+        conditions.append("d.category = :cat")
+        params["cat"] = category.upper()
     if linked_entity_type:
-        conditions.append("d.linked_entity_type = :let"); params["let"] = linked_entity_type
+        conditions.append("d.linked_entity_type = :let")
+        params["let"] = linked_entity_type
     if linked_entity_id:
-        conditions.append("d.linked_entity_id = :lei"); params["lei"] = linked_entity_id
+        conditions.append("d.linked_entity_id = :lei")
+        params["lei"] = linked_entity_id
     if search.strip():
         conditions.append("(LOWER(d.title) LIKE :q OR LOWER(d.description) LIKE :q OR LOWER(d.tags) LIKE :q)")
         params["q"] = f"%{search.strip().lower()}%"

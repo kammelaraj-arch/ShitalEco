@@ -30,7 +30,7 @@ import io
 import logging
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 

@@ -24,6 +24,7 @@ small.
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from typing import Any
 
 import httpx
@@ -111,12 +112,12 @@ async def cost_snapshot() -> dict[str, Any]:
       billing_history:        [{date, type, description, amount}]
       last_30_days_charge:    abs total of negative-amount events in last 30d
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     acct, instances, history = await get_account(), await list_instances(), await billing_history(50)
     forecast = sum(float(i.get("monthly_cost") or 0) for i in instances)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    cutoff = datetime.now(UTC) - timedelta(days=30)
     last_30 = 0.0
     for h in history:
         when = h.get("date") or ""

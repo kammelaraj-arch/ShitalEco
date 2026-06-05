@@ -3607,6 +3607,9 @@ async def _seed_document_categories() -> None:
         ("MEDIA",              "Media & Communications","Press releases, photos, video releases, marketing assets, brand guidelines.",       "📸", "media",             0,  False, 180),
         ("OTHER",              "Other",                 "Documents that don't fit any other category.",                                       "📄", "other",             0,  False, 999),
     ]
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         for c in cats:
             try:
