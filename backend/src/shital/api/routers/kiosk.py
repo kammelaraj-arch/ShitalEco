@@ -595,6 +595,59 @@ async def create_terminal_payment_intent(body: TerminalPaymentInput):
         return {"error": str(e)}
 
 
+# ─── Online Payment Intent (Google Pay / Apple Pay / web cards) ──────────────
+# Separate from /terminal/payment-intent above (which is card_present for
+# physical Stripe Terminal readers). This one creates a regular online
+# PaymentIntent so the donor's phone or browser can pay with a digital
+# wallet via the Stripe Payment Request button.
+
+class OnlinePaymentIntentInput(BaseModel):
+    amount_pence: int
+    currency: str = "GBP"
+    description: str = "Shital Temple Donation"
+    branch_id: str = ""
+    donor_email: str = ""
+    metadata: dict[str, Any] = {}
+
+
+@router.post("/online/payment-intent")
+async def create_online_payment_intent(body: OnlinePaymentIntentInput) -> dict[str, Any]:
+    """Create an online PaymentIntent suitable for the Stripe Payment Request
+    button (Google Pay on Android, Apple Pay on iOS Safari, browser-saved
+    cards elsewhere). Returns the client_secret the frontend uses to confirm
+    the payment without ever touching the secret key."""
+    import stripe
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
+    if body.amount_pence < 50:
+        raise HTTPException(400, detail="Minimum donation is £0.50")
+    if body.amount_pence > 10_000_00:
+        raise HTTPException(400, detail="Single donation cap is £10,000 — please contact the temple for larger donations")
+    meta = {
+        "branch_id":   body.branch_id or "main",
+        "donor_email": body.donor_email or "",
+        "source":      "quick-donation-online",
+        **{str(k)[:40]: str(v)[:500] for k, v in (body.metadata or {}).items()},
+    }
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=body.amount_pence,
+            currency=body.currency.lower(),
+            # automatic_payment_methods lets Stripe pick from card / GPay /
+            # ApplePay / Link based on the donor's device + saved wallets.
+            automatic_payment_methods={"enabled": True},
+            description=body.description[:200],
+            metadata=meta,
+        )
+        return {
+            "payment_intent_id": intent.id,
+            "client_secret":     intent.client_secret,
+            "status":            intent.status,
+            "publishable_key":   (await SecretsManager.get("STRIPE_PUBLISHABLE_KEY", settings.STRIPE_PUBLISHABLE_KEY)) or "",
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
 class ReaderActionInput(BaseModel):
     reader_id: str
     payment_intent_id: str
