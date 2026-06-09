@@ -502,7 +502,14 @@ async def incoming_funds(
 
     where = ["d.deleted_at IS NULL",
              "d.created_at >= :start_ts",
-             "d.created_at < :end_ts"]
+             "d.created_at < :end_ts",
+             # Exclude in-flight / failed / cancelled / refunded so all
+             # totals on the Incoming Funds dashboard reflect only money
+             # the charity actually received. PENDING + FAILED were
+             # inflating the daily numbers on busy festival days when a
+             # handful of transactions never completed.
+             "UPPER(COALESCE(d.status, 'COMPLETED')) NOT IN "
+                 "('PENDING','FAILED','CANCELLED','CANCELED','REFUNDED','VOID','VOIDED')"]
     params: dict[str, Any] = {
         "start_ts": datetime.combine(start_d, datetime.min.time()),
         # End is exclusive; add one day so end_date itself is included.
