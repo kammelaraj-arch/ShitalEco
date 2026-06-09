@@ -119,6 +119,35 @@ export default function DonationsPage() {
   const [csvDownloading, setCsvDownloading] = useState(false)
   const [csvImporting, setCsvImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; error: string }[] } | null>(null)
+  const [reconciling, setReconciling] = useState(false)
+
+  async function reconcileSumUp() {
+    const days = parseInt(prompt('Days to sweep (default 7 covers from 7 June onwards):', '7') || '0', 10)
+    if (!days || days < 1) return
+    setReconciling(true); setError('')
+    try {
+      const r = await apiFetch<{
+        scanned: number; completed: number; failed: number;
+        still_pending: number; not_found: number; errors: number;
+        rows: Array<{ outcome: string; amount?: number }>
+      }>(`/kiosk/sumup/reconcile-pending?days=${days}`, { method: 'POST' })
+      const recovered = (r.rows || [])
+        .filter(x => x.outcome === 'completed')
+        .reduce((acc, x) => acc + (x.amount || 0), 0)
+      alert(
+        `Reconcile complete (${days} days)\n\n` +
+        `Scanned: ${r.scanned}\n` +
+        `✅ Recovered (now COMPLETED): ${r.completed}   £${recovered.toFixed(2)}\n` +
+        `❌ Marked failed: ${r.failed}\n` +
+        `⏳ Still pending on SumUp side: ${r.still_pending}\n` +
+        `🔍 Not found on SumUp: ${r.not_found}\n` +
+        `⚠ Errors: ${r.errors}`
+      )
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Reconcile failed')
+    } finally { setReconciling(false) }
+  }
 
   // New / Edit form
   const [showForm, setShowForm] = useState(false)
@@ -369,6 +398,15 @@ export default function DonationsPage() {
             style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
           >
             {csvImporting ? '⏳' : '⬆'} Import CSV
+          </button>
+          <button
+            onClick={reconcileSumUp}
+            disabled={reconciling}
+            title="Sweep the last 7 days of PENDING SumUp donations, ask SumUp the real status, flip to COMPLETED / FAILED. Use after a container restart or webhook outage."
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+            style={{ background: 'rgba(245,158,11,0.18)', border: '1px solid rgba(245,158,11,0.4)' }}
+          >
+            {reconciling ? '⏳ Reconciling…' : '🔄 Reconcile SumUp'}
           </button>
           <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvUpload} />
         </div>
