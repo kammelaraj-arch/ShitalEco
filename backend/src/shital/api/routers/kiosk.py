@@ -1131,6 +1131,111 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
         return {"paid": False, "error": str(e)}
 
 
+# ─── SumUp reconciliation — recover stuck PENDING donations ──────────────────
+# When the shital-donate container goes down, SumUp's webhook can't reach us
+# so card-tapped donations stay PENDING in our DB even though SumUp actually
+# took the money. This endpoint catches up — pulls every PENDING SumUp
+# donation from the last N days, asks the SumUp API what really happened,
+# and flips status to COMPLETED / FAILED accordingly.
+
+@router.post("/sumup/reconcile-pending")
+async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 7) -> dict[str, Any]:
+    """Sweep PENDING SumUp donations from the last `days` days, query the
+    SumUp API for the real status, update donations.status accordingly.
+
+    Returns counts of updated / still-pending / not-found-on-sumup rows so
+    the admin sees exactly what was recovered. Idempotent — safe to call
+    multiple times; already-COMPLETED rows are skipped.
+
+    Recommended schedule: cron every hour, plus an admin button for
+    on-demand reconciliation after an outage."""
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="admin only")
+    days = max(1, min(int(days), 90))
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    if not access_token:
+        return {"error": "SumUp not configured"}
+
+    from sqlalchemy import text as _text
+
+    summary = {
+        "scanned": 0, "completed": 0, "failed": 0,
+        "still_pending": 0, "not_found": 0,
+        "errors": 0, "days_window": days,
+        "rows": [],
+    }
+    async with SessionLocal() as db:
+        pending_rows = (await db.execute(_text("""
+            SELECT id::text AS id, payment_ref, amount, currency, reference,
+                   created_at::text AS created_at, branch_id
+            FROM donations
+            WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
+              AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+              AND deleted_at IS NULL
+              AND created_at >= NOW() - (:days || ' days')::interval
+              AND payment_ref <> ''
+            ORDER BY created_at DESC
+        """), {"days": str(days)})).mappings().all()
+
+        async with httpx.AsyncClient(timeout=10) as cx:
+            for r in pending_rows:
+                summary["scanned"] += 1
+                checkout_id = r["payment_ref"] or ""
+                if not checkout_id:
+                    summary["errors"] += 1
+                    continue
+                try:
+                    resp = await cx.get(
+                        f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    summary["errors"] += 1
+                    summary["rows"].append({"id": r["id"], "error": str(exc)[:120]})
+                    continue
+                if resp.status_code == 404:
+                    summary["not_found"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "not_found_on_sumup",
+                                            "checkout_id": checkout_id})
+                    continue
+                if resp.status_code >= 400:
+                    summary["errors"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "sumup_error",
+                                            "code": resp.status_code,
+                                            "body": resp.text[:200]})
+                    continue
+                d = resp.json()
+                sumup_status = (d.get("status") or "").upper()
+                # SumUp uses PAID for success, EXPIRED/FAILED for failed
+                if sumup_status == "PAID":
+                    await db.execute(_text("""
+                        UPDATE donations SET status = 'COMPLETED', updated_at = NOW()
+                        WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                    """), {"id": r["id"]})
+                    summary["completed"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "completed",
+                                            "amount": float(r["amount"]),
+                                            "checkout_id": checkout_id})
+                elif sumup_status in {"FAILED", "EXPIRED", "CANCELLED", "CANCELED"}:
+                    await db.execute(_text("""
+                        UPDATE donations SET status = :st, updated_at = NOW()
+                        WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                    """), {"id": r["id"], "st": "FAILED" if sumup_status == "FAILED" else "CANCELLED"})
+                    summary["failed"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "failed",
+                                            "sumup_status": sumup_status,
+                                            "checkout_id": checkout_id})
+                else:
+                    # Still PENDING on SumUp's side — possibly never tapped
+                    summary["still_pending"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "still_pending",
+                                            "sumup_status": sumup_status,
+                                            "checkout_id": checkout_id})
+        await db.commit()
+    return summary
+
+
 @router.get("/sumup/readers")
 async def list_sumup_readers():
     """List SumUp readers registered to the merchant."""
