@@ -336,6 +336,30 @@ async def _patch_schema() -> None:
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS generated_by       VARCHAR(80) NOT NULL DEFAULT ''",
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_path          TEXT        NOT NULL DEFAULT ''",
         "CREATE INDEX IF NOT EXISTS idx_documents_linked ON documents(linked_entity_type, linked_entity_id) WHERE deleted_at IS NULL AND linked_entity_id <> ''",
+        # System alerts — every monitor.sh transition is POSTed here so the
+        # admin can see container restarts, backup failures, expired certs,
+        # etc. in one place instead of trawling through trustee mailboxes.
+        # Auto-heal attempts (restart count + outcome) are recorded on the
+        # same row so the trustee can see "this restarted itself 3 times"
+        # without SSH-ing into the host.
+        """CREATE TABLE IF NOT EXISTS system_alerts (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            host            VARCHAR(120) NOT NULL DEFAULT '',
+            check_name      VARCHAR(80)  NOT NULL,
+            severity        VARCHAR(20)  NOT NULL DEFAULT 'critical',
+            status          VARCHAR(20)  NOT NULL DEFAULT 'fail',
+            message         TEXT         NOT NULL DEFAULT '',
+            detail          TEXT         NOT NULL DEFAULT '',
+            heal_attempts   INTEGER      NOT NULL DEFAULT 0,
+            heal_outcome    VARCHAR(20)  NOT NULL DEFAULT '',
+            acknowledged_at TIMESTAMPTZ DEFAULT NULL,
+            acknowledged_by VARCHAR(255) NOT NULL DEFAULT '',
+            resolved_at     TIMESTAMPTZ DEFAULT NULL,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_system_alerts_status     ON system_alerts(status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_system_alerts_check_host ON system_alerts(check_name, host, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_system_alerts_open       ON system_alerts(created_at DESC) WHERE resolved_at IS NULL AND status <> 'ok'",
         # Category lookup — formal codes with display labels, icons, and a
         # folder name used when laying files out on disk. Seeded with the
         # canonical charity categories; admins can add more via the API.
@@ -3874,7 +3898,7 @@ _mount("shital.api.routers.projects",             "router")
 _mount("shital.api.routers.recurring_payments",   "router")
 _mount("shital.api.routers.hosting",              "router")
 _mount("shital.api.routers.broadcast",            "router")
-_mount("shital.api.routers.broadcast",            "router")
+_mount("shital.api.routers.system_alerts",        "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")

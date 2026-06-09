@@ -20,6 +20,7 @@ set -uo pipefail
 APP_DIR="/opt/shitaleco"
 BACKUP_DIR="$APP_DIR/backups"
 STATE_FILE="$BACKUP_DIR/monitor.state"
+STATE_DIR="$BACKUP_DIR"
 LOG_FILE="$BACKUP_DIR/monitor.log"
 MAIL_PY="$APP_DIR/infra/monitor-mail.py"
 
@@ -147,26 +148,83 @@ check_containers() {
         return
     fi
 
-    # Self-diagnosing alert: include each broken container's restart count +
-    # last 20 log lines so the on-call recipient can triage from the email
-    # alone, instead of round-tripping through the System Ops panel. Each
-    # container's log section is capped so one chatty crash can't swallow
-    # the whole message.
-    local summary detail name restarts logs
-    summary=$(echo "$broken" | tr '\n' ';' | head -c 300)
-    detail=""
+    # ── Self-healing pass ───────────────────────────────────────────────────
+    # Try to recover each broken container before alerting. State file
+    # tracks heal-attempt count per container in a rolling 1-hour window so
+    # a genuinely-broken container (e.g. missing env var) doesn't get
+    # restart-looped forever.
+    local heal_state="$STATE_DIR/heal-attempts.state"
+    mkdir -p "$STATE_DIR" 2>/dev/null || true
+    touch "$heal_state"
+
+    local now_ts; now_ts=$(date +%s)
+    local heal_summary heal_detail name restarts logs attempt_count outcome since_ts
+    heal_summary=""
+    heal_detail=""
+
     while IFS= read -r line; do
         name=$(echo "$line" | awk '{print $1}')
         [ -z "$name" ] && continue
         restarts=$(docker inspect --format '{{.RestartCount}}' "$name" 2>/dev/null || echo "?")
+
+        # Count heal attempts on this container in the last hour
+        attempt_count=$(grep "^${name} " "$heal_state" 2>/dev/null \
+                        | awk -v cutoff="$((now_ts - 3600))" '$2 >= cutoff' | wc -l)
+        outcome="not_attempted"
+
+        if [ "$attempt_count" -lt 3 ]; then
+            log "HEAL attempting restart of $name (attempt $((attempt_count + 1))/3 in last hour)"
+            if docker restart "$name" >/dev/null 2>&1; then
+                # Wait briefly, then re-check status
+                sleep 6
+                local now_status
+                now_status=$(docker ps --filter "name=^${name}$" --format '{{.Status}}' 2>/dev/null || echo "")
+                if echo "$now_status" | grep -Eq 'Up.*\(healthy\)|Up [0-9]+ (seconds|minutes|hours|days|weeks)'; then
+                    outcome="restarted"
+                    log "HEAL succeeded: $name is now up — $now_status"
+                else
+                    outcome="failed"
+                    log "HEAL restart returned 0 but container still unhealthy: $now_status"
+                fi
+            else
+                outcome="failed"
+                log "HEAL: docker restart $name failed"
+            fi
+            echo "${name} ${now_ts} ${outcome}" >> "$heal_state"
+        else
+            outcome="rate_limited"
+            log "HEAL skipped: $name has had $attempt_count attempts in last hour"
+        fi
+
         logs=$(docker logs --tail 20 "$name" 2>&1 | head -c 1500 || true)
-        detail="${detail}
-── ${name} — restarts=${restarts} ──
+        heal_detail="${heal_detail}
+── ${name} — restarts=${restarts}, heal=${outcome} ──
 ${logs}
 "
+        heal_summary="${heal_summary}${name}(${outcome}); "
     done <<< "$broken"
 
-    record containers fail "Containers not healthy: ${summary}${detail}" critical
+    # Re-check: did any heal-attempts succeed? Anything still broken?
+    local still_broken
+    still_broken=$(docker ps -a --filter "name=shital" --format '{{.Names}} {{.Status}}' \
+                   | grep -Ev 'Up.*\(healthy\)|Up [0-9]+ (seconds|minutes|hours|days|weeks)( |$)' \
+                   | grep -v '^$' || true)
+
+    if [ -z "$still_broken" ]; then
+        # Healed — record ok with detail showing what we did
+        record containers ok "Self-healed: ${heal_summary}" critical
+        # Prune old heal-state entries (anything older than 24h)
+        if [ -f "$heal_state" ]; then
+            awk -v cutoff="$((now_ts - 86400))" '$2 >= cutoff' "$heal_state" > "${heal_state}.tmp" \
+                && mv "${heal_state}.tmp" "$heal_state"
+        fi
+        return
+    fi
+
+    # Some container is still broken after the heal attempt — alert.
+    local summary
+    summary=$(echo "$still_broken" | tr '\n' ';' | head -c 300)
+    record containers fail "Containers still unhealthy after auto-heal (${heal_summary}): ${summary}${heal_detail}" critical
 }
 
 check_backup_today() {
@@ -351,6 +409,40 @@ EOF
     else
         log "EMAIL FAILED [$severity] $name (see above)"
     fi
+
+    # Mirror to the central admin DB so the operator can see all alerts in
+    # one place (Sidebar → System Ops → 🚨 Alerts) without needing to read
+    # this VPS's mailbox. Best-effort: failure here is logged but never
+    # blocks the email path.
+    ingest_alert_to_backend "$severity" "$name" "$status" "$msg"
+}
+
+ingest_alert_to_backend() {
+    local sev=$1 ck=$2 st=$3 m=$4
+    local api="${MONITOR_API_URL:-https://shital.org.uk/api/v1}"
+    local tok="${DEPLOY_SECRET:-${MONITOR_TOKEN:-}}"
+    [ -z "$tok" ] && return 0  # No secret configured → skip silently
+    # Trim payload to JSON-safe sizes — bash heredoc + python -c for
+    # robust escaping (avoids breaking on " or newlines in container logs).
+    python3 - "$sev" "$ck" "$st" "$m" "$(hostname)" "$api" "$tok" <<'PYEOF' >> "$LOG_FILE" 2>&1 || \
+        log "ALERT INGEST FAILED for $ck"
+import json, sys, urllib.request
+sev, ck, st, m, host, api, tok = sys.argv[1:8]
+payload = json.dumps({
+    "host": host, "check_name": ck, "severity": sev,
+    "status": st, "message": (m or "")[:2000], "detail": ""
+}).encode("utf-8")
+req = urllib.request.Request(
+    f"{api}/admin/system-alerts/ingest",
+    data=payload, method="POST",
+    headers={"Content-Type": "application/json", "X-Monitor-Token": tok},
+)
+try:
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        print(f"ALERT INGEST {ck}={st} → {resp.status}")
+except Exception as exc:
+    print(f"ALERT INGEST {ck} failed: {exc}")
+PYEOF
 }
 
 # ── Weekly digest ───────────────────────────────────────────────────────────
