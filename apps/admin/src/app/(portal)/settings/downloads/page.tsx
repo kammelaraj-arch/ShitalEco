@@ -40,6 +40,15 @@ const TILES: DownloadTile[] = [
     accent:   'border-l-green-500/50',
   },
   {
+    title:    'Quick Donation for Android',
+    subtitle: 'APK — trustees take card / Google Pay donations on a phone',
+    icon:     '📱',
+    href:     `${KIOSK_RELEASE}/shital-quick-donation-latest.apk`,
+    badge:    '.apk',
+    category: 'installer',
+    accent:   'border-l-saffron-500/50',
+  },
+  {
     title:    'Kiosk for Linux (portable)',
     subtitle: 'AppImage — runs without install on most x64 distros',
     icon:     '🐧',
