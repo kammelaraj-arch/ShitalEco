@@ -1021,22 +1021,90 @@ async def sumup_webhook(request: Request):
     """
     SumUp calls this URL (set as return_url in checkout creation) the instant
     a checkout status changes — typically PENDING → PAID after card tap.
-    We cache the status in Redis so the frontend poll returns it immediately.
-    """
 
+    Updates BOTH:
+      1. Redis cache (`sumup:checkout:<id>`) — so the frontend polling sees
+         the status change immediately on the next 1s tick.
+      2. The donations table directly — so even if the frontend disconnects
+         before its /order/confirm call (kiosk app crash, donor closes
+         screen, network blip, container restart), the donation still
+         flips from PENDING → COMPLETED.
+
+    The #2 update is the FIX for the "last 3 days of SumUp donations all
+    stuck PENDING" bug. Previously the webhook only touched Redis; any
+    interruption between webhook arrival and the frontend confirm call
+    left the donation marked PENDING forever.
+
+    Idempotent — re-receiving the same webhook is a no-op (already
+    COMPLETED rows aren't re-touched by the WHERE filter).
+    """
     try:
         body = await request.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return {"ok": False}
 
-    checkout_id = body.get("id") or body.get("checkout_id")
-    status = body.get("status")
-    if checkout_id and status:
+    # SumUp's webhook payload uses different keys depending on event type;
+    # accept all the variants we've seen in production.
+    checkout_id = (body.get("id") or body.get("checkout_id")
+                   or body.get("resource_id") or "")
+    status      = (body.get("status") or body.get("event_type") or "").upper()
+    payment_ref = (body.get("transaction_id") or body.get("transaction_code") or "")
+
+    if not checkout_id or not status:
+        return {"ok": False, "reason": "missing checkout_id or status"}
+
+    # 1. Redis fast-path (existing behaviour — frontend poll sees it next tick)
+    try:
+        await cache_set(f"sumup:checkout:{checkout_id}",
+                        {"status": status, "transaction_id": payment_ref},
+                        ttl=3600)
+    except Exception:  # noqa: BLE001
+        pass  # Redis unavailable — DB write below still happens
+
+    # 2. DB direct-update (NEW — survives frontend disconnect / container restart)
+    # SumUp uses PAID for success, EXPIRED/FAILED/CANCELLED for failure.
+    new_status: str | None = None
+    if status in {"PAID", "SUCCESSFUL", "SUCCESS"}:
+        new_status = "COMPLETED"
+    elif status in {"FAILED", "EXPIRED", "CANCELLED", "CANCELED", "VOIDED"}:
+        new_status = "FAILED" if status == "FAILED" else "CANCELLED"
+    if new_status:
         try:
-            await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
-        except Exception:
-            pass  # Redis unavailable — webhook still accepted
-    return {"ok": True}
+            from sqlalchemy import text as _text
+            async with SessionLocal() as db:
+                # Match by payment_ref (the SumUp checkout id we stored at
+                # checkout creation time). The WHERE excludes already-
+                # terminal statuses so re-deliveries are no-ops.
+                await db.execute(_text("""
+                    UPDATE donations SET
+                        status = :st,
+                        payment_ref = CASE WHEN :pref <> '' THEN :pref
+                                           ELSE payment_ref END,
+                        updated_at = NOW()
+                    WHERE payment_ref = :cid
+                      AND UPPER(COALESCE(status, '')) IN ('PENDING', '')
+                      AND deleted_at IS NULL
+                """), {"cid": checkout_id, "st": new_status, "pref": payment_ref})
+                # Same for orders (if there's a matching one)
+                await db.execute(_text("""
+                    UPDATE orders SET
+                        status = :st,
+                        payment_ref = CASE WHEN :pref <> '' THEN :pref
+                                           ELSE payment_ref END,
+                        updated_at = NOW()
+                    WHERE payment_ref = :cid
+                      AND UPPER(COALESCE(status, '')) IN ('PENDING', '')
+                """), {"cid": checkout_id, "st": new_status, "pref": payment_ref})
+                await db.commit()
+        except Exception:  # noqa: BLE001
+            # Best-effort — if the DB write fails, the existing /order/confirm
+            # path still has a chance to complete the donation when the
+            # frontend's poll sees the status.
+            import logging as _log
+            _log.getLogger("shital.sumup").exception(
+                "sumup webhook DB update failed for checkout %s", checkout_id)
+
+    return {"ok": True, "status": status, "applied": new_status}
 
 
 @router.get("/sumup/checkout/{checkout_id}")
@@ -1076,6 +1144,56 @@ async def sumup_checkout_status(checkout_id: str):
         return {"status": status, "raw": data}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+@router.get("/sumup/configured-kiosks")
+async def list_sumup_configured_kiosks(ctx: CurrentSpace) -> dict[str, Any]:
+    """Identify every kiosk that's ever taken a SumUp donation. Reads the
+    donations table — answers the operator's question 'which kiosk is
+    actually configured with SumUp' even if kiosk_devices.card_reader_id
+    points at a Stripe row (which can happen if a Stripe reader replaced
+    the SumUp one in the device record).
+
+    Returns each kiosk with its total SumUp donation count, total amount,
+    last donation date, and current card_reader_id mapping so the operator
+    can spot mismatches at a glance."""
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="admin only")
+    from sqlalchemy import text as _text
+    async with SessionLocal() as db:
+        rows = (await db.execute(_text("""
+            SELECT
+                kd.id::text                  AS kiosk_id,
+                kd.name                      AS kiosk_name,
+                kd.branch_id                 AS branch,
+                kd.device_type               AS device_type,
+                COUNT(d.id)                  AS sumup_donation_count,
+                COALESCE(SUM(d.amount), 0)::numeric AS sumup_total,
+                COUNT(*) FILTER (WHERE UPPER(COALESCE(d.status,'')) IN ('PENDING','')) AS pending_count,
+                COUNT(*) FILTER (WHERE UPPER(COALESCE(d.status,'')) = 'COMPLETED')     AS completed_count,
+                MAX(d.created_at)            AS last_sumup_at,
+                kd.card_reader_id::text      AS current_card_reader_id,
+                td.label                     AS current_reader_label,
+                td.provider                  AS current_reader_provider
+            FROM donations d
+            JOIN kiosk_devices kd ON kd.id = d.kiosk_device_id
+            LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+            WHERE UPPER(COALESCE(d.payment_provider, '')) = 'SUMUP'
+              AND d.deleted_at IS NULL
+              AND kd.deleted_at IS NULL
+            GROUP BY kd.id, kd.name, kd.branch_id, kd.device_type,
+                     kd.card_reader_id, td.label, td.provider
+            ORDER BY MAX(d.created_at) DESC
+        """))).mappings().all()
+    items = []
+    for r in rows:
+        d = dict(r)
+        if d.get("last_sumup_at") and hasattr(d["last_sumup_at"], "isoformat"):
+            d["last_sumup_at"] = d["last_sumup_at"].isoformat()
+        d["sumup_total"] = float(d["sumup_total"] or 0)
+        d["mismatch"] = (d.get("current_reader_provider", "") or "").lower() != "sumup"
+        items.append(d)
+    return {"items": items}
 
 
 @router.delete("/sumup/checkout/{checkout_id}")
