@@ -53,6 +53,14 @@ interface DeployEvent {
   at?: string
 }
 
+interface DeployerLog {
+  log_path?: string | null
+  lines?: string[]
+  size?: number
+  error?: string
+  message?: string
+}
+
 interface KioskHealthRow {
   id: string
   name: string
@@ -128,6 +136,15 @@ export default function OpsPage() {
   const [version, setVersion] = useState<VersionInfo | null>(null)
   const [environments, setEnvironments] = useState<EnvironmentsResponse | null>(null)
   const [deploys, setDeploys] = useState<DeployEvent[] | null>(null)
+
+  // Tail of /var/log/shital-deployer/latest.log — written by deploy.sh. Lets
+  // an operator see why a Promote / Re-deploy click did or didn't take effect
+  // (bad GHCR auth, missing /workspace mount, container crash on boot…) without
+  // SSH. Endpoint: backend proxies the deployer container's /last-deploy-log.
+  const [deployerLog, setDeployerLog] = useState<DeployerLog | null>(null)
+  const [deployerLogBusy, setDeployerLogBusy] = useState(false)
+  const [deployerLogTail, setDeployerLogTail] = useState(200)
+  const [deployerLogOpen, setDeployerLogOpen] = useState(false)
 
   // ── Kiosk health (Quick Donation + Full Kiosk fleet) ─────────────────────
   const [kiosks, setKiosks]       = useState<KioskHealthResponse | null>(null)
@@ -233,6 +250,19 @@ export default function OpsPage() {
   }, [])
 
   useEffect(() => { loadEnvs() }, [loadEnvs])
+
+  const loadDeployerLog = useCallback(async (tail = deployerLogTail) => {
+    if (deployerLogBusy) return
+    setDeployerLogBusy(true)
+    try {
+      const d = await apiFetch<DeployerLog>(`/admin/system/deployer/last-log?tail=${tail}`)
+      setDeployerLog(d)
+    } catch (e) {
+      setDeployerLog({ lines: [], error: e instanceof Error ? e.message : 'Failed to fetch log' })
+    } finally {
+      setDeployerLogBusy(false)
+    }
+  }, [deployerLogTail, deployerLogBusy])
 
   function openRedeployDevDialog() {
     setActionMsg(null); setPinValue(''); setConfirmInput('')
@@ -518,6 +548,61 @@ export default function OpsPage() {
               </div>
             )
           })}
+        </div>
+
+        {/* ── Last deploy log (deploy.sh stdout/stderr) ──────────────────── */}
+        <div className="mt-2 rounded-xl border border-white/10" style={{ background: 'rgba(255,255,255,0.02)' }}>
+          <button
+            onClick={() => {
+              const next = !deployerLogOpen
+              setDeployerLogOpen(next)
+              if (next && !deployerLog) loadDeployerLog(deployerLogTail)
+            }}
+            className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-white/60 text-xs uppercase tracking-wider">📄 Last deploy log</span>
+              {deployerLog?.log_path && (
+                <span className="text-white/30 text-[10px] font-mono">{deployerLog.log_path}</span>
+              )}
+              {deployerLog?.error && (
+                <span className="text-red-400 text-[10px]">— {deployerLog.error}</span>
+              )}
+            </div>
+            <span className="text-white/40 text-xs">{deployerLogOpen ? '▾' : '▸'}</span>
+          </button>
+          {deployerLogOpen && (
+            <div className="px-3 pb-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <label className="text-white/40 text-[11px] uppercase">Tail</label>
+                <select
+                  value={deployerLogTail}
+                  onChange={e => setDeployerLogTail(Number(e.target.value))}
+                  className="px-2 py-1 rounded bg-white/5 border border-white/10 text-white/80 text-xs"
+                >
+                  {[50, 100, 200, 500, 1000].map(n => <option key={n} value={n}>{n} lines</option>)}
+                </select>
+                <button
+                  onClick={() => loadDeployerLog(deployerLogTail)}
+                  disabled={deployerLogBusy}
+                  className="px-3 py-1 rounded bg-white/5 border border-white/10 text-white/70 text-xs hover:bg-white/10 disabled:opacity-40"
+                >
+                  {deployerLogBusy ? '⏳' : '↻ Refresh'}
+                </button>
+                {typeof deployerLog?.size === 'number' && (
+                  <span className="text-white/30 text-[10px] font-mono">{formatBytes(deployerLog.size)} on disk</span>
+                )}
+              </div>
+              {deployerLog?.message && (!deployerLog.lines || deployerLog.lines.length === 0) && (
+                <p className="text-white/50 text-xs">{deployerLog.message}</p>
+              )}
+              {deployerLog?.lines && deployerLog.lines.length > 0 && (
+                <pre className="bg-black/50 rounded-lg p-3 text-[11px] text-white/80 overflow-auto whitespace-pre-wrap max-h-96 font-mono">
+                  {deployerLog.lines.join('\n')}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
 
         {deploys && deploys.length > 0 && (
