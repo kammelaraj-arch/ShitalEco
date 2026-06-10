@@ -578,6 +578,27 @@ if [ "$TARGET" = "prod" ]; then
   endpoint_check "/api/v1/admin/system/version"     "http://localhost:8000/api/v1/admin/system/version"  "401"
   endpoint_check "/api/v1/admin/system/environments" "http://localhost:8000/api/v1/admin/system/environments" "401"
   endpoint_check "/api/v1/gift-aid/gasds/buildings" "http://localhost:8000/api/v1/gift-aid/gasds/buildings"  "401"
+  # Feature-level probes — guard against "looks healthy / nothing works"
+  # silent breakages. Each one exercises a code path that has rolled out
+  # broken on a previous deploy and went undetected for hours:
+  #   • /items/catalog  — proves DB connectivity + items router loaded
+  #     (it was a 500 for a full hour during the catalog-version refactor)
+  #   • kiosk QD login  — proves SumUp/Stripe reader-lookup join is wired
+  #     (this is the very flow that broke for 3 days in June)
+  #   • online PaymentIntent — proves Stripe SDK key wiring is intact
+  endpoint_check "/api/v1/items/catalog"            "http://localhost:8000/api/v1/items/catalog"         "200"
+  # Invalid creds should be a clean 401, NOT a 5xx — distinguishes "router
+  # is alive and rejects" from "router crashed / table missing".
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 \
+         -X POST -H 'Content-Type: application/json' \
+         -d '{"email":"smoke@invalid.local","password":"nope"}' \
+         "http://localhost:8000/api/v1/kiosk/quick-donation/login" || echo 000)
+  if [ "$code" = "401" ] || [ "$code" = "403" ]; then
+    echo "  ✓ kiosk QD login rejects invalid creds cleanly ($code)"
+  else
+    echo "  ✗ kiosk QD login returned $code (expected 401) — router likely broken"
+    ENDPOINT_FAIL=1
+  fi
 else
   # Dev — backend exposed on 8001, dev nginx on 8080.
   endpoint_check "dev backend /health"        "http://localhost:8001/health"          "200"

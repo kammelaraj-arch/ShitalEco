@@ -162,6 +162,7 @@ check_containers() {
     heal_summary=""
     heal_detail=""
 
+
     while IFS= read -r line; do
         name=$(echo "$line" | awk '{print $1}')
         [ -z "$name" ] && continue
@@ -288,6 +289,39 @@ check_cert_expiry() {
         record cert fail "TLS cert expires in ${days_left}d — Let's Encrypt renewal may be stuck" high
     else
         record cert fail "TLS cert expires in ${days_left}d (URGENT)" critical
+    fi
+}
+
+check_sumup_pending_stuck() {
+    # SumUp donations should reach a terminal state (COMPLETED / FAILED) within
+    # a couple of minutes — the webhook fires when the cardholder taps. Anything
+    # stuck PENDING > 30 min is almost always a sign that:
+    #   • the shital-donate container restarted mid-transaction and the
+    #     reader-status poll never closed the order, OR
+    #   • the SumUp webhook is failing to deliver (TLS cert blip, nginx routing)
+    #
+    # We caught this exact pattern by hand in June — kiosks looked fine, /health
+    # was green, but donations piled up in PENDING for 3 days. This check makes
+    # it loud at the 15-min granularity of the monitor cron.
+    local count
+    count=$(docker exec "$DB_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -X -A -t -c \
+            "SELECT count(*) FROM donations
+               WHERE payment_provider = 'sumup'
+                 AND UPPER(COALESCE(status,'')) = 'PENDING'
+                 AND created_at > NOW() - INTERVAL '24 hours'
+                 AND created_at < NOW() - INTERVAL '30 minutes'
+                 AND deleted_at IS NULL;" 2>/dev/null | tr -d ' ') || count="err"
+    if [ "$count" = "err" ] || [ -z "$count" ]; then
+        # Don't alarm on query failure — db check above will already alert.
+        return
+    fi
+    if [ "$count" -eq 0 ]; then
+        record sumup_pending ok "No SumUp PENDING > 30 min" high
+    elif [ "$count" -le 2 ]; then
+        # 1-2 in 24h is normal noise (cardholder walked away mid-tap)
+        record sumup_pending ok "${count} SumUp PENDING > 30 min (within noise floor)" high
+    else
+        record sumup_pending fail "${count} SumUp donations stuck PENDING > 30 min — webhook or kiosk container likely degraded. Try the Reconcile SumUp button on /admin/donations" high
     fi
 }
 
@@ -543,6 +577,7 @@ check_restore_test_recent
 check_disk
 check_cert_expiry
 check_donations_active
+check_sumup_pending_stuck
 check_recent_deploy
 
 # Atomically replace state file
