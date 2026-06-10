@@ -84,9 +84,20 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
                     interval=settings.MAIL_AGENT_POLL_SECONDS,
                     mailboxes=settings.MAIL_AGENT_MAILBOXES)
 
+    # ── Background recovery loop ─────────────────────────────────────────
+    # Runs forever inside the backend process: every 15 min it sweeps
+    # SumUp PENDING donations (reconcile against the SumUp API so any
+    # webhook misses self-heal) and emails a digest of unresolved
+    # CRITICAL/ERROR system_alerts. Closes the "I don't want to monitor"
+    # loop — if something needs human attention, it lands in the inbox.
+    from shital.services.background_recovery import recovery_loop
+    _recovery_task = _asyncio.create_task(recovery_loop())
+    logger.info("recovery_loop_started")
+
     yield
     if _mail_task:
         _mail_task.cancel()
+    _recovery_task.cancel()
     logger.info("shital_shutdown")
 
 
