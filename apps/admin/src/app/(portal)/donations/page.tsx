@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+import { ProjectPicker } from '@/components/ui/ProjectPicker'
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
 function authToken() { return typeof window !== 'undefined' ? (localStorage.getItem('shital_access_token') || '') : '' }
@@ -37,6 +38,8 @@ interface Donation {
   donation_type: 'one-time' | 'recurring' | string
   created_at: string
   updated_at: string
+  project_id?: string | null
+  project_name?: string | null
 }
 
 // Master column list — drives the column-toggle menu + the table render.
@@ -116,10 +119,50 @@ export default function DonationsPage() {
   const [csvDownloading, setCsvDownloading] = useState(false)
   const [csvImporting, setCsvImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; error: string }[] } | null>(null)
+  const [reconciling, setReconciling] = useState(false)
+
+  async function reconcileSumUp() {
+    const days = parseInt(prompt('Days to sweep (default 7 covers from 7 June onwards):', '7') || '0', 10)
+    if (!days || days < 1) return
+    setReconciling(true); setError('')
+    try {
+      const r = await apiFetch<{
+        scanned: number; completed: number; failed: number;
+        still_pending: number; not_found: number; errors: number;
+        rows: Array<{ outcome: string; amount?: number }>
+      }>(`/kiosk/sumup/reconcile-pending?days=${days}`, { method: 'POST' })
+      const recovered = (r.rows || [])
+        .filter(x => x.outcome === 'completed')
+        .reduce((acc, x) => acc + (x.amount || 0), 0)
+      alert(
+        `Reconcile complete (${days} days)\n\n` +
+        `Scanned: ${r.scanned}\n` +
+        `✅ Recovered (now COMPLETED): ${r.completed}   £${recovered.toFixed(2)}\n` +
+        `❌ Marked failed: ${r.failed}\n` +
+        `⏳ Still pending on SumUp side: ${r.still_pending}\n` +
+        `🔍 Not found on SumUp: ${r.not_found}\n` +
+        `⚠ Errors: ${r.errors}`
+      )
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Reconcile failed')
+    } finally { setReconciling(false) }
+  }
 
   // New / Edit form
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Donation | null>(null)
+  const [taggingDonation, setTaggingDonation] = useState<Donation | null>(null)
+
+  async function tagDonationToProject(donation: Donation, projectId: string | null) {
+    try {
+      await apiFetch(`/admin/donations/${donation.id}/project`, {
+        method: 'PATCH', body: JSON.stringify({ project_id: projectId }),
+      })
+      setTaggingDonation(null)
+      load()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to tag donation') }
+  }
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
   const [form, setForm] = useState({
@@ -355,6 +398,15 @@ export default function DonationsPage() {
             style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
           >
             {csvImporting ? '⏳' : '⬆'} Import CSV
+          </button>
+          <button
+            onClick={reconcileSumUp}
+            disabled={reconciling}
+            title="Sweep the last 7 days of PENDING SumUp donations, ask SumUp the real status, flip to COMPLETED / FAILED. Use after a container restart or webhook outage."
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+            style={{ background: 'rgba(245,158,11,0.18)', border: '1px solid rgba(245,158,11,0.4)' }}
+          >
+            {reconciling ? '⏳ Reconciling…' : '🔄 Reconcile SumUp'}
           </button>
           <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvUpload} />
         </div>
@@ -685,6 +737,10 @@ export default function DonationsPage() {
                     )}
                     {canEdit && (
                       <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <button onClick={() => setTaggingDonation(d)}
+                          className="text-white/40 hover:text-saffron-400 text-sm font-medium px-2 py-1" title="Tag to project">
+                          {d.project_name ? <span className="text-saffron-300 text-xs">🏗️ {d.project_name.slice(0,16)}</span> : '🏗️ Tag'}
+                        </button>
                         <button onClick={() => openEdit(d)}
                           className="text-white/40 hover:text-saffron-400 text-sm font-medium px-2 py-1">Edit</button>
                       </td>
@@ -696,6 +752,39 @@ export default function DonationsPage() {
           </div>
         )}
       </div>
+
+      {/* Tag-to-project modal */}
+      <AnimatePresence>
+        {taggingDonation && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setTaggingDonation(null)} className="fixed inset-0 bg-black/70 z-40" />
+            <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[92%] max-w-md bg-temple-deep border border-white/10 rounded-2xl z-50 p-5 space-y-4">
+              <div>
+                <h3 className="text-white font-black text-lg">🏗️ Tag donation to a project</h3>
+                <p className="text-white/40 text-xs mt-1">
+                  Attributes this {typeof taggingDonation.amount === 'number' ? `£${taggingDonation.amount}` : `£${taggingDonation.amount}`} {taggingDonation.purpose} donation to a project's incoming funds.
+                </p>
+              </div>
+              {taggingDonation.project_name && (
+                <p className="text-saffron-300 text-xs bg-saffron-500/10 border border-saffron-500/30 rounded-lg p-2">
+                  Currently tagged to <b>{taggingDonation.project_name}</b>
+                </p>
+              )}
+              <ProjectPicker
+                value={taggingDonation.project_id ? { id: taggingDonation.project_id, name: taggingDonation.project_name || '' } : null}
+                onChange={sel => tagDonationToProject(taggingDonation, sel?.id || null)}
+                placeholder="Search projects…"
+              />
+              <div className="flex justify-between gap-3 pt-1">
+                <button onClick={() => tagDonationToProject(taggingDonation, null)} className="text-red-400 text-xs hover:underline">Untag</button>
+                <button onClick={() => setTaggingDonation(null)} className="text-white/40 hover:text-white text-xs">Cancel</button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Slide-over form */}
       <AnimatePresence>

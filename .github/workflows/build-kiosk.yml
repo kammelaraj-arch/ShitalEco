@@ -31,7 +31,7 @@ jobs:
         working-directory: apps/kiosk
         env:
           VITE_ELECTRON: "true"
-          VITE_API_URL: "http://192.248.147.205:8000/api/v1"
+          VITE_API_URL: "https://shital.org.uk/api/v1"
           VITE_BRANCH_ID: "main"
         run: pnpm build
       - name: Upload Windows artifact
@@ -60,7 +60,7 @@ jobs:
         working-directory: apps/kiosk
         env:
           VITE_ELECTRON: "true"
-          VITE_API_URL: "http://192.248.147.205:8000/api/v1"
+          VITE_API_URL: "https://shital.org.uk/api/v1"
           VITE_BRANCH_ID: "main"
         run: pnpm build
       - name: Upload Linux x64 artifact
@@ -91,7 +91,7 @@ jobs:
         working-directory: apps/kiosk
         env:
           VITE_ELECTRON: "true"
-          VITE_API_URL: "http://192.248.147.205:8000/api/v1"
+          VITE_API_URL: "https://shital.org.uk/api/v1"
           VITE_BRANCH_ID: "main"
         run: pnpm run build:electron:arm64
       - name: Upload Pi artifact
@@ -125,14 +125,21 @@ jobs:
       - name: Build web assets for Capacitor
         working-directory: apps/kiosk
         env:
-          VITE_API_URL: "http://192.248.147.205/api/v1"
+          VITE_API_URL: "https://shital.org.uk/api/v1"
           VITE_BRANCH_ID: "main"
         run: pnpm run build:web
       - name: Add Android platform (generates android/ project)
         working-directory: apps/kiosk
+        env:
+          # Build a thin loader APK that points the WebView at the live web
+          # kiosk — installed app stays in sync with shital.org.uk/kiosk/ on
+          # every web deploy, no APK rebuild / reinstall needed.
+          KIOSK_LIVE_URL: "https://shital.org.uk/kiosk/"
         run: npx cap add android
       - name: Sync web assets into Android project
         working-directory: apps/kiosk
+        env:
+          KIOSK_LIVE_URL: "https://shital.org.uk/kiosk/"
         run: npx cap sync android --inline
       - name: Apply kiosk-mode overlay
         working-directory: apps/kiosk
@@ -163,6 +170,60 @@ jobs:
           path: apps/kiosk/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
+  # ─── Quick Donation Android APK (devotee phone — Capacitor wrapper) ─────────
+  # Same Capacitor pattern as the Kiosk app, but the SPA is the Quick Donation
+  # web app (donate.shital.org.uk). Devotees download this APK from the
+  # Software Downloads page and install on their own phones; the app shows
+  # the donation form with Google Pay support.
+  build-quick-donation-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install pnpm
+        run: npm install -g pnpm@9.4.0
+      - name: Install dependencies
+        working-directory: apps/quick-donation
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - name: Build web assets for Capacitor
+        working-directory: apps/quick-donation
+        env:
+          VITE_API_URL: "https://shital.org.uk/api/v1"
+          # Live-load the SPA from the production donate URL so the APK
+          # stays in sync with web deploys without re-flashing.
+          QD_LIVE_URL: "https://shital.org.uk/donate/"
+        run: pnpm run build:web
+      - name: Add Android platform
+        working-directory: apps/quick-donation
+        env:
+          QD_LIVE_URL: "https://shital.org.uk/donate/"
+        run: npx cap add android
+      - name: Sync web assets into Android project
+        working-directory: apps/quick-donation
+        env:
+          QD_LIVE_URL: "https://shital.org.uk/donate/"
+        run: npx cap sync android --inline
+      - name: Set Gradle permissions
+        working-directory: apps/quick-donation/android
+        run: chmod +x gradlew
+      - name: Build debug APK
+        working-directory: apps/quick-donation/android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Upload Quick Donation APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-donation-android
+          path: apps/quick-donation/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
   # ─── Publish ALL installers to a stable GitHub Release ─────────────────────
   # Maintains a rolling `kiosk-latest` tag/release with consistent filenames:
   #   shital-kiosk-windows-setup.exe       (Windows x64 NSIS installer)
@@ -176,8 +237,8 @@ jobs:
   #
   # The admin Software Downloads page links directly to these.
   publish-installers:
-    needs: [build-windows, build-linux-x64, build-linux-arm64, build-android]
-    if: ${{ always() && (needs.build-android.result == 'success' || needs.build-windows.result == 'success' || needs.build-linux-x64.result == 'success' || needs.build-linux-arm64.result == 'success') }}
+    needs: [build-windows, build-linux-x64, build-linux-arm64, build-android, build-quick-donation-android]
+    if: ${{ always() && (needs.build-android.result == 'success' || needs.build-windows.result == 'success' || needs.build-linux-x64.result == 'success' || needs.build-linux-arm64.result == 'success' || needs.build-quick-donation-android.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -213,7 +274,12 @@ jobs:
           if [ -f artifacts/kiosk-android/app-debug.apk ]; then
             cp artifacts/kiosk-android/app-debug.apk release/shital-kiosk-latest.apk
             cp artifacts/kiosk-android/app-debug.apk "release/shital-kiosk-${GITHUB_SHA::7}.apk"
-            echo "✓ Android APK"
+            echo "✓ Kiosk Android APK"
+          fi
+          if [ -f artifacts/quick-donation-android/app-debug.apk ]; then
+            cp artifacts/quick-donation-android/app-debug.apk release/shital-quick-donation-latest.apk
+            cp artifacts/quick-donation-android/app-debug.apk "release/shital-quick-donation-${GITHUB_SHA::7}.apk"
+            echo "✓ Quick Donation Android APK"
           fi
           ls -lh release/
       - name: Move kiosk-latest tag and upload assets

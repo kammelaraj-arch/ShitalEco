@@ -426,9 +426,26 @@ async def kiosks_status(ctx: CurrentSpace) -> dict[str, Any]:
                 kd.longitude                               AS longitude,
                 kd.last_seen_at                            AS last_seen_at,
                 td.label                                   AS reader_label,
-                COALESCE(td.provider, '')                  AS reader_provider,
+                COALESCE(td.provider, '')                  AS reader_provider_configured,
                 LOWER(COALESCE(td.status, ''))             AS reader_status,
-                td.last_seen_at                            AS reader_last_seen_at
+                td.last_seen_at                            AS reader_last_seen_at,
+                -- Source of truth: the payment_provider on the most recent
+                -- donation taken from THIS device. If the operator has been
+                -- swapping readers (or kiosk_devices.card_reader_id points
+                -- at the wrong row), this reveals what the kiosk is REALLY
+                -- using right now.
+                (SELECT UPPER(payment_provider)
+                   FROM donations
+                  WHERE kiosk_device_id = kd.id
+                    AND deleted_at IS NULL
+                    AND UPPER(COALESCE(status,'')) = 'COMPLETED'
+                  ORDER BY created_at DESC
+                  LIMIT 1)                                 AS reader_provider_actual,
+                (SELECT MAX(created_at)
+                   FROM donations
+                  WHERE kiosk_device_id = kd.id
+                    AND deleted_at IS NULL
+                    AND UPPER(COALESCE(status,'')) = 'COMPLETED') AS last_donation_at
             FROM kiosk_devices kd
             LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
             LEFT JOIN branches b ON b.branch_id = kd.branch_id
@@ -455,6 +472,18 @@ async def kiosks_status(ctx: CurrentSpace) -> dict[str, Any]:
             summary[health.lower()] += 1
         summary["total"] += 1
 
+        # Prefer the actual provider observed in recent donations over the
+        # static configured mapping. The configured one is often stale
+        # (e.g. kiosk_devices.card_reader_id points at an old Stripe row
+        # for a kiosk that's actually been using SumUp for months).
+        configured = (r["reader_provider_configured"] or "").strip()
+        actual     = (r["reader_provider_actual"]     or "").strip()
+        provider   = actual or configured or None
+        # Normalise display: SumUp/Stripe/Square come back uppercase from
+        # the donations payment_provider; lowercase from terminal_devices.
+        # Front-end matches case-insensitively, so this stays as-is.
+        last_donation = r["last_donation_at"]
+
         kiosks.append({
             "id":               r["id"],
             "name":             r["name"],
@@ -468,10 +497,14 @@ async def kiosks_status(ctx: CurrentSpace) -> dict[str, Any]:
             "seconds_since_seen": seconds_since,
             "health":           "INACTIVE" if is_inactive else health,
             "reader_label":     r["reader_label"],
-            "reader_provider":  r["reader_provider"] or None,
+            "reader_provider":  provider,
+            "reader_provider_configured": configured or None,
+            "reader_provider_actual":     actual or None,
+            "reader_provider_mismatch":   bool(actual and configured and actual.lower() != configured.lower()),
             "reader_status":    r["reader_status"] or None,
             "reader_last_seen_at": reader_seen.isoformat() if reader_seen else None,
             "reader_seconds_since_seen": reader_seconds,
+            "last_donation_at":  last_donation.isoformat() if last_donation else None,
         })
 
     return {

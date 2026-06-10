@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, t, THEMES, KioskTheme, Language, LANGUAGE_META } from '../store/kiosk.store'
 import { KioskKeyboard } from '../components/KioskKeyboard'
 import { StaffMenu } from '../components/StaffMenu'
+import { absUrl } from '../lib/url'
 import { cachedFetch } from '../utils/cachedFetch'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
@@ -583,7 +584,7 @@ export function HomeScreen() {
                       style={{ border: active ? `2px solid ${th.langActive}` : '2px solid #e5e7eb', boxShadow: active ? `0 4px 12px ${th.langActive}40` : undefined, minWidth: projects.length > 4 ? 140 : undefined }}
                     >
                       <div className="relative overflow-hidden flex items-center justify-center" style={{ height: 70, background: active ? `${th.langActive}18` : '#f3f4f6' }}>
-                        {p.image_url ? <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" /> : <span className="text-3xl">🏗️</span>}
+                        {p.image_url ? <img src={absUrl(p.image_url)} alt={p.name} className="absolute inset-0 w-full h-full object-cover" /> : <span className="text-3xl">🏗️</span>}
                         <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 60%)' }} />
                         {active && <span className="absolute bottom-1.5 right-1.5 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white" style={{ background: th.langActive }}>✓</span>}
                       </div>
@@ -659,7 +660,7 @@ export function HomeScreen() {
                                   <span style={{ fontSize: 56, lineHeight: 1, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>{item.emoji ?? '🙏'}</span>
                                 </div>
                                 <img
-                                  src={item.image_url || getCategoryImage(item.category)}
+                                  src={absUrl(item.image_url) || getCategoryImage(item.category)}
                                   alt=""
                                   // object-contain shows the full picture without cropping or stretching
                                   className="absolute inset-0 w-full h-full object-contain p-2"

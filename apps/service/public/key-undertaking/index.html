@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign Key Undertaking — Shital</title>
+  <style>
+    *,*:before,*:after { box-sizing: border-box }
+    body { margin: 0; background: #f5f1ea; color: #1a0a00; font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 80px }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #e6dccd }
+    header .om { font-size: 32px }
+    header h1 { margin: 0; font-size: 20px; font-weight: 900; color: #b35c00 }
+    header p { margin: 0; font-size: 12px; color: #8b7d68 }
+
+    .card { background: #fff; border: 1px solid #e6dccd; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04) }
+    .kv { display: grid; grid-template-columns: 130px 1fr; row-gap: 8px; font-size: 14px }
+    .kv dt { color: #8b7d68; font-weight: 600 }
+    .kv dd { margin: 0; font-weight: 600 }
+
+    h2 { font-size: 16px; margin: 0 0 12px }
+    pre.undertaking { white-space: pre-wrap; word-wrap: break-word; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: #faf7f1; border: 1px solid #e6dccd; padding: 14px; border-radius: 8px; max-height: 320px; overflow-y: auto }
+
+    label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #8b7d68; margin-bottom: 6px }
+    input[type=text] { width: 100%; padding: 12px 14px; font-size: 16px; border: 1px solid #d4c8b3; border-radius: 8px; background: #fff }
+    input[type=text]:focus { outline: none; border-color: #ff6b00; box-shadow: 0 0 0 3px rgba(255,107,0,.15) }
+
+    .sig-wrap { background: #fff; border: 1px dashed #d4c8b3; border-radius: 8px; padding: 8px }
+    canvas { width: 100%; height: 140px; background: #fff; touch-action: none; border-radius: 4px }
+    .sig-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px }
+    .sig-actions small { color: #8b7d68 }
+    .sig-actions button { background: none; border: none; color: #b35c00; font-size: 12px; cursor: pointer; padding: 4px 8px }
+
+    .terms { background: #fff7e6; border: 1px solid #f0d6a3; border-radius: 8px; padding: 12px; font-size: 13px; color: #6b4f1d }
+
+    button.primary { width: 100%; padding: 14px; font-size: 15px; font-weight: 800; color: #fff; background: linear-gradient(135deg,#ff6b00 0%,#b35c00 100%); border: none; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 12px rgba(255,107,0,.25); margin-top: 8px }
+    button.primary:disabled { opacity: .4; cursor: not-allowed }
+
+    .ok { background: #d4edda; border: 1px solid #a8d5b5; border-radius: 10px; padding: 24px; text-align: center }
+    .ok .check { font-size: 56px; margin-bottom: 8px }
+    .ok h2 { color: #1e5e2c; margin-top: 0 }
+
+    .err { background: #fce4e4; border: 1px solid #f5b5b5; color: #8b1f1f; border-radius: 10px; padding: 12px; margin-bottom: 12px; font-size: 14px }
+    .loading { text-align: center; padding: 48px 12px; color: #8b7d68 }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="om">🕉</span>
+    <div>
+      <h1>Shital — Key Undertaking</h1>
+      <p>Shirdi Sai Temple · Trustees</p>
+    </div>
+  </header>
+
+  <div id="content">
+    <div class="loading">Loading your undertaking…</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const API = '/api/v1';
+  const token = window.location.pathname.split('/').filter(Boolean).pop() || '';
+  const root = document.getElementById('content');
+
+  if (!token || token.length < 16) {
+    root.innerHTML = '<div class="err">This link is incomplete or invalid.</div>';
+    return;
+  }
+
+  let data = null;
+
+  async function load() {
+    try {
+      const r = await fetch(API + '/public/key-undertaking/' + encodeURIComponent(token));
+      if (!r.ok) {
+        if (r.status === 404) throw new Error('This link is no longer valid. The trustees may have sent you a fresh one.');
+        throw new Error('Could not load the undertaking (' + r.status + ')');
+      }
+      data = await r.json();
+      render();
+    } catch (e) {
+      root.innerHTML = '<div class="err">' + (e.message || 'Unable to load undertaking') + '</div>';
+    }
+  }
+
+  function render() {
+    if (data.already_signed) {
+      root.innerHTML =
+        '<div class="ok">' +
+          '<div class="check">✓</div>' +
+          '<h2>Already signed</h2>' +
+          '<p>Signed by <b>' + escapeHTML(data.signed_name || '') + '</b> on ' + escapeHTML(formatDate(data.signed_at)) + '.</p>' +
+          '<p style="color:#8b7d68;font-size:13px;margin-top:16px;">If this wasn\'t you, please reply to the email you received.</p>' +
+        '</div>';
+      return;
+    }
+
+    const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+    const niceType = (data.key_type || 'key').replace(/_/g, ' ').toLowerCase();
+
+    const undertakingText =
+      'I, ' + (data.holder_name || '[your name]') + '\n' +
+      'of ' + (data.holder_address || '[your address]') + ',\n' +
+      'employee no. ' + (data.employee_number || '—') + ',\n' +
+      'acknowledge receipt of the following item from Shital (Shirdi Sai Temple)\n' +
+      'and agree to the conditions below.\n\n' +
+      'ITEM\n' +
+      '  Name:               ' + (data.key_name || '—') + '\n' +
+      '  Type:               ' + niceType + '\n' +
+      '  Set number:         #' + (data.set_number || 1) + '\n' +
+      '  Serial / key no.:   ' + (data.serial_number || '—') + '\n' +
+      '  Branch / location:  ' + (data.branch_id || '—') +
+        (data.physical_location ? ' — ' + data.physical_location : '') + '\n' +
+      '  Issued on:          ' + (data.issued_date || today) + '\n\n' +
+      'CONDITIONS\n' +
+      '  1. I will keep this item secure at all times and will not\n' +
+      '     lend it to or share it with any unauthorised person.\n' +
+      '  2. I will not duplicate, copy or modify the item or its codes\n' +
+      '     without prior written approval from the trustees.\n' +
+      '  3. I will return the item promptly on request, when my role\n' +
+      '     ends, or when otherwise asked by an authorised trustee.\n' +
+      '  4. I will report loss, theft or damage of the item to the\n' +
+      '     trustees within 24 hours of becoming aware.\n' +
+      '  5. I understand that misuse of the item may result in\n' +
+      '     disciplinary action and/or recovery of replacement /\n' +
+      '     re-keying costs from me.';
+
+    root.innerHTML =
+      '<div class="card">' +
+        '<h2>📋 Your item</h2>' +
+        '<dl class="kv">' +
+          '<dt>Item</dt><dd>' + escapeHTML(data.key_name || '—') + '</dd>' +
+          '<dt>Type</dt><dd>' + escapeHTML(niceType) + '</dd>' +
+          '<dt>Set</dt><dd>#' + escapeHTML(String(data.set_number || 1)) + '</dd>' +
+          '<dt>Issued on</dt><dd>' + escapeHTML(data.issued_date || today) + '</dd>' +
+          '<dt>Branch</dt><dd>' + escapeHTML(data.branch_id || '—') + '</dd>' +
+        '</dl>' +
+      '</div>' +
+
+      '<div class="card">' +
+        '<h2>📜 Undertaking</h2>' +
+        '<pre class="undertaking" id="undertaking">' + escapeHTML(undertakingText) + '</pre>' +
+      '</div>' +
+
+      '<div class="card">' +
+        '<h2>✍️ Sign</h2>' +
+        '<div class="terms">' +
+          'By typing your full name below and tapping <b>I agree &amp; sign</b>, ' +
+          'you confirm that you have read the undertaking and accept its conditions. ' +
+          'Your signature, the time, your IP and device are recorded for audit.' +
+        '</div>' +
+        '<div style="margin-top:14px"><label for="name">Type your full name</label>' +
+        '<input id="name" type="text" placeholder="e.g. ' + escapeHTML(data.holder_name || 'Your Name') + '" value="' + escapeHTML(data.holder_name || '') + '"></div>' +
+        '<div style="margin-top:14px"><label>Optional — draw your signature (touch / mouse)</label>' +
+        '<div class="sig-wrap"><canvas id="sig" width="600" height="140"></canvas></div>' +
+        '<div class="sig-actions"><small id="sig-hint">Optional</small><button type="button" id="clear">Clear</button></div></div>' +
+        '<button class="primary" id="submit">✓ I agree &amp; sign</button>' +
+        '<div id="err"></div>' +
+      '</div>';
+
+    initSignature();
+    document.getElementById('submit').addEventListener('click', submit);
+  }
+
+  // ── Signature canvas ──────────────────────────────────────────────────────
+  let canvas, ctx, drawing = false, hasInk = false;
+  function initSignature() {
+    canvas = document.getElementById('sig');
+    ctx = canvas.getContext('2d');
+    ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#1a0a00';
+    function pt(e) {
+      const r = canvas.getBoundingClientRect();
+      const t = e.touches ? e.touches[0] : e;
+      return { x: (t.clientX - r.left) * (canvas.width / r.width),
+               y: (t.clientY - r.top) * (canvas.height / r.height) };
+    }
+    function down(e) { drawing = true; const p = pt(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }
+    function move(e) { if (!drawing) return; const p = pt(e); ctx.lineTo(p.x, p.y); ctx.stroke(); hasInk = true; e.preventDefault(); }
+    function up() { drawing = false; }
+    canvas.addEventListener('mousedown', down); canvas.addEventListener('mousemove', move); canvas.addEventListener('mouseup', up); canvas.addEventListener('mouseleave', up);
+    canvas.addEventListener('touchstart', down); canvas.addEventListener('touchmove', move); canvas.addEventListener('touchend', up);
+    document.getElementById('clear').addEventListener('click', function () {
+      ctx.clearRect(0, 0, canvas.width, canvas.height); hasInk = false;
+    });
+  }
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+  async function submit() {
+    const name = (document.getElementById('name').value || '').trim();
+    const errBox = document.getElementById('err');
+    errBox.innerHTML = '';
+    if (!name) { errBox.innerHTML = '<div class="err">Please type your name to sign.</div>'; return; }
+    const btn = document.getElementById('submit');
+    btn.disabled = true; btn.textContent = 'Signing…';
+    const png = hasInk ? canvas.toDataURL('image/png') : '';
+    try {
+      const r = await fetch(API + '/public/key-undertaking/' + encodeURIComponent(token) + '/sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signed_by_name: name, signature_png: png }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(function () { return {}; });
+        throw new Error(j.detail || ('Could not save (' + r.status + ')'));
+      }
+      root.innerHTML =
+        '<div class="ok">' +
+          '<div class="check">✓</div>' +
+          '<h2>Thank you</h2>' +
+          '<p>Your undertaking has been signed and recorded.</p>' +
+          '<p style="color:#8b7d68;font-size:13px;margin-top:16px;">You may close this page. A trustee will be notified automatically.</p>' +
+        '</div>';
+    } catch (e) {
+      btn.disabled = false; btn.textContent = '✓ I agree & sign';
+      errBox.innerHTML = '<div class="err">' + escapeHTML(e.message || 'Submission failed') + '</div>';
+    }
+  }
+
+  // ── Utility ───────────────────────────────────────────────────────────────
+  function escapeHTML(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function formatDate(iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return iso; }
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@ import { AuthGuard } from '@/components/AuthGuard'
 import { BrandingProvider } from '@/lib/branding'
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs'
 import { AdminKeyboardProvider } from '@/components/ui/AdminKeyboard'
+import { NotificationBell } from '@/components/NotificationBell'
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -50,7 +51,10 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
             </div>
 
             <div className="flex-1 p-4 md:p-8">
-              <Breadcrumbs />
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <Breadcrumbs />
+                <NotificationBell />
+              </div>
               {children}
             </div>
           </main>

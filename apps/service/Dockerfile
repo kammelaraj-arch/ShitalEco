@@ -74,6 +74,15 @@ RUN printf 'server {\n\
         add_header Expires "0";\n\
     }\n\
 \n\
+    # Key undertaking signing — public, token in URL path. Single static\n\
+    # HTML reads the token from window.location and calls the API. Match\n\
+    # /key-undertaking/<anything> so we don\x27t need a separate route per\n\
+    # token.\n\
+    location ^~ /key-undertaking/ {\n\
+        try_files /key-undertaking/index.html =404;\n\
+        add_header Cache-Control "no-cache, no-store, must-revalidate";\n\
+    }\n\
+\n\
     location /health {\n\
         return 200 '"'"'{"status":"healthy","service":"service-portal"}'"'"';\n\
         add_header Content-Type application/json;\n\

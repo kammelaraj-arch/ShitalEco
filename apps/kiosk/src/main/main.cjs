@@ -12,7 +12,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
     },
     backgroundColor: '#1a0a00',
   })
@@ -21,7 +21,11 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'))
+    // Load the live web kiosk so the installed app stays in sync with
+    // shital.org.uk/kiosk/ — no reinstall needed for UI changes, image URLs
+    // returned by the API resolve naturally, and there are no CORS hops.
+    // The bundled dist/ is no longer used in production builds.
+    mainWindow.loadURL('https://shital.org.uk/kiosk/')
   }
 
   // Prevent navigation away from kiosk

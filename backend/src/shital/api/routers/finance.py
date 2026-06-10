@@ -148,9 +148,12 @@ async def list_donations(
                 c.email          AS contact_email,
                 'one-time'       AS donation_type,
                 d.created_at,
-                d.updated_at
+                d.updated_at,
+                d.project_id::text                AS project_id,
+                pr.name                           AS project_name
             FROM donations d
-            LEFT JOIN contacts c ON c.id = d.contact_id
+            LEFT JOIN contacts c  ON c.id  = d.contact_id
+            LEFT JOIN projects pr ON pr.id = d.project_id
             WHERE d.deleted_at IS NULL
               AND d.created_at >= :from_dt
               AND d.created_at < :to_dt
@@ -181,7 +184,9 @@ async def list_donations(
                 COALESCE(c2.email,     rgs.donor_email)  AS contact_email,
                 'recurring'::varchar                      AS donation_type,
                 rgs.created_at,
-                rgs.updated_at
+                rgs.updated_at,
+                NULL::text                                AS project_id,
+                NULL::varchar                             AS project_name
             FROM recurring_giving_subscriptions rgs
             LEFT JOIN recurring_giving_tiers t  ON t.id  = rgs.tier_id
             LEFT JOIN contacts              c2  ON c2.id = rgs.contact_id
@@ -497,7 +502,14 @@ async def incoming_funds(
 
     where = ["d.deleted_at IS NULL",
              "d.created_at >= :start_ts",
-             "d.created_at < :end_ts"]
+             "d.created_at < :end_ts",
+             # Exclude in-flight / failed / cancelled / refunded so all
+             # totals on the Incoming Funds dashboard reflect only money
+             # the charity actually received. PENDING + FAILED were
+             # inflating the daily numbers on busy festival days when a
+             # handful of transactions never completed.
+             "UPPER(COALESCE(d.status, 'COMPLETED')) NOT IN "
+                 "('PENDING','FAILED','CANCELLED','CANCELED','REFUNDED','VOID','VOIDED')"]
     params: dict[str, Any] = {
         "start_ts": datetime.combine(start_d, datetime.min.time()),
         # End is exclusive; add one day so end_date itself is included.
@@ -512,7 +524,14 @@ async def incoming_funds(
     series_sql = f"""
         SELECT date_trunc(:period, d.created_at)::date  AS bucket,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               -- Gift Aid is computed on read (25% of any donation flagged
+               -- gift_aid_eligible). The donations.gift_aid_amount column
+               -- exists in the schema but no INSERT site ever populates it,
+               -- so it's been stuck at 0 — making the dashboard show "GA £0"
+               -- even on receipts where the donor ticked the box. Computing
+               -- it from amount + eligibility works retroactively, no
+               -- backfill migration needed.
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         WHERE  {where_sql}
@@ -523,7 +542,7 @@ async def incoming_funds(
         SELECT d.branch_id,
                COALESCE(b.name, d.branch_id)            AS branch_name,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         LEFT   JOIN branches b ON b.branch_id = d.branch_id
@@ -548,7 +567,7 @@ async def incoming_funds(
                )                                         AS source,
                COALESCE(d.payment_provider, '')         AS payment_provider,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         LEFT   JOIN branches b ON b.branch_id = d.branch_id
@@ -564,7 +583,7 @@ async def incoming_funds(
                COALESCE(b.name, d.branch_id)            AS branch_name,
                COALESCE(d.gift_aid_eligible, false)     AS giftaid_eligible,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         LEFT   JOIN branches b ON b.branch_id = d.branch_id
@@ -583,7 +602,7 @@ async def incoming_funds(
                COALESCE(kd.name, '')                    AS device_name,
                COALESCE(kd.device_type, '')             AS device_type,
                COALESCE(SUM(d.amount), 0)::numeric      AS amount,
-               COALESCE(SUM(d.gift_aid_amount), 0)::numeric AS gift_aid,
+               COALESCE(SUM(CASE WHEN d.gift_aid_eligible THEN d.amount * 0.25 ELSE 0 END), 0)::numeric AS gift_aid,
                COUNT(*)                                  AS cnt
         FROM   donations d
         LEFT   JOIN branches      b  ON b.branch_id = d.branch_id

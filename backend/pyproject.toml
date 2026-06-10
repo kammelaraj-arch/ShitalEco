@@ -32,6 +32,8 @@ dependencies = [
     "ulid-py>=1.1.0",
     "azure-storage-blob>=12.19.0",
     "redis>=5.0.0",
+    "pdfplumber>=0.11.0",
+    "rapidfuzz>=3.9.0",
 ]
 
 [project.optional-dependencies]

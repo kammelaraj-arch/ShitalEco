@@ -595,6 +595,59 @@ async def create_terminal_payment_intent(body: TerminalPaymentInput):
         return {"error": str(e)}
 
 
+# ─── Online Payment Intent (Google Pay / Apple Pay / web cards) ──────────────
+# Separate from /terminal/payment-intent above (which is card_present for
+# physical Stripe Terminal readers). This one creates a regular online
+# PaymentIntent so the donor's phone or browser can pay with a digital
+# wallet via the Stripe Payment Request button.
+
+class OnlinePaymentIntentInput(BaseModel):
+    amount_pence: int
+    currency: str = "GBP"
+    description: str = "Shital Temple Donation"
+    branch_id: str = ""
+    donor_email: str = ""
+    metadata: dict[str, Any] = {}
+
+
+@router.post("/online/payment-intent")
+async def create_online_payment_intent(body: OnlinePaymentIntentInput) -> dict[str, Any]:
+    """Create an online PaymentIntent suitable for the Stripe Payment Request
+    button (Google Pay on Android, Apple Pay on iOS Safari, browser-saved
+    cards elsewhere). Returns the client_secret the frontend uses to confirm
+    the payment without ever touching the secret key."""
+    import stripe
+    stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
+    if body.amount_pence < 50:
+        raise HTTPException(400, detail="Minimum donation is £0.50")
+    if body.amount_pence > 10_000_00:
+        raise HTTPException(400, detail="Single donation cap is £10,000 — please contact the temple for larger donations")
+    meta = {
+        "branch_id":   body.branch_id or "main",
+        "donor_email": body.donor_email or "",
+        "source":      "quick-donation-online",
+        **{str(k)[:40]: str(v)[:500] for k, v in (body.metadata or {}).items()},
+    }
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=body.amount_pence,
+            currency=body.currency.lower(),
+            # automatic_payment_methods lets Stripe pick from card / GPay /
+            # ApplePay / Link based on the donor's device + saved wallets.
+            automatic_payment_methods={"enabled": True},
+            description=body.description[:200],
+            metadata=meta,
+        )
+        return {
+            "payment_intent_id": intent.id,
+            "client_secret":     intent.client_secret,
+            "status":            intent.status,
+            "publishable_key":   (await SecretsManager.get("STRIPE_PUBLISHABLE_KEY", settings.STRIPE_PUBLISHABLE_KEY)) or "",
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
 class ReaderActionInput(BaseModel):
     reader_id: str
     payment_intent_id: str
@@ -968,22 +1021,90 @@ async def sumup_webhook(request: Request):
     """
     SumUp calls this URL (set as return_url in checkout creation) the instant
     a checkout status changes — typically PENDING → PAID after card tap.
-    We cache the status in Redis so the frontend poll returns it immediately.
-    """
 
+    Updates BOTH:
+      1. Redis cache (`sumup:checkout:<id>`) — so the frontend polling sees
+         the status change immediately on the next 1s tick.
+      2. The donations table directly — so even if the frontend disconnects
+         before its /order/confirm call (kiosk app crash, donor closes
+         screen, network blip, container restart), the donation still
+         flips from PENDING → COMPLETED.
+
+    The #2 update is the FIX for the "last 3 days of SumUp donations all
+    stuck PENDING" bug. Previously the webhook only touched Redis; any
+    interruption between webhook arrival and the frontend confirm call
+    left the donation marked PENDING forever.
+
+    Idempotent — re-receiving the same webhook is a no-op (already
+    COMPLETED rows aren't re-touched by the WHERE filter).
+    """
     try:
         body = await request.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return {"ok": False}
 
-    checkout_id = body.get("id") or body.get("checkout_id")
-    status = body.get("status")
-    if checkout_id and status:
+    # SumUp's webhook payload uses different keys depending on event type;
+    # accept all the variants we've seen in production.
+    checkout_id = (body.get("id") or body.get("checkout_id")
+                   or body.get("resource_id") or "")
+    status      = (body.get("status") or body.get("event_type") or "").upper()
+    payment_ref = (body.get("transaction_id") or body.get("transaction_code") or "")
+
+    if not checkout_id or not status:
+        return {"ok": False, "reason": "missing checkout_id or status"}
+
+    # 1. Redis fast-path (existing behaviour — frontend poll sees it next tick)
+    try:
+        await cache_set(f"sumup:checkout:{checkout_id}",
+                        {"status": status, "transaction_id": payment_ref},
+                        ttl=3600)
+    except Exception:  # noqa: BLE001
+        pass  # Redis unavailable — DB write below still happens
+
+    # 2. DB direct-update (NEW — survives frontend disconnect / container restart)
+    # SumUp uses PAID for success, EXPIRED/FAILED/CANCELLED for failure.
+    new_status: str | None = None
+    if status in {"PAID", "SUCCESSFUL", "SUCCESS"}:
+        new_status = "COMPLETED"
+    elif status in {"FAILED", "EXPIRED", "CANCELLED", "CANCELED", "VOIDED"}:
+        new_status = "FAILED" if status == "FAILED" else "CANCELLED"
+    if new_status:
         try:
-            await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
-        except Exception:
-            pass  # Redis unavailable — webhook still accepted
-    return {"ok": True}
+            from sqlalchemy import text as _text
+            async with SessionLocal() as db:
+                # Match by payment_ref (the SumUp checkout id we stored at
+                # checkout creation time). The WHERE excludes already-
+                # terminal statuses so re-deliveries are no-ops.
+                await db.execute(_text("""
+                    UPDATE donations SET
+                        status = :st,
+                        payment_ref = CASE WHEN :pref <> '' THEN :pref
+                                           ELSE payment_ref END,
+                        updated_at = NOW()
+                    WHERE payment_ref = :cid
+                      AND UPPER(COALESCE(status, '')) IN ('PENDING', '')
+                      AND deleted_at IS NULL
+                """), {"cid": checkout_id, "st": new_status, "pref": payment_ref})
+                # Same for orders (if there's a matching one)
+                await db.execute(_text("""
+                    UPDATE orders SET
+                        status = :st,
+                        payment_ref = CASE WHEN :pref <> '' THEN :pref
+                                           ELSE payment_ref END,
+                        updated_at = NOW()
+                    WHERE payment_ref = :cid
+                      AND UPPER(COALESCE(status, '')) IN ('PENDING', '')
+                """), {"cid": checkout_id, "st": new_status, "pref": payment_ref})
+                await db.commit()
+        except Exception:  # noqa: BLE001
+            # Best-effort — if the DB write fails, the existing /order/confirm
+            # path still has a chance to complete the donation when the
+            # frontend's poll sees the status.
+            import logging as _log
+            _log.getLogger("shital.sumup").exception(
+                "sumup webhook DB update failed for checkout %s", checkout_id)
+
+    return {"ok": True, "status": status, "applied": new_status}
 
 
 @router.get("/sumup/checkout/{checkout_id}")
@@ -1023,6 +1144,56 @@ async def sumup_checkout_status(checkout_id: str):
         return {"status": status, "raw": data}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+@router.get("/sumup/configured-kiosks")
+async def list_sumup_configured_kiosks(ctx: CurrentSpace) -> dict[str, Any]:
+    """Identify every kiosk that's ever taken a SumUp donation. Reads the
+    donations table — answers the operator's question 'which kiosk is
+    actually configured with SumUp' even if kiosk_devices.card_reader_id
+    points at a Stripe row (which can happen if a Stripe reader replaced
+    the SumUp one in the device record).
+
+    Returns each kiosk with its total SumUp donation count, total amount,
+    last donation date, and current card_reader_id mapping so the operator
+    can spot mismatches at a glance."""
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="admin only")
+    from sqlalchemy import text as _text
+    async with SessionLocal() as db:
+        rows = (await db.execute(_text("""
+            SELECT
+                kd.id::text                  AS kiosk_id,
+                kd.name                      AS kiosk_name,
+                kd.branch_id                 AS branch,
+                kd.device_type               AS device_type,
+                COUNT(d.id)                  AS sumup_donation_count,
+                COALESCE(SUM(d.amount), 0)::numeric AS sumup_total,
+                COUNT(*) FILTER (WHERE UPPER(COALESCE(d.status,'')) IN ('PENDING','')) AS pending_count,
+                COUNT(*) FILTER (WHERE UPPER(COALESCE(d.status,'')) = 'COMPLETED')     AS completed_count,
+                MAX(d.created_at)            AS last_sumup_at,
+                kd.card_reader_id::text      AS current_card_reader_id,
+                td.label                     AS current_reader_label,
+                td.provider                  AS current_reader_provider
+            FROM donations d
+            JOIN kiosk_devices kd ON kd.id = d.kiosk_device_id
+            LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+            WHERE UPPER(COALESCE(d.payment_provider, '')) = 'SUMUP'
+              AND d.deleted_at IS NULL
+              AND kd.deleted_at IS NULL
+            GROUP BY kd.id, kd.name, kd.branch_id, kd.device_type,
+                     kd.card_reader_id, td.label, td.provider
+            ORDER BY MAX(d.created_at) DESC
+        """))).mappings().all()
+    items = []
+    for r in rows:
+        d = dict(r)
+        if d.get("last_sumup_at") and hasattr(d["last_sumup_at"], "isoformat"):
+            d["last_sumup_at"] = d["last_sumup_at"].isoformat()
+        d["sumup_total"] = float(d["sumup_total"] or 0)
+        d["mismatch"] = (d.get("current_reader_provider", "") or "").lower() != "sumup"
+        items.append(d)
+    return {"items": items}
 
 
 @router.delete("/sumup/checkout/{checkout_id}")
@@ -1076,6 +1247,111 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
         return {"paid": False}
     except Exception as e:
         return {"paid": False, "error": str(e)}
+
+
+# ─── SumUp reconciliation — recover stuck PENDING donations ──────────────────
+# When the shital-donate container goes down, SumUp's webhook can't reach us
+# so card-tapped donations stay PENDING in our DB even though SumUp actually
+# took the money. This endpoint catches up — pulls every PENDING SumUp
+# donation from the last N days, asks the SumUp API what really happened,
+# and flips status to COMPLETED / FAILED accordingly.
+
+@router.post("/sumup/reconcile-pending")
+async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 7) -> dict[str, Any]:
+    """Sweep PENDING SumUp donations from the last `days` days, query the
+    SumUp API for the real status, update donations.status accordingly.
+
+    Returns counts of updated / still-pending / not-found-on-sumup rows so
+    the admin sees exactly what was recovered. Idempotent — safe to call
+    multiple times; already-COMPLETED rows are skipped.
+
+    Recommended schedule: cron every hour, plus an admin button for
+    on-demand reconciliation after an outage."""
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="admin only")
+    days = max(1, min(int(days), 90))
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    if not access_token:
+        return {"error": "SumUp not configured"}
+
+    from sqlalchemy import text as _text
+
+    summary: dict[str, Any] = {
+        "scanned": 0, "completed": 0, "failed": 0,
+        "still_pending": 0, "not_found": 0,
+        "errors": 0, "days_window": days,
+        "rows": [],
+    }
+    async with SessionLocal() as db:
+        pending_rows = (await db.execute(_text("""
+            SELECT id::text AS id, payment_ref, amount, currency, reference,
+                   created_at::text AS created_at, branch_id
+            FROM donations
+            WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
+              AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+              AND deleted_at IS NULL
+              AND created_at >= NOW() - (:days || ' days')::interval
+              AND payment_ref <> ''
+            ORDER BY created_at DESC
+        """), {"days": str(days)})).mappings().all()
+
+        async with httpx.AsyncClient(timeout=10) as cx:
+            for r in pending_rows:
+                summary["scanned"] += 1
+                checkout_id = r["payment_ref"] or ""
+                if not checkout_id:
+                    summary["errors"] += 1
+                    continue
+                try:
+                    resp = await cx.get(
+                        f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    summary["errors"] += 1
+                    summary["rows"].append({"id": r["id"], "error": str(exc)[:120]})
+                    continue
+                if resp.status_code == 404:
+                    summary["not_found"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "not_found_on_sumup",
+                                            "checkout_id": checkout_id})
+                    continue
+                if resp.status_code >= 400:
+                    summary["errors"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "sumup_error",
+                                            "code": resp.status_code,
+                                            "body": resp.text[:200]})
+                    continue
+                d = resp.json()
+                sumup_status = (d.get("status") or "").upper()
+                # SumUp uses PAID for success, EXPIRED/FAILED for failed
+                if sumup_status == "PAID":
+                    await db.execute(_text("""
+                        UPDATE donations SET status = 'COMPLETED', updated_at = NOW()
+                        WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                    """), {"id": r["id"]})
+                    summary["completed"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "completed",
+                                            "amount": float(r["amount"]),
+                                            "checkout_id": checkout_id})
+                elif sumup_status in {"FAILED", "EXPIRED", "CANCELLED", "CANCELED"}:
+                    await db.execute(_text("""
+                        UPDATE donations SET status = :st, updated_at = NOW()
+                        WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                    """), {"id": r["id"], "st": "FAILED" if sumup_status == "FAILED" else "CANCELLED"})
+                    summary["failed"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "failed",
+                                            "sumup_status": sumup_status,
+                                            "checkout_id": checkout_id})
+                else:
+                    # Still PENDING on SumUp's side — possibly never tapped
+                    summary["still_pending"] += 1
+                    summary["rows"].append({"id": r["id"], "outcome": "still_pending",
+                                            "sumup_status": sumup_status,
+                                            "checkout_id": checkout_id})
+        await db.commit()
+    return summary
 
 
 @router.get("/sumup/readers")

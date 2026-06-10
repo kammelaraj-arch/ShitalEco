@@ -4,6 +4,7 @@ import { useKioskStore, THEMES } from '../store/kiosk.store'
 import { BRICK_TIERS, CatalogItem, filterActiveItems } from '../data/catalog'
 import { KioskKeyboard } from '../components/KioskKeyboard'
 import { cachedFetch } from '../utils/cachedFetch'
+import { absUrl } from '../lib/url'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -340,7 +341,7 @@ export function ProjectDonationScreen() {
                       style={{ border: active ? `3px solid ${th.langActive}` : '3px solid #e5e7eb', boxShadow: active ? `0 6px 20px ${th.langActive}40` : '0 2px 8px rgba(0,0,0,0.08)', minWidth: projects.length > 4 ? 160 : undefined }}
                     >
                       <div className="relative w-full overflow-hidden flex items-center justify-center" style={{ height: 90, background: active ? `${th.langActive}18` : '#f3f4f6' }}>
-                        {p.image_url ? <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" /> : <span className="text-4xl">🏗️</span>}
+                        {p.image_url ? <img src={absUrl(p.image_url)} alt={p.name} className="absolute inset-0 w-full h-full object-cover" /> : <span className="text-4xl">🏗️</span>}
                         <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.5) 0%, transparent 55%)' }} />
                         {active && <div className="absolute bottom-2 right-2"><span className="text-[10px] font-black px-2 py-0.5 rounded-full text-white" style={{ background: th.langActive }}>✓ Selected</span></div>}
                       </div>
@@ -366,7 +367,7 @@ export function ProjectDonationScreen() {
                 return (
                   <div className="w-full rounded-2xl overflow-hidden mb-4" style={{ border: `3px solid ${th.langActive}`, boxShadow: `0 4px 24px ${th.langActive}50` }}>
                     <div className="relative w-full flex items-end" style={{ height: 140, background: proj.image_url ? undefined : `linear-gradient(135deg, ${th.langActive} 0%, #7f1010 100%)` }}>
-                      {proj.image_url && <img src={proj.image_url} alt={proj.name} className="absolute inset-0 w-full h-full object-cover" />}
+                      {proj.image_url && <img src={absUrl(proj.image_url)} alt={proj.name} className="absolute inset-0 w-full h-full object-cover" />}
                       <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.2) 60%, transparent 100%)' }} />
                       <div className="relative z-10 px-4 pb-3 w-full">
                         <p className="text-white font-black text-xl leading-tight drop-shadow-lg">{proj.name}</p>

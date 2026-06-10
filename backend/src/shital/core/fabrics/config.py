@@ -46,17 +46,30 @@ class Settings(BaseSettings):
     # clearest structured output for an agentic loop to handle well. Once that's
     # proven (clean classifications, no false-positive invoices, reasonable
     # supplier matching), add trustees@ and info@ via env var override.
-    MAIL_AGENT_MAILBOXES: str = "accounts@shirdisai.org.uk"
+    MAIL_AGENT_MAILBOXES: str = "accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
     MAIL_AGENT_POLL_SECONDS: int = 300        # 5 min; 0 = disabled
     MAIL_AGENT_MODEL: str = "claude-opus-4-7"  # used for the agentic loop
     MAIL_AGENT_MAX_ITER: int = 15             # cap tool turns per email
+    # Pipeline selector:
+    #   "agent" — Claude agentic triage (needs ANTHROPIC_API_KEY)
+    #   "rules" — deterministic pdfplumber + regex + rapidfuzz vendor match
+    #   "auto"  — Claude if a key is configured, otherwise rules (default)
+    # Rules mode is free to run; covers ~80% of UK invoices and stages the
+    # rest for manual review through the same inbox UI.
+    MAIL_AGENT_MODE: str = "auto"
+
+    # Vultr API token (Personal Access Token from my.vultr.com/settings).
+    # Used by services/vultr.py to pull real hosting cost into the
+    # Finance → Hosting Costs page. Can also be set via Admin → API Keys
+    # (the encrypted store wins over this env var).
+    VULTR_API_KEY: str = ""
     # Hard floor on how far back to look on the first sweep. Without this,
     # a fresh prod install would try to triage years of accounts@ history
     # on first run — slow, expensive, and mostly noise. After the first
     # sweep, the poller resumes from the newest processed message and the
     # floor only matters again if the DB is wiped or the agent is paused
     # for longer than the floor.
-    MAIL_AGENT_LOOKBACK_DAYS: int = 10
+    MAIL_AGENT_LOOKBACK_DAYS: int = 20
     # ── Optional service-account auth ─────────────────────────────────────
     # Either set these two for delegated OAuth (ROPC, "Resource Owner Password
     # Credentials" grant) using a service account that has been granted

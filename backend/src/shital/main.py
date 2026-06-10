@@ -84,9 +84,20 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
                     interval=settings.MAIL_AGENT_POLL_SECONDS,
                     mailboxes=settings.MAIL_AGENT_MAILBOXES)
 
+    # ── Background recovery loop ─────────────────────────────────────────
+    # Runs forever inside the backend process: every 15 min it sweeps
+    # SumUp PENDING donations (reconcile against the SumUp API so any
+    # webhook misses self-heal) and emails a digest of unresolved
+    # CRITICAL/ERROR system_alerts. Closes the "I don't want to monitor"
+    # loop — if something needs human attention, it lands in the inbox.
+    from shital.services.background_recovery import recovery_loop
+    _recovery_task = _asyncio.create_task(recovery_loop())
+    logger.info("recovery_loop_started")
+
     yield
     if _mail_task:
         _mail_task.cancel()
+    _recovery_task.cancel()
     logger.info("shital_shutdown")
 
 
@@ -224,6 +235,16 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_keyreg_status  ON key_register(status)   WHERE deleted_at IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_keyreg_holder  ON key_register(holder_employee_id) WHERE deleted_at IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_keyreg_expiry  ON key_register(expiry_date) WHERE expiry_date IS NOT NULL AND deleted_at IS NULL",
+        # ── Expansion fields added 2026: track total sets vs in-vault, plus
+        # the per-holder undertaking that trustees increasingly require for
+        # physical keys to property / shrines / donation boxes.
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS total_sets               INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS sets_in_vault            INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_required     BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_signed_at    TIMESTAMPTZ DEFAULT NULL",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_signed_name  VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_pdf_url      TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE key_register ADD COLUMN IF NOT EXISTS undertaking_sent_at      TIMESTAMPTZ DEFAULT NULL",
         """CREATE TABLE IF NOT EXISTS key_register_events (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             key_id UUID NOT NULL,
@@ -236,6 +257,44 @@ async def _patch_schema() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_keyreg_events_key ON key_register_events(key_id, created_at DESC)",
+        # ── Per-set holdings (a single key definition may have N sets each
+        # held by a different person, each with their own undertaking +
+        # issue/return dates). This replaces the single holder_employee_id
+        # for new code; the legacy column stays as a denormalised "current
+        # primary holder" for back-compat with the existing list view.
+        """CREATE TABLE IF NOT EXISTS key_holdings (
+            id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            key_id                   UUID NOT NULL REFERENCES key_register(id) ON DELETE CASCADE,
+            set_number               INTEGER NOT NULL DEFAULT 1,
+            holder_employee_id       UUID,
+            issued_date              DATE,
+            returned_date            DATE,
+            expected_return_date     DATE,
+            status                   VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+            undertaking_required     BOOLEAN NOT NULL DEFAULT true,
+            undertaking_sent_at      TIMESTAMPTZ,
+            undertaking_signed_at    TIMESTAMPTZ,
+            undertaking_signed_name  VARCHAR(200) NOT NULL DEFAULT '',
+            undertaking_pdf_url      TEXT NOT NULL DEFAULT '',
+            notes                    TEXT NOT NULL DEFAULT '',
+            created_by_user_id       UUID,
+            created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at               TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_key_holdings_key      ON key_holdings(key_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_key_holdings_holder   ON key_holdings(holder_employee_id) WHERE deleted_at IS NULL AND status = 'ACTIVE'",
+        "CREATE INDEX IF NOT EXISTS idx_key_holdings_undersnd ON key_holdings(key_id) WHERE deleted_at IS NULL AND undertaking_required = true AND undertaking_signed_at IS NULL",
+        # E-signature columns — when the operator emails the holder for
+        # online signing, we mint a token, snapshot the recipient email,
+        # and (on sign) capture the typed name + IP + user agent + a
+        # base64 PNG of any drawn signature as evidence.
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_token            VARCHAR(64) DEFAULT NULL",
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_email_sent_to    VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_signed_ip        VARCHAR(64)  NOT NULL DEFAULT ''",
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_signed_ua        TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE key_holdings ADD COLUMN IF NOT EXISTS undertaking_signature_png    TEXT         NOT NULL DEFAULT ''",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_key_holdings_token ON key_holdings(undertaking_token) WHERE undertaking_token IS NOT NULL",
         """CREATE TABLE IF NOT EXISTS bookings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             branch_id VARCHAR(100) NOT NULL DEFAULT 'main',
@@ -277,6 +336,57 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_documents_branch   ON documents(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category)",
+        # DMS expansion — link a document to another record (a key_holding,
+        # an employee, a project), mark confidential / system-generated,
+        # and remember the disk path so the download endpoint can stream
+        # the file without re-deriving it.
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS linked_entity_type VARCHAR(40) NOT NULL DEFAULT ''",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS linked_entity_id   VARCHAR(64) NOT NULL DEFAULT ''",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_confidential    BOOLEAN     NOT NULL DEFAULT false",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_generated       BOOLEAN     NOT NULL DEFAULT false",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS generated_by       VARCHAR(80) NOT NULL DEFAULT ''",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_path          TEXT        NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS idx_documents_linked ON documents(linked_entity_type, linked_entity_id) WHERE deleted_at IS NULL AND linked_entity_id <> ''",
+        # System alerts — every monitor.sh transition is POSTed here so the
+        # admin can see container restarts, backup failures, expired certs,
+        # etc. in one place instead of trawling through trustee mailboxes.
+        # Auto-heal attempts (restart count + outcome) are recorded on the
+        # same row so the trustee can see "this restarted itself 3 times"
+        # without SSH-ing into the host.
+        """CREATE TABLE IF NOT EXISTS system_alerts (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            host            VARCHAR(120) NOT NULL DEFAULT '',
+            check_name      VARCHAR(80)  NOT NULL,
+            severity        VARCHAR(20)  NOT NULL DEFAULT 'critical',
+            status          VARCHAR(20)  NOT NULL DEFAULT 'fail',
+            message         TEXT         NOT NULL DEFAULT '',
+            detail          TEXT         NOT NULL DEFAULT '',
+            heal_attempts   INTEGER      NOT NULL DEFAULT 0,
+            heal_outcome    VARCHAR(20)  NOT NULL DEFAULT '',
+            acknowledged_at TIMESTAMPTZ DEFAULT NULL,
+            acknowledged_by VARCHAR(255) NOT NULL DEFAULT '',
+            resolved_at     TIMESTAMPTZ DEFAULT NULL,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_system_alerts_status     ON system_alerts(status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_system_alerts_check_host ON system_alerts(check_name, host, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_system_alerts_open       ON system_alerts(created_at DESC) WHERE resolved_at IS NULL AND status <> 'ok'",
+        # Category lookup — formal codes with display labels, icons, and a
+        # folder name used when laying files out on disk. Seeded with the
+        # canonical charity categories; admins can add more via the API.
+        """CREATE TABLE IF NOT EXISTS document_categories (
+            code                  VARCHAR(40)  PRIMARY KEY,
+            label                 VARCHAR(120) NOT NULL,
+            description           TEXT         NOT NULL DEFAULT '',
+            icon                  VARCHAR(8)   NOT NULL DEFAULT '📄',
+            folder_name           VARCHAR(60)  NOT NULL DEFAULT 'general',
+            default_review_months INTEGER      NOT NULL DEFAULT 0,
+            is_confidential_default BOOLEAN    NOT NULL DEFAULT false,
+            sort_order            INTEGER      NOT NULL DEFAULT 100,
+            is_active             BOOLEAN      NOT NULL DEFAULT true,
+            created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
         # Gift Aid submissions history table
         """CREATE TABLE IF NOT EXISTS gift_aid_submissions (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -448,6 +558,346 @@ async def _patch_schema() -> None:
         # Link catalog_items to a project (optional)
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS project_id VARCHAR(60) NOT NULL DEFAULT ''",
         "CREATE INDEX IF NOT EXISTS idx_catalog_items_project ON catalog_items(project_id)",
+
+        # ── Project Management extensions ────────────────────────────────────
+        # Three named owner roles (each is a users.id reference, nullable so
+        # an early-stage project doesn't have to fill every slot).
+        # Plus budget_total (committed budget), status (lifecycle), and
+        # risk_level (operator-set RAG).
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_manager_id UUID DEFAULT NULL",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS business_owner_id  UUID DEFAULT NULL",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS tech_owner_id      UUID DEFAULT NULL",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_total       NUMERIC(14,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS status             VARCHAR(20)   NOT NULL DEFAULT 'DRAFT'",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS risk_level         VARCHAR(20)   NOT NULL DEFAULT 'GREEN'",
+        # Parent project for hierarchy — programmes → projects → sub-projects.
+        # Nullable: a top-level project has no parent. ON DELETE SET NULL so
+        # deleting a parent doesn't cascade-destroy its children — they just
+        # become top-level. The summary endpoint surfaces both the parent's
+        # name and the immediate-child list so the UI can render a tree.
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS parent_project_id  UUID DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_project_id) WHERE parent_project_id IS NOT NULL",
+
+        # Team assignments — many-to-many between projects and users with a
+        # role per assignment (DEVELOPER, ANALYST, FINANCE, STAKEHOLDER, etc.).
+        """CREATE TABLE IF NOT EXISTS project_assignments (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            user_id      UUID NOT NULL,
+            role         VARCHAR(40)  NOT NULL DEFAULT 'TEAM_MEMBER',
+            notes        TEXT         NOT NULL DEFAULT '',
+            assigned_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            removed_at   TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_assignments_proj ON project_assignments(project_id) WHERE removed_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_assignments_user ON project_assignments(user_id)    WHERE removed_at IS NULL",
+
+        # Activity log — every status change, comment, milestone update.
+        # actor_id is the user who logged the activity (nullable for system
+        # events). kind discriminates: NOTE / STATUS_CHANGE / MILESTONE /
+        # EXPENSE / INVOICE / RISK.
+        """CREATE TABLE IF NOT EXISTS project_activities (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            actor_id     UUID DEFAULT NULL,
+            actor_email  VARCHAR(255) NOT NULL DEFAULT '',
+            kind         VARCHAR(30)  NOT NULL DEFAULT 'NOTE',
+            title        VARCHAR(255) NOT NULL DEFAULT '',
+            body         TEXT         NOT NULL DEFAULT '',
+            related_id   VARCHAR(100) NOT NULL DEFAULT '',
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_activities_proj ON project_activities(project_id, created_at DESC)",
+
+        # Risk register — one row per identified risk. likelihood + impact
+        # are 1-5 scales; risk_score = likelihood * impact, computed as
+        # generated column so the UI can sort/filter without recomputing.
+        """CREATE TABLE IF NOT EXISTS project_risks (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title        VARCHAR(255) NOT NULL,
+            description  TEXT         NOT NULL DEFAULT '',
+            likelihood   INTEGER      NOT NULL DEFAULT 3 CHECK (likelihood BETWEEN 1 AND 5),
+            impact       INTEGER      NOT NULL DEFAULT 3 CHECK (impact     BETWEEN 1 AND 5),
+            risk_score   INTEGER      GENERATED ALWAYS AS (likelihood * impact) STORED,
+            mitigation   TEXT         NOT NULL DEFAULT '',
+            owner_id     UUID DEFAULT NULL,
+            status       VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            closed_at    TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_risks_proj ON project_risks(project_id, status)",
+
+        # Expense line items — actual spending against the project. category
+        # is operator-set (LABOUR / MATERIALS / SERVICES / TRAVEL / OTHER).
+        # invoice_ref links to project_invoices.invoice_no when sourced from
+        # a vendor invoice.
+        """CREATE TABLE IF NOT EXISTS project_expenses (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            spent_on     DATE         NOT NULL,
+            category     VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+            vendor       VARCHAR(255) NOT NULL DEFAULT '',
+            description  TEXT         NOT NULL DEFAULT '',
+            amount       NUMERIC(14,2) NOT NULL DEFAULT 0,
+            currency     VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            invoice_ref  VARCHAR(100) NOT NULL DEFAULT '',
+            recorded_by  UUID DEFAULT NULL,
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at   TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_expenses_proj ON project_expenses(project_id, spent_on DESC) WHERE deleted_at IS NULL",
+
+        # Vendor invoice tracker per project. status: RECEIVED / APPROVED /
+        # PAID / DISPUTED / CANCELLED.
+        """CREATE TABLE IF NOT EXISTS project_invoices (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id    UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            vendor        VARCHAR(255) NOT NULL,
+            invoice_no    VARCHAR(100) NOT NULL DEFAULT '',
+            invoice_date  DATE,
+            due_date      DATE,
+            paid_date     DATE,
+            amount        NUMERIC(14,2) NOT NULL DEFAULT 0,
+            currency      VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            status        VARCHAR(20)  NOT NULL DEFAULT 'RECEIVED',
+            file_url      TEXT         NOT NULL DEFAULT '',
+            notes         TEXT         NOT NULL DEFAULT '',
+            recorded_by   UUID DEFAULT NULL,
+            created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at    TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_invoices_proj   ON project_invoices(project_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_invoices_status ON project_invoices(status)    WHERE deleted_at IS NULL",
+
+        # ── Phase 1b/1c — reuse-existing linking ─────────────────────────────
+        # Link expenses + invoices to the existing crm_accounts CRM (where
+        # vendor/supplier/partner already live as account_type values). Keep
+        # the free-text vendor column for back-compat — populate either.
+        "ALTER TABLE project_expenses ADD COLUMN IF NOT EXISTS vendor_account_id UUID DEFAULT NULL",
+        "ALTER TABLE project_invoices ADD COLUMN IF NOT EXISTS vendor_account_id UUID DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_expenses_vendor ON project_expenses(vendor_account_id) WHERE vendor_account_id IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_invoices_vendor ON project_invoices(vendor_account_id) WHERE vendor_account_id IS NOT NULL",
+
+        # Reuse the donations table for incoming-funds attribution per project.
+        # Today the dashboard guesses by `purpose` text-match against the
+        # project name; making this an explicit FK lets restricted-fund
+        # projects show their actual donor-restricted intake without text
+        # heuristics. Nullable so general donations stay project-agnostic.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS project_id UUID DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_donations_project ON donations(project_id) WHERE project_id IS NOT NULL",
+
+        # Milestones — the work breakdown the operator asked for. Each row is
+        # a deliverable with an owner + due date. status moves through
+        # PENDING / IN_PROGRESS / DONE / SKIPPED; pct_complete is 0-100 for
+        # finer reporting on the dashboard.
+        """CREATE TABLE IF NOT EXISTS project_milestones (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title        VARCHAR(255) NOT NULL,
+            description  TEXT         NOT NULL DEFAULT '',
+            owner_id     UUID DEFAULT NULL,
+            due_date     DATE,
+            status       VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            pct_complete INTEGER      NOT NULL DEFAULT 0 CHECK (pct_complete BETWEEN 0 AND 100),
+            completed_at TIMESTAMPTZ  DEFAULT NULL,
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at   TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_milestones_proj ON project_milestones(project_id, due_date) WHERE deleted_at IS NULL",
+
+        # Documents — charter, contracts, grant agreements, signed approvals.
+        # file_url is intentionally an external URL (SharePoint, Drive, S3)
+        # rather than a binary in PG — uploaders elsewhere already populate
+        # similar URL columns this way.
+        """CREATE TABLE IF NOT EXISTS project_documents (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title        VARCHAR(255) NOT NULL,
+            kind         VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+            file_url     TEXT         NOT NULL DEFAULT '',
+            version      VARCHAR(50)  NOT NULL DEFAULT '',
+            uploaded_by  UUID DEFAULT NULL,
+            uploaded_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at   TIMESTAMPTZ  DEFAULT NULL,
+            notes        TEXT         NOT NULL DEFAULT ''
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_documents_proj ON project_documents(project_id) WHERE deleted_at IS NULL",
+
+        # ── Tasks ────────────────────────────────────────────────────────
+        # The Activity log records what HAPPENED (immutable timeline). Tasks
+        # record what NEEDS TO HAPPEN — assigned work with a due date and
+        # status that the team progresses. Kept deliberately small: one
+        # assignee, status enum, no sub-tasks. Adding a CHECKLIST kind to
+        # project_activities was considered and rejected because tasks need
+        # mutable state.
+        """CREATE TABLE IF NOT EXISTS project_tasks (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title           VARCHAR(255) NOT NULL,
+            description     TEXT         NOT NULL DEFAULT '',
+            assignee_id     UUID DEFAULT NULL,
+            due_date        DATE DEFAULT NULL,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'TODO',
+            priority        VARCHAR(20)  NOT NULL DEFAULT 'MEDIUM',
+            created_by      UUID DEFAULT NULL,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            completed_at    TIMESTAMPTZ DEFAULT NULL,
+            deleted_at      TIMESTAMPTZ DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_tasks_proj      ON project_tasks(project_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_tasks_assignee  ON project_tasks(assignee_id) WHERE deleted_at IS NULL AND status <> 'DONE'",
+
+        # ── TV / Broadcast channel ───────────────────────────────────────
+        # The temple's online TV channel runs through YouTube Live as the
+        # streaming backend; the admin keeps the content library, schedule
+        # and playout log so we own the "what's playing now" question
+        # independently of YouTube's API. Donations and viewer metrics tie
+        # back here. Public viewer lives at apps/tv/.
+        """CREATE TABLE IF NOT EXISTS broadcast_assets (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title           VARCHAR(255) NOT NULL,
+            description     TEXT         NOT NULL DEFAULT '',
+            kind            VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+            language        VARCHAR(20)  NOT NULL DEFAULT 'en',
+            branch_id       VARCHAR(100) DEFAULT NULL,
+            source_url      TEXT         NOT NULL DEFAULT '',
+            youtube_video_id VARCHAR(40) DEFAULT NULL,
+            duration_seconds INTEGER     NOT NULL DEFAULT 0,
+            thumbnail_url   TEXT         NOT NULL DEFAULT '',
+            rights_cleared  BOOLEAN      NOT NULL DEFAULT true,
+            tags            JSONB        NOT NULL DEFAULT '[]'::jsonb,
+            uploaded_by     UUID DEFAULT NULL,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at      TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_assets_kind     ON broadcast_assets(kind)     WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_assets_branch   ON broadcast_assets(branch_id) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_assets_yt       ON broadcast_assets(youtube_video_id) WHERE youtube_video_id IS NOT NULL",
+        # Schedule = recurring weekly grid. day_of_week 0=Mon … 6=Sun.
+        """CREATE TABLE IF NOT EXISTS broadcast_schedule_blocks (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id       VARCHAR(100) DEFAULT NULL,
+            day_of_week     SMALLINT     NOT NULL,
+            start_time      TIME         NOT NULL,
+            duration_min    INTEGER      NOT NULL DEFAULT 30,
+            asset_id        UUID REFERENCES broadcast_assets(id) ON DELETE SET NULL,
+            title_override  VARCHAR(255) NOT NULL DEFAULT '',
+            is_live_slot    BOOLEAN      NOT NULL DEFAULT false,
+            recurring       BOOLEAN      NOT NULL DEFAULT true,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            deleted_at      TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_schedule_dow    ON broadcast_schedule_blocks(day_of_week, start_time) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_schedule_branch ON broadcast_schedule_blocks(branch_id) WHERE deleted_at IS NULL",
+        # Live broadcasts — actual occurrences (vs the recurring schedule).
+        # A row is created when something actually goes live, capturing the
+        # YouTube stream id + viewer peak for reporting.
+        """CREATE TABLE IF NOT EXISTS broadcast_live_events (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id       VARCHAR(100) DEFAULT NULL,
+            project_id      UUID DEFAULT NULL,
+            title           VARCHAR(255) NOT NULL,
+            description     TEXT         NOT NULL DEFAULT '',
+            scheduled_at    TIMESTAMPTZ  DEFAULT NULL,
+            started_at      TIMESTAMPTZ  DEFAULT NULL,
+            ended_at        TIMESTAMPTZ  DEFAULT NULL,
+            platform        VARCHAR(20)  NOT NULL DEFAULT 'youtube',
+            youtube_video_id VARCHAR(40) DEFAULT NULL,
+            stream_url      TEXT         NOT NULL DEFAULT '',
+            recording_url   TEXT         NOT NULL DEFAULT '',
+            viewer_count_peak INTEGER    NOT NULL DEFAULT 0,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'SCHEDULED',
+            created_by      UUID DEFAULT NULL,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_live_status  ON broadcast_live_events(status, scheduled_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_live_branch  ON broadcast_live_events(branch_id, scheduled_at DESC)",
+
+        # Budget breakdown — one row per category (LABOUR / MATERIALS /
+        # SERVICES / TRAVEL / OTHER, matching the project_expenses category
+        # enum). Variance reporting joins this against the expense rollup
+        # for per-category over/under spend.
+        """CREATE TABLE IF NOT EXISTS project_budget_items (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            category     VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+            description  TEXT         NOT NULL DEFAULT '',
+            amount       NUMERIC(14,2) NOT NULL DEFAULT 0,
+            currency     VARCHAR(10)  NOT NULL DEFAULT 'GBP',
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_budget_items_proj ON project_budget_items(project_id, category)",
+
+        # Project partners — join to crm_accounts (NOT a new vendors table).
+        # The relationship value distinguishes between PARTNER (collaborating
+        # charity), GRANTOR (funded us), BENEFICIARY (we serve them),
+        # SPONSOR (gave us in-kind / cash without restriction), SUPPLIER.
+        # account_type on crm_accounts already filters vendor/supplier/etc.;
+        # this table records the per-project relationship.
+        """CREATE TABLE IF NOT EXISTS project_partners (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            account_id   UUID NOT NULL REFERENCES crm_accounts(id) ON DELETE CASCADE,
+            relationship VARCHAR(40)  NOT NULL DEFAULT 'PARTNER',
+            start_date   DATE,
+            end_date     DATE,
+            notes        TEXT         NOT NULL DEFAULT '',
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            removed_at   TIMESTAMPTZ  DEFAULT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_partners_proj    ON project_partners(project_id)    WHERE removed_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_project_partners_account ON project_partners(account_id)    WHERE removed_at IS NULL",
+
+        # Approval workflow — single-step trustee/admin approval pattern.
+        # kind: START (DRAFT → ACTIVE), CHANGE_BUDGET, CHANGE_SCOPE, CLOSE.
+        # status: PENDING → APPROVED | REJECTED | WITHDRAWN.
+        # Project status transitions to ACTIVE are gated on an APPROVED
+        # 'START' row when budget_total > APPROVAL_THRESHOLD_GBP OR
+        # project_type='CAPITAL' OR fund_type IN (RESTRICTED, ENDOWMENT).
+        """CREATE TABLE IF NOT EXISTS project_approvals (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            kind            VARCHAR(40)  NOT NULL DEFAULT 'START',
+            requested_by    UUID DEFAULT NULL,
+            requested_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            request_reason  TEXT         NOT NULL DEFAULT '',
+            status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+            approver_id     UUID DEFAULT NULL,
+            decided_at      TIMESTAMPTZ  DEFAULT NULL,
+            decision_reason TEXT         NOT NULL DEFAULT ''
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_project_approvals_proj ON project_approvals(project_id, status)",
+
+        # ── Phase 3B — In-app notifications ──────────────────────────────────
+        # Per-user fan-out. kind discriminates: ASSIGNMENT / RISK / APPROVAL /
+        # MILESTONE / INVOICE / FUNDING / SYSTEM. link_url is a relative
+        # path the header bell links to when the user clicks the row.
+        # read_at NULL → unread; mark-read flips it. Auto-collapse old rows
+        # via a periodic job (skipped for now — table size is fine for years).
+        """CREATE TABLE IF NOT EXISTS notifications (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id     UUID NOT NULL,
+            kind        VARCHAR(40)  NOT NULL DEFAULT 'SYSTEM',
+            title       VARCHAR(255) NOT NULL,
+            body        TEXT         NOT NULL DEFAULT '',
+            link_url    VARCHAR(500) NOT NULL DEFAULT '',
+            severity    VARCHAR(20)  NOT NULL DEFAULT 'INFO',
+            read_at     TIMESTAMPTZ  DEFAULT NULL,
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, created_at DESC) WHERE read_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_user_all    ON notifications(user_id, created_at DESC)",
+
         # ── Recurring Payments — financial obligations tracker ─────────────────
         """CREATE TABLE IF NOT EXISTS recurring_payments (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2539,6 +2989,7 @@ async def _patch_schema() -> None:
     await _seed_catalog()
     await _seed_email_templates()
     await _seed_release_notes()
+    await _seed_document_categories()
 
 
 async def _seed_api_key_metadata() -> None:
@@ -2579,6 +3030,10 @@ async def _seed_api_key_metadata() -> None:
         ("SUMUP_ACCESS_TOKEN",       "SumUp Personal API key (sup_pk_...)",            "SumUp",     True),
         ("SUMUP_MERCHANT_CODE",      "SumUp merchant code (e.g. M602X5FC)",            "SumUp",     False),
         ("MEILISEARCH_MASTER_KEY",   "MeiliSearch master key",                         "Other",     True),
+        ("VULTR_API_KEY",            "Vultr Personal Access Token — pulls real hosting cost into Finance → Hosting Costs",              "Hosting",   True),
+        ("YOUTUBE_CHANNEL_ID",       "YouTube channel ID (UC...) for the temple's TV channel — drives live-status detection on shital.org.uk/tv", "TV",        False),
+        ("YOUTUBE_CHANNEL_HANDLE",   "YouTube channel handle, e.g. @ShirdiSaiTempleUK — used for the 'Watch on YouTube' link",                  "TV",        False),
+        ("YOUTUBE_DATA_API_KEY",     "YouTube Data API v3 key (AIzaSy...) — free from console.cloud.google.com",                              "TV",        True),
     ]
 
     async with SessionLocal() as db:
@@ -3086,6 +3541,48 @@ _{{ branch_name }} — Registered UK Charity_"""
             ),
             "variables": '["referee_name","applicant_name","response_url","charity_number"]',
         },
+        {
+            # Sent when a trustee clicks "Email undertaking" on a key holding.
+            # Variables: {{ holder_name }}, {{ key_name }}, {{ key_type_label }},
+            #            {{ set_number }}, {{ sign_url }}, {{ custom_message }}.
+            # Server falls back to a hard-coded body when this template is
+            # missing or its bodies are blank — but editing it from Email
+            # Templates admin lets trustees set the right tone without a deploy.
+            "key": "key_undertaking",
+            "name": "Key Undertaking — Sign Online",
+            "subject": "Please sign your key undertaking — {{ key_name }}",
+            "html_body": (
+                "<p>Dear {{ holder_name }},</p>"
+                "<p>You have been issued a <b>{{ key_type_label }}</b> "
+                "(<b>{{ key_name }}</b>, set #{{ set_number }}) at Shital — "
+                "Shirdi Sai Temple.</p>"
+                "<p>Please sign the undertaking for this item using the secure link below. "
+                "It only takes a minute:</p>"
+                "<p style='text-align:center;margin:24px 0;'>"
+                "<a href='{{ sign_url }}' style='background:#FF6B00;color:#fff;"
+                "text-decoration:none;padding:12px 28px;border-radius:8px;"
+                "font-weight:700;display:inline-block;'>Sign Undertaking →</a></p>"
+                "{{ custom_message_html }}"
+                "<p style='color:#888;font-size:12px;margin-top:32px;'>"
+                "If you did not expect this email, please reply to let us know.<br>"
+                "Thank you for your service to the temple.<br>"
+                "— Trustees, Shital</p>"
+            ),
+            "text_body": (
+                "Dear {{ holder_name }},\n\n"
+                "You have been issued a {{ key_type_label }} "
+                "({{ key_name }}, set #{{ set_number }}) at Shital — "
+                "Shirdi Sai Temple.\n\n"
+                "Please sign the undertaking for this item using the secure "
+                "link below. It only takes a minute:\n\n"
+                "    {{ sign_url }}\n\n"
+                "{{ custom_message }}\n\n"
+                "If you did not expect this email, please reply to let us know.\n\n"
+                "Thank you for your service to the temple.\n"
+                "Trustees, Shital."
+            ),
+            "variables": '["holder_name","key_name","key_type_label","set_number","sign_url","custom_message","custom_message_html"]',
+        },
     ]
 
     async with SessionLocal() as db:
@@ -3115,6 +3612,68 @@ _{{ branch_name }} — Registered UK Charity_"""
                 logger.error("email_template_seed_failed", template_key=t.get("key"), error=str(exc))
         await db.commit()
     logger.info("email_templates_seeded")
+
+
+async def _seed_document_categories() -> None:
+    """Seed the canonical charity document categories. Admins can later
+    add/edit through the API, but these are always present after boot.
+
+    Each category gets a folder_name that the DMS uses to lay files out
+    on disk as MEDIA_DIR/documents/{folder_name}/{doc_id}.<ext> — so the
+    on-disk structure mirrors the logical structure and back-end staff
+    can navigate the file tree directly when needed."""
+    cats = [
+        # code, label, description, icon, folder, review_months, confidential, sort
+        ("GOVERNANCE",         "Governance & Trustees", "Trustee resolutions, board minutes, AGM packs, Charity Commission filings.", "🏛️", "governance",        0,  False, 10),
+        ("COMPLIANCE",         "Compliance & Safety",   "Safeguarding, GDPR, fire safety, health & safety, risk assessments, DBS checks.", "✅", "compliance",        12, True,  20),
+        ("HR",                 "HR & Employment",       "Employment contracts, job descriptions, performance reviews, disciplinary records.", "👥", "hr",                0,  True,  30),
+        ("PAYROLL",            "Payroll",               "Payslips, P60s, NI records, pension contributions.",                                    "💷", "payroll",           0,  True,  31),
+        ("FINANCE",            "Finance",               "Annual accounts, audit reports, management accounts, ledgers, bank statements.",     "📊", "finance",          12, True,  40),
+        ("INSURANCE",          "Insurance",             "Public liability, employers' liability, buildings, contents — policies + claims.",   "🛡️", "insurance",         12, False, 50),
+        ("POLICIES",           "Policies",              "Written organisational policies — data protection, child safety, conflict of interest.","📜", "policies",          24, False, 60),
+        ("CONTRACTS",          "Contracts & Agreements","Supplier contracts, MOUs, lease agreements, professional service agreements.",      "📝", "contracts",         12, False, 70),
+        ("CERTIFICATES",       "Certificates & Licences","Charity registration, VAT, fundraising licences, gift aid claims, HMRC.",            "🏅", "certificates",      24, False, 80),
+        ("KEY_UNDERTAKINGS",   "Key Undertakings",      "Signed undertakings from key holders. Auto-generated when a holder e-signs.",        "🔑", "key-undertakings",  0,  False, 90),
+        ("VOLUNTEER_AGREEMENTS","Volunteer Agreements", "Signed volunteer agreements, role descriptions, induction records.",                  "🙋", "volunteer-agreements",0, True,  100),
+        ("DONOR_CORRESPONDENCE","Donor Correspondence", "Major donor thank-you letters, pledge agreements, grant correspondence.",            "💌", "donors",            0,  True,  110),
+        ("LEGAL",              "Legal",                 "Legal advice, opinions, court documents, lawyer correspondence.",                    "⚖️", "legal",             0,  True,  120),
+        ("BUILDING",           "Building & Property",   "Title deeds, planning permission, lease documents, surveys, EPC.",                   "🏗️", "building",          0,  False, 130),
+        ("PROJECTS",           "Project Records",       "Project charters, closure reports, lessons-learned — official records only.",        "📁", "projects",          0,  False, 140),
+        ("TRAINING",           "Training & Development","Training records, attendance certificates, CPD logs.",                               "🎓", "training",          24, False, 150),
+        ("IT",                 "IT & Systems",          "IT policies, system architecture, recovery procedures, backup logs.",               "💻", "it",                12, False, 160),
+        ("EVENTS",             "Events & Festivals",    "Event plans, run sheets, festival programs, post-event reports.",                   "🎉", "events",            0,  False, 170),
+        ("MEDIA",              "Media & Communications","Press releases, photos, video releases, marketing assets, brand guidelines.",       "📸", "media",             0,  False, 180),
+        ("OTHER",              "Other",                 "Documents that don't fit any other category.",                                       "📄", "other",             0,  False, 999),
+    ]
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        for c in cats:
+            try:
+                await db.execute(text("""
+                    INSERT INTO document_categories
+                        (code, label, description, icon, folder_name,
+                         default_review_months, is_confidential_default,
+                         sort_order, is_active)
+                    VALUES (:code, :lab, :desc, :icon, :folder,
+                            :rev, :conf, :sort, true)
+                    ON CONFLICT (code) DO UPDATE SET
+                        label                  = EXCLUDED.label,
+                        description            = EXCLUDED.description,
+                        icon                   = EXCLUDED.icon,
+                        folder_name            = EXCLUDED.folder_name,
+                        default_review_months  = EXCLUDED.default_review_months,
+                        is_confidential_default= EXCLUDED.is_confidential_default,
+                        sort_order             = EXCLUDED.sort_order,
+                        is_active              = true,
+                        updated_at             = NOW()
+                """), {"code": c[0], "lab": c[1], "desc": c[2], "icon": c[3],
+                       "folder": c[4], "rev": c[5], "conf": c[6], "sort": c[7]})
+            except Exception as exc:  # noqa: BLE001
+                logger.error("doc_category_seed_failed", code=c[0], error=str(exc))
+        await db.commit()
+    logger.info("document_categories_seeded")
 
 
 async def _seed_release_notes() -> None:
@@ -3321,7 +3880,9 @@ _mount("shital.api.routers.nominal_codes",    "router")
 _mount("shital.api.routers.purchasing",       "router")
 _mount("shital.api.routers.gl",               "router")
 _mount("shital.api.routers.budgets",          "router")
-_mount("shital.api.routers.project_costing",  "router")
+_mount("shital.api.routers.project_costing",   "router")
+_mount("shital.api.routers.project_management","router")
+_mount("shital.api.routers.notifications",     "router")
 _mount("shital.api.routers.reports",          "router")
 _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.hr_alerts",        "router")
@@ -3330,6 +3891,14 @@ _mount("shital.api.routers.email_templates",  "router")
 _mount("shital.api.routers.functions",        "router")
 _mount("shital.api.routers.assets",           "router")
 _mount("shital.api.routers.key_register",     "router")
+# Wire the public e-signature endpoints (/public/key-undertaking/{token})
+# alongside the prefixed router so the holder's signing link works without
+# auth or branch scoping.
+try:
+    from shital.api.routers.key_register import register_public_router as _krpub
+    _krpub(app)
+except Exception as _exc:  # noqa: BLE001
+    logger.error("key_register_public_mount_failed", error=str(_exc))
 _mount("shital.api.routers.bookings_router",  "router")
 _mount("shital.api.routers.documents_router", "router")
 _mount("shital.api.routers.api_keys",         "router")
@@ -3338,6 +3907,9 @@ _mount("shital.api.routers.screen",           "router")
 _mount("shital.api.routers.branches",         "router")
 _mount("shital.api.routers.projects",             "router")
 _mount("shital.api.routers.recurring_payments",   "router")
+_mount("shital.api.routers.hosting",              "router")
+_mount("shital.api.routers.broadcast",            "router")
+_mount("shital.api.routers.system_alerts",        "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")

@@ -14,10 +14,43 @@ from shital.api.deps import RequiredSpace
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-VALID_ROLES = [
+# Hardcoded system roles — these gate code paths (auth checks, kiosk
+# bootstrap, public devotee self-service) so they always exist regardless
+# of what's in board_roles. The dynamic list below is the full union.
+_SYSTEM_ROLES: set[str] = {
     "SUPER_ADMIN", "TRUSTEE", "ACCOUNTANT", "HR_MANAGER",
     "BRANCH_MANAGER", "STAFF", "VOLUNTEER", "DEVOTEE", "KIOSK", "AUDITOR",
-]
+    # Common roles also surfaced through board_roles, listed here too as a
+    # safety net in case the table is empty on first-deploy.
+    "CHAIR", "CEO", "TREASURER", "SECRETARY",
+    "LMC_CHAIR", "LMC_TREASURER", "LMC_MEMBER",
+    "EXTERNAL_CONTRACTOR", "TEMP_WORKER",
+}
+
+
+async def _valid_roles() -> set[str]:
+    """Return every role assignable on the user form. Union of the static
+    system roles + every active row in board_roles (so roles added through
+    Admin → Users & Roles flow into validation without a redeploy)."""
+    roles = set(_SYSTEM_ROLES)
+    try:
+        from sqlalchemy import text
+
+        from shital.core.fabrics.database import SessionLocal
+        async with SessionLocal() as db:
+            rows = (await db.execute(text(
+                "SELECT code FROM board_roles WHERE is_active = true"
+            ))).all()
+        roles.update(r[0] for r in rows if r[0])
+    except Exception:  # noqa: BLE001 — table may not exist on first boot
+        pass
+    return roles
+
+
+# Kept as a property-style alias so any older imports of `VALID_ROLES`
+# still work (mostly tests and admin tooling). The async _valid_roles()
+# is the source of truth at request time.
+VALID_ROLES = sorted(_SYSTEM_ROLES)
 
 
 def _row(row: Any) -> dict:
@@ -127,8 +160,9 @@ async def create_user(body: UserCreate, ctx: RequiredSpace):
 
     from shital.core.fabrics.database import SessionLocal
 
-    if body.role not in VALID_ROLES:
-        raise HTTPException(status_code=400, detail=f"Invalid role. Choose from: {', '.join(VALID_ROLES)}")
+    valid = await _valid_roles()
+    if body.role not in valid:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Choose from: {', '.join(sorted(valid))}")
 
     user_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -178,8 +212,9 @@ class RoleUpdate(BaseModel):
 
 @router.put("/{user_id}/role")
 async def update_role(user_id: str, body: RoleUpdate, ctx: RequiredSpace):
-    if body.role not in VALID_ROLES:
-        raise HTTPException(status_code=400, detail=f"Invalid role. Choose from: {', '.join(VALID_ROLES)}")
+    valid = await _valid_roles()
+    if body.role not in valid:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Choose from: {', '.join(sorted(valid))}")
 
     from sqlalchemy import text
 

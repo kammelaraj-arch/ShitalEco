@@ -35,8 +35,13 @@ interface Account {
   status: string
 }
 
+// 'any' = no account_type filter — used by the project Partners tab where
+// the relationship (PARTNER / GRANTOR / SPONSOR / …) is stored separately
+// and any account can be linked.
+type AccountTypeFilter = 'supplier' | 'customer' | 'any'
+
 interface AccountPickerProps {
-  accountType: 'supplier' | 'customer'
+  accountType: AccountTypeFilter
   value: { id: string; name: string } | null
   onChange: (sel: { id: string; name: string } | null) => void
   placeholder?: string
@@ -61,10 +66,13 @@ export function AccountPicker({
       // Suppliers can also be tagged 'vendor' in some legacy data — backend
       // accepts both, so we fetch both and merge. The 'customer' side is
       // single-typed.
-      const types = accountType === 'supplier' ? ['supplier', 'vendor'] : ['customer']
+      const types = accountType === 'supplier' ? ['supplier', 'vendor']
+                  : accountType === 'customer' ? ['customer']
+                  : ['']  // 'any' → one call with no account_type filter
       const all: Account[] = []
       for (const t of types) {
-        const qs = new URLSearchParams({ account_type: t, status: 'active', per_page: '20' })
+        const qs = new URLSearchParams({ status: 'active', per_page: '20' })
+        if (t) qs.set('account_type', t)
         if (q.trim()) qs.set('q', q.trim())
         const d = await apiFetch<{ accounts: Account[] }>(`/accounts?${qs}`)
         all.push(...(d.accounts || []))

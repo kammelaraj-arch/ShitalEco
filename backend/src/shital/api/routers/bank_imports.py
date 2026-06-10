@@ -267,6 +267,90 @@ PARSERS = {
 }
 
 
+# ─── PDF → row-list converter ────────────────────────────────────────────────
+# pdfplumber's extract_tables() works well on born-digital bank statements
+# (Natwest, HSBC, Barclays, Lloyds all produce regular column layouts).
+# For scanned statements (image-only PDFs) it returns nothing — the operator
+# is told to export CSV from online banking instead.
+#
+# We DON'T try to parse provider-specific layouts here — we just produce a
+# list-of-lists (header row + transaction rows) that the existing CSV
+# pipeline (`_parse_natwest_row` / `_parse_generic_row`) understands. That
+# keeps PDFs and CSVs sharing 100% of the downstream logic.
+
+def _pdf_to_rows(raw: bytes, provider_hint: str = "") -> list[list[str]]:
+    """Extract transaction rows from a bank-statement PDF. Returns the same
+    row-list shape as csv.reader: first row is the header, the rest are
+    transactions. Returns [] when the PDF has no extractable tables (image
+    scans, password-protected, exotic layouts)."""
+    import io as _io
+
+    try:
+        import pdfplumber  # type: ignore[import-untyped]
+    except ImportError:
+        return []
+
+    out: list[list[str]] = []
+    header: list[str] | None = None
+    try:
+        with pdfplumber.open(_io.BytesIO(raw)) as pdf:
+            for page in pdf.pages:
+                # extract_tables() is the heavy hitter — it groups text into
+                # rows and columns based on ruling lines + alignment. Returns
+                # one or more 2D arrays per page.
+                tables = page.extract_tables() or []
+                for tbl in tables:
+                    if not tbl or not tbl[0]:
+                        continue
+                    # Normalise cells — pdfplumber may return None for empty
+                    # cells, and individual cells often contain newlines from
+                    # multi-line descriptions.
+                    norm = [
+                        [(c or "").replace("\n", " ").strip() for c in row]
+                        for row in tbl
+                    ]
+                    # Is this the header row? Look for words like Date /
+                    # Description / Amount / Balance.
+                    first = " ".join(norm[0]).lower()
+                    is_header_row = any(k in first for k in (
+                        "date", "description", "details", "type",
+                        "amount", "balance", "money in", "money out",
+                        "paid in", "paid out", "credit", "debit",
+                    ))
+                    if is_header_row:
+                        if header is None:
+                            header = norm[0]
+                            out.append(header)
+                        # Append data rows from this table (skip the header itself)
+                        for r in norm[1:]:
+                            if any(c.strip() for c in r):
+                                out.append(r)
+                    else:
+                        # Table without a recognisable header — assume it's a
+                        # continuation of the previous page's table.
+                        if header is not None:
+                            for r in norm:
+                                if any(c.strip() for c in r):
+                                    out.append(r)
+    except Exception:  # noqa: BLE001
+        return []
+
+    # Drop rows that are too short to be transactions (e.g. carried-balance
+    # summary lines that pdfplumber sometimes pulls in as 2-col rows).
+    if header is None:
+        return []
+    expected = len(header)
+    cleaned: list[list[str]] = [header]
+    for r in out[1:]:
+        if len(r) >= max(3, expected - 1):
+            # Right-pad short rows so the header → column mapping in
+            # _parse_*_row() doesn't index-error.
+            while len(r) < expected:
+                r.append("")
+            cleaned.append(r[:expected])
+    return cleaned
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/admin/bank-accounts/{account_id}/import")
@@ -285,8 +369,8 @@ async def import_csv(
     raw = await file.read()
     if not raw:
         raise HTTPException(400, detail="empty file")
-    if len(raw) > 10 * 1024 * 1024:
-        raise HTTPException(400, detail="file too large (10 MB max for CSV)")
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(400, detail="file too large (25 MB max)")
 
     file_hash = hashlib.sha256(raw).hexdigest()
     file_name = (file.filename or "statement.csv")[:500]
@@ -295,17 +379,32 @@ async def import_csv(
 
     from shital.core.fabrics.database import SessionLocal
 
-    # Decode + parse the CSV. Try utf-8 then fall back to latin-1 (some bank
-    # exports use Windows-1252 which is a superset).
-    try:
-        text_content = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text_content = raw.decode("latin-1", errors="replace")
+    # Detect PDF vs CSV. PDFs start with '%PDF-' magic bytes; everything else
+    # is treated as CSV/text. The PDF branch converts the document to a
+    # CSV-style row list in-memory, then merges back into the same parsing
+    # pipeline so dedup / preview / commit semantics stay identical.
+    is_pdf = raw[:5] == b"%PDF-" or file_name.lower().endswith(".pdf")
+    if is_pdf:
+        rows = _pdf_to_rows(raw, provider_hint=provider_hint)
+        if not rows:
+            raise HTTPException(400, detail=(
+                "Could not extract a transactions table from this PDF. "
+                "Possible reasons: image-only scan (needs OCR), unusual "
+                "layout, or password-protected. Try exporting CSV from "
+                "online banking instead."
+            ))
+    else:
+        # Decode + parse the CSV. Try utf-8 then fall back to latin-1 (some
+        # bank exports use Windows-1252 which is a superset).
+        try:
+            text_content = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text_content = raw.decode("latin-1", errors="replace")
 
-    reader = csv.reader(io.StringIO(text_content))
-    rows = list(reader)
-    if not rows:
-        raise HTTPException(400, detail="CSV is empty")
+        reader = csv.reader(io.StringIO(text_content))
+        rows = list(reader)
+        if not rows:
+            raise HTTPException(400, detail="CSV is empty")
 
     # Some bank exports prefix metadata lines before the header. Find the
     # header by looking for the first row with >= 3 non-empty cells AND a
@@ -496,13 +595,21 @@ async def import_commit(
                 "previewed, then click commit."
             ))
 
-        try:
-            text_content = raw.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            text_content = raw.decode("latin-1", errors="replace")
+        # Same PDF / CSV branch logic as the preview endpoint — keep them in
+        # sync so /commit re-parses the file the same way as /import did.
+        is_pdf_commit = raw[:5] == b"%PDF-"
+        if is_pdf_commit:
+            rows = _pdf_to_rows(raw)
+            if not rows:
+                raise HTTPException(400, detail="Could not extract a transactions table from this PDF on re-parse.")
+        else:
+            try:
+                text_content = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                text_content = raw.decode("latin-1", errors="replace")
 
-        reader = csv.reader(io.StringIO(text_content))
-        rows = list(reader)
+            reader = csv.reader(io.StringIO(text_content))
+            rows = list(reader)
         header_idx = 0
         for i, r in enumerate(rows[:20]):
             if len([c for c in r if c.strip()]) >= 3 and any(

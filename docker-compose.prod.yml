@@ -58,6 +58,10 @@ services:
       PAYPAL_ENV: ${PAYPAL_ENV:-live}
       DEPLOY_SECRET: ${DEPLOY_SECRET:?DEPLOY_SECRET must be set in /opt/shitaleco/.env}
       DEPLOYER_URL: http://deployer:9000
+      # Mail-agent inbound-mail poller. MODE "auto" → rules-based extractor
+      # when no Anthropic key is configured, Claude agent when one is.
+      MAIL_AGENT_MAILBOXES: ${MAIL_AGENT_MAILBOXES:-accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk}
+      MAIL_AGENT_MODE: ${MAIL_AGENT_MODE:-auto}
     volumes:
       - /opt/shitaleco/backups:/opt/shitaleco/backups
       - /opt/shitaleco/media:/app/media

@@ -68,6 +68,11 @@ services:
       # trailingSlash:true so Azure exact-match accepts it.
       MS_REDIRECT_URI:        ${MS_REDIRECT_URI_DEV:-https://dev.shital.org.uk/admin/auth-callback/}
       DEPLOYER_URL:           ${DEPLOYER_URL:-http://deployer:9000}
+      # Mail agent — comma-separated list of mailboxes the poller pulls.
+      # MODE "auto" picks rules-based extractor when ANTHROPIC_API_KEY
+      # is empty, Claude agentic loop when it isn't.
+      MAIL_AGENT_MAILBOXES:   ${MAIL_AGENT_MAILBOXES:-accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk}
+      MAIL_AGENT_MODE:        ${MAIL_AGENT_MODE:-auto}
     volumes:
       - /opt/shitaleco-dev/media:/app/media
     depends_on:

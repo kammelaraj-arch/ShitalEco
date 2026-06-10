@@ -485,7 +485,7 @@ export default function BankAccountsPage() {
               className="px-4 py-2 rounded-xl border border-saffron-400/40 text-saffron-300 font-semibold text-sm hover:bg-saffron-400/10">
               📥 Import CSV
             </button>
-            <span className="text-white/40 text-xs italic">PDF import coming in PR 3</span>
+            <span className="text-white/40 text-xs italic">PDF + CSV supported</span>
             <input value={txnSearch} onChange={e => setTxnSearch(e.target.value)}
               placeholder="Search description, counterparty, reference…"
               className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-sm placeholder-white/30 outline-none focus:border-saffron-400/50 flex-1 min-w-[240px]" />
@@ -771,11 +771,11 @@ export default function BankAccountsPage() {
                 <>
                   <div className="space-y-3">
                     <div>
-                      <label className={lbl}>CSV file *</label>
-                      <input type="file" accept=".csv,text/csv,text/plain"
+                      <label className={lbl}>Statement file (CSV or PDF) *</label>
+                      <input type="file" accept=".csv,text/csv,text/plain,.pdf,application/pdf"
                         onChange={e => setImportFile(e.target.files?.[0] ?? null)}
                         className="block w-full text-sm text-white/70 file:mr-3 file:px-4 file:py-2 file:rounded-xl file:border-0 file:bg-saffron-gradient file:text-white file:font-bold file:text-xs file:cursor-pointer cursor-pointer" />
-                      <p className="text-white/40 text-xs mt-1">PayPal / SumUp / Stripe / NatWest / generic UK bank. 10 MB max.</p>
+                      <p className="text-white/40 text-xs mt-1">CSV or PDF — PayPal / SumUp / Stripe / NatWest / generic UK bank. 25 MB max. Born-digital PDFs work; scanned image PDFs need OCR (not supported yet — export CSV instead).</p>
                     </div>
                     <div>
                       <label className={lbl}>Provider hint</label>

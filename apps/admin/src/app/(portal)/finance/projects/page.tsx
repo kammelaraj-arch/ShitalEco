@@ -1,8 +1,10 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { Pagination } from '@/components/ui/Pagination'
+import { ProjectPicker } from '@/components/ui/ProjectPicker'
 
 interface Branch { branch_id: string; name: string; is_active?: boolean }
 
@@ -27,6 +29,8 @@ interface Project {
   image_url: string
   created_at: string
   updated_at: string
+  parent_project_id?: string | null
+  parent_project_name?: string | null
 }
 
 interface PLItem { code_id: string; code: string; code_name: string; code_type: string; amount: number }
@@ -48,7 +52,14 @@ interface TimelineRow {
   branch_id: string; fund_type: string
 }
 
-const PROJECT_TYPES = ['GENERAL', 'CAPITAL', 'RESTRICTED_FUND', 'EVENT', 'GRANT', 'OUTREACH']
+// Keep in sync with backend VALID_TYPES in
+// backend/src/shital/api/routers/project_costing.py and the glossary.
+const PROJECT_TYPES = [
+  'GENERAL', 'CAPITAL', 'OPERATIONAL', 'RESTRICTED_FUND',
+  'EVENT', 'FUNDRAISING', 'GRANT', 'OUTREACH',
+  'TECHNOLOGY', 'MAINTENANCE', 'TRAINING', 'MARKETING',
+  'RESEARCH', 'PARTNERSHIP', 'EMERGENCY', 'COMPLIANCE',
+]
 const STATUSES      = ['ACTIVE', 'PLANNING', 'ON_HOLD', 'COMPLETED', 'CANCELLED']
 const FUND_TYPES    = ['UNRESTRICTED', 'RESTRICTED', 'ENDOWMENT']
 
@@ -186,22 +197,30 @@ export default function ProjectCostingPage() {
               <th className="text-left px-4 py-3">Name</th>
               <th className="text-left px-4 py-3">Branch</th>
               <th className="text-left px-4 py-3">Type</th>
+              <th className="text-left px-4 py-3">Parent</th>
               <th className="text-right px-4 py-3">Budget</th>
               <th className="text-right px-4 py-3">Goal</th>
               <th className="text-center px-4 py-3">Status</th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={7} className="px-4 py-10 text-center text-white/30 text-sm">Loading…</td></tr>}
+            {loading && <tr><td colSpan={8} className="px-4 py-10 text-center text-white/30 text-sm">Loading…</td></tr>}
             {!loading && items.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-12 text-center text-white/30 text-sm">No projects. Click + New Project to start tracking one.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-12 text-center text-white/30 text-sm">No projects. Click + New Project to start tracking one.</td></tr>
             )}
             {items.map(p => (
               <tr key={p.id} onClick={() => openDetail(p)} className="border-b border-white/5 hover:bg-white/3 cursor-pointer transition-colors">
-                <td className="px-4 py-3 text-white font-mono text-xs font-bold">{p.project_id}</td>
+                <td className="px-4 py-3 text-white font-mono text-xs font-bold">
+                  {p.project_id}
+                  <Link href={`/finance/projects/detail?id=${p.id}`} onClick={e => e.stopPropagation()}
+                     className="ml-2 text-[10px] text-saffron-300 hover:underline">Detail ↗</Link>
+                </td>
                 <td className="px-4 py-3 text-white/80 text-sm">{p.name}</td>
                 <td className="px-4 py-3 text-white/50 text-xs">{p.branch_id}</td>
                 <td className="px-4 py-3 text-white/50 text-xs">{p.project_type}</td>
+                <td className="px-4 py-3 text-xs" onClick={e => e.stopPropagation()}>
+                  <ParentCell project={p} onChanged={load} />
+                </td>
                 <td className="px-4 py-3 text-right text-white/70 font-mono text-sm">{fmt(p.budget_amount)}</td>
                 <td className="px-4 py-3 text-right text-white/70 font-mono text-sm">{fmt(p.goal_amount)}</td>
                 <td className="px-4 py-3 text-center">
@@ -229,6 +248,37 @@ export default function ProjectCostingPage() {
   )
 }
 
+function ParentCell({ project, onChanged }: { project: Project; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false)
+  async function save(sel: { id: string; name: string } | null) {
+    try {
+      await apiFetch(`/admin/projects/${project.id}/parent`, {
+        method: 'PATCH',
+        body: JSON.stringify({ parent_project_id: sel?.id || null }),
+      })
+      setEditing(false); onChanged()
+    } catch { /* surfaced upstream */ }
+  }
+  if (editing) {
+    return (
+      <div className="w-56">
+        <ProjectPicker
+          value={project.parent_project_id ? { id: project.parent_project_id, name: project.parent_project_name || '' } : null}
+          onChange={save} excludeId={project.id} placeholder="Search…"
+        />
+        <button onClick={() => setEditing(false)} className="text-white/40 text-[10px] hover:underline mt-1">Cancel</button>
+      </div>
+    )
+  }
+  return (
+    <button onClick={() => setEditing(true)} className="text-left">
+      {project.parent_project_name
+        ? <span className="text-saffron-300 text-xs hover:underline">{project.parent_project_name}</span>
+        : <span className="text-white/30 text-xs hover:text-saffron-300">+ Set</span>}
+    </button>
+  )
+}
+
 function ProjectForm({ open, onClose, onSaved, branches }: {
   open: boolean; onClose: () => void; onSaved: () => void; branches: Branch[]
 }) {
@@ -245,6 +295,7 @@ function ProjectForm({ open, onClose, onSaved, branches }: {
   const [endDate, setEndDate] = useState('')
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
+  const [parent, setParent] = useState<{ id: string; name: string; project_id: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -252,7 +303,7 @@ function ProjectForm({ open, onClose, onSaved, branches }: {
     if (!name.trim()) { setError('Name is required'); return }
     setSaving(true); setError('')
     try {
-      await apiFetch('/admin/projects', {
+      const created = await apiFetch<{ id?: string }>('/admin/projects', {
         method: 'POST',
         body: JSON.stringify({
           project_id: projectId, name, description, branch_id: branchId,
@@ -262,6 +313,17 @@ function ProjectForm({ open, onClose, onSaved, branches }: {
           reference, notes,
         }),
       })
+      // Backend create endpoint doesn't accept parent_project_id, so wire
+      // it up as a second call via the PATCH /parent endpoint. Skipped if
+      // the user didn't pick a parent.
+      if (parent && created?.id) {
+        try {
+          await apiFetch(`/admin/projects/${created.id}/parent`, {
+            method: 'PATCH',
+            body: JSON.stringify({ parent_project_id: parent.id }),
+          })
+        } catch { /* non-fatal — project still created */ }
+      }
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create project')
@@ -342,6 +404,12 @@ function ProjectForm({ open, onClose, onSaved, branches }: {
                   <label className={lbl}>End date</label>
                   <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className={inp} />
                 </div>
+              </div>
+
+              <div>
+                <label className={lbl}>Parent project (optional)</label>
+                <ProjectPicker value={parent} onChange={setParent} placeholder="Leave blank for top-level project…" />
+                <p className="text-white/30 text-[10px] mt-1">Link this project under an existing one to form a programme / sub-project hierarchy.</p>
               </div>
 
               <div>
