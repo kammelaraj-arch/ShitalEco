@@ -258,18 +258,36 @@ jobs:
             echo "=== Rolling restart: backend ==="
             docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
 
-            echo "Waiting for backend health..."
+            echo "Waiting for backend health (up to 600s — cold start on 2GB VPS runs"
+            echo "alembic upgrade + _patch_schema + sync_from_digital_dna + seeds"
+            echo "synchronously before /health answers; old 30×5s window was too short"
+            echo "and rolled back legit deploys for slowness)."
             BACKEND_OK=0
-            for i in $(seq 1 30); do
+            for i in $(seq 1 120); do
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null; then
-                echo "Backend healthy!"; BACKEND_OK=1; break
+                echo "Backend healthy! (attempt $i/120 = $((i*5))s)"; BACKEND_OK=1; break
               fi
-              echo "  attempt $i/30..."
+              # Fast-fail if the container has actually exited — no point waiting
+              # the full window when the process is gone.
+              state=$(docker inspect -f '{{.State.Status}}' shitaleco-backend-1 2>/dev/null || echo "missing")
+              if [ "$state" != "running" ] && [ "$state" != "restarting" ]; then
+                echo "!!! Backend container state=${state} — aborting wait early !!!"
+                docker logs --tail=50 shitaleco-backend-1 2>&1 | sed 's/^/    /'
+                break
+              fi
+              # Periodic log tail every 30s so the workflow log shows progress
+              if [ $((i % 6)) -eq 0 ]; then
+                echo "  attempt $i/120 (${i}*5=$((i*5))s) — backend log tail:"
+                docker logs --tail=10 shitaleco-backend-1 2>&1 | sed 's/^/    /'
+              else
+                echo "  attempt $i/120..."
+              fi
             done
 
             if [ "$BACKEND_OK" -eq 0 ]; then
-              echo "!!! Backend unhealthy — rolling back to :previous !!!"
+              echo "!!! Backend unhealthy after 600s — rolling back to :previous !!!"
+              docker logs --tail=80 shitaleco-backend-1 2>&1 | sed 's/^/    /' || true
               docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
                          ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
               docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
