@@ -34,6 +34,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wait for :dev image with this commit SHA
+        # Best-effort wait. If the image arrives within 10 min we deploy
+        # the new code. If it doesn't (CI failed, build errored, etc.) we
+        # STILL fall through to the SSH step and force-recreate the dev
+        # stack from whatever :dev currently points at — so a crashed dev
+        # always recovers, even when this commit can't be built. The image
+        # match outcome is exported so the SSH script can log the difference.
+        id: wait_image
         env:
           GH_PAT:    ${{ secrets.GH_PAT }}
           TARGET:    ${{ github.sha }}
@@ -47,12 +54,16 @@ jobs:
             echo "  attempt $i/60 — :dev tag has GIT_SHA=$CUR (waiting for $TARGET)"
             if [ "$CUR" = "$TARGET" ]; then
               echo "OK — :dev image matches this commit"
+              echo "image_matched=true"  >> "$GITHUB_OUTPUT"
+              echo "current_sha=$CUR"    >> "$GITHUB_OUTPUT"
               exit 0
             fi
             sleep 10
           done
-          echo "Timed out waiting for :dev image with GIT_SHA=$TARGET — likely CI failed. Skipping deploy."
-          exit 1
+          echo "::warning::Timed out waiting for :dev image with GIT_SHA=$TARGET — CI likely failed."
+          echo "::warning::Falling through to force-recreate the dev stack from the existing :dev tag (GIT_SHA=$CUR) so a crashed dev recovers."
+          echo "image_matched=false" >> "$GITHUB_OUTPUT"
+          echo "current_sha=$CUR"    >> "$GITHUB_OUTPUT"
 
       - name: Pull :dev + restart dev stack on VPS
         uses: appleboy/ssh-action@v1.0.3
@@ -66,17 +77,27 @@ jobs:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
           DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
-          DEPLOY_REF: ${{ github.ref_name }}
+          DEPLOY_REF:    ${{ github.ref_name }}
+          IMAGE_MATCHED: ${{ steps.wait_image.outputs.image_matched }}
+          IMAGE_SHA:     ${{ steps.wait_image.outputs.current_sha }}
+          TARGET_SHA:    ${{ github.sha }}
         with:
           host: 192.248.147.205
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
           timeout: 600s
-          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,DEPLOY_SECRET,DEPLOY_REF
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,DEPLOY_SECRET,DEPLOY_REF,IMAGE_MATCHED,IMAGE_SHA,TARGET_SHA
           script: |
             set -eu
-            echo "=== Deploy to Dev — branch=${DEPLOY_REF} ==="
+            if [ "${IMAGE_MATCHED:-false}" = "true" ]; then
+              echo "=== Deploy to Dev — branch=${DEPLOY_REF} — NEW IMAGE (${TARGET_SHA:0:7}) ==="
+            else
+              echo "=== Deploy to Dev — branch=${DEPLOY_REF} — RECOVERY MODE ==="
+              echo "    CI did not produce a new image for ${TARGET_SHA:0:7}; recreating dev stack from"
+              echo "    the existing :dev tag (GIT_SHA=${IMAGE_SHA:-unknown}). This gets a crashed dev"
+              echo "    back online even when this commit can't be built."
+            fi
 
             # ── Pre-flight: every required secret must be present.
             # Required = without it the dev stack cannot come up at all.
@@ -217,6 +238,62 @@ jobs:
               echo "::warning::Next prod deploy will reconcile (see deploy-vultr.yml force-recreate step)."
               # Non-fatal — dev stack is healthy regardless.
             fi
+
+            # ── Install / refresh dev-host watchdog ─────────────────────────────
+            # Independent of the GitHub Actions deploy: a host-side cron that
+            # runs every 2 min, restarts any stopped dev container, and curls
+            # /health on backend-dev. If health fails it `docker compose up -d`
+            # (idempotent — only restarts what's actually broken). This is the
+            # piece that catches a crash at 3 am without anyone clicking
+            # Promote / pushing a commit.
+            mkdir -p /opt/shitaleco-dev/infra
+            cat > /opt/shitaleco-dev/infra/watchdog-dev.sh << 'WDEOF'
+            #!/bin/bash
+            # Auto-installed by deploy-dev.yml every push. Re-running this file
+            # is safe — it ONLY restarts containers that are actually down.
+            set -uo pipefail
+            COMPOSE_FILE=/opt/shitaleco-dev/docker-compose.dev.yml
+            LOG=/var/log/shital-dev-watchdog.log
+            ts() { date -u +'%Y-%m-%dT%H:%M:%SZ'; }
+            log() { echo "[$(ts)] $*" >> "$LOG"; }
+
+            # 1. Find any dev container that isn't running
+            stopped=$(docker ps -a --filter "name=shitaleco-dev-" --filter "status=exited" --format '{{.Names}}'; \
+                      docker ps -a --filter "name=shitaleco-dev-" --filter "status=dead" --format '{{.Names}}'; \
+                      docker ps -a --filter "name=shitaleco-dev-" --filter "status=created" --format '{{.Names}}')
+            if [ -n "${stopped}" ]; then
+              log "stopped containers found: $(echo "$stopped" | tr '\n' ' ')"
+              cd /opt/shitaleco-dev
+              docker compose -f "$COMPOSE_FILE" up -d >> "$LOG" 2>&1 || log "compose up failed"
+            fi
+
+            # 2. Backend health probe. 502 from nginx === backend wedged.
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 8 https://dev.shital.org.uk/api/v1/health 2>/dev/null || echo "000")
+            if [ "$code" != "200" ]; then
+              # Rate-limit: don't restart more than once per 5 min from this path
+              last_kick=$(stat -c %Y /tmp/.shital-dev-kicked 2>/dev/null || echo 0)
+              now=$(date +%s)
+              if [ $((now - last_kick)) -ge 300 ]; then
+                log "health=$code → restarting backend-dev + nginx-dev"
+                docker compose -f "$COMPOSE_FILE" restart backend-dev nginx-dev >> "$LOG" 2>&1 || true
+                touch /tmp/.shital-dev-kicked
+              else
+                log "health=$code but rate-limited (last kick $((now-last_kick))s ago)"
+              fi
+            fi
+
+            # 3. Trim log to last 2000 lines so it doesn't grow unbounded
+            if [ -f "$LOG" ] && [ $(wc -l < "$LOG") -gt 2000 ]; then
+              tail -n 2000 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
+            fi
+            WDEOF
+            chmod +x /opt/shitaleco-dev/infra/watchdog-dev.sh
+
+            # Idempotent cron entry — replace any prior shital-dev-watchdog line
+            (crontab -l 2>/dev/null | grep -v 'shital-dev-watchdog' ; \
+             echo "*/2 * * * * /opt/shitaleco-dev/infra/watchdog-dev.sh # shital-dev-watchdog") | crontab -
+            echo "=== Watchdog cron installed ==="
+            crontab -l | grep shital-dev-watchdog || echo "WARN: cron entry not found after install"
 
             echo ""
             echo "=== DEV deploy complete — branch ${DEPLOY_REF} ==="
