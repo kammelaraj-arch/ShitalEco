@@ -405,20 +405,51 @@ $COMPOSE_CMD up -d --no-deps --force-recreate backend 2>/dev/null || \
   $COMPOSE_CMD up -d --no-deps --force-recreate backend-dev
 
 echo "=== Waiting for backend health (${HEALTH_URL}) ==="
-# 60 × 5s = 300s. Lifespan runs _patch_schema() + sync_from_digital_dna()
-# (~30 capability rows) before /health serves; deploy-dev.yml's comment
-# pegs cold start at 90-150s, so the old 150s window sat right on the
-# edge and rolled back every deploy as "backend health check failed".
+# 120 × 5s = 600s (10 min). Prod cold start can take 90-300s depending on
+# how many schema patches lifespan applies (donations table grows; each
+# ALTER takes longer). The old 60-attempt (300s) window was rolling back
+# valid promotes that just needed another 30-60s to come up. Bumped to
+# 10 min, with extra grace if the container is RUNNING but /health not
+# yet 200 — we only hard-fail when the container has CRASHED.
+BACKEND_LOG_DUMP="/workspace/backups/promote-backend-$(date -u +'%Y%m%dT%H%M%SZ').log"
+mkdir -p "$(dirname "$BACKEND_LOG_DUMP")"
 BACKEND_OK=0
-for i in $(seq 1 60); do
+HEALTH_FAIL_REASON=""
+BACKEND_CONTAINER="$($COMPOSE_CMD ps -q backend 2>/dev/null || $COMPOSE_CMD ps -q backend-dev 2>/dev/null || true)"
+
+for i in $(seq 1 120); do
   sleep 5
   if curl -sf --max-time 5 "$HEALTH_URL" > /dev/null 2>&1; then
-    echo "Backend healthy after ${i} attempts"
+    echo "Backend healthy after ${i} attempts ($((i*5))s)"
     BACKEND_OK=1
     break
   fi
-  echo "  attempt ${i}/60..."
+  # Every 6 attempts (30s), print a progress line + container state. Helps
+  # diagnose mid-deploy without grepping the log.
+  if [ $((i % 6)) -eq 0 ]; then
+    if [ -n "$BACKEND_CONTAINER" ]; then
+      state=$(docker inspect --format '{{.State.Status}} (restarts={{.RestartCount}}, exit={{.State.ExitCode}})' "$BACKEND_CONTAINER" 2>/dev/null || echo "?")
+      echo "  ${i}/120 — backend container: ${state}"
+      # If the container has CRASHED (exited non-zero), fail fast — no
+      # point waiting 10 min for /health when the process is dead.
+      exit_code=$(docker inspect --format '{{.State.ExitCode}}' "$BACKEND_CONTAINER" 2>/dev/null || echo "0")
+      status=$(docker inspect --format '{{.State.Status}}' "$BACKEND_CONTAINER" 2>/dev/null || echo "running")
+      if [ "$status" = "exited" ] && [ "$exit_code" != "0" ]; then
+        HEALTH_FAIL_REASON="backend container crashed (exit=${exit_code}) after $((i*5))s"
+        echo "!!! ${HEALTH_FAIL_REASON} — failing fast"
+        break
+      fi
+    else
+      echo "  ${i}/120 — (container handle lost; still polling /health)"
+    fi
+  fi
 done
+
+# Always capture the backend logs to disk — even on success, so the admin
+# can diagnose slow boots later.
+if [ -n "$BACKEND_CONTAINER" ]; then
+  docker logs --tail 200 "$BACKEND_CONTAINER" > "$BACKEND_LOG_DUMP" 2>&1 || true
+fi
 
 HISTORY_FILE=/workspace/backups/deploy-history.jsonl
 mkdir -p "$(dirname "$HISTORY_FILE")"
@@ -427,13 +458,22 @@ COMMIT_MSG=$(cd /workspace && git log -1 --format='%s' "$GIT_SHA" 2>/dev/null | 
 
 if [ "$BACKEND_OK" -eq 0 ]; then
   echo "!!! Backend unhealthy on ${STACK_NAME} — rolling back to :previous ==="
+  echo "    Reason: ${HEALTH_FAIL_REASON:-/health did not return 200 after 600s}"
+  echo ""
+  echo "── Last 50 lines of backend logs ──────────────────────────────────"
+  tail -50 "$BACKEND_LOG_DUMP" 2>/dev/null || echo "(no logs captured)"
+  echo "── End of log excerpt ─────────────────────────────────────────────"
+  echo "    Full log: ${BACKEND_LOG_DUMP}"
   if [ "$TARGET" = "prod" ]; then
     docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:previous \
                ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
     $COMPOSE_CMD up -d --no-deps --force-recreate backend
   fi
+  # Escape the log tail so it survives JSONL encoding (no raw newlines/quotes).
+  LOG_TAIL=$(tail -20 "$BACKEND_LOG_DUMP" 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read())[1:-1])' 2>/dev/null || echo "")
+  REASON_ESC=$(echo "${HEALTH_FAIL_REASON:-/health did not return 200 after 600s}" | sed 's/"/\\"/g')
   cat >> "$HISTORY_FILE" <<JSON
-{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"rolled_back","message":"backend health check failed"}
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"rolled_back","message":"${REASON_ESC}","log_tail":"${LOG_TAIL}","log_file":"${BACKEND_LOG_DUMP}"}
 JSON
   exit 1
 fi
