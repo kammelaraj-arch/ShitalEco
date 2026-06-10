@@ -425,8 +425,9 @@ async def kiosks_status(ctx: CurrentSpace) -> dict[str, Any]:
                 kd.latitude                                AS latitude,
                 kd.longitude                               AS longitude,
                 kd.last_seen_at                            AS last_seen_at,
-                td.label                                   AS reader_label,
+                td.label                                   AS reader_label_configured,
                 COALESCE(td.provider, '')                  AS reader_provider_configured,
+                COALESCE(td.sumup_reader_serial, '')       AS reader_sumup_serial_configured,
                 LOWER(COALESCE(td.status, ''))             AS reader_status,
                 td.last_seen_at                            AS reader_last_seen_at,
                 -- Source of truth: the payment_provider on the most recent
@@ -441,6 +442,23 @@ async def kiosks_status(ctx: CurrentSpace) -> dict[str, Any]:
                     AND UPPER(COALESCE(status,'')) = 'COMPLETED'
                   ORDER BY created_at DESC
                   LIMIT 1)                                 AS reader_provider_actual,
+                -- When the configured terminal_devices row's provider doesn't
+                -- match the actual provider seen in donations (very common
+                -- after a Stripe→SumUp swap that wasn't reconfigured in Admin),
+                -- look up a terminal_devices row in the SAME branch that DOES
+                -- match the actual provider — its label is what's really in use.
+                (SELECT COALESCE(td2.label, td2.sumup_reader_serial)
+                   FROM terminal_devices td2
+                  WHERE td2.branch_id = kd.branch_id
+                    AND td2.deleted_at IS NULL
+                    AND UPPER(COALESCE(td2.provider, '')) = (
+                      SELECT UPPER(payment_provider) FROM donations
+                       WHERE kiosk_device_id = kd.id AND deleted_at IS NULL
+                         AND UPPER(COALESCE(status,'')) = 'COMPLETED'
+                       ORDER BY created_at DESC LIMIT 1
+                    )
+                  ORDER BY td2.created_at DESC
+                  LIMIT 1)                                 AS reader_label_by_actual,
                 (SELECT MAX(created_at)
                    FROM donations
                   WHERE kiosk_device_id = kd.id
@@ -479,9 +497,28 @@ async def kiosks_status(ctx: CurrentSpace) -> dict[str, Any]:
         configured = (r["reader_provider_configured"] or "").strip()
         actual     = (r["reader_provider_actual"]     or "").strip()
         provider   = actual or configured or None
-        # Normalise display: SumUp/Stripe/Square come back uppercase from
-        # the donations payment_provider; lowercase from terminal_devices.
-        # Front-end matches case-insensitively, so this stays as-is.
+        mismatch   = bool(actual and configured and actual.lower() != configured.lower())
+
+        # Pick the label that matches the actual provider. If the configured
+        # terminal_devices row is the wrong provider (eg. kiosk_devices.card_
+        # reader_id still points at an old Stripe row but donations history
+        # shows SumUp), use the SumUp-matching row's label instead. Avoids
+        # the misleading "honeydew-everyone-then" Stripe label appearing
+        # next to a SUMUP provider tag.
+        label_configured = (r["reader_label_configured"] or "").strip()
+        label_by_actual  = (r["reader_label_by_actual"]  or "").strip()
+        sumup_serial     = (r["reader_sumup_serial_configured"] or "").strip()
+        if mismatch and label_by_actual:
+            reader_label = label_by_actual
+        elif mismatch and actual == "SUMUP" and sumup_serial:
+            reader_label = sumup_serial
+        elif mismatch:
+            # No matching row exists for the actual provider — hide the
+            # misleading configured label, surface the issue clearly.
+            reader_label = f"(no {actual.lower()} reader paired — fix in Admin)"
+        else:
+            reader_label = label_configured or sumup_serial or None
+
         last_donation = r["last_donation_at"]
 
         kiosks.append({
@@ -496,11 +533,11 @@ async def kiosks_status(ctx: CurrentSpace) -> dict[str, Any]:
             "last_seen_at":     last_seen.isoformat() if last_seen else None,
             "seconds_since_seen": seconds_since,
             "health":           "INACTIVE" if is_inactive else health,
-            "reader_label":     r["reader_label"],
+            "reader_label":     reader_label,
             "reader_provider":  provider,
             "reader_provider_configured": configured or None,
             "reader_provider_actual":     actual or None,
-            "reader_provider_mismatch":   bool(actual and configured and actual.lower() != configured.lower()),
+            "reader_provider_mismatch":   mismatch,
             "reader_status":    r["reader_status"] or None,
             "reader_last_seen_at": reader_seen.isoformat() if reader_seen else None,
             "reader_seconds_since_seen": reader_seconds,
