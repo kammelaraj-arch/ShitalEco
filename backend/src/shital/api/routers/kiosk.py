@@ -1277,7 +1277,7 @@ async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 7) -> dict[str,
 
     from sqlalchemy import text as _text
 
-    summary = {
+    summary: dict[str, Any] = {
         "scanned": 0, "completed": 0, "failed": 0,
         "still_pending": 0, "not_found": 0,
         "errors": 0, "days_window": days,

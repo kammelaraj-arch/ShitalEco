@@ -11,6 +11,7 @@ persistence/audit + admin surface for it.
 """
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Any
 
@@ -19,7 +20,6 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace
-from shital.core.fabrics.config import settings
 from shital.core.fabrics.database import SessionLocal
 
 router = APIRouter(tags=["system-alerts"])
@@ -38,8 +38,10 @@ class AlertIn(BaseModel):
 
 def _check_monitor_token(x_monitor_token: str | None) -> None:
     """The monitor authenticates with the same DEPLOY_SECRET that
-    deployer/deploy.sh uses — avoids a separate secret to manage."""
-    expected = (settings.DEPLOY_SECRET or "").strip()
+    deployer/deploy.sh uses — avoids a separate secret to manage.
+    Read straight from env (matches system.py): DEPLOY_SECRET isn't in
+    the typed Settings model, so importing it via settings.* breaks mypy."""
+    expected = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
     if not expected:
         # If the secret isn't configured, accept (dev environments without
         # the deploy key shouldn't 401 the monitor and lose telemetry).
