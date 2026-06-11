@@ -994,7 +994,33 @@ async def sumup_checkout(body: SumUpCheckoutInput):
                 return {"error": f"Could not resolve SumUp reader ID for serial '{reader_serial}'. Ensure the reader is paired and SUMUP_MERCHANT_CODE is correct."}
 
             push_status = None
+            terminate_outcome: str | None = None
             if reader_id and checkout_id:
+                # ── Step 1: terminate any in-flight checkout on this reader ─────
+                # WHY: the SumUp Solo reader can get stuck if a prior checkout
+                # didn't cleanly resolve (network drop, webhook never delivered,
+                # customer walked away before tap). API calls to push a NEW
+                # checkout return success even when the reader can't display the
+                # prompt — silently losing the donation. The pattern observed:
+                # "1-2 transactions work after reboot, rest stay PENDING".
+                #
+                # SumUp's /terminate endpoint forcibly clears the reader's
+                # current operation. Idempotent — returns 200/204 even when
+                # there's nothing to terminate. Add a 3s timeout cap so a
+                # slow terminate doesn't block a legit donation.
+                try:
+                    term_resp = await client.post(
+                        f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_id}/terminate",
+                        headers=headers,
+                        timeout=3,
+                    )
+                    terminate_outcome = f"http_{term_resp.status_code}"
+                except Exception as _exc:  # noqa: BLE001
+                    # Non-fatal — push will still likely succeed if reader was
+                    # idle. Log the outcome for diagnostics.
+                    terminate_outcome = f"skipped: {type(_exc).__name__}"
+
+                # ── Step 2: push the new checkout ───────────────────────────────
                 push_resp = await client.post(
                     f"{base}/v0.1/merchants/{merchant_code}/readers/{reader_id}/checkout",
                     headers=headers,
@@ -1002,7 +1028,9 @@ async def sumup_checkout(body: SumUpCheckoutInput):
                 )
                 push_status = push_resp.status_code
                 if not push_resp.is_success:
-                    return {"error": f"Reader push failed ({push_resp.status_code}): {push_resp.text[:200]}", "reader_id_used": reader_id, "merchant_code_used": merchant_code}
+                    return {"error": f"Reader push failed ({push_resp.status_code}): {push_resp.text[:200]}",
+                            "reader_id_used": reader_id, "merchant_code_used": merchant_code,
+                            "terminate_outcome": terminate_outcome}
 
         return {
             "checkout_id": checkout_id,
@@ -1011,6 +1039,7 @@ async def sumup_checkout(body: SumUpCheckoutInput):
             "reader_id": reader_id,
             "reader_serial": reader_serial,
             "push_status": push_status,
+            "terminate_outcome": terminate_outcome,
         }
     except Exception as e:
         return {"error": str(e)}
