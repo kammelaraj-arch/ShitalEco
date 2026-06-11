@@ -58,7 +58,15 @@ jobs:
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
           timeout: 600s
-          command_timeout: 10m
+          # 10m was killing the SSH session mid-deploy: backend cold start
+          # (alembic + patch_schema + sync_from_digital_dna + 4 seed funcs)
+          # + image pulls + frontend restarts + nginx reload + watchdog cron
+          # install genuinely takes 8-15 min on this 2GB VPS. The deploy was
+          # SUCCEEDING (router_mounted lines were streaming) and SSH gave up
+          # mid-flight → job marked failed, but deploy.sh on the VPS was
+          # killed before doing frontends/nginx, leaving the stack
+          # inconsistent. 25m gives full headroom.
+          command_timeout: 25m
           envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,PAYPAL_CLIENT_ID,PAYPAL_CLIENT_SECRET,GITHUB_SHA
           script: |
             set -e
