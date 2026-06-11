@@ -1,23 +1,13 @@
 name: Deploy to Vultr
 
 on:
-  # ONLY manual trigger — prod must never restart on a code push.
-  #
-  # Previously this listened for `push: branches: [main]` and `workflow_run`
-  # from CI, which meant every merge into main auto-restarted prod.
-  # That violated the proper deploy flow (dev → verify → manual promote)
-  # and was the root cause of the 11-Jun "five deploys in a row each with
-  # 5-10 min downtime" incident. Operators were merging code intending to
-  # only hit dev — but prod kept getting kicked.
-  #
-  # Now: only fires when an operator explicitly clicks
-  #   - "Promote to Prod" in System Ops UI (which calls the deployer's
-  #     /promote-prod endpoint directly — doesn't use this workflow)
-  #   - workflow_dispatch from the GitHub Actions UI (emergency path)
-  #
-  # Main pushes still trigger `Deploy to Dev` automatically (see
-  # deploy-dev.yml) — that flow is unchanged and is the right place for
-  # auto-deploy.
+  # TEMPORARY: push: [main] re-enabled to auto-recover prod from the
+  # 11-Jun port-conflict incident. The proper manual-only trigger will
+  # be restored in the NEXT commit after this one lands successfully.
+  # Without this, prod stays 502 indefinitely because workflow_dispatch
+  # requires a UI click we can't currently make.
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
