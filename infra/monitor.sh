@@ -272,6 +272,36 @@ check_disk() {
     fi
 }
 
+check_memory() {
+    # Catches OOM pressure BEFORE the kernel starts killing containers.
+    # On a 2GB VPS, deploys + concurrent docker pulls can spike RAM use to
+    # near-full for 30-60s. If MemAvailable stays under the threshold the
+    # next OOM event is just a matter of time.
+    #
+    # MemAvailable already accounts for reclaimable caches, so it's the
+    # honest "memory you could allocate without swapping" number.
+    local avail_kb avail_mb total_kb total_mb pct_used
+    avail_kb=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null)
+    total_kb=$(awk '/^MemTotal:/    {print $2}' /proc/meminfo 2>/dev/null)
+    if [ -z "$avail_kb" ] || [ -z "$total_kb" ] || [ "$total_kb" -eq 0 ]; then
+        record memory ok "could not read /proc/meminfo — skipping" critical
+        return
+    fi
+    avail_mb=$((avail_kb / 1024))
+    total_mb=$((total_kb / 1024))
+    pct_used=$(( (total_kb - avail_kb) * 100 / total_kb ))
+
+    if [ "$avail_mb" -ge 200 ]; then
+        record memory ok "Memory ${avail_mb}MB available of ${total_mb}MB (${pct_used}% used)" critical
+    elif [ "$avail_mb" -ge 100 ]; then
+        # Warning band — deploys may now OOM-kill expendable containers.
+        record memory fail "Memory tight: only ${avail_mb}MB available of ${total_mb}MB (${pct_used}% used). Next deploy could OOM-kill containers." high
+    else
+        # Critical — OOM imminent.
+        record memory fail "Memory critically low: only ${avail_mb}MB available of ${total_mb}MB (${pct_used}% used). OOM kills likely in next minutes." critical
+    fi
+}
+
 check_cert_expiry() {
     local end_date end_ts now_ts days_left
     end_date=$(echo | timeout 10 openssl s_client -connect "${DOMAIN}:443" -servername "$DOMAIN" 2>/dev/null \
@@ -575,6 +605,7 @@ check_containers
 check_backup_today
 check_restore_test_recent
 check_disk
+check_memory
 check_cert_expiry
 check_donations_active
 check_sumup_pending_stuck

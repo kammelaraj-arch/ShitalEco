@@ -160,7 +160,11 @@ services:
       resources:
         limits:
           cpus: '0.25'
-          memory: 64M
+          # 64M was hitting the OOM killer during deploys when nginx workers
+          # buffered concurrent connections + Docker's image-pull pressure
+          # squeezed the host. 128M gives headroom and is still well below
+          # the 2GB VPS budget.
+          memory: 128M
     depends_on:
       - backend
     networks:
@@ -209,7 +213,12 @@ services:
       resources:
         limits:
           cpus: '1.00'
-          memory: 128M
+          # 128M wasn't enough during a full promote: deploy.sh shells out to
+          # docker pulls + retags + pg_dump in parallel, each spawning child
+          # processes. OOM-killed mid-deploy meant the rest of the deploy
+          # silently aborted. 256M is comfortable and the deployer is idle
+          # 99% of the time so the extra ceiling rarely materialises in RSS.
+          memory: 256M
     environment:
       DEPLOY_SECRET: ${DEPLOY_SECRET:?DEPLOY_SECRET must be set in /opt/shitaleco/.env}
       DEPLOY_BRANCH: ${DEPLOY_BRANCH:-main}
