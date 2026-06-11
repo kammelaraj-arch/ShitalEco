@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -1257,21 +1257,34 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
 # and flips status to COMPLETED / FAILED accordingly.
 
 @router.post("/sumup/reconcile-pending")
-async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 7) -> dict[str, Any]:
-    """Sweep PENDING SumUp donations from the last `days` days, query the
-    SumUp API for the real status, update donations.status accordingly.
+async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 14) -> dict[str, Any]:
+    """Sweep PENDING SumUp donations from the last `days` days, resolve them
+    against SumUp's API, update donations.status accordingly.
 
-    Returns counts of updated / still-pending / not-found-on-sumup rows so
-    the admin sees exactly what was recovered. Idempotent — safe to call
-    multiple times; already-COMPLETED rows are skipped.
+    Two-pass strategy (the second pass is what catches the "Unsuccessful"
+    rows the user sees in the SumUp dashboard):
 
-    Recommended schedule: cron every hour, plus an admin button for
-    on-demand reconciliation after an outage."""
+    Pass 1 — checkouts API
+      Hits GET /v0.1/checkouts/{checkout_id} for each PENDING row. Works
+      for short-lived PENDING (≤ 24h) where the checkout is still
+      retrievable. SumUp purges old un-paid checkouts so this 404s for
+      anything more than a day or two.
+
+    Pass 2 — transactions API
+      Hits GET /v2.1/merchants/{merchant_code}/transactions/history,
+      which NEVER prunes (it's the authoritative record of every tap,
+      including UNSUCCESSFUL ones). Matches each transaction back to our
+      donations by amount + timestamp + foreign_transaction_id (our
+      checkout_reference). This is the only path that recovers donations
+      whose checkouts SumUp has already deleted.
+
+    Idempotent — already-COMPLETED rows are skipped at the SQL level."""
     if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
         raise HTTPException(status_code=403, detail="admin only")
     days = max(1, min(int(days), 90))
 
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
     if not access_token:
         return {"error": "SumUp not configured"}
 
@@ -1281,28 +1294,32 @@ async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 7) -> dict[str,
         "scanned": 0, "completed": 0, "failed": 0,
         "still_pending": 0, "not_found": 0,
         "errors": 0, "days_window": days,
+        "matched_via_transactions_api": 0,
         "rows": [],
     }
+
     async with SessionLocal() as db:
         pending_rows = (await db.execute(_text("""
             SELECT id::text AS id, payment_ref, amount, currency, reference,
-                   created_at::text AS created_at, branch_id
+                   created_at, branch_id
             FROM donations
             WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
               AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
               AND deleted_at IS NULL
               AND created_at >= NOW() - (:days || ' days')::interval
-              AND payment_ref <> ''
             ORDER BY created_at DESC
         """), {"days": str(days)})).mappings().all()
 
-        async with httpx.AsyncClient(timeout=10) as cx:
+        # Track which donation IDs are resolved by pass 1 so pass 2 skips them.
+        resolved_ids: set[str] = set()
+
+        async with httpx.AsyncClient(timeout=15) as cx:
+            # ── Pass 1: checkouts API (covers ≤ 24h PENDING) ───────────────────
             for r in pending_rows:
                 summary["scanned"] += 1
                 checkout_id = r["payment_ref"] or ""
                 if not checkout_id:
-                    summary["errors"] += 1
-                    continue
+                    continue  # nothing to query — pass 2 will try amount+time match
                 try:
                     resp = await cx.get(
                         f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
@@ -1310,46 +1327,165 @@ async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 7) -> dict[str,
                     )
                 except Exception as exc:  # noqa: BLE001
                     summary["errors"] += 1
-                    summary["rows"].append({"id": r["id"], "error": str(exc)[:120]})
+                    summary["rows"].append({"id": r["id"], "pass": 1, "error": str(exc)[:120]})
                     continue
                 if resp.status_code == 404:
-                    summary["not_found"] += 1
-                    summary["rows"].append({"id": r["id"], "outcome": "not_found_on_sumup",
-                                            "checkout_id": checkout_id})
+                    # Will be retried in pass 2 via transactions API
                     continue
                 if resp.status_code >= 400:
                     summary["errors"] += 1
-                    summary["rows"].append({"id": r["id"], "outcome": "sumup_error",
-                                            "code": resp.status_code,
+                    summary["rows"].append({"id": r["id"], "pass": 1, "code": resp.status_code,
                                             "body": resp.text[:200]})
                     continue
                 d = resp.json()
                 sumup_status = (d.get("status") or "").upper()
-                # SumUp uses PAID for success, EXPIRED/FAILED for failed
                 if sumup_status == "PAID":
                     await db.execute(_text("""
                         UPDATE donations SET status = 'COMPLETED', updated_at = NOW()
                         WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
                     """), {"id": r["id"]})
                     summary["completed"] += 1
-                    summary["rows"].append({"id": r["id"], "outcome": "completed",
-                                            "amount": float(r["amount"]),
-                                            "checkout_id": checkout_id})
+                    resolved_ids.add(r["id"])
+                    summary["rows"].append({"id": r["id"], "pass": 1, "outcome": "completed",
+                                            "amount": float(r["amount"]), "checkout_id": checkout_id})
                 elif sumup_status in {"FAILED", "EXPIRED", "CANCELLED", "CANCELED"}:
+                    new_status = "FAILED" if sumup_status == "FAILED" else "CANCELLED"
                     await db.execute(_text("""
                         UPDATE donations SET status = :st, updated_at = NOW()
                         WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
-                    """), {"id": r["id"], "st": "FAILED" if sumup_status == "FAILED" else "CANCELLED"})
+                    """), {"id": r["id"], "st": new_status})
                     summary["failed"] += 1
-                    summary["rows"].append({"id": r["id"], "outcome": "failed",
-                                            "sumup_status": sumup_status,
+                    resolved_ids.add(r["id"])
+                    summary["rows"].append({"id": r["id"], "pass": 1, "outcome": new_status.lower(),
                                             "checkout_id": checkout_id})
-                else:
-                    # Still PENDING on SumUp's side — possibly never tapped
-                    summary["still_pending"] += 1
-                    summary["rows"].append({"id": r["id"], "outcome": "still_pending",
-                                            "sumup_status": sumup_status,
-                                            "checkout_id": checkout_id})
+
+            # ── Pass 2: transactions API (covers > 24h PENDING) ────────────────
+            # Only useful if we have a merchant_code. If not, the un-resolved
+            # rows from pass 1 stay PENDING and are reported as such.
+            unresolved = [r for r in pending_rows if r["id"] not in resolved_ids]
+            if merchant_code and unresolved:
+                # SumUp's transactions/history endpoint paginates with `oldest_ref`.
+                # 100 per page; we walk pages until we're past our window or run dry.
+                page_count = 0
+                # Map: amount(pence) -> list of (timestamp_dt, sumup_status, transaction_code, foreign_ref)
+                tx_index: dict[int, list[tuple[Any, str, str, str]]] = {}
+                ref_index: dict[str, tuple[Any, str, str]] = {}  # foreign_ref -> (ts, status, code)
+                oldest_ref = ""
+                while page_count < 20:  # safety cap → up to 2000 transactions
+                    page_count += 1
+                    url = (f"https://api.sumup.com/v2.1/merchants/{merchant_code}/"
+                           f"transactions/history?limit=100&order=descending")
+                    if oldest_ref:
+                        url += f"&oldest_ref={oldest_ref}"
+                    try:
+                        resp = await cx.get(url, headers={"Authorization": f"Bearer {access_token}"})
+                    except Exception as exc:  # noqa: BLE001
+                        summary["rows"].append({"pass": 2, "error": f"history_call_failed: {exc}"[:200]})
+                        break
+                    if resp.status_code >= 400:
+                        summary["rows"].append({"pass": 2, "code": resp.status_code,
+                                                "body": resp.text[:200]})
+                        break
+                    data = resp.json() or {}
+                    items = data.get("items") or data.get("data") or (data if isinstance(data, list) else [])
+                    if not items:
+                        break
+                    cutoff = datetime.now(UTC) - timedelta(days=days)
+                    page_oldest = None
+                    for tx in items:
+                        ts_raw = tx.get("timestamp") or tx.get("created_at") or ""
+                        try:
+                            ts_dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw else None
+                        except (ValueError, AttributeError):
+                            ts_dt = None
+                        page_oldest = ts_dt or page_oldest
+                        if ts_dt and ts_dt < cutoff:
+                            continue
+                        amount_pence = int(round(float(tx.get("amount") or 0) * 100))
+                        sumup_status_tx = (tx.get("status") or "").upper()
+                        tx_code = tx.get("transaction_code") or tx.get("transaction_id") or ""
+                        foreign_ref = (tx.get("foreign_transaction_id")
+                                       or tx.get("checkout_reference") or "")
+                        tx_index.setdefault(amount_pence, []).append(
+                            (ts_dt, sumup_status_tx, tx_code, foreign_ref))
+                        if foreign_ref:
+                            ref_index[foreign_ref] = (ts_dt, sumup_status_tx, tx_code)
+                    # Stop pagination once the page is entirely before our cutoff
+                    if page_oldest and page_oldest < cutoff:
+                        break
+                    next_ref = data.get("next_ref") or data.get("oldest_ref")
+                    if not next_ref or next_ref == oldest_ref:
+                        break
+                    oldest_ref = next_ref
+
+                # Now match each unresolved donation against the indexed transactions
+                for r in unresolved:
+                    amount_pence = int(round(float(r["amount"]) * 100))
+                    matched: tuple[Any, str, str] | None = None
+                    # Try foreign_reference first (donations.reference is the
+                    # SHT-XXX checkout_reference we set when creating the checkout)
+                    if r["reference"] and r["reference"] in ref_index:
+                        matched = ref_index[r["reference"]]
+                    else:
+                        # Fall back to amount + timestamp ±10 min window
+                        candidates = tx_index.get(amount_pence, [])
+                        donation_ts = r["created_at"]
+                        for ts_dt, sumup_status_tx, tx_code, foreign_ref in candidates:
+                            if not ts_dt or not donation_ts:
+                                continue
+                            delta = abs((ts_dt - donation_ts).total_seconds())
+                            if delta <= 600:  # 10 min window
+                                matched = (ts_dt, sumup_status_tx, tx_code)
+                                break
+
+                    if matched is None:
+                        summary["not_found"] += 1
+                        summary["rows"].append({"id": r["id"], "pass": 2,
+                                                "outcome": "no_transaction_match",
+                                                "amount": float(r["amount"])})
+                        continue
+
+                    _ts, tx_status, tx_code = matched
+                    if tx_status in {"SUCCESSFUL", "PAID"}:
+                        await db.execute(_text("""
+                            UPDATE donations SET status = 'COMPLETED',
+                                payment_ref = CASE WHEN :code != '' THEN :code ELSE payment_ref END,
+                                updated_at = NOW()
+                            WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                        """), {"id": r["id"], "code": tx_code})
+                        summary["completed"] += 1
+                        summary["matched_via_transactions_api"] += 1
+                        summary["rows"].append({"id": r["id"], "pass": 2, "outcome": "completed",
+                                                "transaction_code": tx_code,
+                                                "amount": float(r["amount"])})
+                    elif tx_status in {"FAILED", "CANCELLED", "CANCELED", "UNSUCCESSFUL",
+                                       "EXPIRED", "DECLINED", "REFUSED", "VOIDED"}:
+                        new_status = "FAILED" if tx_status == "FAILED" else "CANCELLED"
+                        await db.execute(_text("""
+                            UPDATE donations SET status = :st,
+                                payment_ref = CASE WHEN :code != '' THEN :code ELSE payment_ref END,
+                                updated_at = NOW()
+                            WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                        """), {"id": r["id"], "st": new_status, "code": tx_code})
+                        summary["failed"] += 1
+                        summary["matched_via_transactions_api"] += 1
+                        summary["rows"].append({"id": r["id"], "pass": 2, "outcome": new_status.lower(),
+                                                "transaction_code": tx_code,
+                                                "sumup_status": tx_status,
+                                                "amount": float(r["amount"])})
+                    else:
+                        summary["still_pending"] += 1
+                        summary["rows"].append({"id": r["id"], "pass": 2,
+                                                "outcome": "still_pending_on_sumup",
+                                                "sumup_status": tx_status,
+                                                "transaction_code": tx_code})
+            elif unresolved:
+                # No merchant_code configured — pass 2 disabled
+                for r in unresolved:
+                    summary["not_found"] += 1
+                    summary["rows"].append({"id": r["id"], "pass": 2,
+                                            "outcome": "skipped_no_merchant_code"})
+
         await db.commit()
     return summary
 
