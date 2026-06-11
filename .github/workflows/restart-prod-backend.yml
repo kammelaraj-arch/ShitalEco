@@ -47,8 +47,12 @@ jobs:
             echo "now at: $(git log -1 --oneline)"
 
             echo "=== Hard restart shitaleco-backend-1 ==="
-            # 1. Kill ANY container holding port 8000 (not just backend)
-            holder=$(docker ps -a --format '{{.ID}} {{.Names}} {{.Ports}}' | grep -E ':8000->|->8000' || true)
+            # 1. Kill ANY container holding HOST port 8000 (not just backend).
+            # Grep matches only `:8000->` so it can't false-positive on dev's
+            # `:8001->8000/tcp` (where container-side is 8000 but host-side is
+            # 8001). The dev backend was getting killed by this workflow before
+            # because of the broader `->8000` pattern.
+            holder=$(docker ps -a --format '{{.ID}} {{.Names}} {{.Ports}}' | grep ':8000->' || true)
             if [ -n "$holder" ]; then
               echo "containers on port 8000:"; echo "$holder" | sed 's/^/  /'
               echo "$holder" | awk '{print $1}' | xargs -r docker rm -f
