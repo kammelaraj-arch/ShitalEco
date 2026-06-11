@@ -1,13 +1,14 @@
 name: Deploy to Vultr
 
 on:
-  # TEMPORARY: push: [main] re-enabled to auto-recover prod from the
-  # 11-Jun port-conflict incident. The proper manual-only trigger will
-  # be restored in the NEXT commit after this one lands successfully.
-  # Without this, prod stays 502 indefinitely because workflow_dispatch
-  # requires a UI click we can't currently make.
-  push:
-    branches: [main]
+  # MANUAL ONLY — prod must never restart on a code push (lesson from
+  # the 11-Jun "five deploys in a row each 5-10 min downtime" incident).
+  # Operator clicks "Promote to Prod" in System Ops UI (which uses the
+  # deployer's /promote-prod endpoint, NOT this workflow), OR
+  # workflow_dispatch from the GitHub Actions UI for emergencies.
+  #
+  # Main pushes still auto-trigger Deploy to Dev (see deploy-dev.yml) —
+  # that's the right place for auto-deploy.
   workflow_dispatch:
 
 concurrency:
