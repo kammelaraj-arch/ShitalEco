@@ -90,6 +90,21 @@ jobs:
             curl -s http://localhost:8000/health | head -c 200 || echo "still 502"
 
             echo ""
+            echo "=== Backend logs (last 100 lines) ==="
+            docker logs --tail=100 shitaleco-backend-1 2>&1 | sed 's/^/  /'
+
+            echo ""
+            echo "=== Wait 60s and check if backend stayed alive ==="
+            sleep 60
+            POST_CHECK=$(curl -s -o /dev/null -w "%{http_code}" -m 5 http://localhost:8000/health 2>/dev/null || echo "000")
+            echo "post-60s /health = ${POST_CHECK}"
+            if [ "$POST_CHECK" != "200" ]; then
+              echo "BACKEND DIED within 60s of starting — dumping crash logs:"
+              docker logs --tail=200 shitaleco-backend-1 2>&1 | sed 's/^/  /'
+              docker inspect shitaleco-backend-1 --format '{{.State.Status}} ExitCode={{.State.ExitCode}} Error={{.State.Error}} OOMKilled={{.State.OOMKilled}}' || true
+            fi
+
+            echo ""
             echo "=== Watchdog cron LEFT DISABLED ==="
             echo "The */5 min watchdog was kicking backend mid-cold-start (cold"
             echo "start = 5-8 min; watchdog timer = 5 min; backend never"
