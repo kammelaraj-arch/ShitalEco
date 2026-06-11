@@ -173,8 +173,18 @@ if [ "$PROMOTE" -eq 1 ]; then
     pull_out=$(docker pull "${img}:dev" 2>&1) && pull_rc=0 || pull_rc=$?
     if [ "$pull_rc" -eq 0 ]; then
       dev_id=$(docker image inspect "${img}:dev" --format '{{.Id}}' 2>/dev/null || echo "unknown")
+      # Force-remove the existing :latest tag before retag. Without this, if the
+      # docker daemon thinks :latest already points at the right manifest, the
+      # tag operation can be a silent no-op and the running container keeps the
+      # old image cached. Untag-then-retag guarantees the local :latest
+      # references the freshly-pulled :dev image ID.
+      docker rmi "${img}:latest" 2>/dev/null || true
       docker tag "${img}:dev" "${img}:latest"
-      echo "  ✓ promoted ${svc} (image_id=${dev_id})"
+      new_latest_id=$(docker image inspect "${img}:latest" --format '{{.Id}}' 2>/dev/null || echo "unknown")
+      echo "  ✓ promoted ${svc} — :dev=${dev_id} → :latest=${new_latest_id}"
+      if [ "$dev_id" != "$new_latest_id" ]; then
+        echo "  !!! WARN: :latest does not match :dev after retag — image ID mismatch"
+      fi
     else
       echo "  !!! FAILED to promote ${svc}: docker pull exit=${pull_rc}"
       echo "      ${pull_out}"
@@ -401,8 +411,15 @@ $COMPOSE_CMD up -d --no-deps backend 2>/dev/null || \
   $COMPOSE_CMD up -d --no-deps backend-dev
 
 echo "=== Rolling restart: backend (${STACK_NAME}) ==="
-$COMPOSE_CMD up -d --no-deps --force-recreate backend 2>/dev/null || \
-  $COMPOSE_CMD up -d --no-deps --force-recreate backend-dev
+# --pull always: force docker to re-resolve the image tag from the registry
+# (or from the just-promoted local :latest after the untag-retag dance above).
+# Without this, "up -d --force-recreate" can recreate the container from a
+# CACHED image reference — i.e. the OLD :latest — even after a successful
+# promote retag. That was the root cause of "Promoted 5 times and prod still
+# serving old code" in the 11-Jun incident: the retag worked, but compose
+# never picked up the new image ID. --pull=always forces re-resolution.
+$COMPOSE_CMD up -d --no-deps --pull always --force-recreate backend 2>/dev/null || \
+  $COMPOSE_CMD up -d --no-deps --pull always --force-recreate backend-dev
 
 echo "=== Waiting for backend health (${HEALTH_URL}) ==="
 # 120 × 5s = 600s (10 min). Prod cold start can take 90-300s depending on
