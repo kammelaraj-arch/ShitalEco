@@ -411,13 +411,17 @@ $COMPOSE_CMD up -d --no-deps backend 2>/dev/null || \
   $COMPOSE_CMD up -d --no-deps backend-dev
 
 echo "=== Rolling restart: backend (${STACK_NAME}) ==="
-# --pull always: force docker to re-resolve the image tag from the registry
-# (or from the just-promoted local :latest after the untag-retag dance above).
-# Without this, "up -d --force-recreate" can recreate the container from a
-# CACHED image reference — i.e. the OLD :latest — even after a successful
-# promote retag. That was the root cause of "Promoted 5 times and prod still
-# serving old code" in the 11-Jun incident: the retag worked, but compose
-# never picked up the new image ID. --pull=always forces re-resolution.
+# Two safety steps before force-recreate:
+# 1. docker rm -f releases port 8000 in case compose state has a zombie
+#    backend container holding it (the 11-Jun incident: every Promote
+#    failed with "Bind for 0.0.0.0:8000 failed: port is already
+#    allocated" but the failure was swallowed and prod kept serving
+#    the stale container).
+# 2. --pull always forces re-resolution of the :latest tag so we don't
+#    recreate from a cached image ID.
+docker rm -f shitaleco-backend-1 2>/dev/null || true
+docker rm -f shitaleco-dev-backend-dev-1 2>/dev/null || true
+sleep 1
 $COMPOSE_CMD up -d --no-deps --pull always --force-recreate backend 2>/dev/null || \
   $COMPOSE_CMD up -d --no-deps --pull always --force-recreate backend-dev
 

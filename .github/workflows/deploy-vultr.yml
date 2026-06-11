@@ -263,7 +263,20 @@ jobs:
             docker container prune -f
 
             # ── Rolling restart: backend first ────────────────────────────────
+            # Before force-recreate, hard-remove any existing backend container
+            # to release port 8000. Without this, if a previous deploy left a
+            # zombie container or compose state is out of sync, force-recreate
+            # fails with "Bind for 0.0.0.0:8000 failed: port is already
+            # allocated" → docker leaves the OLD container running → prod
+            # keeps serving stale code while the deploy logs report success.
+            # That was the root cause of the 11-Jun "5 Promote clicks, prod
+            # still on old code" incident.
             echo "=== Rolling restart: backend ==="
+            docker rm -f shitaleco-backend-1 2>/dev/null || true
+            # Also kill any stray process still bound to host port 8000
+            # (uncommon but possible after a docker daemon restart).
+            fuser -k 8000/tcp 2>/dev/null || true
+            sleep 1
             docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
 
             echo "Waiting for backend health (up to 600s — cold start on 2GB VPS runs"
