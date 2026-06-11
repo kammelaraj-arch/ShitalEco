@@ -117,7 +117,7 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('failed')
             setStatusMessage('Payment declined — please try again.')
-            speak('Sorry, your card was declined. Please try a different card.')
+            speak('Sairam ji, your card was declined. Please try a different card.')
           } else if (s === 'EXPIRED' || s === 'CANCELLED' || s === 'CANCELED') {
             clearInterval(poll)
             setReaderStatus('cancelled')
@@ -152,7 +152,7 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('failed')
             setStatusMessage('Payment declined — please try again.')
-            speak('Sorry, your card was declined. Please try a different card.')
+            speak('Sairam ji, your card was declined. Please try a different card.')
           } else if (s === 'CANCELLED') {
             clearInterval(poll)
             setReaderStatus('cancelled')
