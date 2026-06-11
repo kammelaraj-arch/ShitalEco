@@ -488,6 +488,16 @@ jobs:
               docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
             fi
 
+            # CRITICAL: cd back to prod dir before any further docker compose
+            # calls. The post-deploy nginx reload below used to run while still
+            # in /opt/shitaleco-dev, picking up dev's .env (which doesn't have
+            # prod's DEPLOY_SECRET). compose interpolation then failed with
+            # "required variable DEPLOY_SECRET is missing a value" → exit 1 →
+            # the whole job marked FAILED even though deploy.sh had already
+            # printed "Deploy complete — all sites live" and all smoke tests
+            # had passed. The cosmetic failure spammed dashboards and made
+            # operators distrust the deploy chain.
+            cd /opt/shitaleco
             docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || true
 
             # ── Install / refresh prod-host watchdog ────────────────────────────
