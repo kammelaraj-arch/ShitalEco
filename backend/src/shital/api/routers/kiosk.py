@@ -1285,6 +1285,147 @@ async def sumup_recent_transaction(amount_pence: int, since_seconds: int = 120):
 # donation from the last N days, asks the SumUp API what really happened,
 # and flips status to COMPLETED / FAILED accordingly.
 
+class SumUpPaidEntry(BaseModel):
+    transaction_code: str   # e.g. "TAAA3HFU9UM"
+    amount: float           # gross amount in GBP, e.g. 11.00
+    datetime_str: str       # ISO or "YYYY-MM-DD HH:MM" — we tolerate both
+
+
+class SumUpPaidImport(BaseModel):
+    entries: list[SumUpPaidEntry]
+    branch_id: str | None = None  # optional filter (e.g. "wembley")
+    match_window_minutes: int = 30  # ± window for timestamp matching
+
+
+@router.post("/sumup/import-paid-list")
+async def import_sumup_paid_list(body: SumUpPaidImport, ctx: CurrentSpace) -> dict[str, Any]:
+    """One-shot import for SumUp's daily payments PDF / dashboard CSV.
+
+    Use case: SumUp dashboard / daily PDF report shows N transactions as
+    PAID. Our donations table has those same N as PENDING (because the
+    webhook dropped, the reader-state issue, etc.). Reconcile via the
+    SumUp API works in theory but depends on SUMUP_MERCHANT_CODE being set
+    and the API being reachable. This endpoint is the "I have the proof
+    in hand — just mark them paid" escape hatch.
+
+    For each entry, finds the closest PENDING donation by:
+      amount EXACT match + SUMUP/KIOSK provider + within ± window of timestamp
+    and updates status → COMPLETED, payment_ref → transaction_code.
+
+    Idempotent: re-running with the same list is safe — already-COMPLETED
+    matches are skipped.
+
+    Returns counts + per-entry outcomes for audit trail."""
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="admin only")
+
+    from sqlalchemy import text as _text
+
+    summary: dict[str, Any] = {
+        "submitted": len(body.entries),
+        "matched_and_completed": 0,
+        "already_completed": 0,
+        "no_match": 0,
+        "errors": 0,
+        "rows": [],
+    }
+
+    window_seconds = max(60, body.match_window_minutes * 60)
+
+    async with SessionLocal() as db:
+        for entry in body.entries:
+            # Parse the datetime (accept ISO or "YYYY-MM-DD HH:MM")
+            ts_str = entry.datetime_str.strip()
+            ts_dt: datetime | None = None
+            for fmt in (
+                "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
+                "%d-%m-%Y %H:%M", "%d/%m/%Y %H:%M",
+            ):
+                try:
+                    ts_dt = datetime.strptime(ts_str, fmt)
+                    if ts_dt.tzinfo is None:
+                        ts_dt = ts_dt.replace(tzinfo=UTC)
+                    break
+                except ValueError:
+                    continue
+            if ts_dt is None:
+                try:
+                    ts_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    if ts_dt.tzinfo is None:
+                        ts_dt = ts_dt.replace(tzinfo=UTC)
+                except ValueError:
+                    summary["errors"] += 1
+                    summary["rows"].append({"code": entry.transaction_code,
+                                            "error": f"bad datetime: {ts_str}"})
+                    continue
+
+            # Find the closest PENDING donation
+            params: dict[str, Any] = {
+                "amount": entry.amount,
+                "ts": ts_dt,
+                "window": window_seconds,
+                "code": entry.transaction_code,
+            }
+            extra_where = ""
+            if body.branch_id:
+                extra_where = " AND branch_id = :branch_id"
+                params["branch_id"] = body.branch_id
+
+            row = (await db.execute(_text(f"""
+                SELECT id::text AS id, status
+                FROM donations
+                WHERE deleted_at IS NULL
+                  AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+                  AND ABS(amount - :amount) < 0.01
+                  AND ABS(EXTRACT(EPOCH FROM (created_at - :ts))) <= :window
+                  {extra_where}
+                ORDER BY ABS(EXTRACT(EPOCH FROM (created_at - :ts))) ASC,
+                         CASE WHEN UPPER(COALESCE(status,'')) IN ('PENDING','') THEN 0 ELSE 1 END ASC
+                LIMIT 1
+            """), params)).mappings().first()
+
+            if not row:
+                summary["no_match"] += 1
+                summary["rows"].append({"code": entry.transaction_code,
+                                        "amount": entry.amount,
+                                        "at": ts_dt.isoformat(),
+                                        "outcome": "no_match"})
+                continue
+
+            db_status = (row["status"] or "").upper()
+            if db_status == "COMPLETED":
+                # Still update payment_ref so the audit trail has the transaction code
+                await db.execute(_text("""
+                    UPDATE donations
+                    SET payment_ref = CASE WHEN COALESCE(payment_ref, '') = '' OR payment_ref != :code
+                                           THEN :code ELSE payment_ref END,
+                        updated_at = NOW()
+                    WHERE id = CAST(:id AS UUID)
+                """), {"id": row["id"], "code": entry.transaction_code})
+                summary["already_completed"] += 1
+                summary["rows"].append({"code": entry.transaction_code,
+                                        "donation_id": row["id"][:8],
+                                        "outcome": "already_completed"})
+            else:
+                await db.execute(_text("""
+                    UPDATE donations
+                    SET status = 'COMPLETED',
+                        payment_ref = :code,
+                        updated_at = NOW()
+                    WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                """), {"id": row["id"], "code": entry.transaction_code})
+                summary["matched_and_completed"] += 1
+                summary["rows"].append({"code": entry.transaction_code,
+                                        "donation_id": row["id"][:8],
+                                        "amount": entry.amount,
+                                        "was": db_status,
+                                        "outcome": "marked_completed"})
+        await db.commit()
+
+    return summary
+
+
 @router.post("/sumup/reconcile-pending")
 async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 14) -> dict[str, Any]:
     """Sweep PENDING SumUp donations from the last `days` days, resolve them

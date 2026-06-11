@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import os
 import smtplib
+from datetime import UTC, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
@@ -51,48 +52,61 @@ ALERT_DIGEST_GRACE_SECONDS = 5 * 60
 # SumUp reconcile
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _sumup_reconcile_once() -> dict[str, Any]:
+async def _sumup_reconcile_once(days: int = 14) -> dict[str, Any]:
     """Sweep PENDING SumUp donations and resolve their status from SumUp's API.
-    Returns counts so the caller can log a single summary line."""
+
+    Two passes (mirror of the /sumup/reconcile-pending route — they should
+    behave identically since both serve the same recovery purpose):
+
+      Pass 1: checkouts API (covers ≤ 24h PENDING — those checkouts still
+              exist on SumUp's side).
+      Pass 2: transactions API (covers > 24h PENDING — SumUp purges old
+              un-paid checkouts but keeps every transaction forever).
+
+    Default window 14 days so an outage stretching over a few days still
+    auto-resolves on the next cron tick without anyone clicking Reconcile.
+    """
     from shital.services.secrets_manager import SecretsManager
 
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
     if not access_token:
         return {"skipped": "sumup_not_configured"}
 
     summary: dict[str, Any] = {
         "scanned": 0, "completed": 0, "failed": 0,
         "still_pending": 0, "not_found": 0, "errors": 0,
+        "matched_via_transactions_api": 0, "days_window": days,
     }
     async with SessionLocal() as db:
-        rows = (await db.execute(text("""
-            SELECT id::text AS id, payment_ref, amount
+        pending_rows = (await db.execute(text("""
+            SELECT id::text AS id, payment_ref, amount, reference, created_at
             FROM donations
             WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
               AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
               AND deleted_at IS NULL
-              AND created_at >= NOW() - INTERVAL '7 days'
-              AND payment_ref <> ''
-        """))).mappings().all()
+              AND created_at >= NOW() - (:days || ' days')::interval
+        """), {"days": str(days)})).mappings().all()
 
-        async with httpx.AsyncClient(timeout=10) as cx:
-            for r in rows:
+        resolved_ids: set[str] = set()
+
+        async with httpx.AsyncClient(timeout=15) as cx:
+            # ── Pass 1: checkouts API ─────────────────────────────────────────
+            for r in pending_rows:
                 summary["scanned"] += 1
                 checkout_id = r["payment_ref"] or ""
                 if not checkout_id:
-                    summary["errors"] += 1
                     continue
                 try:
                     resp = await cx.get(
                         f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
                         headers={"Authorization": f"Bearer {access_token}"},
                     )
-                except Exception:  # noqa: BLE001 — transient network blip, move on
+                except Exception:  # noqa: BLE001
                     summary["errors"] += 1
                     continue
                 if resp.status_code == 404:
-                    summary["not_found"] += 1
-                    continue
+                    continue  # will be retried in pass 2
                 if resp.status_code >= 400:
                     summary["errors"] += 1
                     continue
@@ -103,6 +117,7 @@ async def _sumup_reconcile_once() -> dict[str, Any]:
                         WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
                     """), {"id": r["id"]})
                     summary["completed"] += 1
+                    resolved_ids.add(r["id"])
                 elif sumup_status in {"FAILED", "EXPIRED", "CANCELLED", "CANCELED"}:
                     new_status = "FAILED" if sumup_status == "FAILED" else "CANCELLED"
                     await db.execute(text("""
@@ -110,8 +125,94 @@ async def _sumup_reconcile_once() -> dict[str, Any]:
                         WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
                     """), {"id": r["id"], "st": new_status})
                     summary["failed"] += 1
-                else:
-                    summary["still_pending"] += 1
+                    resolved_ids.add(r["id"])
+
+            # ── Pass 2: transactions API ──────────────────────────────────────
+            unresolved = [r for r in pending_rows if r["id"] not in resolved_ids]
+            if merchant_code and unresolved:
+                tx_index: dict[int, list[tuple[Any, str, str, str]]] = {}
+                ref_index: dict[str, tuple[Any, str, str]] = {}
+                oldest_ref = ""
+                cutoff = datetime.now(UTC) - timedelta(days=days)
+                for _ in range(20):
+                    url = (f"https://api.sumup.com/v2.1/merchants/{merchant_code}/"
+                           f"transactions/history?limit=100&order=descending")
+                    if oldest_ref:
+                        url += f"&oldest_ref={oldest_ref}"
+                    try:
+                        resp = await cx.get(url, headers={"Authorization": f"Bearer {access_token}"})
+                    except Exception:  # noqa: BLE001
+                        break
+                    if resp.status_code >= 400:
+                        break
+                    data = resp.json() or {}
+                    items = data.get("items") or data.get("data") or []
+                    if not items:
+                        break
+                    page_oldest = None
+                    for tx in items:
+                        ts_raw = tx.get("timestamp") or tx.get("created_at") or ""
+                        try:
+                            ts_dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw else None
+                        except (ValueError, AttributeError):
+                            ts_dt = None
+                        page_oldest = ts_dt or page_oldest
+                        if ts_dt and ts_dt < cutoff:
+                            continue
+                        amount_pence = int(round(float(tx.get("amount") or 0) * 100))
+                        sumup_status_tx = (tx.get("status") or "").upper()
+                        tx_code = tx.get("transaction_code") or tx.get("transaction_id") or ""
+                        foreign_ref = (tx.get("foreign_transaction_id")
+                                       or tx.get("checkout_reference") or "")
+                        tx_index.setdefault(amount_pence, []).append(
+                            (ts_dt, sumup_status_tx, tx_code, foreign_ref))
+                        if foreign_ref:
+                            ref_index[foreign_ref] = (ts_dt, sumup_status_tx, tx_code)
+                    if page_oldest and page_oldest < cutoff:
+                        break
+                    next_ref = data.get("next_ref") or data.get("oldest_ref")
+                    if not next_ref or next_ref == oldest_ref:
+                        break
+                    oldest_ref = next_ref
+
+                for r in unresolved:
+                    amount_pence = int(round(float(r["amount"]) * 100))
+                    matched: tuple[Any, str, str] | None = None
+                    if r["reference"] and r["reference"] in ref_index:
+                        matched = ref_index[r["reference"]]
+                    else:
+                        for ts_dt, sumup_status_tx, tx_code, _fref in tx_index.get(amount_pence, []):
+                            if not ts_dt or not r["created_at"]:
+                                continue
+                            if abs((ts_dt - r["created_at"]).total_seconds()) <= 600:
+                                matched = (ts_dt, sumup_status_tx, tx_code)
+                                break
+                    if matched is None:
+                        summary["not_found"] += 1
+                        continue
+                    _ts, tx_status, tx_code = matched
+                    if tx_status in {"SUCCESSFUL", "PAID"}:
+                        await db.execute(text("""
+                            UPDATE donations SET status = 'COMPLETED',
+                                payment_ref = CASE WHEN :code != '' THEN :code ELSE payment_ref END,
+                                updated_at = NOW()
+                            WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                        """), {"id": r["id"], "code": tx_code})
+                        summary["completed"] += 1
+                        summary["matched_via_transactions_api"] += 1
+                    elif tx_status in {"FAILED", "CANCELLED", "CANCELED", "UNSUCCESSFUL",
+                                       "EXPIRED", "DECLINED", "REFUSED", "VOIDED"}:
+                        new_status = "FAILED" if tx_status == "FAILED" else "CANCELLED"
+                        await db.execute(text("""
+                            UPDATE donations SET status = :st,
+                                payment_ref = CASE WHEN :code != '' THEN :code ELSE payment_ref END,
+                                updated_at = NOW()
+                            WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                        """), {"id": r["id"], "st": new_status, "code": tx_code})
+                        summary["failed"] += 1
+                        summary["matched_via_transactions_api"] += 1
+                    else:
+                        summary["still_pending"] += 1
         await db.commit()
     return summary
 
@@ -223,8 +324,276 @@ async def _alert_digest_once() -> dict[str, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Daily SumUp digest — runs once per day, posts yesterday's reconciled
+# transactions to the trustees email so they have a "yesterday's takings"
+# summary without having to open the dashboard.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Run time in UTC. 23:30 UTC = 00:30 BST in summer / 23:30 GMT in winter —
+# either way, the previous calendar day's transactions are all settled.
+DAILY_DIGEST_HOUR_UTC   = 23
+DAILY_DIGEST_MINUTE_UTC = 30
+
+# State file so a backend restart mid-day doesn't re-send today's digest.
+DAILY_DIGEST_STATE_FILE = "/tmp/shital-daily-sumup-digest.state"
+
+
+async def _sumup_daily_digest(target_date: datetime | None = None) -> dict[str, Any]:
+    """Fetch every SumUp transaction for the target calendar day (UTC),
+    cross-check against the donations table, email a summary.
+
+    If target_date is None, defaults to the day BEFORE today (UTC) — the
+    "yesterday" semantics that make daily-digest natural.
+
+    Output: stats dict for logging."""
+    from shital.services.secrets_manager import SecretsManager
+
+    if target_date is None:
+        target_date = (datetime.now(UTC) - timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+    day_start = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end   = day_start + timedelta(days=1)
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+    if not access_token or not merchant_code:
+        return {"skipped": "sumup_not_configured"}
+
+    # ── 1. Pull all SumUp transactions for the day ──────────────────────────
+    txs: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=15) as cx:
+        oldest_ref = ""
+        for _ in range(20):  # safety cap → up to 2000 transactions
+            url = (f"https://api.sumup.com/v2.1/merchants/{merchant_code}/"
+                   f"transactions/history?limit=100&order=descending")
+            if oldest_ref:
+                url += f"&oldest_ref={oldest_ref}"
+            try:
+                resp = await cx.get(url, headers={"Authorization": f"Bearer {access_token}"})
+            except Exception as exc:  # noqa: BLE001
+                return {"error": f"sumup_api_failed: {exc}"[:200]}
+            if resp.status_code >= 400:
+                return {"error": f"sumup_http_{resp.status_code}", "body": resp.text[:200]}
+            data = resp.json() or {}
+            items = data.get("items") or data.get("data") or []
+            if not items:
+                break
+            page_oldest = None
+            for tx in items:
+                ts_raw = tx.get("timestamp") or tx.get("created_at") or ""
+                try:
+                    ts_dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw else None
+                except (ValueError, AttributeError):
+                    ts_dt = None
+                if not ts_dt:
+                    continue
+                page_oldest = ts_dt
+                if ts_dt >= day_end:
+                    continue  # newer than our window — keep paging
+                if ts_dt < day_start:
+                    # We've paged into the day before — stop entirely
+                    page_oldest = ts_dt
+                    break
+                tx["_ts_dt"] = ts_dt
+                txs.append(tx)
+            if page_oldest and page_oldest < day_start:
+                break
+            next_ref = data.get("next_ref") or data.get("oldest_ref")
+            if not next_ref or next_ref == oldest_ref:
+                break
+            oldest_ref = next_ref
+
+    # ── 2. Cross-check against our donations table ──────────────────────────
+    completed_count = 0
+    completed_gross = 0.0
+    failed_count    = 0
+    failed_gross    = 0.0
+    matched_in_db   = 0
+    missing_in_db   = 0
+    discrepancies: list[str] = []
+    tx_rows_html:  list[str] = []
+
+    async with SessionLocal() as db:
+        for tx in sorted(txs, key=lambda t: t["_ts_dt"]):
+            amount = float(tx.get("amount") or 0)
+            sumup_status_tx = (tx.get("status") or "").upper()
+            tx_code = tx.get("transaction_code") or tx.get("transaction_id") or ""
+            card_type = (tx.get("card", {}) or {}).get("type", "") or tx.get("payment_type", "")
+            ts_dt = tx["_ts_dt"]
+
+            if sumup_status_tx in {"SUCCESSFUL", "PAID"}:
+                completed_count += 1
+                completed_gross += amount
+                badge_color = "#16a34a"
+                badge_text = "PAID"
+            else:
+                failed_count += 1
+                failed_gross += amount
+                badge_color = "#dc2626"
+                badge_text = sumup_status_tx or "FAILED"
+
+            # Try to find matching donation by transaction_code or amount+time
+            row = (await db.execute(text("""
+                SELECT id::text AS id, status, payment_ref
+                FROM donations
+                WHERE deleted_at IS NULL
+                  AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+                  AND created_at BETWEEN :start AND :end
+                  AND (payment_ref = :code OR ABS(EXTRACT(EPOCH FROM (created_at - :ts))) < 600)
+                  AND ABS(amount - :amount) < 0.01
+                ORDER BY ABS(EXTRACT(EPOCH FROM (created_at - :ts))) ASC
+                LIMIT 1
+            """), {"code": tx_code, "ts": ts_dt, "amount": amount,
+                   "start": day_start - timedelta(hours=2),
+                   "end":   day_end + timedelta(hours=2)})).mappings().first()
+
+            if row:
+                matched_in_db += 1
+                db_status = (row["status"] or "").upper()
+                expected = "COMPLETED" if sumup_status_tx in {"SUCCESSFUL", "PAID"} else ("FAILED" if sumup_status_tx == "FAILED" else "CANCELLED")
+                if db_status != expected:
+                    discrepancies.append(
+                        f"{tx_code} £{amount:.2f}: SumUp says {sumup_status_tx} but our DB says {db_status} (donation id {row['id'][:8]})"
+                    )
+            else:
+                missing_in_db += 1
+                discrepancies.append(
+                    f"{tx_code} £{amount:.2f} at {ts_dt.strftime('%H:%M')}: no matching donation row in our DB"
+                )
+
+            tx_rows_html.append(
+                f"<tr>"
+                f"<td style='padding:4px 10px;border-bottom:1px solid #eee'>{ts_dt.strftime('%H:%M')}</td>"
+                f"<td style='padding:4px 10px;border-bottom:1px solid #eee;font-family:monospace;font-size:11px'>{tx_code}</td>"
+                f"<td style='padding:4px 10px;border-bottom:1px solid #eee'>{card_type}</td>"
+                f"<td style='padding:4px 10px;border-bottom:1px solid #eee;text-align:right'>£{amount:.2f}</td>"
+                f"<td style='padding:4px 10px;border-bottom:1px solid #eee'><span style='background:{badge_color};color:white;padding:1px 6px;border-radius:4px;font-size:11px'>{badge_text}</span></td>"
+                f"</tr>"
+            )
+
+    # ── 3. Build the HTML digest ────────────────────────────────────────────
+    discrepancies_html = ""
+    if discrepancies:
+        discrepancies_html = (
+            "<h3 style='color:#dc2626;margin-top:24px'>⚠ Discrepancies — need attention</h3>"
+            "<ul style='font-size:13px'>" +
+            "".join(f"<li>{d}</li>" for d in discrepancies[:50]) +
+            "</ul>"
+        )
+
+    html = f"""
+    <div style='font-family:sans-serif;max-width:760px'>
+      <h2>SumUp daily report — {day_start.strftime('%a %d %b %Y')}</h2>
+      <p style='color:#666'>Merchant {merchant_code} · {len(txs)} transactions</p>
+      <table style='border-collapse:collapse;margin:12px 0'>
+        <tr style='background:#f0f0f0'>
+          <td style='padding:8px 14px'><b>Paid (gross)</b></td>
+          <td style='padding:8px 14px;text-align:right;color:#16a34a;font-weight:bold'>£{completed_gross:.2f} ({completed_count} txs)</td>
+        </tr>
+        <tr>
+          <td style='padding:8px 14px'><b>Failed / Unsuccessful</b></td>
+          <td style='padding:8px 14px;text-align:right;color:#dc2626;font-weight:bold'>£{failed_gross:.2f} ({failed_count} txs)</td>
+        </tr>
+        <tr style='background:#f0f0f0'>
+          <td style='padding:8px 14px'><b>Matched in donations DB</b></td>
+          <td style='padding:8px 14px;text-align:right'>{matched_in_db} / {len(txs)}</td>
+        </tr>
+        <tr>
+          <td style='padding:8px 14px'><b>Missing from donations DB</b></td>
+          <td style='padding:8px 14px;text-align:right;{"color:#dc2626;font-weight:bold" if missing_in_db else ""}'>{missing_in_db}</td>
+        </tr>
+      </table>
+
+      {discrepancies_html}
+
+      <h3 style='margin-top:24px'>All transactions</h3>
+      <table style='border-collapse:collapse;font-size:13px;width:100%'>
+        <tr style='background:#f0f0f0;text-align:left'>
+          <th style='padding:6px 10px'>Time</th>
+          <th style='padding:6px 10px'>Code</th>
+          <th style='padding:6px 10px'>Card</th>
+          <th style='padding:6px 10px;text-align:right'>Amount</th>
+          <th style='padding:6px 10px'>Status</th>
+        </tr>
+        {''.join(tx_rows_html)}
+      </table>
+
+      <p style='color:#999;font-size:11px;margin-top:24px'>
+        Generated by the backend daily-digest task. Reconciliation against
+        the donations table is automatic — discrepancies above are the only
+        items that need a human to look at.
+      </p>
+    </div>
+    """
+
+    recipients = os.environ.get("MONITOR_ALERT_RECIPIENTS", "").strip() \
+        or "rajk@shirdisai.org.uk,it@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            _send_smtp,
+            recipients,
+            f"[ShitalEco] SumUp daily report — {day_start.strftime('%a %d %b')} — £{completed_gross:.2f} paid, {failed_count} failed",
+            html,
+        )
+        emailed = True
+    except Exception as exc:  # noqa: BLE001
+        logger.error("daily_sumup_digest_send_failed", error=str(exc))
+        emailed = False
+
+    return {
+        "date": day_start.strftime("%Y-%m-%d"),
+        "transactions": len(txs),
+        "completed": completed_count, "completed_gross": round(completed_gross, 2),
+        "failed":    failed_count,    "failed_gross":    round(failed_gross, 2),
+        "matched_in_db": matched_in_db, "missing_in_db": missing_in_db,
+        "discrepancies": len(discrepancies),
+        "emailed": emailed,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Loop entry point — wired into main.py lifespan
 # ─────────────────────────────────────────────────────────────────────────────
+
+async def daily_digest_loop() -> None:
+    """Separate loop that wakes once per day at DAILY_DIGEST_HOUR_UTC:MINUTE.
+    Idempotent via state file — re-sending the same day's digest is blocked
+    so a backend restart mid-day doesn't double-mail trustees."""
+    # Initial 5-min delay so we don't fire seconds after a deploy.
+    await asyncio.sleep(300)
+    while True:
+        now = datetime.now(UTC)
+        target = now.replace(hour=DAILY_DIGEST_HOUR_UTC,
+                             minute=DAILY_DIGEST_MINUTE_UTC,
+                             second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        sleep_secs = max(60, int((target - now).total_seconds()))
+        logger.info("daily_digest_scheduled", at=target.isoformat(), sleep_seconds=sleep_secs)
+        await asyncio.sleep(sleep_secs)
+
+        # Idempotency: only send each calendar day once
+        today_key = datetime.now(UTC).strftime("%Y-%m-%d")
+        already_sent = ""
+        try:
+            with open(DAILY_DIGEST_STATE_FILE) as f:
+                already_sent = f.read().strip()
+        except OSError:
+            pass
+        if already_sent == today_key:
+            logger.info("daily_digest_skipped_already_sent_today", date=today_key)
+            continue
+
+        try:
+            result = await _sumup_daily_digest()
+            logger.info("daily_sumup_digest", result=result)
+            with open(DAILY_DIGEST_STATE_FILE, "w") as f:
+                f.write(today_key)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("daily_sumup_digest_failed", error=str(exc))
+
 
 async def recovery_loop() -> None:
     """Forever-loop. Sleeps RECOVERY_INTERVAL_SECONDS between passes.

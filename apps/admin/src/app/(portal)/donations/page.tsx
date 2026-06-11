@@ -121,8 +121,68 @@ export default function DonationsPage() {
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; error: string }[] } | null>(null)
   const [reconciling, setReconciling] = useState(false)
 
+  // Paste SumUp's daily payments PDF transaction table (or any TSV/CSV with
+  // transaction_code, amount, datetime). Forces matches against PENDING
+  // donations by amount + ± window. The "I have the proof in hand" path
+  // when reconcile-via-API doesn't catch them (eg. SumUp purged checkouts
+  // older than a day or SUMUP_MERCHANT_CODE isn't configured).
+  async function importSumUpPaidList() {
+    const sample = `# Paste rows from the SumUp daily PDF, one per line.
+# Format: TRANSACTION_CODE  AMOUNT  DATE TIME
+# Tab or 2+ spaces between columns. Date/time in UK format.
+# Example (7 Jun 2026):
+TAAA3G3ANXK  11.00  2026-06-07 09:54
+TAAA3G3B6EH  5.00   2026-06-07 09:57`
+    const raw = prompt('Paste SumUp transaction list (one per line: CODE  AMOUNT  YYYY-MM-DD HH:MM)\n\nExample format below — replace with real rows:', sample)
+    if (!raw) return
+    const entries: Array<{ transaction_code: string; amount: number; datetime_str: string }> = []
+    for (const line of raw.split('\n')) {
+      const t = line.trim()
+      if (!t || t.startsWith('#')) continue
+      // Split on tabs or 2+ spaces
+      const parts = t.split(/\t+|\s{2,}/).map(s => s.trim()).filter(Boolean)
+      if (parts.length < 3) continue
+      const code = parts[0]
+      const amount = parseFloat(parts[1].replace(/[£$,]/g, ''))
+      const dt = parts.slice(2).join(' ')
+      if (!code || !Number.isFinite(amount) || !dt) continue
+      entries.push({ transaction_code: code, amount, datetime_str: dt })
+    }
+    if (entries.length === 0) {
+      alert('No valid rows parsed. Each line must be: CODE AMOUNT YYYY-MM-DD HH:MM (whitespace-separated).')
+      return
+    }
+    if (!confirm(`Parsed ${entries.length} rows. Submit to mark matching PENDING donations as COMPLETED?`)) return
+    setReconciling(true); setError('')
+    try {
+      const r = await apiFetch<{
+        submitted: number; matched_and_completed: number;
+        already_completed: number; no_match: number; errors: number;
+        rows: Array<{ code: string; outcome: string; donation_id?: string }>
+      }>('/kiosk/sumup/import-paid-list', {
+        method: 'POST',
+        body: JSON.stringify({ entries, match_window_minutes: 30 }),
+      })
+      const noMatchCodes = (r.rows || []).filter(x => x.outcome === 'no_match').map(x => x.code).slice(0, 10)
+      alert(
+        `Import complete\n\n` +
+        `Submitted: ${r.submitted}\n` +
+        `✅ Marked COMPLETED: ${r.matched_and_completed}\n` +
+        `↻ Already complete (payment_ref updated): ${r.already_completed}\n` +
+        `🔍 No matching PENDING donation: ${r.no_match}` +
+        (noMatchCodes.length ? `\n   (first 10: ${noMatchCodes.join(', ')})` : '') +
+        `\n❌ Errors: ${r.errors}`
+      )
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import failed')
+    } finally {
+      setReconciling(false)
+    }
+  }
+
   async function reconcileSumUp() {
-    const days = parseInt(prompt('Days to sweep (default 7 covers from 7 June onwards):', '7') || '0', 10)
+    const days = parseInt(prompt('Days to sweep (default 14 covers the 7 Jun window):', '14') || '0', 10)
     if (!days || days < 1) return
     setReconciling(true); setError('')
     try {
@@ -402,11 +462,20 @@ export default function DonationsPage() {
           <button
             onClick={reconcileSumUp}
             disabled={reconciling}
-            title="Sweep the last 7 days of PENDING SumUp donations, ask SumUp the real status, flip to COMPLETED / FAILED. Use after a container restart or webhook outage."
+            title="Sweep the last N days of PENDING SumUp donations, ask SumUp the real status, flip to COMPLETED / FAILED. Use after a container restart or webhook outage."
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
             style={{ background: 'rgba(245,158,11,0.18)', border: '1px solid rgba(245,158,11,0.4)' }}
           >
             {reconciling ? '⏳ Reconciling…' : '🔄 Reconcile SumUp'}
+          </button>
+          <button
+            onClick={importSumUpPaidList}
+            disabled={reconciling}
+            title="Paste rows from SumUp's daily payments PDF (transaction_code, amount, date/time). Force-matches PENDING donations to COMPLETED."
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+            style={{ background: 'rgba(34,197,94,0.18)', border: '1px solid rgba(34,197,94,0.4)' }}
+          >
+            📋 Import SumUp PDF
           </button>
           <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvUpload} />
         </div>
