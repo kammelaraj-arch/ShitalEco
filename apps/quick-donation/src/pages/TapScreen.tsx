@@ -44,8 +44,9 @@ export function TapScreen() {
 
   // Speak the initial prompt the moment the customer lands on this screen so
   // they know to tap; useful when the visual prompt isn't being read.
+  // (Disabled by user request — visual prompt is enough.)
   useEffect(() => {
-    speak('Please tap your card on the reader')
+    // intentionally silent on screen entry
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -110,7 +111,7 @@ export function TapScreen() {
           const s = (checkoutRes.value?.status || '').toUpperCase()
 
           if (s === 'PAID' || s === 'COMPLETED' || s === 'SUCCESSFUL') {
-            speak('Thank you. Payment successful.')
+            speak('Sairam')
             onSumUpSuccess()
           } else if (s === 'FAILED' || s === 'DECLINED') {
             clearInterval(poll)
@@ -125,7 +126,6 @@ export function TapScreen() {
           } else {
             if (s === 'PROCESSING') {
               setStatusMessage('Processing payment...')
-              speak('Processing payment, please wait.')
             } else {
               setStatusMessage('Waiting for card...')
             }
@@ -141,7 +141,7 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('succeeded')
             setStatusMessage('Payment successful!')
-            speak('Thank you. Payment successful.')
+            speak('Sairam')
             setTimeout(() => setScreen('confirmation'), 1500)
             fetch(`${API_BASE}/kiosk/order/confirm`, {
               method: 'POST',
@@ -169,7 +169,7 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('succeeded')
             setStatusMessage('Payment successful!')
-            speak('Thank you. Payment successful.')
+            speak('Sairam')
             setTimeout(() => setScreen('confirmation'), 1500)
             fetch(`${API_BASE}/kiosk/order/confirm`, {
               method: 'POST',
@@ -185,7 +185,6 @@ export function TapScreen() {
             setStatusMessage('Tap, insert or swipe your card...')
           } else if (d.status === 'processing') {
             setStatusMessage('Processing payment...')
-            speak('Processing payment, please wait.')
           }
         }
       } catch { /* network error — retry on next tick */ }
