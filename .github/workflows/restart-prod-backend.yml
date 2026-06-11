@@ -40,10 +40,13 @@ jobs:
             echo "=== Current backend container state ==="
             docker ps -a --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
-            echo "=== Hard restart shitaleco-backend-1 ==="
-            # docker rm -f first ensures port 8000 is released, then up -d
-            # recreates with --pull always to use the latest :latest image
+            echo "=== Git pull latest main (picks up compose changes) ==="
             cd /opt/shitaleco
+            git fetch origin
+            git reset --hard origin/main
+            echo "now at: $(git log -1 --oneline)"
+
+            echo "=== Hard restart shitaleco-backend-1 ==="
             # 1. Kill ANY container holding port 8000 (not just backend)
             holder=$(docker ps -a --format '{{.ID}} {{.Names}} {{.Ports}}' | grep -E ':8000->|->8000' || true)
             if [ -n "$holder" ]; then

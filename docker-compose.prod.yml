@@ -28,7 +28,12 @@ services:
       resources:
         limits:
           cpus: '1.00'
-          memory: 512M
+          # 512M was OOM-killing the container mid-execution when the
+          # recovery_loop pulled SumUp's transactions history into memory.
+          # 1GB gives headroom for the loop's tx_index + normal request
+          # handling. On the 2GB VPS this still leaves ~700MB for db +
+          # nginx + frontends combined.
+          memory: 1024M
     # Use alembic upgrade head only — never stamp base (would wipe migration history)
     command: >
       sh -c "alembic upgrade head 2>&1 || echo 'WARNING: alembic failed';
