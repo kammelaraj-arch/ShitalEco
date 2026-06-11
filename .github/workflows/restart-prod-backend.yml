@@ -64,12 +64,14 @@ jobs:
             curl -s http://localhost:8000/health | head -c 200 || echo "still 502"
 
             echo ""
-            echo "=== Reinstall watchdog cron (now that backend is up) ==="
-            (crontab -l 2>/dev/null | grep -v 'shital-prod-watchdog' ; \
-             echo "*/5 * * * * /opt/shitaleco/infra/watchdog-prod.sh # shital-prod-watchdog") | crontab -
-            # NOTE: changed schedule from */2 to */5 min — less aggressive,
-            # gives backend more time to cold-start without watchdog kicking it.
-            echo "watchdog re-installed on */5 schedule"
+            echo "=== Watchdog cron LEFT DISABLED ==="
+            echo "The */5 min watchdog was kicking backend mid-cold-start (cold"
+            echo "start = 5-8 min; watchdog timer = 5 min; backend never"
+            echo "finished booting). Leaving cron off until we make the"
+            echo "watchdog deploy-aware. Re-install manually with:"
+            echo "  (crontab -l 2>/dev/null | grep -v shital-prod-watchdog ; \\"
+            echo "   echo '*/15 * * * * /opt/shitaleco/infra/watchdog-prod.sh') | crontab -"
+            crontab -l 2>/dev/null | grep -v shital || echo "no shital crons (clean)"
 
             echo ""
             echo "=== Done ==="
