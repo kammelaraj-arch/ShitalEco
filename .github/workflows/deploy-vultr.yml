@@ -1,18 +1,23 @@
 name: Deploy to Vultr
 
 on:
-  # Trigger AFTER ci.yml finishes so :dev images are guaranteed fresh before
-  # we auto-promote them to :latest. Keep `push` as a fallback in case
-  # workflow_run misses (it skips if the trigger config wasn't on the default
-  # branch BEFORE the source workflow started — true for the very commit
-  # that introduces this trigger). The fallback uses whatever :dev is
-  # already in GHCR, which is the last successful CI build's images.
-  workflow_run:
-    workflows: ["Shital ERP CI/CD"]
-    types: [completed]
-    branches: [main]
-  push:
-    branches: [main]
+  # ONLY manual trigger — prod must never restart on a code push.
+  #
+  # Previously this listened for `push: branches: [main]` and `workflow_run`
+  # from CI, which meant every merge into main auto-restarted prod.
+  # That violated the proper deploy flow (dev → verify → manual promote)
+  # and was the root cause of the 11-Jun "five deploys in a row each with
+  # 5-10 min downtime" incident. Operators were merging code intending to
+  # only hit dev — but prod kept getting kicked.
+  #
+  # Now: only fires when an operator explicitly clicks
+  #   - "Promote to Prod" in System Ops UI (which calls the deployer's
+  #     /promote-prod endpoint directly — doesn't use this workflow)
+  #   - workflow_dispatch from the GitHub Actions UI (emergency path)
+  #
+  # Main pushes still trigger `Deploy to Dev` automatically (see
+  # deploy-dev.yml) — that flow is unchanged and is the right place for
+  # auto-deploy.
   workflow_dispatch:
 
 concurrency:
@@ -22,11 +27,6 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Run on:
-    #   - manual workflow_dispatch
-    #   - push to main (fallback path)
-    #   - workflow_run from CI, but only if it succeeded
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Trigger webhook deployer (preferred — bypasses fail2ban)
         run: |
