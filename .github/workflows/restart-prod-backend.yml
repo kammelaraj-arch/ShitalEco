@@ -44,9 +44,35 @@ jobs:
             # docker rm -f first ensures port 8000 is released, then up -d
             # recreates with --pull always to use the latest :latest image
             cd /opt/shitaleco
+            # 1. Kill ANY container holding port 8000 (not just backend)
+            holder=$(docker ps -a --format '{{.ID}} {{.Names}} {{.Ports}}' | grep -E ':8000->|->8000' || true)
+            if [ -n "$holder" ]; then
+              echo "containers on port 8000:"; echo "$holder" | sed 's/^/  /'
+              echo "$holder" | awk '{print $1}' | xargs -r docker rm -f
+            fi
+            # 2. compose-level cleanup
+            docker compose -f docker-compose.prod.yml stop backend 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml rm -f backend 2>/dev/null || true
             docker rm -f shitaleco-backend-1 2>/dev/null || true
+            # 3. Kill any process bound to port 8000
             fuser -k 8000/tcp 2>/dev/null || true
-            sleep 3
+            # 4. Drop docker's internal port allocation state
+            docker network prune -f >/dev/null 2>&1 || true
+            # 5. Poll-wait up to 20s, then nuclear (restart docker daemon)
+            STILL_BOUND=1
+            for i in $(seq 1 20); do
+              if ! ss -tlnp 2>/dev/null | grep -q ':8000 ' && \
+                 ! docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ':8000->'; then
+                STILL_BOUND=0; echo "port 8000 free after ${i}s"; break
+              fi
+              sleep 1
+            done
+            if [ "$STILL_BOUND" -eq 1 ]; then
+              echo "port 8000 still bound — NUCLEAR: systemctl restart docker"
+              systemctl restart docker
+              sleep 10
+            fi
+            # 6. Now safe to create backend
             docker compose -f docker-compose.prod.yml up -d --no-deps --pull always backend
 
             echo "=== Waiting for /health (up to 8 min) ==="
