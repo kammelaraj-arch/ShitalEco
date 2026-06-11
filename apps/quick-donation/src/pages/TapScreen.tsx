@@ -22,6 +22,33 @@ export function TapScreen() {
   // Keep ref in sync so the timer closure can read latest status without a dep
   useEffect(() => { readerStatusRef.current = readerStatus }, [readerStatus])
 
+  // Voice feedback so donors aren't standing confused at a silent screen when
+  // the tap doesn't go through. Web Speech API ships in every modern browser
+  // and works inside Capacitor's Android WebView. We dedupe by text so a
+  // poll loop that keeps reporting the same state doesn't repeat-speak.
+  const lastSpokenRef = useRef<string>('')
+  const speak = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+    if (lastSpokenRef.current === text) return
+    lastSpokenRef.current = text
+    try {
+      window.speechSynthesis.cancel()  // stop any in-flight utterance
+      const u = new SpeechSynthesisUtterance(text)
+      u.rate = 0.95
+      u.pitch = 1.0
+      u.volume = 1.0
+      u.lang = 'en-GB'
+      window.speechSynthesis.speak(u)
+    } catch { /* speech unavailable — silent fallback */ }
+  }
+
+  // Speak the initial prompt the moment the customer lands on this screen so
+  // they know to tap; useful when the visual prompt isn't being read.
+  useEffect(() => {
+    speak('Please tap your card on the reader')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const isSumUp = readerProvider === 'sumup' || (!!sumupReaderId && !stripeReaderId && !cloverDeviceId)
   const isClover = readerProvider === 'clover' || (!!cloverDeviceId && !stripeReaderId && !sumupReaderId)
 
@@ -32,13 +59,17 @@ export function TapScreen() {
         if (t <= 1) {
           clearInterval(timer)
           // Only abandon if no payment has succeeded yet
-          if (readerStatusRef.current !== 'succeeded') reset()
+          if (readerStatusRef.current !== 'succeeded') {
+            speak('Card not tapped in time. Please start again.')
+            reset()
+          }
           return 0
         }
         return t - 1
       })
     }, 1000)
     return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reset])
 
   // Poll payment status — branches on provider
@@ -79,18 +110,22 @@ export function TapScreen() {
           const s = (checkoutRes.value?.status || '').toUpperCase()
 
           if (s === 'PAID' || s === 'COMPLETED' || s === 'SUCCESSFUL') {
+            speak('Thank you. Payment successful.')
             onSumUpSuccess()
           } else if (s === 'FAILED' || s === 'DECLINED') {
             clearInterval(poll)
             setReaderStatus('failed')
             setStatusMessage('Payment declined — please try again.')
+            speak('Sorry, your card was declined. Please try a different card.')
           } else if (s === 'EXPIRED' || s === 'CANCELLED' || s === 'CANCELED') {
             clearInterval(poll)
             setReaderStatus('cancelled')
             setStatusMessage('Payment session expired.')
+            speak('Card not tapped in time. Please start again.')
           } else {
             if (s === 'PROCESSING') {
               setStatusMessage('Processing payment...')
+              speak('Processing payment, please wait.')
             } else {
               setStatusMessage('Waiting for card...')
             }
@@ -106,6 +141,7 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('succeeded')
             setStatusMessage('Payment successful!')
+            speak('Thank you. Payment successful.')
             setTimeout(() => setScreen('confirmation'), 1500)
             fetch(`${API_BASE}/kiosk/order/confirm`, {
               method: 'POST',
@@ -116,10 +152,12 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('failed')
             setStatusMessage('Payment declined — please try again.')
+            speak('Sorry, your card was declined. Please try a different card.')
           } else if (s === 'CANCELLED') {
             clearInterval(poll)
             setReaderStatus('cancelled')
             setStatusMessage('Payment session expired.')
+            speak('Card not tapped in time. Please start again.')
           } else {
             setStatusMessage('Waiting for card...')
           }
@@ -131,6 +169,7 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('succeeded')
             setStatusMessage('Payment successful!')
+            speak('Thank you. Payment successful.')
             setTimeout(() => setScreen('confirmation'), 1500)
             fetch(`${API_BASE}/kiosk/order/confirm`, {
               method: 'POST',
@@ -141,10 +180,12 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('cancelled')
             setStatusMessage('Payment was cancelled.')
+            speak('Payment cancelled. Please start again.')
           } else if (d.status === 'requires_payment_method') {
             setStatusMessage('Tap, insert or swipe your card...')
           } else if (d.status === 'processing') {
             setStatusMessage('Processing payment...')
+            speak('Processing payment, please wait.')
           }
         }
       } catch { /* network error — retry on next tick */ }
