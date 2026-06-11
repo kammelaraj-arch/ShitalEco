@@ -182,17 +182,18 @@ jobs:
             docker compose -f docker-compose.dev.yml up -d --remove-orphans
 
             # ── Backend health check ────────────────────────────────────────────
-            # 90 × 5s = 450s. Cold start on the 2GB VPS runs alembic upgrade
-            # head (re-applies all migrations idempotently), _patch_schema (60+
-            # ALTERs), sync_from_digital_dna, and four seed functions — all
-            # synchronously before /health responds. We observed ~6-8 min in
-            # practice; 240s timed out every push and produced the recurring
-            # "backend health check failed" entries on the System Ops panel
-            # even though the container then came up healthy seconds later.
-            # Matches the prod budget in PR #123 for symmetry.
+            # 180 × 5s = 900s (15 min). Cold start on the 2GB VPS runs alembic
+            # upgrade head + _patch_schema (60+ ALTERs) + sync_from_digital_dna
+            # + four seed functions synchronously before /health responds.
+            # 90 × 5s = 450s was timing out for the last 6 dev pushes because
+            # migration 030 (donations.kiosk_device_id backfill) does a large
+            # UPDATE that takes 2-3 min on its own with the current donations
+            # row count. Matches the principle of "wait until the box is genuinely
+            # broken, don't give up while it's working." 15 min covers any
+            # realistic cold start without false-failing the deploy.
             echo "=== Waiting for backend-dev health ==="
             DEV_OK=0
-            for i in $(seq 1 90); do
+            for i in $(seq 1 180); do
               sleep 5
               if curl -sf http://localhost:8001/health > /dev/null 2>&1; then
                 DEV_OK=1; break
@@ -200,14 +201,14 @@ jobs:
               # Tail backend logs every 30s so the workflow log shows WHY
               # startup is slow (helpful when this DOES legitimately fail).
               if [ $((i % 6)) -eq 0 ]; then
-                echo "  attempt $i/90 — tailing backend-dev logs:"
+                echo "  attempt $i/180 — tailing backend-dev logs:"
                 docker compose -f docker-compose.dev.yml logs --tail=10 backend-dev 2>&1 | sed 's/^/    /'
               else
-                echo "  attempt $i/90..."
+                echo "  attempt $i/180..."
               fi
             done
             if [ "$DEV_OK" -eq 0 ]; then
-              echo "!!! Dev backend failed health check after 450s !!!"
+              echo "!!! Dev backend failed health check after 900s !!!"
               docker compose -f docker-compose.dev.yml logs --tail=50 backend-dev
               exit 1
             fi
