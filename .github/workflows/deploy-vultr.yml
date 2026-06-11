@@ -263,20 +263,39 @@ jobs:
             docker container prune -f
 
             # ── Rolling restart: backend first ────────────────────────────────
-            # Before force-recreate, hard-remove any existing backend container
-            # to release port 8000. Without this, if a previous deploy left a
-            # zombie container or compose state is out of sync, force-recreate
-            # fails with "Bind for 0.0.0.0:8000 failed: port is already
-            # allocated" → docker leaves the OLD container running → prod
-            # keeps serving stale code while the deploy logs report success.
-            # That was the root cause of the 11-Jun "5 Promote clicks, prod
-            # still on old code" incident.
+            # Aggressive cleanup before force-recreate. Docker's network
+            # namespace cleanup is ASYNC — even after `docker rm -f`, the
+            # port allocation may remain in docker's internal state for
+            # 10-30s, causing "port is already allocated" errors on the
+            # immediately-following `up -d`. The poll-wait below blocks
+            # until port 8000 is genuinely free before recreating.
             echo "=== Rolling restart: backend ==="
+            # 1. Hard-remove the existing container (releases compose's hold)
+            docker compose -f docker-compose.prod.yml stop backend 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml rm -f backend 2>/dev/null || true
             docker rm -f shitaleco-backend-1 2>/dev/null || true
-            # Also kill any stray process still bound to host port 8000
-            # (uncommon but possible after a docker daemon restart).
+
+            # 2. Kill anything else holding port 8000 (paranoid belt-and-braces)
             fuser -k 8000/tcp 2>/dev/null || true
-            sleep 1
+
+            # 3. Clean up docker network state so the port allocation drops
+            docker network prune -f >/dev/null 2>&1 || true
+
+            # 4. Poll-wait until port 8000 is genuinely free (up to 30s).
+            #    Docker's network cleanup can lag this long after rm.
+            for i in $(seq 1 30); do
+              if ! ss -tlnp 2>/dev/null | grep -q ':8000 ' && \
+                 ! docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ':8000->'; then
+                echo "   port 8000 free after ${i}s"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "   WARN: port 8000 still bound after 30s — proceeding anyway"
+              fi
+              sleep 1
+            done
+
+            # 5. Now safe to recreate
             docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
 
             echo "Waiting for backend health (up to 600s — cold start on 2GB VPS runs"
