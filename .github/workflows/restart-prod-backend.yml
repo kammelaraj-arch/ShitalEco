@@ -1,0 +1,75 @@
+name: Restart Prod Backend (one-shot)
+
+# Surgical workflow: SSH to prod and `docker restart shitaleco-backend-1`.
+# Faster than a full deploy (~60s vs 10 min), no image pull, no port-conflict
+# games. Used when backend container is wedged but the rest of the stack
+# is fine — e.g. recovery from the 11-Jun watchdog/cold-start race.
+#
+# Trigger: push to main. This file's push event itself fires the workflow
+# (so we can use this without manual workflow_dispatch).
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restart-prod-backend.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: restart-prod-backend
+  cancel-in-progress: false
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH to prod and docker restart backend
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 120s
+          command_timeout: 5m
+          script: |
+            set -e
+            echo "=== Removing watchdog cron temporarily (so it can't kick backend mid-restart) ==="
+            crontab -l 2>/dev/null | grep -v 'shital-prod-watchdog' | crontab - || true
+            crontab -l 2>/dev/null | head -20
+
+            echo "=== Current backend container state ==="
+            docker ps -a --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+            echo "=== Hard restart shitaleco-backend-1 ==="
+            # docker rm -f first ensures port 8000 is released, then up -d
+            # recreates with --pull always to use the latest :latest image
+            cd /opt/shitaleco
+            docker rm -f shitaleco-backend-1 2>/dev/null || true
+            fuser -k 8000/tcp 2>/dev/null || true
+            sleep 3
+            docker compose -f docker-compose.prod.yml up -d --no-deps --pull always backend
+
+            echo "=== Waiting for /health (up to 8 min) ==="
+            for i in $(seq 1 96); do
+              sleep 5
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "BACKEND HEALTHY after $((i*5))s"
+                break
+              fi
+              [ $((i % 6)) -eq 0 ] && echo "  attempt $i/96"
+            done
+
+            echo "=== Final state ==="
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}'
+            curl -s http://localhost:8000/health | head -c 200 || echo "still 502"
+
+            echo ""
+            echo "=== Reinstall watchdog cron (now that backend is up) ==="
+            (crontab -l 2>/dev/null | grep -v 'shital-prod-watchdog' ; \
+             echo "*/5 * * * * /opt/shitaleco/infra/watchdog-prod.sh # shital-prod-watchdog") | crontab -
+            # NOTE: changed schedule from */2 to */5 min — less aggressive,
+            # gives backend more time to cold-start without watchdog kicking it.
+            echo "watchdog re-installed on */5 schedule"
+
+            echo ""
+            echo "=== Done ==="
