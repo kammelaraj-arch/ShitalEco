@@ -253,39 +253,62 @@ jobs:
             docker container prune -f
 
             # ── Rolling restart: backend first ────────────────────────────────
-            # Aggressive cleanup before force-recreate. Docker's network
-            # namespace cleanup is ASYNC — even after `docker rm -f`, the
-            # port allocation may remain in docker's internal state for
-            # 10-30s, causing "port is already allocated" errors on the
-            # immediately-following `up -d`. The poll-wait below blocks
-            # until port 8000 is genuinely free before recreating.
+            # Previous attempts (rm -f shitaleco-backend-1 + fuser + 30s wait)
+            # failed because port 8000 was bound by a DIFFERENT container (or
+            # docker's bridge networking held the allocation in a stuck
+            # state). The 30s poll-wait expired with port still bound, then
+            # compose up hit the same port-allocated error.
+            #
+            # Now we discover what's actually holding port 8000 and remove it
+            # — by container if it's a docker container, by process if it's
+            # not. Last resort: restart the docker daemon (nuclear but
+            # guaranteed to clear all stuck port allocations).
             echo "=== Rolling restart: backend ==="
-            # 1. Hard-remove the existing container (releases compose's hold)
+
+            # 1. Stop any container that maps port 8000 to host (regardless of name)
+            echo "   pre-clean: searching for containers holding port 8000..."
+            holder=$(docker ps -a --format '{{.ID}} {{.Names}} {{.Ports}}' | grep -E ':8000->|:8000$|->8000' || true)
+            if [ -n "$holder" ]; then
+              echo "   found containers on port 8000:"
+              echo "$holder" | sed 's/^/     /'
+              echo "$holder" | awk '{print $1}' | xargs -r docker rm -f
+            fi
+
+            # 2. compose-level cleanup of backend (defence in depth)
             docker compose -f docker-compose.prod.yml stop backend 2>/dev/null || true
             docker compose -f docker-compose.prod.yml rm -f backend 2>/dev/null || true
             docker rm -f shitaleco-backend-1 2>/dev/null || true
 
-            # 2. Kill anything else holding port 8000 (paranoid belt-and-braces)
+            # 3. Kill any non-docker process bound to port 8000
             fuser -k 8000/tcp 2>/dev/null || true
 
-            # 3. Clean up docker network state so the port allocation drops
+            # 4. Prune dangling docker networks
             docker network prune -f >/dev/null 2>&1 || true
 
-            # 4. Poll-wait until port 8000 is genuinely free (up to 30s).
-            #    Docker's network cleanup can lag this long after rm.
-            for i in $(seq 1 30); do
+            # 5. Poll-wait up to 20s for port 8000 to drop. If still bound,
+            #    restart the docker daemon — guaranteed cleanup of any stuck
+            #    port allocations in docker's internal state. ~5s downtime
+            #    on all other containers but unavoidable when the daemon is
+            #    in a stuck state.
+            STILL_BOUND=1
+            for i in $(seq 1 20); do
               if ! ss -tlnp 2>/dev/null | grep -q ':8000 ' && \
                  ! docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ':8000->'; then
                 echo "   port 8000 free after ${i}s"
+                STILL_BOUND=0
                 break
-              fi
-              if [ "$i" -eq 30 ]; then
-                echo "   WARN: port 8000 still bound after 30s — proceeding anyway"
               fi
               sleep 1
             done
+            if [ "$STILL_BOUND" -eq 1 ]; then
+              echo "   port 8000 STILL bound — restarting docker daemon (nuclear)"
+              ss -tlnp 2>/dev/null | grep ':8000 ' | sed 's/^/     /' || true
+              systemctl restart docker
+              sleep 10
+              echo "   docker daemon restarted"
+            fi
 
-            # 5. Now safe to recreate
+            # 6. Now safe to recreate
             docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate backend
 
             echo "Waiting for backend health (up to 600s — cold start on 2GB VPS runs"
