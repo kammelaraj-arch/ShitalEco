@@ -61,7 +61,7 @@ export function TapScreen() {
           clearInterval(timer)
           // Only abandon if no payment has succeeded yet
           if (readerStatusRef.current !== 'succeeded') {
-            speak('Card not tapped in time. Please start again.')
+            speak('Sairam ji, card not tapped in time. Please start again.')
             reset()
           }
           return 0
@@ -122,7 +122,7 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('cancelled')
             setStatusMessage('Payment session expired.')
-            speak('Card not tapped in time. Please start again.')
+            speak('Sairam ji, card not tapped in time. Please start again.')
           } else {
             if (s === 'PROCESSING') {
               setStatusMessage('Processing payment...')
@@ -157,7 +157,7 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('cancelled')
             setStatusMessage('Payment session expired.')
-            speak('Card not tapped in time. Please start again.')
+            speak('Sairam ji, card not tapped in time. Please start again.')
           } else {
             setStatusMessage('Waiting for card...')
           }
@@ -180,7 +180,7 @@ export function TapScreen() {
             clearInterval(poll)
             setReaderStatus('cancelled')
             setStatusMessage('Payment was cancelled.')
-            speak('Payment cancelled. Please start again.')
+            speak('Sairam ji, payment cancelled. Please start again.')
           } else if (d.status === 'requires_payment_method') {
             setStatusMessage('Tap, insert or swipe your card...')
           } else if (d.status === 'processing') {
