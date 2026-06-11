@@ -5,6 +5,7 @@ and all Foundation Fabrics into a unified agentic API.
 """
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -85,19 +86,24 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
                     mailboxes=settings.MAIL_AGENT_MAILBOXES)
 
     # ── Background recovery loop ─────────────────────────────────────────
-    # Runs forever inside the backend process: every 15 min it sweeps
-    # SumUp PENDING donations (reconcile against the SumUp API so any
-    # webhook misses self-heal) and emails a digest of unresolved
-    # CRITICAL/ERROR system_alerts. Closes the "I don't want to monitor"
-    # loop — if something needs human attention, it lands in the inbox.
-    from shital.services.background_recovery import recovery_loop
-    _recovery_task = _asyncio.create_task(recovery_loop())
-    logger.info("recovery_loop_started")
+    # Runs forever inside the backend process. DISABLED via env var on prod
+    # while we diagnose a crash that happens ~5 min after the loop starts
+    # (suspected OOM during SumUp transactions-API pagination, or
+    # uncaught exception in _sumup_reconcile_once tearing down the asyncio
+    # event loop). Set RECOVERY_LOOP_ENABLED=1 to re-enable.
+    _recovery_task: _asyncio.Task[None] | None = None
+    if os.environ.get("RECOVERY_LOOP_ENABLED", "0") == "1":
+        from shital.services.background_recovery import recovery_loop
+        _recovery_task = _asyncio.create_task(recovery_loop())
+        logger.info("recovery_loop_started")
+    else:
+        logger.info("recovery_loop_disabled_via_env")
 
     yield
     if _mail_task:
         _mail_task.cancel()
-    _recovery_task.cancel()
+    if _recovery_task is not None:
+        _recovery_task.cancel()
     logger.info("shital_shutdown")
 
 
