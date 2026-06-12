@@ -1,0 +1,49 @@
+name: Diagnose prod backend (post-promote)
+
+on:
+  push:
+    branches: [claude/fix-access-payment-stability-Q40dj]
+    paths:
+      - '.github/workflows/diag-prod-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 120s
+          command_timeout: 5m
+          script: |
+            set +e
+            echo "=== docker ps backend + deployer ==="
+            docker ps -a --filter 'name=shitaleco-backend-1' --filter 'name=shitaleco-deployer-1' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+            echo ""
+            echo "=== backend image ==="
+            docker inspect shitaleco-backend-1 --format 'image={{.Config.Image}} cmd={{.Config.Cmd}}'
+
+            echo ""
+            echo "=== backend last 80 log lines ==="
+            docker logs --tail 80 shitaleco-backend-1 2>&1
+
+            echo ""
+            echo "=== nginx error log last 40 ==="
+            docker exec shitaleco-nginx-1 sh -c 'tail -40 /var/log/nginx/error.log' 2>&1
+
+            echo ""
+            echo "=== /health from inside backend? ==="
+            docker exec shitaleco-backend-1 sh -c 'curl -m 3 -s -o /dev/null -w "in-container /health → %{http_code}\n" http://localhost:8000/health' 2>&1
+
+            echo ""
+            echo "=== docker events last 5m for backend ==="
+            docker events --since 5m --until 0s --filter container=shitaleco-backend-1 2>&1 | tail -30
+
+            echo ""
+            echo "=== port 8000 binding from host ==="
+            ss -ltnp 2>/dev/null | grep ':8000 ' || echo "  nothing listening on host :8000"
