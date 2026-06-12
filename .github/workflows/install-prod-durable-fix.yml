@@ -11,6 +11,9 @@ name: Install prod durable fix (assertion service)
 # Idempotent — safe to re-run any time. After this lands, prod should
 # self-recover from the workspace-backend-1 zombie pattern without any
 # human intervention.
+#
+# 14:18 — promote-to-prod took prod down (503 upstream connect refused).
+# Re-triggering this workflow to recover + apply latest fixes.
 
 on:
   push:
@@ -85,6 +88,12 @@ jobs:
             /opt/shitaleco/infra/host/assert-state.sh
             echo "--- assert-state.log tail ---"
             tail -20 /var/log/shital-assert-state.log 2>/dev/null || echo "(no log yet)"
+
+            echo ""
+            echo "=== Bring up ALL prod services (idempotent — nothing happens if already running) ==="
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+            timeout 120 docker compose -p shitaleco -f docker-compose.prod.yml up -d 2>&1 | tail -30
 
             echo ""
             echo "=== Wait /health (3 min) ==="
