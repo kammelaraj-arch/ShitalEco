@@ -1,0 +1,95 @@
+name: Disable recovery_loop (causes uvicorn death after ~5min)
+
+# Permanent fix for today's repeated "backend dies after 5-7 min" outages.
+# The recovery_loop background task in background_recovery.py crashes the
+# asyncio event loop after a few iterations (suspected via the broken
+# import 'shital.services.secrets_manager' or OOM in SumUp pagination).
+# main.py already has the env-var disable hook; just need to set
+# RECOVERY_LOOP_ENABLED=0 in both .env files and recreate backends.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/disable-recovery-loop.yml'
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 12m
+          script: |
+            set +e
+
+            for stack in prod dev; do
+              if [ "$stack" = "prod" ]; then
+                DIR=/opt/shitaleco
+                ENVF=.env
+                PROJ=shitaleco
+                COMPOSE=docker-compose.prod.yml
+                SVC=backend
+                CNAME=shitaleco-backend-1
+                HEALTH_URL=http://localhost:8000/health
+              else
+                DIR=/opt/shitaleco-dev
+                ENVF=.env.dev
+                PROJ=shitaleco-dev
+                COMPOSE=docker-compose.dev.yml
+                SVC=backend-dev
+                CNAME=shitaleco-dev-backend-dev-1
+                HEALTH_URL=http://localhost:8001/health
+              fi
+
+              echo "============================================================"
+              echo "==  ${stack} stack — ensure RECOVERY_LOOP_ENABLED=0        =="
+              echo "============================================================"
+              cd "$DIR" || { echo "  $DIR missing — skip"; continue; }
+
+              if [ ! -f "$ENVF" ]; then
+                echo "  $ENVF missing — create"
+                touch "$ENVF"
+              fi
+
+              if grep -q "^RECOVERY_LOOP_ENABLED=" "$ENVF"; then
+                sed -i 's|^RECOVERY_LOOP_ENABLED=.*|RECOVERY_LOOP_ENABLED=0|' "$ENVF"
+                echo "  updated RECOVERY_LOOP_ENABLED in $ENVF"
+              else
+                echo "RECOVERY_LOOP_ENABLED=0" >> "$ENVF"
+                echo "  appended RECOVERY_LOOP_ENABLED=0 to $ENVF"
+              fi
+
+              grep "^RECOVERY_LOOP_ENABLED" "$ENVF"
+
+              # Recreate backend so the new env takes effect.
+              set -a; . "$ENVF"; set +a
+              echo "  recreating $CNAME ..."
+              docker compose -p "$PROJ" --env-file "$ENVF" -f "$COMPOSE" \
+                up -d --force-recreate --no-deps "$SVC" 2>&1 | tail -10
+
+              # Wait /health.
+              echo "  waiting for /health (up to 4 min):"
+              for i in $(seq 1 48); do
+                sleep 5
+                c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
+                [ "$c" = "200" ] && { echo "    OK after $((i*5))s"; break; }
+                [ $((i % 6)) -eq 0 ] && echo "    $((i*5))s — $c"
+              done
+
+              # Quick verify the env var IS in the running container.
+              echo "  env in container:"
+              docker exec "$CNAME" sh -c 'echo RECOVERY_LOOP_ENABLED=$RECOVERY_LOOP_ENABLED' 2>&1 | head -2
+
+              echo ""
+            done
+
+            echo "=== Done. Both backends should NOT crash again from recovery_loop. ==="
+            curl -s -o /dev/null -w "prod /health → %{http_code}\n" -m 5 http://localhost:8000/health
+            curl -s -o /dev/null -w "dev  /health → %{http_code}\n" -m 5 http://localhost:8001/health
