@@ -110,6 +110,16 @@ jobs:
             timeout 120 docker compose -p shitaleco -f docker-compose.prod.yml up -d 2>&1 | tail -30
 
             echo ""
+            echo "=== Also bring up dev backend (if .env.dev exists) ==="
+            if [ -f /opt/shitaleco-dev/.env.dev ]; then
+              cd /opt/shitaleco-dev
+              set -a; . .env.dev; set +a
+              timeout 60 docker compose -p shitaleco-dev -f docker-compose.dev.yml up -d backend-dev 2>&1 | tail -15
+            else
+              echo "  /opt/shitaleco-dev/.env.dev missing — skip"
+            fi
+
+            echo ""
             echo "=== Wait /health (3 min) ==="
             for i in $(seq 1 36); do
               sleep 5
