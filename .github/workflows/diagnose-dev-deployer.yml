@@ -1,0 +1,79 @@
+name: Diagnose dev → deployer DNS failure
+
+# The dev System Ops card shows "Deployer unreachable: <urlopen error [Errno -2]
+# Name or service not known>". That's a DNS resolution failure: backend-dev
+# can't resolve "deployer" to an IP. backend-dev is supposed to be attached to
+# the prod stack's `shitaleco_internal` network (aliased prod-bridge in dev
+# compose) so it can reach the deployer container that lives in the prod
+# stack.
+#
+# Read-only diagnostic. Does not change anything.
+
+on:
+  push:
+    branches: [claude/fix-access-payment-stability-Q40dj]
+    paths:
+      - '.github/workflows/diagnose-dev-deployer.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH inspect dev↔deployer wiring (read-only)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 120s
+          command_timeout: 5m
+          script: |
+            set +e
+            echo "============================================="
+            echo "==   Dev → deployer DNS / network probe    =="
+            echo "============================================="
+
+            echo ""
+            echo "=== 1) Is the prod stack's shitaleco_internal network present? ==="
+            docker network ls | grep -E 'shitaleco|internal' || echo "  none"
+
+            echo ""
+            echo "=== 2) Containers on shitaleco_internal (looking for deployer) ==="
+            docker network inspect shitaleco_internal --format '{{range .Containers}}{{.Name}} ({{.IPv4Address}}){{"\n"}}{{end}}' 2>&1
+
+            echo ""
+            echo "=== 3) Is the deployer container running at all? ==="
+            docker ps -a --filter 'name=deployer' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+
+            echo ""
+            echo "=== 4) backend-dev container — networks attached ==="
+            docker inspect shitaleco-dev-backend-dev-1 \
+              --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} (IP: {{$v.IPAddress}}, Aliases: {{$v.Aliases}}){{"\n"}}{{end}}' 2>&1
+
+            echo ""
+            echo "=== 5) Probe DNS from inside backend-dev: getent hosts deployer ==="
+            docker exec shitaleco-dev-backend-dev-1 sh -c 'getent hosts deployer 2>&1; echo exit=$?'
+
+            echo ""
+            echo "=== 6) Probe HTTP from inside backend-dev: curl deployer:9000/health ==="
+            docker exec shitaleco-dev-backend-dev-1 sh -c \
+              'curl -m 5 -s -o /dev/null -w "http_code=%{http_code} time=%{time_total}\n" http://deployer:9000/health 2>&1; echo exit=$?'
+
+            echo ""
+            echo "=== 7) DEPLOYER_URL env on backend-dev ==="
+            docker exec shitaleco-dev-backend-dev-1 sh -c 'echo "DEPLOYER_URL=$DEPLOYER_URL"'
+
+            echo ""
+            echo "=== 8) deployer/server.py — is it healthy from host? ==="
+            DPL_IP=$(docker inspect shitaleco-deployer-1 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' 2>/dev/null | head -1 | awk '{print $1}')
+            echo "deployer host IP: $DPL_IP"
+            [ -n "$DPL_IP" ] && curl -m 5 -s -o /dev/null -w "from host → deployer:9000 http_code=%{http_code}\n" http://$DPL_IP:9000/health
+
+            echo ""
+            echo "=== 9) Prod compose project state ==="
+            docker compose ls 2>&1 | head -10
+
+            echo ""
+            echo "=== Done ==="
