@@ -368,7 +368,15 @@ echo "=== Ensure all required ${STACK_NAME} containers exist ==="
 if [ "$TARGET" = "dev" ]; then
   REQUIRED_SERVICES="db-dev backend-dev admin-dev quick-donation-dev kiosk-dev screen-dev nginx-dev"
 else
-  REQUIRED_SERVICES="db backend admin quick-donation kiosk screen service nginx certbot backup-scheduler deployer"
+  # ⚠️ 'deployer' is DELIBERATELY EXCLUDED. deploy.sh runs INSIDE the
+  # deployer container; including it here means `compose up -d
+  # --force-recreate deployer` kills deploy.sh's own container mid-run,
+  # aborting the promote and leaving frontends stuck in Created (the
+  # 12-Jun 18:42 self-destruct). The deployer is long-lived; it's
+  # recreated out-of-band (install workflow / manual), never by the
+  # script it hosts. Same reasoning excludes nothing else — only the
+  # self-host container is unsafe to recreate from within.
+  REQUIRED_SERVICES="db backend admin quick-donation kiosk screen service nginx certbot backup-scheduler"
 fi
 $COMPOSE_CMD up -d --no-deps $REQUIRED_SERVICES 2>&1 | tail -30 || true
 
