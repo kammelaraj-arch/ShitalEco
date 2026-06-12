@@ -1,4 +1,5 @@
 name: Restart Prod Backend (one-shot)
+# Trigger re-run after 1079c85 (mem_limit enforcement fix in compose)
 
 # Surgical workflow: SSH to prod and `docker restart shitaleco-backend-1`.
 # Faster than a full deploy (~60s vs 10 min), no image pull, no port-conflict
