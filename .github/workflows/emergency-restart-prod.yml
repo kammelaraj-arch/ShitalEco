@@ -37,10 +37,8 @@ jobs:
             ps -eo pid,rss,comm --sort=-rss 2>/dev/null | head -11
 
             echo ""
-            echo "=== Kill any stuck docker compose processes ==="
-            pgrep -af 'docker compose' | head -5
-            pkill -9 -f 'docker compose' 2>/dev/null
-            sleep 2
+            echo "=== List stuck docker compose processes (do NOT pkill; matched our own script last time) ==="
+            pgrep -af 'docker compose' 2>/dev/null | grep -v "$$" | head -5 || true
 
             echo ""
             echo "=== Free RAM: stop the non-critical dev containers (we can restart them later) ==="
