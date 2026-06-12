@@ -172,14 +172,26 @@ jobs:
             # aborts mid-rollout. Force-remove by name first so compose has
             # a clean slot to land into. -f ignores "not found" so the call
             # is safe to run unconditionally.
-            echo "=== Pre-clean: full compose-down + drop stale container IDs ==="
-            docker compose -f docker-compose.dev.yml down --remove-orphans 2>/dev/null || true
+            #
+            # ⚠️ CRITICAL — DO NOT add `--remove-orphans` here, and ALWAYS
+            # pass `-p shitaleco-dev`. The dev compose references prod's
+            # `shitaleco_internal` network as an external network (so the dev
+            # backend can reach the deployer at deployer:9000). With
+            # `--remove-orphans`, compose treats EVERY prod container on that
+            # shared network (backend, admin, nginx, …) as an orphan and
+            # SIGKILLs them — exitCode 137. That was the 12-Jun all-day
+            # "prod keeps dying" incident: every push to main triggered this
+            # deploy-dev job, whose `down --remove-orphans` nuked prod's
+            # backend off the shared network. Scope to the dev project and
+            # never sweep orphans across a shared external network.
+            echo "=== Pre-clean: dev compose down (NO --remove-orphans) ==="
+            docker compose -p shitaleco-dev -f docker-compose.dev.yml down 2>/dev/null || true
             for c in db backend admin quick-donation kiosk screen nginx; do
               docker rm -f "shitaleco-dev-${c}-dev-1" 2>/dev/null || true
             done
-            
+
             echo "=== Bring dev stack up ==="
-            docker compose -f docker-compose.dev.yml up -d --remove-orphans
+            docker compose -p shitaleco-dev -f docker-compose.dev.yml up -d
 
             # ── Backend health check ────────────────────────────────────────────
             # 180 × 5s = 900s (15 min). Cold start on the 2GB VPS runs alembic

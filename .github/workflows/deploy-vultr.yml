@@ -530,8 +530,10 @@ jobs:
               cd "$DEV_DIR"
               git fetch origin
               git reset --hard origin/main
-              docker compose -f docker-compose.dev.yml pull 2>/dev/null || true
-              docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
+              docker compose -p shitaleco-dev -f docker-compose.dev.yml pull 2>/dev/null || true
+              # NO --remove-orphans: dev shares prod's external network; the
+              # flag would SIGKILL prod containers as "orphans" (12-Jun bug).
+              docker compose -p shitaleco-dev -f docker-compose.dev.yml up -d 2>/dev/null || true
             fi
 
             # CRITICAL: cd back to prod dir before any further docker compose

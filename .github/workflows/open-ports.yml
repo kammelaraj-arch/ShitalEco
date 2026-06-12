@@ -73,11 +73,14 @@ jobs:
 
             echo ""
             echo "=== 5. Start full dev stack ==="
-            docker compose -f docker-compose.dev.yml up -d --remove-orphans 2>/dev/null || true
+            # NO --remove-orphans: dev compose shares prod's external network
+            # and --remove-orphans would SIGKILL prod containers. Scope to
+            # the dev project explicitly.
+            docker compose -p shitaleco-dev -f docker-compose.dev.yml up -d 2>/dev/null || true
 
             echo ""
             echo "=== 6. Status ==="
-            docker compose -f docker-compose.dev.yml ps
+            docker compose -p shitaleco-dev -f docker-compose.dev.yml ps
             echo ""
             echo "Dev URLs:"
             echo "  http://192.248.147.205:8080"

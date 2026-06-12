@@ -217,8 +217,14 @@ def op_recreate_stack(args):
                 "exit_code": -3, "duration_ms": 0}
     compose = DEV_COMPOSE if target == "dev" else PROD_COMPOSE
     env_file = DEV_ENV if target == "dev" else PROD_ENV
-    return _exec(["docker", "compose", "--env-file", env_file, "-f", compose,
-                  "up", "-d", "--force-recreate", "--remove-orphans"], timeout=600)
+    # ⚠️ NEVER use --remove-orphans here. The dev compose references prod's
+    # shitaleco_internal network as external; --remove-orphans then treats
+    # every prod container on that shared network as an orphan and SIGKILLs
+    # them (the 12-Jun all-day prod-outage bug). Always pass an explicit
+    # project name and never sweep orphans across the shared network.
+    project = "shitaleco-dev" if target == "dev" else "shitaleco"
+    return _exec(["docker", "compose", "-p", project, "--env-file", env_file,
+                  "-f", compose, "up", "-d", "--force-recreate"], timeout=600)
 
 
 def op_psql_select(args):
