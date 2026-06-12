@@ -90,7 +90,14 @@ jobs:
               sleep 10
             fi
             # 6. Now safe to create backend
-            docker compose -f docker-compose.prod.yml up -d --no-deps --pull always backend
+            # NOTE: NO --pull here. We've already done `docker pull :dev`
+            # + `docker tag :dev :latest` above, so the LOCAL :latest
+            # points at the freshly-built CI image. `--pull always` would
+            # re-pull :latest from the REGISTRY, but CI only pushes :dev
+            # (not :latest), so the registry's :latest is the stale
+            # last-Promote image — overwriting our local retag with old
+            # code. That was the 12-Jun "fix lands, prod still old" bug.
+            docker compose -f docker-compose.prod.yml up -d --no-deps backend
 
             echo "=== Waiting for /health (up to 8 min) ==="
             for i in $(seq 1 96); do
