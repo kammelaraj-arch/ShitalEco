@@ -1,0 +1,93 @@
+name: Free port 8000 and bring backend up
+
+# The post-promote outage is caused by a stale process holding host port 8000.
+# `docker compose up -d backend` fails with:
+#   "Bind for 0.0.0.0:8000 failed: port is already allocated"
+# Identify the holder, kill by PID (NOT pkill — pkill matched our own script
+# last time and signal-9'd it after 1s), then bring backend up.
+
+on:
+  push:
+    branches: [claude/fix-access-payment-stability-Q40dj]
+    paths:
+      - '.github/workflows/free-port-8000.yml'
+  workflow_dispatch:
+
+jobs:
+  free:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 120s
+          command_timeout: 10m
+          script: |
+            set +e
+
+            echo "=== What is holding port 8000? ==="
+            ss -ltnp 2>/dev/null | grep ':8000 ' || echo "  nothing on :8000 via ss"
+            echo ""
+            echo "via fuser:"
+            fuser 8000/tcp 2>&1 || echo "  fuser found nothing"
+            echo ""
+            echo "via lsof:"
+            lsof -i :8000 2>&1 | head -10 || echo "  lsof found nothing"
+
+            echo ""
+            echo "=== Kill by PID (specific, not pattern-matched) ==="
+            for PID in $(fuser 8000/tcp 2>/dev/null); do
+              [ -z "$PID" ] && continue
+              echo "  killing PID $PID:"
+              ps -p "$PID" -o pid,cmd 2>/dev/null | tail -n +2 || true
+              kill -9 "$PID" 2>/dev/null && echo "    sent SIGKILL" || echo "    kill failed"
+            done
+
+            # Belt-and-braces — fuser -k uses the PID list it just collected
+            # and doesn't match our shell.
+            fuser -k 8000/tcp 2>/dev/null || true
+            sleep 2
+
+            echo ""
+            echo "=== After kill — port 8000 status ==="
+            ss -ltnp 2>/dev/null | grep ':8000 ' || echo "  ✓ port :8000 is FREE"
+
+            echo ""
+            echo "=== Force-remove any half-created backend container ==="
+            docker rm -f shitaleco-backend-1 2>/dev/null && echo "  removed" || echo "  none to remove"
+
+            echo ""
+            echo "=== compose up backend (no pull — :latest already retagged) ==="
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+            timeout 60 docker compose -f docker-compose.prod.yml up -d --no-deps backend
+            UP_RC=$?
+            echo "compose up exit=$UP_RC"
+
+            echo ""
+            echo "=== State after up ==="
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+            echo ""
+            echo "=== Wait /health (up to 4 min) ==="
+            for i in $(seq 1 48); do
+              sleep 5
+              c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              if [ "$c" = "200" ]; then
+                echo "OK — backend healthy after $((i*5))s"
+                break
+              fi
+              [ $((i % 6)) -eq 0 ] && echo "  $i/48 ($((i*5))s) — got $c"
+            done
+
+            echo ""
+            echo "=== Final ==="
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}'
+            curl -s -o /dev/null -w "host /health → %{http_code}\n" -m 5 http://localhost:8000/health
+
+            echo ""
+            echo "=== Backend log tail ==="
+            docker logs --tail 40 shitaleco-backend-1 2>&1
