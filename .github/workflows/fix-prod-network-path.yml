@@ -1,0 +1,93 @@
+name: Fix prod network path (restart nginx route to backend)
+
+# REAL diagnosis from the isolate workflow log:
+#  - NO docker kill/die events — backend container never dies
+#  - `docker ps` showed "Up 4 minutes (healthy)" at the exact moment the
+#    probe returned 000
+# => The container is healthy; nginx lost its ROUTE to it. Dev stack ops
+#    churning the shared shitaleco_internal network's iptables/DNS broke
+#    nginx→backend resolution. Restarting backend alone doesn't fix it
+#    because nginx caches the upstream IP; nginx itself must re-resolve.
+#
+# This workflow: ensure backend up, restart nginx so it re-resolves
+# backend on shitaleco_internal, verify ONLY prod containers are on that
+# network, remove the dev-watchdog cron for good, watch 8 min.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-prod-network-path.yml'
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 14m
+          script: |
+            set +e
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+
+            echo "=== who is on shitaleco_internal? (should be prod-only) ==="
+            docker network inspect shitaleco_internal \
+              --format '{{range .Containers}}{{.Name}} {{end}}' 2>&1
+
+            echo ""
+            echo "=== remove dev-watchdog cron for good ==="
+            crontab -l 2>/dev/null | grep -v 'shital-dev-watchdog' | crontab -
+            crontab -l 2>/dev/null | grep -vE '^#|^$' || echo "  (only backup remains)"
+
+            echo ""
+            echo "=== ensure backend running ==="
+            state=$(docker inspect shitaleco-backend-1 --format '{{.State.Status}}' 2>/dev/null || echo absent)
+            echo "backend state: $state"
+            if [ "$state" != "running" ]; then
+              docker rm -f shitaleco-backend-1 2>/dev/null
+              docker compose -p shitaleco --env-file .env -f docker-compose.prod.yml up -d --no-deps backend 2>&1 | tail -5
+              echo "  waiting for backend health..."
+              for i in $(seq 1 48); do
+                sleep 5
+                ic=$(docker exec shitaleco-backend-1 curl -m 3 -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+                [ "$ic" = "200" ] && { echo "  backend healthy after $((i*5))s"; break; }
+                [ $((i % 6)) -eq 0 ] && echo "    $((i*5))s in-container=$ic"
+              done
+            fi
+
+            echo ""
+            echo "=== restart nginx so it re-resolves backend on the network ==="
+            docker compose -p shitaleco --env-file .env -f docker-compose.prod.yml up -d --no-deps --force-recreate nginx 2>&1 | tail -5
+
+            echo ""
+            echo "=== probe via nginx (host :80 and :443 path) ==="
+            sleep 3
+            curl -s -o /dev/null -w "  host :8000 direct  → %{http_code}\n" -m 5 http://localhost:8000/health
+            curl -s -o /dev/null -w "  host :80 /health   → %{http_code}\n" -m 5 http://localhost:80/health
+
+            echo ""
+            echo "=== Watch 8 min: container state vs reachability each 30s ==="
+            for i in $(seq 1 16); do
+              sleep 30
+              st=$(docker inspect shitaleco-backend-1 --format '{{.State.Status}}/{{.State.Health.Status}}' 2>/dev/null || echo absent)
+              host8000=$(timeout 4 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              nginx80=$(timeout 4 curl -s -o /dev/null -w "%{http_code}" http://localhost:80/health 2>/dev/null || echo "000")
+              echo "  [$((i*30))s] container=$st  :8000=$host8000  nginx:80=$nginx80"
+              if [ "$host8000" != "200" ] && [ "$st" = "running/healthy" ]; then
+                echo "    ⚠️ container HEALTHY but :8000 unreachable — port/iptables broke. Capturing:"
+                ss -ltnp 2>/dev/null | grep ':8000 ' || echo "      nothing listening on :8000"
+                docker events --since 90s --until 0s 2>&1 | grep -vE 'exec_|health_status' | tail -15
+              fi
+            done
+
+            echo ""
+            echo "=== final ==="
+            docker ps --filter 'name=shitaleco-backend-1' --filter 'name=shitaleco-nginx-1' --format 'table {{.Names}}\t{{.Status}}'
+            curl -s -o /dev/null -w "host :8000 → %{http_code}\n" -m 5 http://localhost:8000/health
