@@ -1,0 +1,69 @@
+name: Sync deploy.sh to host
+
+# Pushes deployer/deploy.sh to /opt/shitaleco/deployer/deploy.sh on the host.
+# The deployer container has deploy.sh bind-mounted (ro), so the next webhook
+# call (Promote-to-Prod / dev deploy) picks up the new file with no
+# deployer restart needed.
+#
+# Pure file-sync + syntax verification. No docker compose action, no
+# container recreation. Safe to run anytime.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deployer/deploy.sh'
+      - '.github/workflows/sync-deploy-sh.yml'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: scp deploy.sh to host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          source: "deployer/deploy.sh"
+          target: "/opt/shitaleco/"
+          overwrite: true
+
+      - name: verify the deploy.sh on host parses
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 30s
+          command_timeout: 60s
+          script: |
+            set +e
+            FILE=/opt/shitaleco/deployer/deploy.sh
+            echo "=== file metadata ==="
+            ls -l "$FILE"
+            echo ""
+            echo "=== bash syntax check ==="
+            if bash -n "$FILE"; then
+              echo "  ✓ deploy.sh syntax OK"
+            else
+              echo "  ✗ deploy.sh has a syntax error — DO NOT promote until fixed"
+              exit 1
+            fi
+            echo ""
+            echo "=== target-aware fix present? ==="
+            grep -c 'BACKEND_CONTAINER=' "$FILE" \
+              | sed 's/^/  BACKEND_CONTAINER refs (expect ≥ 2): /'
+            grep -c '=== FINAL AUDIT — every REQUIRED_SERVICE' "$FILE" \
+              | sed 's/^/  expanded FINAL_AUDIT block (expect 1): /'
+            grep -c 'restarting shitaleco-nginx-1 to flush stale upstream DNS' "$FILE" \
+              | sed 's/^/  forced nginx restart (expect 1): /'
+            grep -c 'backend via nginx (https://localhost/health)' "$FILE" \
+              | sed 's/^/  end-to-end nginx→backend smoke (expect 2): /'
+            echo ""
+            echo "  ✓ deploy.sh hardening landed on host. Next promote uses it."

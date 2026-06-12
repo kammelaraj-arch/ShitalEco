@@ -630,9 +630,21 @@ else
     fi
   done
 
-  # Reload nginx (prod only — dev nginx auto-reloads)
-  $COMPOSE_CMD exec -T nginx nginx -s reload 2>/dev/null || \
-    $COMPOSE_CMD up -d --no-deps nginx
+  # Force nginx to fully restart (not just reload). When backend has been
+  # recreated, `nginx -s reload` keeps the old upstream IP in its resolver
+  # cache and every /api/* request 502's. `docker restart` re-resolves DNS
+  # on container start, which is the only reliable way to pick up the new
+  # backend IP. 12-Jun outage was caused by this exact stale-cache 502.
+  if ! docker inspect shitaleco-nginx-1 >/dev/null 2>&1; then
+    echo "  shitaleco-nginx-1 absent — recreating"
+    $COMPOSE_CMD up -d --no-deps nginx 2>&1 | tail -5
+  else
+    echo "  restarting shitaleco-nginx-1 to flush stale upstream DNS"
+    docker restart shitaleco-nginx-1 2>&1 | sed 's/^/    /' || \
+      $COMPOSE_CMD up -d --no-deps nginx
+  fi
+  # Give nginx a moment to bind :80/:443 before smoke tests.
+  sleep 3
 fi
 
 # ── Smoke tests ──────────────────────────────────────────────────────────────
@@ -656,6 +668,20 @@ else
   smoke "kiosk via nginx"   "http://localhost:80/kiosk/"
   smoke "donate via nginx"  "http://localhost:80/donate/"
   smoke "screen via nginx"  "http://localhost:80/screen/"
+
+  # End-to-end: backend reachable THROUGH nginx over TLS. This is the exact
+  # path real users hit (Cloudflare/Envoy → host nginx :443 → backend:8000).
+  # Catches the stale-DNS 502 that the in-container `:8000` and `:80/`
+  # smokes miss. -k accepts the self-signed cert presented to host curl.
+  e2e_code=$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 8 \
+             -H "Host: shital.org.uk" \
+             https://localhost/health 2>/dev/null || echo 000)
+  if [ "$e2e_code" = "200" ]; then
+    echo "  ✓ backend via nginx (https://localhost/health) → 200"
+  else
+    echo "  ✗ backend via nginx (https://localhost/health) → $e2e_code"
+    SMOKE_FAIL=1
+  fi
 fi
 
 if [ "$SMOKE_FAIL" -ne 0 ]; then
@@ -776,28 +802,45 @@ fi
 # the backend container EXISTS and is running before we write "success" to
 # deploy-history.jsonl. If it doesn't exist, we make one last force-create
 # attempt and refuse to record success until it's running.
-if [ "$TARGET" = "dev" ]; then
-  FINAL_BACKEND_CNAME="shitaleco-dev-backend-dev-1"
-  FINAL_BACKEND_SVC="backend-dev"
-else
-  FINAL_BACKEND_CNAME="shitaleco-backend-1"
-  FINAL_BACKEND_SVC="backend"
-fi
-FINAL_STATE=$(docker inspect "$FINAL_BACKEND_CNAME" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
-if [ "$FINAL_STATE" != "running" ]; then
-  echo "!!! FINAL AUDIT FAIL — ${FINAL_BACKEND_CNAME} is '${FINAL_STATE}' (expected running)"
-  echo "    Last-ditch attempt: compose up -d --no-deps ${FINAL_BACKEND_SVC}"
-  $COMPOSE_CMD up -d --no-deps "$FINAL_BACKEND_SVC" 2>&1 | tail -20 || true
-  sleep 5
-  FINAL_STATE=$(docker inspect "$FINAL_BACKEND_CNAME" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
-  if [ "$FINAL_STATE" != "running" ]; then
-    cat >> "$HISTORY_FILE" <<JSON
-{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA:-${GIT_SHA:0:7}}","branch":"${DEPLOY_BRANCH}","status":"backend_missing_after_deploy","message":"final audit: ${FINAL_BACKEND_CNAME} state=${FINAL_STATE}"}
-JSON
-    echo "!!! ABORTING: backend STILL not running. Deploy NOT marked success."
-    exit 3
+echo "=== FINAL AUDIT — every REQUIRED_SERVICE must be running ==="
+# Promote-to-Prod is only "complete" if every required container is up. The
+# 12-Jun outage was caused by FINAL AUDIT only checking backend; nginx was
+# silently missing, and deploy.sh wrote status=success to history while the
+# site was 503'ing for every user. Now we iterate the same REQUIRED_SERVICES
+# list `up -d` was given, derive each container name from $TARGET, and fail
+# the deploy if any of them is not in "running" state. One last-ditch
+# `compose up --no-deps <svc>` per missing service before giving up.
+AUDIT_FAIL=""
+for svc in $REQUIRED_SERVICES; do
+  if [ "$TARGET" = "dev" ]; then
+    cname="shitaleco-dev-${svc}-1"
+  else
+    cname="shitaleco-${svc}-1"
   fi
-  echo "    Recovered — ${FINAL_BACKEND_CNAME} is now running."
+  state=$(docker inspect "$cname" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
+  if [ "$state" = "running" ]; then
+    echo "  ✓ ${svc} (${cname}) → running"
+  else
+    echo "  ✗ ${svc} (${cname}) → ${state} — last-ditch compose up"
+    $COMPOSE_CMD up -d --no-deps "$svc" 2>&1 | tail -5 || true
+    sleep 5
+    state=$(docker inspect "$cname" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
+    if [ "$state" = "running" ]; then
+      echo "    recovered — ${cname} now running"
+    else
+      echo "    STILL ${state} after recovery attempt"
+      AUDIT_FAIL="${AUDIT_FAIL} ${svc}=${state}"
+    fi
+  fi
+done
+
+if [ -n "$AUDIT_FAIL" ]; then
+  cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA:-${GIT_SHA:0:7}}","branch":"${DEPLOY_BRANCH}","status":"audit_fail","message":"final audit: missing/broken${AUDIT_FAIL}"}
+JSON
+  echo "!!! FINAL AUDIT FAIL${AUDIT_FAIL}"
+  echo "!!! ABORTING: deploy NOT marked success — deployer's rollback path will engage."
+  exit 3
 fi
 
 # ── Success ─────────────────────────────────────────────────────────────────
