@@ -472,8 +472,21 @@ echo "=== Rolling restart: backend (${STACK_NAME}) ==="
 #    on prod, the service literally doesn't exist, so calling it is a
 #    guaranteed second-failure. Make the fallback target-aware.
 
-docker rm -f shitaleco-backend-1 2>/dev/null || true
-docker rm -f shitaleco-dev-backend-dev-1 2>/dev/null || true
+# Target-aware backend determination — MUST come before the docker rm below.
+# A dev deploy must NEVER touch the prod backend container, and vice-versa.
+# (12-Jun bug: these rm lines ran UNCONDITIONALLY, so every dev deploy did
+#  `docker rm -f shitaleco-backend-1` — deleting the PROD backend — then only
+#  recreated backend-dev, leaving prod with no backend until manual recovery.)
+if [ "$TARGET" = "dev" ]; then
+  BACKEND_SVC=backend-dev
+  BACKEND_CONTAINER=shitaleco-dev-backend-dev-1
+else
+  BACKEND_SVC=backend
+  BACKEND_CONTAINER=shitaleco-backend-1
+fi
+
+# Remove ONLY the backend container for the current target.
+docker rm -f "$BACKEND_CONTAINER" 2>/dev/null || true
 sleep 1
 
 if [ "$PROMOTE" -eq 1 ]; then
@@ -481,12 +494,6 @@ if [ "$PROMOTE" -eq 1 ]; then
   echo "Using locally-promoted :latest (no --pull always)"
 else
   PULL_FLAG="--pull always"
-fi
-
-if [ "$TARGET" = "dev" ]; then
-  BACKEND_SVC=backend-dev
-else
-  BACKEND_SVC=backend
 fi
 
 # Run the up explicitly, capturing failure. Without `set -e` the script
