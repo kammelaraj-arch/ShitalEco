@@ -490,34 +490,28 @@ async def kiosks_status(ctx: CurrentSpace) -> dict[str, Any]:
             summary[health.lower()] += 1
         summary["total"] += 1
 
-        # Prefer the actual provider observed in recent donations over the
-        # static configured mapping. The configured one is often stale
-        # (e.g. kiosk_devices.card_reader_id points at an old Stripe row
-        # for a kiosk that's actually been using SumUp for months).
+        # Display the CONFIGURED reader pairing (kiosk_devices.card_reader_id
+        # → terminal_devices.*). The configured row is the source of truth
+        # that the kiosk app actually reads at runtime to drive payments.
+        #
+        # `reader_provider_actual` (provider on the most recent completed
+        # donation) is kept as a DIAGNOSTIC field only — it's exposed in
+        # the API response so the UI can flag a mismatch, but it does NOT
+        # override the displayed label. The previous "actual wins" override
+        # caused exactly the bug we saw on 12-Jun: Main Hundi had its
+        # reader correctly reconfigured from SumUp → Stripe in Admin, but
+        # historical donations were still SumUp, so the System Ops card
+        # kept showing the old SumUp reader label. From the operator's
+        # POV that looks like the swap "didn't take" — confusing and
+        # actively misleading after the very fix you just performed.
         configured = (r["reader_provider_configured"] or "").strip()
         actual     = (r["reader_provider_actual"]     or "").strip()
-        provider   = actual or configured or None
+        provider   = configured or actual or None
         mismatch   = bool(actual and configured and actual.lower() != configured.lower())
 
-        # Pick the label that matches the actual provider. If the configured
-        # terminal_devices row is the wrong provider (eg. kiosk_devices.card_
-        # reader_id still points at an old Stripe row but donations history
-        # shows SumUp), use the SumUp-matching row's label instead. Avoids
-        # the misleading "honeydew-everyone-then" Stripe label appearing
-        # next to a SUMUP provider tag.
         label_configured = (r["reader_label_configured"] or "").strip()
-        label_by_actual  = (r["reader_label_by_actual"]  or "").strip()
         sumup_serial     = (r["reader_sumup_serial_configured"] or "").strip()
-        if mismatch and label_by_actual:
-            reader_label = label_by_actual
-        elif mismatch and actual == "SUMUP" and sumup_serial:
-            reader_label = sumup_serial
-        elif mismatch:
-            # No matching row exists for the actual provider — hide the
-            # misleading configured label, surface the issue clearly.
-            reader_label = f"(no {actual.lower()} reader paired — fix in Admin)"
-        else:
-            reader_label = label_configured or sumup_serial or None
+        reader_label = label_configured or sumup_serial or None
 
         last_donation = r["last_donation_at"]
 
