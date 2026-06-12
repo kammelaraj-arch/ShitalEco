@@ -30,7 +30,7 @@ jobs:
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
           timeout: 120s
-          command_timeout: 5m
+          command_timeout: 15m
           script: |
             set -e
             echo "=== Removing watchdog cron temporarily (so it can't kick backend mid-restart) ==="
