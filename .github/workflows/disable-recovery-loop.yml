@@ -58,15 +58,24 @@ jobs:
                 touch "$ENVF"
               fi
 
-              if grep -q "^RECOVERY_LOOP_ENABLED=" "$ENVF"; then
-                sed -i 's|^RECOVERY_LOOP_ENABLED=.*|RECOVERY_LOOP_ENABLED=0|' "$ENVF"
-                echo "  updated RECOVERY_LOOP_ENABLED in $ENVF"
-              else
-                echo "RECOVERY_LOOP_ENABLED=0" >> "$ENVF"
-                echo "  appended RECOVERY_LOOP_ENABLED=0 to $ENVF"
-              fi
+              # Disable BOTH background tasks. recovery_loop ticks every
+              # 15 min so doesn't match the 5-7 min death pattern. mail_agent
+              # ticks every 5 min and uses Microsoft Graph + Anthropic — if
+              # it does sync blocking I/O (or anthropic SDK is sync under
+              # the hood), it'd wedge the asyncio event loop for the
+              # duration of the call. That fits.
+              for KV in "RECOVERY_LOOP_ENABLED=0" "MAIL_AGENT_POLL_SECONDS=0"; do
+                K="${KV%=*}"
+                if grep -q "^${K}=" "$ENVF"; then
+                  sed -i "s|^${K}=.*|${KV}|" "$ENVF"
+                  echo "  updated ${K} in $ENVF"
+                else
+                  echo "${KV}" >> "$ENVF"
+                  echo "  appended ${KV} to $ENVF"
+                fi
+              done
 
-              grep "^RECOVERY_LOOP_ENABLED" "$ENVF"
+              grep -E "^(RECOVERY_LOOP_ENABLED|MAIL_AGENT_POLL_SECONDS)=" "$ENVF"
 
               # Recreate backend so the new env takes effect.
               set -a; . "$ENVF"; set +a
