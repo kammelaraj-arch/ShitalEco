@@ -9,6 +9,10 @@ name: Kill workspace-backend-1 (port 8000 blocker)
 #
 # Fix: remove ALL workspace-* containers definitively, then bring our
 # real backend up.
+#
+# 13:5x — second outage of the same kind (workspace-backend-1 came back).
+# Re-triggering this workflow. Durable fix (systemd assertion service)
+# pending user go-ahead.
 
 on:
   push:
