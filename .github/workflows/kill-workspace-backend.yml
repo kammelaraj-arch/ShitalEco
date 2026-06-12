@@ -1,0 +1,82 @@
+name: Kill workspace-backend-1 (port 8000 blocker)
+
+# A zombie `workspace-backend-1` container is running with host port 8000
+# bound — leftover from the Neuron-co-located stack that lived on this VPS.
+# The kill-neuron-restart-backend workflow targeted this name in its
+# cleanup, but the container has come back (likely auto-restarted via
+# docker's restart policy from an earlier compose project). It's the
+# reason our shitaleco-backend-1 can't bind port 8000 → permanent 502.
+#
+# Fix: remove ALL workspace-* containers definitively, then bring our
+# real backend up.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/kill-workspace-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  kill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 6m
+          script: |
+            set +e
+
+            echo "=== Before — workspace-* containers ==="
+            docker ps -a --filter 'name=workspace-' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+            echo ""
+            echo "=== Stop + remove every workspace-* container ==="
+            for c in $(docker ps -a --filter 'name=workspace-' --format '{{.Names}}'); do
+              docker stop --timeout=3 "$c" 2>/dev/null
+              docker rm -f "$c" && echo "  removed $c" || echo "  failed $c"
+            done
+
+            echo ""
+            echo "=== Confirm port 8000 is free ==="
+            ss -ltnp 2>/dev/null | grep ':8000 ' || echo "  ✓ port 8000 free"
+
+            echo ""
+            echo "=== Force-remove any shitaleco-backend-1 husk ==="
+            docker rm -f shitaleco-backend-1 2>/dev/null && echo "  removed husk" || echo "  no husk"
+
+            echo ""
+            echo "=== Start shitaleco-backend-1 ==="
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+            timeout 60 docker compose -f docker-compose.prod.yml up -d --no-deps backend 2>&1
+
+            echo ""
+            echo "=== Wait /health (3 min) ==="
+            for i in $(seq 1 36); do
+              sleep 5
+              c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              [ "$c" = "200" ] && { echo "OK after $((i*5))s"; break; }
+              [ $((i % 6)) -eq 0 ] && echo "  $((i*5))s — $c"
+            done
+
+            echo ""
+            echo "=== Final ==="
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}'
+            curl -s -o /dev/null -w "host /health → %{http_code}\n" -m 5 http://localhost:8000/health
+
+            # ── Investigate WHY workspace-backend-1 keeps reappearing ──
+            echo ""
+            echo "=== Look for the compose project that owns 'workspace-*' ==="
+            docker compose ls 2>&1 | grep -i workspace || echo "  no workspace compose project running"
+            echo ""
+            echo "=== Any compose files in /workspace or /opt referencing 'workspace-' service names? ==="
+            grep -lE 'container_name:\s*workspace-' /workspace*/docker-compose*.yml /opt/*/docker-compose*.yml 2>/dev/null | head -5 || echo "  none found"
+            echo ""
+            echo "=== Any systemd unit or cron that runs compose with -p workspace? ==="
+            grep -rE 'compose.*-p\s+workspace' /etc/systemd /etc/cron.d /opt /root 2>/dev/null | head -5 || echo "  none found"
