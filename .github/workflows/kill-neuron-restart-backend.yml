@@ -27,14 +27,62 @@ jobs:
           command_timeout: 15m
           script: |
             set +e
-            echo "=== Step 1: stop Neuron deployer & its watchdog timer ==="
-            docker stop neuron-deployer 2>&1 | head -5
-            docker rm   neuron-deployer 2>&1 | head -5
-            systemctl stop    neuron-vhost-watchdog.timer 2>&1 | head -5
-            systemctl disable neuron-vhost-watchdog.timer 2>&1 | head -5
-            systemctl stop    neuron-vhost-watchdog.service 2>&1 | head -5
-            systemctl mask    neuron-vhost-watchdog.service 2>&1 | head -5
-            echo "Neuron pieces stopped/masked"
+            echo "=== Step 1: stop + DELETE all Neuron pieces ==="
+            # User directive: delete any Neuron stuff. Make Shital independent.
+
+            # 1a. Find and disable ALL neuron-* systemd units (not just watchdog)
+            for u in $(systemctl list-units --all --type=service --no-pager 2>/dev/null | awk '/neuron/{print $2}'); do
+              echo "  stopping/disabling $u"
+              systemctl stop "$u"     2>/dev/null || true
+              systemctl disable "$u"  2>/dev/null || true
+              systemctl mask "$u"     2>/dev/null || true
+            done
+            for u in $(systemctl list-units --all --type=timer --no-pager 2>/dev/null | awk '/neuron/{print $2}'); do
+              echo "  stopping/disabling $u"
+              systemctl stop "$u"     2>/dev/null || true
+              systemctl disable "$u"  2>/dev/null || true
+              systemctl mask "$u"     2>/dev/null || true
+            done
+
+            # 1b. Remove any neuron systemd unit files
+            rm -f /etc/systemd/system/neuron-*.service /etc/systemd/system/neuron-*.timer
+            rm -f /lib/systemd/system/neuron-*.service /lib/systemd/system/neuron-*.timer
+            systemctl daemon-reload
+
+            # 1c. Containers (any container with "neuron" in name)
+            docker ps -a --format '{{.Names}}' | grep -i neuron | xargs -r docker rm -f
+            # 1d. Images (any image with "neuron" in repo)
+            docker images --format '{{.Repository}}:{{.Tag}}' | grep -i neuron | xargs -r docker rmi -f
+
+            # 1e. Scripts + data dirs
+            rm -f /usr/local/bin/neuron-* /usr/local/sbin/neuron-*
+            rm -rf /opt/neuron-platform /opt/neuron 2>/dev/null || true
+
+            # 1f. Nginx vhost config that proxied to Neuron
+            rm -f /opt/shitaleco/nginx/conf.d/neuron.conf
+
+            # 1g. Any docker compose file referencing neuron in /etc or /opt
+            find /etc /opt -maxdepth 4 -name 'docker-compose*.yml' 2>/dev/null \
+              | xargs grep -l -i 'neuron' 2>/dev/null \
+              | while read f; do
+                  echo "  WARNING: $f references neuron — manual review needed"
+                done
+
+            # 1h. Cron entries that mention neuron
+            crontab -l 2>/dev/null | grep -v -i 'neuron' | crontab - || true
+            for cf in /etc/cron.d/*; do
+              if grep -l -i 'neuron' "$cf" 2>/dev/null; then
+                echo "  removing $cf"
+                rm -f "$cf"
+              fi
+            done
+
+            echo "Neuron pieces deleted from host"
+            echo "--- verify nothing neuron-related remains ---"
+            ls /etc/systemd/system/ 2>/dev/null | grep -i neuron || echo "  no systemd units"
+            docker ps -a | grep -i neuron || echo "  no containers"
+            ls /usr/local/bin/ 2>/dev/null | grep -i neuron || echo "  no scripts"
+            ls /opt/ 2>/dev/null | grep -i neuron || echo "  no /opt dirs"
 
             echo ""
             echo "=== Step 2: remove the duplicate 'workspace-*' containers ==="
