@@ -1,0 +1,105 @@
+name: Capture dead backend state+logs THEN restart
+
+# Prod backend died ~17:24 after 27 min uptime, with recovery_loop AND
+# mail_agent BOTH disabled. So neither background loop is the cause.
+# Capture the dead container's exact state + full logs BEFORE restarting,
+# so we finally see what actually happens at the moment of death.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/capture-death-then-restart.yml'
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 8m
+          script: |
+            set +e
+
+            echo "============================================================"
+            echo "==  1) Container state (running? exited? OOMKilled?)       =="
+            echo "============================================================"
+            docker ps -a --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}\t{{.RunningFor}}'
+            docker inspect shitaleco-backend-1 --format \
+              'Status={{.State.Status}} Health={{.State.Health.Status}} ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Error={{.State.Error}} Started={{.State.StartedAt}} Finished={{.State.FinishedAt}} Restarts={{.RestartCount}}' 2>&1
+
+            echo ""
+            echo "============================================================"
+            echo "==  2) Is uvicorn still ALIVE inside? (exec ps)            =="
+            echo "============================================================"
+            docker exec shitaleco-backend-1 ps aux 2>&1 | head -20 || echo "  cannot exec — container not running"
+
+            echo ""
+            echo "============================================================"
+            echo "==  3) In-container /health (bypass nginx + healthcheck)   =="
+            echo "============================================================"
+            docker exec shitaleco-backend-1 sh -c 'curl -m 5 -s -o /dev/null -w "in-container /health=%{http_code}\n" http://localhost:8000/health' 2>&1 || echo "  exec failed"
+
+            echo ""
+            echo "============================================================"
+            echo "==  4) Healthcheck history (last entries)                  =="
+            echo "============================================================"
+            docker inspect shitaleco-backend-1 --format '{{json .State.Health}}' 2>/dev/null \
+              | python3 -c "import json,sys; h=json.load(sys.stdin) or {}; print('Status:',h.get('Status'),'FailingStreak:',h.get('FailingStreak')); [print(f\"  {e['Start'][11:19]} exit={e['ExitCode']} {e['Output'][:120]!r}\") for e in (h.get('Log') or [])]" 2>&1
+
+            echo ""
+            echo "============================================================"
+            echo "==  5) LAST 120 backend log lines (the death moment)       =="
+            echo "============================================================"
+            docker logs --tail 120 --timestamps shitaleco-backend-1 2>&1 | tail -120
+
+            echo ""
+            echo "============================================================"
+            echo "==  6) Memory + OOM kernel signals                         =="
+            echo "============================================================"
+            free -h
+            cat /sys/fs/cgroup/memory.events 2>/dev/null || cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null || echo "  no cgroup memory.events"
+            dmesg 2>/dev/null | tail -40 | grep -iE 'oom|kill|memory' || echo "  no dmesg oom/kill"
+
+            echo ""
+            echo "============================================================"
+            echo "==  7) Recent docker events (kills/restarts)               =="
+            echo "============================================================"
+            docker events --since 35m --until 0s --filter container=shitaleco-backend-1 2>&1 \
+              | grep -vE 'exec_create|exec_start|exec_die|health_status' | tail -25
+
+            echo ""
+            echo "============================================================"
+            echo "==  8) systemd assert-state timer — has it been firing?    =="
+            echo "============================================================"
+            systemctl status shital-assert-state.timer --no-pager --lines=2 2>&1 | head -8
+            echo "--- last 25 assert-state.log ---"
+            tail -25 /var/log/shital-assert-state.log 2>/dev/null || echo "  no log"
+            echo "--- journalctl assert-state last 20 (look for 203/EXEC) ---"
+            journalctl -u shital-assert-state.service --since '35 min ago' --no-pager 2>&1 | tail -20
+
+            echo ""
+            echo "############################################################"
+            echo "##  NOW RESTART prod backend                              ##"
+            echo "############################################################"
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+            docker rm -f shitaleco-backend-1 2>/dev/null
+            sleep 2
+            docker compose -p shitaleco --env-file .env -f docker-compose.prod.yml up -d --no-deps backend 2>&1 | tail -10
+
+            echo ""
+            echo "=== wait /health (4 min) ==="
+            for i in $(seq 1 48); do
+              sleep 5
+              c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              [ "$c" = "200" ] && { echo "OK after $((i*5))s"; break; }
+              [ $((i % 6)) -eq 0 ] && echo "  $((i*5))s — $c"
+            done
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}'
