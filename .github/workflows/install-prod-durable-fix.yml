@@ -16,6 +16,7 @@ name: Install prod durable fix (assertion service)
 # Re-triggering this workflow to recover + apply latest fixes.
 # 14:55 — backend down AGAIN (502, even with -p shitaleco fix on disk).
 # Recovery + investigation needed.
+# 15:0x — and again. Recovering.
 
 on:
   push:
