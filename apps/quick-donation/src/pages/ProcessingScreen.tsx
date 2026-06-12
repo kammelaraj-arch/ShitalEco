@@ -36,7 +36,20 @@ export function ProcessingScreen() {
     : isClover ? !cloverDeviceId?.trim()
     : !stripeReaderId?.trim()
 
-  async function recordDonation(basketId: string, orderRef: string, amountPence: number, paymentRef: string, readerId: string, provider = 'SUMUP') {
+  // provider is REQUIRED — was previously defaulted to 'SUMUP' which caused
+  // the Stripe Terminal path (line ~215) to mis-tag every donation as SUMUP.
+  // From 7 Jun → 12 Jun this hid the fact that the app was actually creating
+  // Stripe PaymentIntents (none of which collected card data, all "incomplete"
+  // on Stripe dashboard). Forcing the caller to be explicit makes the
+  // payment_provider in donations table reflect what was actually attempted.
+  async function recordDonation(
+    basketId: string,
+    orderRef: string,
+    amountPence: number,
+    paymentRef: string,
+    readerId: string,
+    provider: 'SUMUP' | 'CLOVER' | 'STRIPE',
+  ) {
     try {
       await fetch(`${API_BASE}/kiosk/quick-donation/record`, {
         method: 'POST',
@@ -212,7 +225,7 @@ export function ProcessingScreen() {
 
       // 5. Record and transition
       const orderRef = `DON-${basketId.slice(0, 8).toUpperCase()}`
-      await recordDonation(basketId, orderRef, amountPence, pi.payment_intent_id, stripeReaderId)
+      await recordDonation(basketId, orderRef, amountPence, pi.payment_intent_id, stripeReaderId, 'STRIPE')
       setOrderResult(basketId, orderRef, pi.payment_intent_id, pi.client_secret)
       setScreen('tap')
 
