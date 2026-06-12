@@ -51,7 +51,14 @@ jobs:
             # but Docker shows "Up About a minute" for 45-90s — backend gets
             # mis-classified as broken and restarted with SIGKILL right when
             # it's about to finish cold-starting. Disabling until check is fixed.
-            crontab -l 2>/dev/null | grep -v 'shital-prod-watchdog' | grep -v 'monitor.sh' | crontab - || true
+            # Also disable dev watchdog. Even though it claims to only touch
+            # dev containers, backend dies at exactly 2-min uptime which
+            # matches `*/2 * * * *`. Worth ruling out.
+            crontab -l 2>/dev/null \
+              | grep -v 'shital-prod-watchdog' \
+              | grep -v 'monitor.sh' \
+              | grep -v 'shital-dev-watchdog' \
+              | crontab - || true
             crontab -l 2>/dev/null | head -20
 
             echo "=== Current backend container state ==="
