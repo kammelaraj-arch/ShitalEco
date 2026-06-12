@@ -1,0 +1,65 @@
+name: Recover nginx (prod)
+
+# Bring back shitaleco-nginx-1 — it was missing after today's promote
+# (deploy.sh listed nginx in REQUIRED_SERVICES but the compose up didn't
+# create it for some reason). External Envoy is returning Connection
+# refused because there's no nginx listening on :80/:443.
+#
+# Pure recovery: only touches the nginx service. No --force-recreate on
+# anything else, no rm of backend, no compose up of other services.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recover-nginx.yml'
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 5m
+          script: |
+            set +e
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+
+            echo "=== before ==="
+            docker ps -a --filter 'name=nginx' --format 'table {{.Names}}\t{{.Status}}'
+            ss -lntp 2>/dev/null | awk 'NR==1 || $4 ~ /:80$|:443$/' | head -10
+
+            echo ""
+            echo "=== compose up -d --no-deps nginx ==="
+            docker compose -p shitaleco --env-file .env -f docker-compose.prod.yml up -d --no-deps nginx 2>&1 | tail -15
+
+            echo ""
+            echo "=== wait up to 60s for nginx to be Up ==="
+            for i in $(seq 1 12); do
+              sleep 5
+              st=$(docker inspect shitaleco-nginx-1 --format '{{.State.Status}}' 2>/dev/null || echo absent)
+              echo "  [${i}/12] state=$st"
+              [ "$st" = "running" ] && break
+            done
+
+            echo ""
+            echo "=== after ==="
+            docker ps --filter 'name=nginx' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+            ss -lntp 2>/dev/null | awk 'NR==1 || $4 ~ /:80$|:443$/' | head -10
+
+            echo ""
+            echo "=== nginx log tail (40) ==="
+            docker logs --tail 40 shitaleco-nginx-1 2>&1 | sed 's/^/  /'
+
+            echo ""
+            echo "=== host probes ==="
+            curl -s -o /dev/null -w "  http://localhost:80/        → %{http_code}\n" -m 5 http://localhost:80/
+            curl -s -o /dev/null -w "  http://localhost:80/donate/  → %{http_code}\n" -m 5 http://localhost:80/donate/
+            curl -s -o /dev/null -w "  http://localhost:8000/health → %{http_code}\n" -m 5 http://localhost:8000/health
