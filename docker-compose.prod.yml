@@ -24,15 +24,17 @@ services:
   backend:
     image: ghcr.io/kammelaraj-arch/shitaleco-backend:latest
     restart: unless-stopped
+    # mem_limit and cpus at the top level are enforced by `docker compose up`
+    # (the non-swarm path). `deploy.resources.limits` BELOW is for swarm/k8s
+    # only and is silently IGNORED by `docker compose up`. That was the
+    # 12-Jun "backend dies every 3 min" bug: the 1024M was never actually
+    # capped, backend grew unbounded, host OOM-killer eventually picked it.
+    mem_limit: 1024M
+    cpus: 1.0
     deploy:
       resources:
         limits:
           cpus: '1.00'
-          # 512M was OOM-killing the container mid-execution when the
-          # recovery_loop pulled SumUp's transactions history into memory.
-          # 1GB gives headroom for the loop's tx_index + normal request
-          # handling. On the 2GB VPS this still leaves ~700MB for db +
-          # nginx + frontends combined.
           memory: 1024M
     # Use alembic upgrade head only — never stamp base (would wipe migration history)
     command: >
