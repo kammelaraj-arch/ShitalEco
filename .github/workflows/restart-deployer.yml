@@ -1,0 +1,58 @@
+name: Restart deployer container
+
+# shitaleco-deployer-1 was found Exited(137) — likely OOM-killed during the
+# Neuron purge workflow (the deployer has a 256M cap and gets memory-busy when
+# deploy.sh shells out in parallel). With deployer dead, the prod nginx still
+# serves the apps fine, but:
+#   - dev backend-dev can't resolve "deployer" on the prod-bridge network
+#     (no DNS entry without a running container) → admin System Ops shows
+#     "Deployer unreachable" for BOTH dev and prod
+#   - /ops/run + audit endpoints stop working
+#
+# This workflow simply brings deployer back up. No code change, no
+# touching backend/db/nginx. Bind-mounts on deploy.sh and server.py mean
+# any changes already picked up from disk.
+
+on:
+  push:
+    branches: [claude/fix-access-payment-stability-Q40dj]
+    paths:
+      - '.github/workflows/restart-deployer.yml'
+  workflow_dispatch:
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH bring deployer back up
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 120s
+          command_timeout: 5m
+          script: |
+            set +e
+            echo "=== Before ==="
+            docker ps -a --filter 'name=deployer' --format 'table {{.Names}}\t{{.Status}}'
+
+            cd /opt/shitaleco
+            # `up -d --no-deps deployer` recreates it without touching anything else.
+            docker compose -f docker-compose.prod.yml up -d --no-deps deployer
+
+            echo ""
+            echo "=== After (wait 5s for startup) ==="
+            sleep 5
+            docker ps --filter 'name=deployer' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+            echo ""
+            echo "=== Probe health from host via container IP ==="
+            DPL_IP=$(docker inspect shitaleco-deployer-1 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' 2>/dev/null | awk '{print $1}')
+            echo "deployer IP: $DPL_IP"
+            [ -n "$DPL_IP" ] && curl -m 5 -s -o /dev/null -w "deployer:9000/health → %{http_code}\n" "http://$DPL_IP:9000/health"
+
+            echo ""
+            echo "=== Probe DNS + HTTP from inside backend-dev ==="
+            docker exec shitaleco-dev-backend-dev-1 sh -c 'getent hosts deployer; curl -m 5 -s -o /dev/null -w "deployer:9000/health → %{http_code}\n" http://deployer:9000/health'

@@ -417,13 +417,58 @@ echo "=== Rolling restart: backend (${STACK_NAME}) ==="
 #    failed with "Bind for 0.0.0.0:8000 failed: port is already
 #    allocated" but the failure was swallowed and prod kept serving
 #    the stale container).
-# 2. --pull always forces re-resolution of the :latest tag so we don't
-#    recreate from a cached image ID.
+# 2. Pull policy is conditional:
+#    - On --promote-prod, we already retagged :dev → :latest LOCALLY in
+#      take_snapshot(). `--pull always` here would hit the registry and
+#      overwrite that retag with whatever stale :latest GHCR still has
+#      (CI only pushes :dev). That was the 12-Jun bug that left prod
+#      with NO backend container — pull failed, up failed, the `||`
+#      fell through to "backend-dev" which doesn't exist on prod, both
+#      legs of the OR errored, and 2>/dev/null swallowed everything.
+#    - On a normal :latest deploy (no promote), `--pull always` IS
+#      correct: it ensures we don't recreate from a cached image ID
+#      when the registry has a newer :latest.
+# 3. NEVER swallow stderr — `2>/dev/null` hid every failure mode that
+#    led to "Promote silently broke prod". Surface errors instead.
+# 4. The `backend-dev` fallback only makes sense on the dev stack;
+#    on prod, the service literally doesn't exist, so calling it is a
+#    guaranteed second-failure. Make the fallback target-aware.
+
 docker rm -f shitaleco-backend-1 2>/dev/null || true
 docker rm -f shitaleco-dev-backend-dev-1 2>/dev/null || true
 sleep 1
-$COMPOSE_CMD up -d --no-deps --pull always --force-recreate backend 2>/dev/null || \
-  $COMPOSE_CMD up -d --no-deps --pull always --force-recreate backend-dev
+
+if [ "$PROMOTE" -eq 1 ]; then
+  PULL_FLAG=""
+  echo "Using locally-promoted :latest (no --pull always)"
+else
+  PULL_FLAG="--pull always"
+fi
+
+if [ "$TARGET" = "dev" ]; then
+  BACKEND_SVC=backend-dev
+else
+  BACKEND_SVC=backend
+fi
+
+# Run the up explicitly, capturing failure. Without `set -e` the script
+# would otherwise continue silently into the health-wait loop with no
+# container at all — which is exactly the failure mode we just hit.
+if ! $COMPOSE_CMD up -d --no-deps $PULL_FLAG --force-recreate "$BACKEND_SVC"; then
+  echo "!!! compose up backend FAILED — capturing state and aborting promote"
+  docker compose -f /workspace/docker-compose.prod.yml ps 2>&1 | tail -20
+  cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG:-prod}","sha":"${GIT_SHA}","short":"${GIT_SHA:0:7}","branch":"${DEPLOY_BRANCH}","status":"compose_up_failed","message":"backend up -d failed during ${PROMOTE:+promote }deploy"}
+JSON
+  # Try to roll back: previous :latest is preserved under :promote-<ts>
+  if [ "$PROMOTE" -eq 1 ] && [ -n "$PROMOTE_TS" ]; then
+    echo "    Rolling :latest back to :promote-${PROMOTE_TS}"
+    docker tag "ghcr.io/kammelaraj-arch/shitaleco-backend:promote-${PROMOTE_TS}" \
+               "ghcr.io/kammelaraj-arch/shitaleco-backend:latest" 2>/dev/null || true
+    $COMPOSE_CMD up -d --no-deps --force-recreate "$BACKEND_SVC" || true
+  fi
+  exit 2
+fi
 
 echo "=== Waiting for backend health (${HEALTH_URL}) ==="
 # 120 × 5s = 600s (10 min). Prod cold start can take 90-300s depending on
@@ -677,6 +722,37 @@ fi
 if [ "$ENDPOINT_FAIL" -ne 0 ]; then
   echo "WARNING: One or more sanity-check endpoints did not respond as expected."
   echo "         The deploy may have restarted with a stale image."
+fi
+
+# ── Final audit: ABORT success status if backend container is missing ──────
+# This is the last line of defence. Every prior path SHOULD have caught a
+# missing backend, but each one (smoke tests, force-recreate, audit_and_heal)
+# has been bypassed at some point. So we do one explicit, final check that
+# the backend container EXISTS and is running before we write "success" to
+# deploy-history.jsonl. If it doesn't exist, we make one last force-create
+# attempt and refuse to record success until it's running.
+if [ "$TARGET" = "dev" ]; then
+  FINAL_BACKEND_CNAME="shitaleco-dev-backend-dev-1"
+  FINAL_BACKEND_SVC="backend-dev"
+else
+  FINAL_BACKEND_CNAME="shitaleco-backend-1"
+  FINAL_BACKEND_SVC="backend"
+fi
+FINAL_STATE=$(docker inspect "$FINAL_BACKEND_CNAME" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
+if [ "$FINAL_STATE" != "running" ]; then
+  echo "!!! FINAL AUDIT FAIL — ${FINAL_BACKEND_CNAME} is '${FINAL_STATE}' (expected running)"
+  echo "    Last-ditch attempt: compose up -d --no-deps ${FINAL_BACKEND_SVC}"
+  $COMPOSE_CMD up -d --no-deps "$FINAL_BACKEND_SVC" 2>&1 | tail -20 || true
+  sleep 5
+  FINAL_STATE=$(docker inspect "$FINAL_BACKEND_CNAME" --format '{{.State.Status}}' 2>/dev/null || echo "absent")
+  if [ "$FINAL_STATE" != "running" ]; then
+    cat >> "$HISTORY_FILE" <<JSON
+{"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA:-${GIT_SHA:0:7}}","branch":"${DEPLOY_BRANCH}","status":"backend_missing_after_deploy","message":"final audit: ${FINAL_BACKEND_CNAME} state=${FINAL_STATE}"}
+JSON
+    echo "!!! ABORTING: backend STILL not running. Deploy NOT marked success."
+    exit 3
+  fi
+  echo "    Recovered — ${FINAL_BACKEND_CNAME} is now running."
 fi
 
 # ── Success ─────────────────────────────────────────────────────────────────
