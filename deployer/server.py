@@ -632,7 +632,12 @@ def _service_state(target: str, svc: str) -> str:
             stderr=subprocess.DEVNULL, timeout=5,
         ).decode().strip()
     except Exception:
-        return "absent|-"
+        # ⚠️ Return 'unknown', NOT 'absent'. An inspect TIMEOUT (host under
+        # load) is indistinguishable from a truly-missing container, and the
+        # old 'absent' return caused the watchdog to force-recreate a HEALTHY
+        # backend whose inspect merely timed out — the 12-Jun crashloop.
+        # 'unknown' is never treated as needs_heal.
+        return "unknown|-"
     return out
 
 
@@ -681,10 +686,20 @@ def _watchdog_loop():
                 for svc in services:
                     state_str = _service_state(target, svc)
                     state, health = (state_str + "|-").split("|")[:2]
+                    # Heal ONLY on definitively-broken states. Deliberately
+                    # NOT healing on:
+                    #   - health == "unhealthy": a slow cold start (prod
+                    #     backend runs 571 schema patches, 3-4 min) trips the
+                    #     healthcheck to unhealthy; force-recreating RESTARTS
+                    #     that cold start → infinite crashloop. Let docker's
+                    #     own restart policy + the container's start_period
+                    #     handle genuinely-wedged processes.
+                    #   - state == "unknown": inspect timed out under load;
+                    #     the container is probably fine. Never recreate on
+                    #     ambiguous evidence.
                     needs_heal = (
-                        state in ("created", "exited", "absent")
+                        state in ("created", "exited")
                         or (state == "restarting")
-                        or (health == "unhealthy")
                     )
                     if not needs_heal:
                         continue

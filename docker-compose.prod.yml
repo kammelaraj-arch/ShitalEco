@@ -248,6 +248,17 @@ services:
       DEPLOY_BRANCH: ${DEPLOY_BRANCH:-main}
       DOCKER_BUILDKIT: "1"
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # ⚠️ DEPLOY_WATCHDOG=0 — the in-deployer 60s watchdog loop was the
+      # 12-Jun all-day prod-outage cause. It force-recreated prod backend
+      # whenever (a) its slow 3-4 min cold start tripped docker's healthcheck
+      # to 'unhealthy', or (b) a `docker inspect` timed out under host load
+      # and returned 'absent' for a HEALTHY container. Either way it SIGKILLed
+      # a fine backend → fresh cold start → tripped again → infinite
+      # crashloop. The host-side systemd shital-assert-state.timer already
+      # heals a genuinely-down backend, safely (acts only on state!=running,
+      # never on 'unhealthy' or inspect-timeout). So the deployer watchdog
+      # is pure downside on prod. Keep it OFF.
+      DEPLOY_WATCHDOG: "0"
     volumes:
       - /opt/shitaleco:/workspace
       # Read access to the dev stack files so /ops/run can pull/recreate dev too.

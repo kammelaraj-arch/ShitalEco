@@ -1,0 +1,100 @@
+name: Kill the deployer watchdog (THE root cause) + stabilize prod
+
+# ROOT CAUSE (proven from the side-by-side table + kill-event labels):
+# the deployer container runs a 60s _watchdog_loop that force-recreates
+# prod backend whenever its 3-4min cold start trips docker's healthcheck
+# to 'unhealthy', OR when a `docker inspect` times out under host load and
+# returns 'absent' for a HEALTHY backend. Either way → SIGKILL a fine
+# backend → fresh cold start → trips again → infinite crashloop. compose
+# v5.1.3 in the kill events = the deployer's bundled compose. Container
+# was always 'recreated', never crashed.
+#
+# Fix: recreate the deployer with DEPLOY_WATCHDOG=0 (loop never starts),
+# carrying the hardened server.py too. Then restart prod backend ONCE and
+# watch 10 min — with the watchdog gone it should cold-start once and stay.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/kill-deployer-watchdog.yml'
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: scp hardened server.py + compose to prod
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          source: "deployer/server.py,docker-compose.prod.yml"
+          target: "/opt/shitaleco/"
+          overwrite: true
+
+      - name: Recreate deployer with watchdog OFF, stabilize prod
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 16m
+          script: |
+            set +e
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+
+            echo "=== current deployer watchdog activity (last 20 log lines) ==="
+            docker logs --tail 20 shitaleco-deployer-1 2>&1 | grep -i watchdog | tail -20 || echo "  (none)"
+
+            echo ""
+            echo "=== Recreate deployer with DEPLOY_WATCHDOG=0 ==="
+            DEPLOY_WATCHDOG=0 docker compose -p shitaleco --env-file .env \
+              -f docker-compose.prod.yml up -d --no-deps --force-recreate deployer 2>&1 | tail -8
+            sleep 4
+            echo "  deployer env check:"
+            docker exec shitaleco-deployer-1 sh -c 'echo DEPLOY_WATCHDOG=$DEPLOY_WATCHDOG' 2>&1 | head -1
+            echo "  deployer startup log:"
+            docker logs --tail 8 shitaleco-deployer-1 2>&1 | tail -8
+
+            echo ""
+            echo "=== Restart prod backend ONCE (clean cold start, no watchdog to kill it) ==="
+            docker rm -f shitaleco-backend-1 2>/dev/null
+            sleep 2
+            docker compose -p shitaleco --env-file .env -f docker-compose.prod.yml up -d --no-deps backend 2>&1 | tail -6
+
+            echo ""
+            echo "=== Wait for backend healthy (up to 6 min cold start) ==="
+            for i in $(seq 1 72); do
+              sleep 5
+              c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              [ "$c" = "200" ] && { echo "  healthy after $((i*5))s"; break; }
+              [ $((i % 12)) -eq 0 ] && echo "    $((i*5))s — $c"
+            done
+
+            echo ""
+            echo "=== Watch 10 min — backend should now stay up (no watchdog recreate) ==="
+            DIED=0
+            for i in $(seq 1 20); do
+              sleep 30
+              st=$(docker inspect shitaleco-backend-1 --format '{{.State.Status}}/{{.State.Health.Status}} up={{.State.StartedAt}}' 2>/dev/null || echo absent)
+              c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              echo "  [$((i*30))s] $st  :8000=$c"
+              if [ "$c" != "200" ]; then
+                # Only count as death if the container was RECREATED (StartedAt changed)
+                echo "    (unreachable — checking for recreate)"
+                docker logs --tail 5 shitaleco-deployer-1 2>&1 | grep -i watchdog | tail -5
+              fi
+            done
+
+            echo ""
+            echo "=== final ==="
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}'
+            curl -s -o /dev/null -w "host :8000 → %{http_code}\n" -m 5 http://localhost:8000/health
