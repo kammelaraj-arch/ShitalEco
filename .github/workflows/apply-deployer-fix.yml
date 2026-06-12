@@ -1,9 +1,11 @@
 name: Apply deployer watchdog-removal + bring deployer back clean
 
-# Applies the watchdog-free deployer/server.py + cleaned compose to the host,
-# removes any stale/auto-renamed deployer containers, recreates ONE clean
-# deployer (which loads the bind-mounted watchdog-free server.py), and verifies
-# the backend stays up (the watchdog that deleted it is now gone from code).
+# Applies the watchdog-free deployer/server.py + target-aware deploy.sh +
+# cleaned compose to the host, removes any stale/auto-renamed deployer
+# containers, recreates ONE clean deployer (which loads the bind-mounted
+# watchdog-free server.py and target-aware deploy.sh), and verifies the
+# backend stays up. Re-run 12-Jun 21:40 UTC to apply the deploy.sh target-aware
+# fix (dev deploys no longer touch the prod backend container).
 
 on:
   workflow_dispatch:
