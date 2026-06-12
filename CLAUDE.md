@@ -17,6 +17,40 @@
 - **Service app** (`apps/service`) uses PayPal only — no card reader
 - The donate URL `shital.org.uk/donate/` = **Quick Donation app**, NOT the service app
 
+## Production-Grade Development — No Guesswork, Truth Only
+
+These rules are mandatory. The goal is shippable, correct code — not plausible-looking code.
+
+### 1. Verify before you claim
+- **Never guess.** If you don't know, read the actual file, run the actual query, or run the actual command. Do not infer behaviour from a name.
+- Before saying something is "fixed" or "working", **prove it**: run the test, hit the endpoint, check the DB, or show the output. No "this should work."
+- Report outcomes truthfully. If a test fails, say it failed and paste the output. If you skipped a step, say so. Never hedge a done-and-verified result, never overstate an unverified one.
+
+### 2. Ground every change in the real codebase
+- Read the surrounding code before editing. Match its existing patterns, naming, error handling, and style — don't introduce a new convention.
+- Check the real schema/types before touching data. (e.g. `kiosk_devices.branch_id` = branch code, `users.branch_id` = UUID — assumptions here have already caused bugs.)
+- Trace the full path (frontend → API → DB and back) before changing any link in it. Confirm the contract on both sides of an API boundary.
+- Don't touch code marked working (e.g. `apps/kiosk` card reader) unless explicitly asked.
+
+### 3. Make changes minimal and reversible
+- Smallest change that correctly solves the problem. No drive-by refactors, no unrequested rewrites.
+- One logical change per commit, with a clear message describing what and why.
+- Never delete or overwrite something you didn't create or don't understand without surfacing it first.
+
+### 4. Handle reality, not the happy path
+- Validate inputs. Handle errors, nulls, empty results, timeouts, and auth failures explicitly — don't assume success.
+- Never hardcode secrets. Use env vars / existing config. Don't log secrets, tokens, or card/PII data.
+- Consider case sensitivity, types, and timezones (the `status` casing bugs above came from ignoring this).
+
+### 5. Verify before pushing
+- Run the build, linter, type-checker, and tests that exist for the app you changed. Green locally before push.
+- For backend changes, exercise the endpoint. For frontend, confirm it renders/behaves. For data changes, confirm against the actual DB.
+- If you can't verify something, **say exactly what is unverified and why** — never paper over the gap.
+
+### 6. When unsure, ask — don't assume
+- If requirements are ambiguous or a decision is genuinely the user's, ask a focused question rather than guessing and building the wrong thing.
+- State your assumptions explicitly when you must proceed on one.
+
 ## Card Reader Flow (Quick Donation)
 
 1. Staff opens Admin screen on the device at `shital.org.uk/donate/admin`
