@@ -69,6 +69,10 @@ services:
       # when no Anthropic key is configured, Claude agent when one is.
       MAIL_AGENT_MAILBOXES: ${MAIL_AGENT_MAILBOXES:-accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk}
       MAIL_AGENT_MODE: ${MAIL_AGENT_MODE:-auto}
+      # Background recovery loop: sweeps PENDING SumUp donations every 15 min,
+      # mails a digest of unresolved system_alerts. Re-enabled now that Neuron
+      # is gone (it was Neuron killing backend 4 min in, not the recovery_loop).
+      RECOVERY_LOOP_ENABLED: ${RECOVERY_LOOP_ENABLED:-1}
     volumes:
       - /opt/shitaleco/backups:/opt/shitaleco/backups
       - /opt/shitaleco/media:/app/media
@@ -77,12 +81,17 @@ services:
         condition: service_healthy
     networks:
       - internal
-    # Healthcheck DISABLED — 12-Jun debugging: backend was being externally
-    # removed by something acting on "unhealthy" docker status (despite all
-    # known watchdog crons being disabled). Removing the healthcheck removes
-    # the docker-side signal that "unhealthy" autohealers latch onto.
+    # Healthcheck re-enabled (12-Jun afternoon): the "external killer" turned
+    # out to be the Neuron-platform deployer co-located on the host (now
+    # fully purged via .github/workflows/kill-neuron-restart-backend.yml).
+    # With Neuron gone, no other process acts on docker unhealthy status,
+    # so docker's own healthcheck is safe to use again.
     healthcheck:
-      disable: true
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
 
   admin:
     image: ghcr.io/kammelaraj-arch/shitaleco-admin:latest
