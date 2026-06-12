@@ -14,6 +14,8 @@ name: Install prod durable fix (assertion service)
 #
 # 14:18 — promote-to-prod took prod down (503 upstream connect refused).
 # Re-triggering this workflow to recover + apply latest fixes.
+# 14:55 — backend down AGAIN (502, even with -p shitaleco fix on disk).
+# Recovery + investigation needed.
 
 on:
   push:
@@ -69,6 +71,16 @@ jobs:
             echo ""
             echo "=== Verify nothing on port 8000 ==="
             ss -ltnp 2>/dev/null | grep ':8000 ' || echo "  ✓ port 8000 free"
+
+            echo ""
+            echo "=== Why didn't the timer save us? ==="
+            systemctl is-enabled shital-assert-state.timer 2>&1
+            systemctl is-active  shital-assert-state.timer 2>&1
+            systemctl list-timers shital-assert-state.timer --no-pager 2>&1
+            echo "--- assert-state.log last 30 lines ---"
+            tail -30 /var/log/shital-assert-state.log 2>/dev/null || echo "  no log"
+            echo "--- recent service runs (journalctl) ---"
+            journalctl -u shital-assert-state.service --since '15 min ago' --no-pager 2>&1 | tail -30
 
             echo ""
             echo "=== Make assert-state.sh executable ==="
