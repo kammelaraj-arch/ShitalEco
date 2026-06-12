@@ -28,18 +28,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: scp host scripts to prod
+      - name: scp host scripts + new compose + deploy.sh to prod
         uses: appleboy/scp-action@v0.1.7
         with:
           host: 192.248.147.205
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
-          source: "infra/host/assert-state.sh,infra/host/shital-assert-state.service,infra/host/shital-assert-state.timer,deployer/deploy.sh"
+          source: "infra/host/assert-state.sh,infra/host/shital-assert-state.service,infra/host/shital-assert-state.timer,deployer/deploy.sh,docker-compose.prod.yml"
           target: "/opt/shitaleco/"
           overwrite: true
 
-      - name: Install systemd unit + purge zombies + bring backend up
+      - name: Teardown workspace project + install systemd unit + bring up shitaleco
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: 192.248.147.205
@@ -51,6 +51,23 @@ jobs:
           script: |
             set +e
 
+            echo "=== ROOT-CAUSE FIX: tear down the 'workspace' compose project ==="
+            # The deployer container ran 'docker compose' from /workspace
+            # without -p, producing project name 'workspace' and container
+            # names workspace-backend-1, etc. — racing shitaleco-backend-1
+            # for port 8000. Pinning the project name fixes future deploys;
+            # this teardown evicts the existing workspace-* set.
+            cd /opt/shitaleco
+            docker compose -p workspace -f docker-compose.prod.yml down --remove-orphans --volumes=false 2>&1 | tail -20
+            for c in $(docker ps -a --filter 'name=^workspace-' --format '{{.Names}}'); do
+              docker rm -f "$c" 2>/dev/null && echo "  removed $c" || true
+            done
+
+            echo ""
+            echo "=== Verify nothing on port 8000 ==="
+            ss -ltnp 2>/dev/null | grep ':8000 ' || echo "  ✓ port 8000 free"
+
+            echo ""
             echo "=== Make assert-state.sh executable ==="
             chmod +x /opt/shitaleco/infra/host/assert-state.sh
             ls -la /opt/shitaleco/infra/host/

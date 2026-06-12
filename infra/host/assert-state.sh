@@ -36,7 +36,7 @@ if [ "$state" != "running" ]; then
   log "shitaleco-backend-1 state=${state} — invoking compose up"
   cd /opt/shitaleco 2>/dev/null || { log "  FAIL: /opt/shitaleco missing"; exit 1; }
   set -a; [ -f .env ] && . .env; set +a
-  timeout 60 docker compose -f docker-compose.prod.yml up -d --no-deps backend >> "$LOG" 2>&1
+  timeout 60 docker compose -p shitaleco -f docker-compose.prod.yml up -d --no-deps backend >> "$LOG" 2>&1
   DID_WORK=1
 fi
 

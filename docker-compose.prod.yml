@@ -1,3 +1,11 @@
+# Top-level project name pin — without this, the container names default
+# to `<cwd-basename>-<service>-<idx>`. The deployer container's working dir
+# is /workspace (bind-mount of /opt/shitaleco), so compose used to create
+# `workspace-backend-1` etc., racing with `shitaleco-backend-1` for port
+# 8000 and 502'ing prod every time. Pinning the name kills that whole
+# class of bug — there is exactly ONE project namespace ever.
+name: shitaleco
+
 services:
   db:
     image: postgres:16-alpine

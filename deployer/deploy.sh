@@ -280,11 +280,21 @@ elif [ "$TARGET" = "dev" ] && [ -d /workspace-dev ] && [ -f /workspace/.env ]; t
     echo "  → linked /workspace-dev/.env.dev → /workspace/.env"
 fi
 
-# Build the base compose command once so EVERY call below uses --env-file.
-if [ -n "$ENV_FILE" ]; then
-  COMPOSE_CMD="docker compose --env-file $ENV_FILE -f $COMPOSE"
+# Build the base compose command once so EVERY call below uses --env-file
+# AND an explicit project name. Without -p, compose derives the project
+# from the cwd basename — which inside the deployer container is
+# /workspace, producing `workspace-backend-1` etc. that race
+# shitaleco-backend-1 for port 8000. Pin -p shitaleco|shitaleco-dev so
+# this can never happen again.
+if [ "$TARGET" = "dev" ]; then
+  PROJECT_FLAG="-p shitaleco-dev"
 else
-  COMPOSE_CMD="docker compose -f $COMPOSE"
+  PROJECT_FLAG="-p shitaleco"
+fi
+if [ -n "$ENV_FILE" ]; then
+  COMPOSE_CMD="docker compose $PROJECT_FLAG --env-file $ENV_FILE -f $COMPOSE"
+else
+  COMPOSE_CMD="docker compose $PROJECT_FLAG -f $COMPOSE"
 fi
 echo "=== Compose command: $COMPOSE_CMD ==="
 
