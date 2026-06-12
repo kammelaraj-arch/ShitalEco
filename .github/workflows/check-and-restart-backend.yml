@@ -1,0 +1,63 @@
+name: Check + restart prod backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-and-restart-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 8m
+          script: |
+            set +e
+            echo "=== backend container state ==="
+            docker ps -a --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+            echo ""
+            echo "=== last 60 backend logs ==="
+            docker logs --tail 60 shitaleco-backend-1 2>&1
+
+            echo ""
+            echo "=== Find any container holding host port 8000 ==="
+            for cid in $(docker ps -a -q); do
+              hp=$(docker inspect "$cid" --format '{{range $p, $bs := .HostConfig.PortBindings}}{{if eq $p "8000/tcp"}}{{range $bs}}{{.HostPort}}{{end}}{{end}}{{end}}' 2>/dev/null)
+              if [ "$hp" = "8000" ]; then
+                name=$(docker inspect "$cid" --format '{{.Name}} state={{.State.Status}}' 2>/dev/null)
+                echo "  $cid $name"
+              fi
+            done
+
+            echo ""
+            echo "=== Force-remove backend and recreate ==="
+            docker rm -f shitaleco-backend-1 2>/dev/null && echo "removed" || true
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+            timeout 90 docker compose -f docker-compose.prod.yml up -d --no-deps backend 2>&1
+
+            echo ""
+            echo "=== Wait /health ==="
+            for i in $(seq 1 36); do
+              sleep 5
+              c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              [ "$c" = "200" ] && { echo "OK after $((i*5))s"; break; }
+              [ $((i % 6)) -eq 0 ] && echo "  $((i*5))s — $c"
+            done
+
+            echo ""
+            echo "=== Final ==="
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}'
+            curl -s -o /dev/null -w "/health → %{http_code}\n" -m 5 http://localhost:8000/health
+            echo ""
+            echo "=== Last 30 backend logs after restart ==="
+            docker logs --tail 30 shitaleco-backend-1 2>&1
