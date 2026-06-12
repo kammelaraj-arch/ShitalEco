@@ -119,14 +119,37 @@ jobs:
             docker logs --tail=100 shitaleco-backend-1 2>&1 | sed 's/^/  /'
 
             echo ""
-            echo "=== Wait 60s and check if backend stayed alive ==="
-            sleep 60
-            POST_CHECK=$(curl -s -o /dev/null -w "%{http_code}" -m 5 http://localhost:8000/health 2>/dev/null || echo "000")
-            echo "post-60s /health = ${POST_CHECK}"
-            if [ "$POST_CHECK" != "200" ]; then
-              echo "BACKEND DIED within 60s of starting — dumping crash logs:"
-              docker logs --tail=200 shitaleco-backend-1 2>&1 | sed 's/^/  /'
-              docker inspect shitaleco-backend-1 --format '{{.State.Status}} ExitCode={{.State.ExitCode}} Error={{.State.Error}} OOMKilled={{.State.OOMKilled}}' || true
+            echo "=== Monitoring backend for 6 min — catch the death window ==="
+            # Backend has been dying at 1-4 min after startup. Poll /health
+            # every 20s; if it goes from 200 → not-200, dump logs IMMEDIATELY
+            # to capture what was happening at the moment of death.
+            BACKEND_DIED_AT=""
+            for i in $(seq 1 18); do
+              sleep 20
+              c=$(curl -s -o /dev/null -w "%{http_code}" -m 5 http://localhost:8000/health 2>/dev/null || echo "000")
+              echo "  t=$((i*20))s /health=${c}"
+              if [ "$c" != "200" ]; then
+                BACKEND_DIED_AT="$((i*20))s"
+                echo "  *** BACKEND DIED at t=${BACKEND_DIED_AT} ***"
+                break
+              fi
+            done
+
+            if [ -n "$BACKEND_DIED_AT" ]; then
+              echo "=== Backend container state ==="
+              docker inspect shitaleco-backend-1 --format '{{.State.Status}} ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Error={{.State.Error}}' || true
+              docker inspect shitaleco-backend-1 --format '{{.State.StartedAt}} → {{.State.FinishedAt}}' || true
+              echo ""
+              echo "=== Backend container logs (last 250 lines) ==="
+              docker logs --tail=250 shitaleco-backend-1 2>&1 | sed 's/^/  /' || true
+              echo ""
+              echo "=== Host memory at time of death ==="
+              free -h
+              echo ""
+              echo "=== dmesg for OOM kills (last 5) ==="
+              dmesg | grep -i "oom\|killed" | tail -5 || echo "  (no OOM events in dmesg)"
+            else
+              echo "Backend stayed alive 6 min — diagnostic window passed without death"
             fi
 
             echo ""
