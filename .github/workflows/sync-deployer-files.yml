@@ -1,0 +1,72 @@
+name: Sync deploy.sh + server.py + compose to host (ready for clean re-promote)
+
+# Put the fixed deploy.sh (no deployer self-recreate), hardened server.py
+# (watchdog off + safe states), and compose (DEPLOY_WATCHDOG=0) onto the
+# host so the NEXT Promote uses them. The deployer bind-mounts deploy.sh
+# and server.py, so this takes effect immediately, no rebuild.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-deployer-files.yml'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: scp deployer files + compose to host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          source: "deployer/deploy.sh,deployer/server.py,docker-compose.prod.yml,docker-compose.dev.yml"
+          target: "/opt/shitaleco/"
+          overwrite: true
+
+      - name: Verify the fixes are on the host
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 3m
+          script: |
+            set +e
+            echo "=== deploy.sh: deployer excluded from REQUIRED_SERVICES? ==="
+            grep -n "REQUIRED_SERVICES=\"db backend" /opt/shitaleco/deployer/deploy.sh
+            grep -q "DELIBERATELY EXCLUDED" /opt/shitaleco/deployer/deploy.sh \
+              && echo "  ✓ self-destruct guard present" || echo "  ✗ MISSING"
+
+            echo ""
+            echo "=== compose: DEPLOY_WATCHDOG=0 on deployer? ==="
+            grep -n "DEPLOY_WATCHDOG" /opt/shitaleco/docker-compose.prod.yml
+
+            echo ""
+            echo "=== server.py: watchdog heal hardened? ==="
+            grep -q "Heal ONLY on definitively-broken states" /opt/shitaleco/deployer/server.py \
+              && echo "  ✓ hardened heal logic present" || echo "  ✗ MISSING"
+
+            echo ""
+            echo "=== recreate deployer to load hardened server.py (bind-mounted) ==="
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+            docker compose -p shitaleco --env-file .env -f docker-compose.prod.yml \
+              up -d --no-deps --force-recreate deployer 2>&1 | tail -5
+            sleep 4
+            docker exec shitaleco-deployer-1 sh -c 'echo DEPLOY_WATCHDOG=$DEPLOY_WATCHDOG' 2>&1 | head -1
+            docker logs --tail 5 shitaleco-deployer-1 2>&1 | tail -5
+
+            echo ""
+            echo "=== prod still healthy? ==="
+            curl -s -o /dev/null -w "backend :8000 → %{http_code}\n" -m 5 http://localhost:8000/health
+            curl -s -o /dev/null -w "nginx :80   → %{http_code}\n" -m 5 http://localhost:80/health
+            echo ""
+            echo "READY: next Promote will use the fixed deploy.sh (no self-destruct) + watchdog stays off."
