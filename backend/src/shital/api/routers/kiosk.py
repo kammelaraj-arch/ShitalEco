@@ -1737,12 +1737,36 @@ async def _resolve_anonymous_user(db: Any) -> str:
     return str(row["id"]) if row else anon_id
 
 
+_VALID_QD_PROVIDERS: set[str] = {"SUMUP", "CLOVER", "STRIPE", "STRIPE_TERMINAL"}
+
+
 @router.post("/quick-donation/record")
 async def record_quick_donation(body: QuickDonationRecordInput):
     """
     Record a quick donation as an anonymous entry in both the orders and donations tables.
     All quick donations are stored as anonymous — no personal data is captured.
+
+    STRICT provider validation. The payment_provider field MUST be one of the
+    known values. Previously the code defaulted to "SUMUP" when the frontend
+    sent an empty string — which is exactly how Stripe Terminal donations
+    silently landed in the DB tagged as SUMUP (visible in the Stripe dashboard
+    as incomplete PaymentIntents but invisible in our donation reports).
+    Refusing the request here makes the next leak surface immediately.
     """
+    provider_upper = (body.payment_provider or "").upper()
+    # Treat STRIPE and STRIPE_TERMINAL as the same thing (normalise to STRIPE).
+    if provider_upper == "STRIPE_TERMINAL":
+        provider_upper = "STRIPE"
+    if provider_upper not in {"SUMUP", "CLOVER", "STRIPE"}:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid or missing payment_provider: '{body.payment_provider}'. "
+                f"Must be one of: SUMUP, CLOVER, STRIPE. "
+                f"This guard prevents the silent-default-to-SUMUP bug that "
+                f"misattributed Stripe Terminal donations between 7-12 Jun."
+            ),
+        )
 
     order_id = body.basket_id
     donation_id = str(uuid.uuid4())
@@ -1766,15 +1790,14 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                     "id": order_id, "uid": anon_user_id, "bid": branch_id,
                     "basket": body.basket_id, "ref": body.order_ref,
                     "total": str(total), "pref": body.payment_intent_id,
-                    "provider": (body.payment_provider or "SUMUP").upper(),
+                    "provider": provider_upper,
                     "ikey": order_id, "now": now,
                 },
             )
 
             ga = body.ga_declared and bool(body.ga_first_name or body.ga_surname)
 
-            # 2. Record in donations table (for donation reporting, Gift Aid, finance)
-            provider_upper = (body.payment_provider or "SUMUP").upper()
+            # 2. Record in donations table (provider_upper already validated above)
             # Estimated fee rates — will be replaced by actual settlement data via webhook
             fee_pct = 0.0169 if provider_upper == "SUMUP" else 0.0175
             fee_amount = round(total * fee_pct, 2)

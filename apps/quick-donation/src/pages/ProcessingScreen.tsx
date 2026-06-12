@@ -30,11 +30,23 @@ export function ProcessingScreen() {
 
   const [error, setError] = useState('')
   const [stage, setStage] = useState('Creating donation...')
-  const isSumUp = readerProvider === 'sumup'
+
+  // STRICT PROVIDER ROUTING. Three explicit branches — sumup, clover, stripe.
+  // Anything else (empty, undefined, garbage) is a CONFIGURATION ERROR and
+  // we REFUSE to process. Previously the `else` branch defaulted to Stripe
+  // Terminal which is why a missing SumUp config silently led to incomplete
+  // Stripe PaymentIntents (the "phantom failed donations" leaking ~£1000s
+  // between 7-12 Jun).
+  const isSumUp  = readerProvider === 'sumup'
   const isClover = readerProvider === 'clover'
+  const isStripe = readerProvider === 'stripe_terminal'
+  const isReaderProviderUnknown = !isSumUp && !isClover && !isStripe
+
+  // Reader-id missing for the configured provider = also a config error.
   const isReaderError = isSumUp ? !sumupReaderId?.trim()
     : isClover ? !cloverDeviceId?.trim()
-    : !stripeReaderId?.trim()
+    : isStripe ? !stripeReaderId?.trim()
+    : true  // unknown provider → always reader error
 
   // provider is REQUIRED — was previously defaulted to 'SUMUP' which caused
   // the Stripe Terminal path (line ~215) to mis-tag every donation as SUMUP.
@@ -155,6 +167,18 @@ export function ProcessingScreen() {
       }
 
       // ── Stripe Terminal flow ─────────────────────────────────────────────
+      // HARD GUARD: only enter this path when provider is EXPLICITLY Stripe.
+      // Without this, an empty / unknown readerProvider would silently land
+      // here and create incomplete Stripe PaymentIntents while the customer
+      // tapped a SumUp reader → no money moved → phantom failed donations.
+      if (!isStripe) {
+        throw new Error(
+          `Reader provider misconfigured (got "${readerProvider || '(empty)'}"). ` +
+          `Refusing to process. Ask staff to fix the kiosk's reader assignment ` +
+          `in Admin → Kiosks/Card Readers before trying again.`
+        )
+      }
+
       // 1. Create basket
       setStage('Creating donation...')
       let basketId = generateUUID()
