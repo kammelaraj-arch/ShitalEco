@@ -5,6 +5,10 @@ Wants=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/shitaleco/infra/host/assert-state.sh
+# Explicit /bin/bash so the script doesn't need to be executable.
+# scp uploads with mode 0644 by default; relying on chmod-after-upload
+# created a race where the timer fired between upload and chmod and
+# systemd got 203/EXEC, silently disabling our safety net.
+ExecStart=/bin/bash /opt/shitaleco/infra/host/assert-state.sh
 StandardOutput=journal
 StandardError=journal
