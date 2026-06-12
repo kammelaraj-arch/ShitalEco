@@ -1,0 +1,87 @@
+name: Install prod durable fix (assertion service)
+
+# ONE durable fix to replace seven scattered recovery workflows:
+#   1. Purge any current workspace-* zombie
+#   2. Bring shitaleco-backend-1 up
+#   3. Install /opt/shitaleco/infra/host/assert-state.sh
+#   4. Install + enable shital-assert-state.{service,timer} on the host
+#      → runs every 60s, evicts workspace-* zombies, ensures
+#        shitaleco-backend-1 is the only port-8000 owner
+#
+# Idempotent — safe to re-run any time. After this lands, prod should
+# self-recover from the workspace-backend-1 zombie pattern without any
+# human intervention.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/install-prod-durable-fix.yml'
+      - 'infra/host/assert-state.sh'
+      - 'infra/host/shital-assert-state.service'
+      - 'infra/host/shital-assert-state.timer'
+  workflow_dispatch:
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: scp host scripts to prod
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          source: "infra/host/assert-state.sh,infra/host/shital-assert-state.service,infra/host/shital-assert-state.timer,deployer/deploy.sh"
+          target: "/opt/shitaleco/"
+          overwrite: true
+
+      - name: Install systemd unit + purge zombies + bring backend up
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 8m
+          script: |
+            set +e
+
+            echo "=== Make assert-state.sh executable ==="
+            chmod +x /opt/shitaleco/infra/host/assert-state.sh
+            ls -la /opt/shitaleco/infra/host/
+
+            echo ""
+            echo "=== Install systemd unit + timer ==="
+            cp /opt/shitaleco/infra/host/shital-assert-state.service /etc/systemd/system/shital-assert-state.service
+            cp /opt/shitaleco/infra/host/shital-assert-state.timer   /etc/systemd/system/shital-assert-state.timer
+            systemctl daemon-reload
+            systemctl enable --now shital-assert-state.timer
+            systemctl status shital-assert-state.timer --no-pager --lines=3
+
+            echo ""
+            echo "=== Run assert-state.sh once now to bring prod back ==="
+            /opt/shitaleco/infra/host/assert-state.sh
+            echo "--- assert-state.log tail ---"
+            tail -20 /var/log/shital-assert-state.log 2>/dev/null || echo "(no log yet)"
+
+            echo ""
+            echo "=== Wait /health (3 min) ==="
+            for i in $(seq 1 36); do
+              sleep 5
+              c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              [ "$c" = "200" ] && { echo "OK after $((i*5))s"; break; }
+              [ $((i % 6)) -eq 0 ] && echo "  $((i*5))s — $c"
+            done
+
+            echo ""
+            echo "=== Final state ==="
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}'
+            curl -s -o /dev/null -w "host /health → %{http_code}\n" -m 5 http://localhost:8000/health
+            echo ""
+            echo "Timer next runs:"
+            systemctl list-timers shital-assert-state.timer --no-pager

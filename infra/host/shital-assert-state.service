@@ -1,0 +1,10 @@
+[Unit]
+Description=Assert ShitalEco prod state invariants (port 8000 owned by shitaleco-backend-1, backend running)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/shitaleco/infra/host/assert-state.sh
+StandardOutput=journal
+StandardError=journal

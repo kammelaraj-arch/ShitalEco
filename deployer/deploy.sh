@@ -39,10 +39,30 @@ mkdir -p "$SNAP_DIR"
 echo "=== Deploy started $(date) — target=${TARGET} promote=${PROMOTE} restore=${RESTORE_ID:-none} ==="
 cd /workspace
 
+# ── Step 0: purge zombie workspace-* containers ─────────────────────────────
+# These are leftovers from the Neuron-co-located stack that lived on this VPS.
+# They share the same docker images as our shitaleco-* containers but under
+# project name 'workspace', and one of them (workspace-backend-1) keeps
+# binding host port 8000, which blocks shitaleco-backend-1 from starting and
+# 502s prod. Purge unconditionally on every deploy — it's a no-op if none
+# exist and a critical fix if they do.
+echo "=== Step 0: purge any workspace-* zombie containers ==="
+for c in $(docker ps -a --filter 'name=^workspace-' --format '{{.Names}}' 2>/dev/null); do
+  echo "  rm $c"
+  docker rm -f "$c" >/dev/null 2>&1 || true
+done
+
 git fetch origin
 git reset --hard "origin/${DEPLOY_BRANCH}"
 GIT_SHA=$(git rev-parse HEAD)
 echo "=== Deploying commit ${GIT_SHA} (${DEPLOY_BRANCH}) → ${TARGET} ==="
+
+# NOTE: the host-side shital-assert-state.timer is installed by
+# .github/workflows/install-prod-durable-fix.yml — it's outside the
+# deployer container (which has no access to /etc/systemd/system or
+# systemctl). The timer also runs assert-state.sh every 60s,
+# independently of any deploy, so the workspace-* zombies get evicted
+# automatically even if no one ever clicks Promote.
 
 # ── Login to GHCR so we can pull private images ──────────────────────────────
 if [ -n "${GITHUB_TOKEN:-}" ]; then
