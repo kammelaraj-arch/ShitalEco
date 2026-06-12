@@ -50,9 +50,26 @@ jobs:
             done
 
             echo ""
+            echo "=== restart nginx so it re-resolves upstream backend DNS ==="
+            # Backend was recreated during the promote AFTER nginx came up the
+            # first time, so nginx is caching a stale backend IP and 502'ing
+            # every /api/* request. `docker restart` forces fresh DNS.
+            docker restart shitaleco-nginx-1 2>&1 | sed 's/^/  /'
+            sleep 5
+
+            echo ""
+            echo "=== verify nginx ↔ backend connectivity ==="
+            for i in $(seq 1 12); do
+              sleep 3
+              # Probe through nginx on :80 (it 301-redirects to https, so check status)
+              up=$(timeout 4 curl -s -o /dev/null -w "%{http_code}" -k -H "Host: shital.org.uk" https://localhost/health 2>/dev/null || echo "000")
+              echo "  [${i}/12] https://localhost/health (via nginx) → $up"
+              [ "$up" = "200" ] && break
+            done
+
+            echo ""
             echo "=== after ==="
             docker ps --filter 'name=nginx' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
-            ss -lntp 2>/dev/null | awk 'NR==1 || $4 ~ /:80$|:443$/' | head -10
 
             echo ""
             echo "=== nginx log tail (40) ==="
@@ -60,6 +77,6 @@ jobs:
 
             echo ""
             echo "=== host probes ==="
-            curl -s -o /dev/null -w "  http://localhost:80/        → %{http_code}\n" -m 5 http://localhost:80/
-            curl -s -o /dev/null -w "  http://localhost:80/donate/  → %{http_code}\n" -m 5 http://localhost:80/donate/
+            curl -s -o /dev/null -w "  http://localhost:80/         → %{http_code}\n" -m 5 http://localhost:80/
             curl -s -o /dev/null -w "  http://localhost:8000/health → %{http_code}\n" -m 5 http://localhost:8000/health
+            curl -k -s -o /dev/null -w "  https://localhost/health (via nginx) → %{http_code}\n" -m 5 -H "Host: shital.org.uk" https://localhost/health
