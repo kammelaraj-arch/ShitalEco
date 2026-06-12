@@ -1,0 +1,48 @@
+name: Inspect terminal_devices providers (READ-ONLY)
+
+# Look at what terminal_devices rows exist on prod and what each
+# row's `provider` column actually says. The Kiosk Devices UI labels
+# each reader with the provider stored on its terminal_devices row.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-terminal-providers.yml'
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 2m
+          script: |
+            set +e
+            # Pull DB password from prod .env
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+
+            echo "=== terminal_devices for Wembley branch ==="
+            docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" shitaleco-db-1 \
+              psql -U "${POSTGRES_USER:-shitaleco_db_user}" -d "${POSTGRES_DB:-shitaleco_db}" -P pager=off \
+              -c "SELECT id::text, label, provider, status, branch_id, deleted_at IS NULL AS alive
+                  FROM terminal_devices
+                  WHERE branch_id = 'wembley'
+                  ORDER BY label"
+
+            echo ""
+            echo "=== kiosk_devices for Wembley + which terminal each is paired with ==="
+            docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" shitaleco-db-1 \
+              psql -U "${POSTGRES_USER:-shitaleco_db_user}" -d "${POSTGRES_DB:-shitaleco_db}" -P pager=off \
+              -c "SELECT kd.name, kd.device_type, kd.card_reader_id::text AS reader_id,
+                         td.label AS reader_label, td.provider AS reader_provider
+                  FROM kiosk_devices kd
+                  LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                  WHERE kd.branch_id = 'wembley' AND kd.deleted_at IS NULL"
