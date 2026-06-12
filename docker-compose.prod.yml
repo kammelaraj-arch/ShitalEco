@@ -77,12 +77,12 @@ services:
         condition: service_healthy
     networks:
       - internal
+    # Healthcheck DISABLED — 12-Jun debugging: backend was being externally
+    # removed by something acting on "unhealthy" docker status (despite all
+    # known watchdog crons being disabled). Removing the healthcheck removes
+    # the docker-side signal that "unhealthy" autohealers latch onto.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 60s
-      retries: 3
+      disable: true
 
   admin:
     image: ghcr.io/kammelaraj-arch/shitaleco-admin:latest
