@@ -252,62 +252,17 @@ jobs:
               # Non-fatal — dev stack is healthy regardless.
             fi
 
-            # ── Install / refresh dev-host watchdog ─────────────────────────────
-            # Independent of the GitHub Actions deploy: a host-side cron that
-            # runs every 2 min, restarts any stopped dev container, and curls
-            # /health on backend-dev. If health fails it `docker compose up -d`
-            # (idempotent — only restarts what's actually broken). This is the
-            # piece that catches a crash at 3 am without anyone clicking
-            # Promote / pushing a commit.
-            mkdir -p /opt/shitaleco-dev/infra
-            cat > /opt/shitaleco-dev/infra/watchdog-dev.sh << 'WDEOF'
-            #!/bin/bash
-            # Auto-installed by deploy-dev.yml every push. Re-running this file
-            # is safe — it ONLY restarts containers that are actually down.
-            set -uo pipefail
-            COMPOSE_FILE=/opt/shitaleco-dev/docker-compose.dev.yml
-            LOG=/var/log/shital-dev-watchdog.log
-            ts() { date -u +'%Y-%m-%dT%H:%M:%SZ'; }
-            log() { echo "[$(ts)] $*" >> "$LOG"; }
-
-            # 1. Find any dev container that isn't running
-            stopped=$(docker ps -a --filter "name=shitaleco-dev-" --filter "status=exited" --format '{{.Names}}'; \
-                      docker ps -a --filter "name=shitaleco-dev-" --filter "status=dead" --format '{{.Names}}'; \
-                      docker ps -a --filter "name=shitaleco-dev-" --filter "status=created" --format '{{.Names}}')
-            if [ -n "${stopped}" ]; then
-              log "stopped containers found: $(echo "$stopped" | tr '\n' ' ')"
-              cd /opt/shitaleco-dev
-              docker compose -f "$COMPOSE_FILE" up -d >> "$LOG" 2>&1 || log "compose up failed"
-            fi
-
-            # 2. Backend health probe. 502 from nginx === backend wedged.
-            code=$(curl -s -o /dev/null -w "%{http_code}" -m 8 https://dev.shital.org.uk/api/v1/health 2>/dev/null || echo "000")
-            if [ "$code" != "200" ]; then
-              # Rate-limit: don't restart more than once per 5 min from this path
-              last_kick=$(stat -c %Y /tmp/.shital-dev-kicked 2>/dev/null || echo 0)
-              now=$(date +%s)
-              if [ $((now - last_kick)) -ge 300 ]; then
-                log "health=$code → restarting backend-dev + nginx-dev"
-                docker compose -f "$COMPOSE_FILE" restart backend-dev nginx-dev >> "$LOG" 2>&1 || true
-                touch /tmp/.shital-dev-kicked
-              else
-                log "health=$code but rate-limited (last kick $((now-last_kick))s ago)"
-              fi
-            fi
-
-            # 3. Trim log to last 2000 lines so it doesn't grow unbounded
-            if [ -f "$LOG" ] && [ $(wc -l < "$LOG") -gt 2000 ]; then
-              tail -n 2000 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
-            fi
-            WDEOF
-            chmod +x /opt/shitaleco-dev/infra/watchdog-dev.sh
-
-            # Idempotent cron entry — replace any prior shital-dev-watchdog line
-            (crontab -l 2>/dev/null | grep -v 'shital-dev-watchdog' ; \
-             echo "*/2 * * * * /opt/shitaleco-dev/infra/watchdog-dev.sh # shital-dev-watchdog") | crontab -
-            echo "=== Watchdog cron installed ==="
-            crontab -l | grep shital-dev-watchdog || echo "WARN: cron entry not found after install"
+            # ── dev-watchdog cron REMOVED (12-Jun) ──────────────────────────────
+            # The every-2-min `docker compose up -d` cron was a net negative:
+            # it churned the docker network/iptables and, combined with the
+            # deployer watchdog, contributed to the all-day prod crashloop.
+            # Docker's own `restart: unless-stopped` policy already restarts a
+            # crashed dev container in place. Actively REMOVE any leftover cron
+            # so old installs don't keep running it.
+            crontab -l 2>/dev/null | grep -v 'shital-dev-watchdog' | crontab - 2>/dev/null || true
+            rm -f /opt/shitaleco-dev/infra/watchdog-dev.sh 2>/dev/null || true
+            echo "=== dev-watchdog cron removed (no auto-recreate) ==="
 
             echo ""
             echo "=== DEV deploy complete — branch ${DEPLOY_REF} ==="
-            docker compose -f docker-compose.dev.yml ps
+            docker compose -p shitaleco-dev -f docker-compose.dev.yml ps
