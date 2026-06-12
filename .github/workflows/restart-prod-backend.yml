@@ -34,8 +34,12 @@ jobs:
           command_timeout: 15m
           script: |
             set -e
-            echo "=== Removing watchdog cron temporarily (so it can't kick backend mid-restart) ==="
-            crontab -l 2>/dev/null | grep -v 'shital-prod-watchdog' | crontab - || true
+            echo "=== Removing watchdog AND monitor.sh crons (both kill backend mid-cold-start) ==="
+            # monitor.sh check_containers() regex only matches "Up N seconds"
+            # but Docker shows "Up About a minute" for 45-90s — backend gets
+            # mis-classified as broken and restarted with SIGKILL right when
+            # it's about to finish cold-starting. Disabling until check is fixed.
+            crontab -l 2>/dev/null | grep -v 'shital-prod-watchdog' | grep -v 'monitor.sh' | crontab - || true
             crontab -l 2>/dev/null | head -20
 
             echo "=== Current backend container state ==="
