@@ -159,6 +159,12 @@ jobs:
             done
 
             if [ -n "$BACKEND_DIED_AT" ]; then
+              echo "=== docker events for last 5 min (shows WHO/WHAT acted on backend) ==="
+              docker events --since 5m --until 0s --filter container=shitaleco-backend-1 2>&1 | head -50 || true
+              echo ""
+              echo "=== systemd journal for docker daemon (any crashes / restarts) ==="
+              journalctl -u docker --since "5 minutes ago" 2>&1 | tail -40 || true
+              echo ""
               echo "=== Backend container state ==="
               docker inspect shitaleco-backend-1 --format '{{.State.Status}} ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Error={{.State.Error}}' || true
               docker inspect shitaleco-backend-1 --format '{{.State.StartedAt}} → {{.State.FinishedAt}}' || true
