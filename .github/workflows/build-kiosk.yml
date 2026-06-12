@@ -5,6 +5,7 @@ on:
     branches: [claude/shital-erp-platform-iR2UF, claude/fix-access-payment-stability-Q40dj, main]
     paths:
       - 'apps/kiosk/**'
+      - 'apps/quick-donation/**'
       - '.github/workflows/build-kiosk.yml'
   workflow_dispatch:
 
@@ -199,17 +200,17 @@ jobs:
           VITE_API_URL: "https://shital.org.uk/api/v1"
           # Live-load the SPA from the production donate URL so the APK
           # stays in sync with web deploys without re-flashing.
-          QD_LIVE_URL: "https://shital.org.uk/donate/"
+          QD_LIVE_URL: "https://donate.shital.org.uk/donate/"
         run: pnpm run build:web
       - name: Add Android platform
         working-directory: apps/quick-donation
         env:
-          QD_LIVE_URL: "https://shital.org.uk/donate/"
+          QD_LIVE_URL: "https://donate.shital.org.uk/donate/"
         run: npx cap add android
       - name: Sync web assets into Android project
         working-directory: apps/quick-donation
         env:
-          QD_LIVE_URL: "https://shital.org.uk/donate/"
+          QD_LIVE_URL: "https://donate.shital.org.uk/donate/"
         run: npx cap sync android --inline
       - name: Set Gradle permissions
         working-directory: apps/quick-donation/android

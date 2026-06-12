@@ -1,12 +1,12 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 // The Quick Donation Android APK is a thin Capacitor wrapper that loads the
-// live web app from https://shital.org.uk/donate/. Keeps the device in sync
-// with web deploys automatically — no APK re-flash needed when we ship UI
+// live web app from https://donate.shital.org.uk/donate/. Keeps the device in
+// sync with web deploys automatically — no APK re-flash needed when we ship UI
 // changes. To build a fully-offline APK (rare; only useful for venues with
 // poor connectivity), unset QD_LIVE_URL and the build will bundle the local
 // dist/ instead.
-const liveUrl = process.env.QD_LIVE_URL || 'https://shital.org.uk/donate/'
+const liveUrl = process.env.QD_LIVE_URL || 'https://donate.shital.org.uk/donate/'
 
 const config: CapacitorConfig = {
   appId: 'org.shital.quickdonation',
