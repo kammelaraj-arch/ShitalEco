@@ -2977,20 +2977,90 @@ async def _patch_schema() -> None:
     # 30/30 healthcheck failure traced back to a stuck schema patch
     # — adding the timeout + per-N progress logging so the pattern is
     # visible in container logs next time something stalls.
+    #
+    # 12-Jun perf: a successful patch is recorded by SHA in
+    # schema_patches_applied. Subsequent boots skip it in O(query),
+    # cutting cold-start time on prod (where most patches are already
+    # applied and only a handful of new patches arrive per release).
     import asyncio
+    import hashlib
+
+    # Ensure the tracking table exists. ONE statement, separate txn so
+    # any failure here doesn't poison the patch loop below.
+    try:
+        async with SessionLocal() as db:
+            await asyncio.wait_for(
+                db.execute(text(
+                    "CREATE TABLE IF NOT EXISTS schema_patches_applied ("
+                    "  sql_hash CHAR(64) PRIMARY KEY,"
+                    "  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+                    ")"
+                )),
+                timeout=10,
+            )
+            await db.commit()
+    except Exception as exc:
+        logger.warning("schema_patches_table_create_failed", error=str(exc))
+
+    # Load already-applied hashes in one query.
+    applied: set[str] = set()
+    try:
+        async with SessionLocal() as db:
+            rows = (await db.execute(
+                text("SELECT sql_hash FROM schema_patches_applied")
+            )).all()
+            applied = {row[0] for row in rows}
+    except Exception as exc:
+        logger.warning("schema_patches_applied_query_failed", error=str(exc))
+
+    def _hash(sql: str) -> str:
+        # Normalize whitespace so trivial reformatting doesn't re-run a patch.
+        return hashlib.sha256(" ".join(sql.split()).encode()).hexdigest()
+
     total = len(patches)
-    for idx, sql in enumerate(patches):
+    pending = [(p, _hash(p)) for p in patches]
+    pending = [(p, h) for (p, h) in pending if h not in applied]
+    skipped = total - len(pending)
+
+    if skipped:
+        logger.info("schema_patch_skipped_cached", skipped=skipped, total=total)
+
+    async def _mark_applied(h: str) -> None:
+        try:
+            async with SessionLocal() as db:
+                await asyncio.wait_for(
+                    db.execute(
+                        text(
+                            "INSERT INTO schema_patches_applied (sql_hash) "
+                            "VALUES (:h) ON CONFLICT DO NOTHING"
+                        ),
+                        {"h": h},
+                    ),
+                    timeout=5,
+                )
+                await db.commit()
+        except Exception:
+            pass  # tracking is best-effort; never blocks startup
+
+    for idx, (sql, h) in enumerate(pending):
+        applied_this_round = False
         try:
             async with SessionLocal() as db:
                 await asyncio.wait_for(db.execute(text(sql)), timeout=30)
                 await db.commit()
+                applied_this_round = True
         except TimeoutError:
             logger.warning("schema_patch_timeout", index=idx, sql_preview=sql[:80])
+            # Don't mark applied — retry next boot.
         except Exception:
-            pass  # column already exists / table missing — safe to skip
+            # Column already exists / table missing / safe-skip — mark as
+            # applied so we don't waste another 30s timeout slot retrying it.
+            applied_this_round = True
+        if applied_this_round:
+            await _mark_applied(h)
         if idx and idx % 50 == 0:
-            logger.info("schema_patch_progress", done=idx, total=total)
-    logger.info("schema_patch_done", total=total)
+            logger.info("schema_patch_progress", done=idx, total=len(pending))
+    logger.info("schema_patch_done", total=total, skipped=skipped, applied=len(pending))
     await _seed_api_key_metadata()
     await _seed_catalog()
     await _seed_email_templates()
@@ -3599,9 +3669,15 @@ _{{ branch_name }} — Registered UK Charity_"""
                 # template (or an earlier failed seed that left the row in
                 # a half-baked state) silently breaks features that depend
                 # on it (eg. volunteer_reference_request bug from PR #N+1).
+                # NOTE: Use CAST(... AS JSONB), NOT `:variables::jsonb`.
+                # asyncpg's `::` cast collides with SQLAlchemy's `:name`
+                # param syntax — SQLAlchemy fails to substitute `:variables`
+                # and asyncpg sees the literal token, raising
+                # PostgresSyntaxError. That's why every boot logged
+                # email_template_seed_failed once per template.
                 await db.execute(text("""
                     INSERT INTO email_templates (template_key, name, subject, html_body, text_body, variables, is_active)
-                    VALUES (:key, :name, :subject, :html_body, :text_body, :variables::jsonb, true)
+                    VALUES (:key, :name, :subject, :html_body, :text_body, CAST(:variables AS JSONB), true)
                     ON CONFLICT (template_key) DO UPDATE
                         SET is_active  = true,
                             -- Heal any rows that ended up with empty bodies
