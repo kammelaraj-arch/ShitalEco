@@ -1,0 +1,52 @@
+name: Bring up dev backend (simple, no force-recreate)
+
+# Dev backend-dev container was deleted during an earlier workflow race.
+# This just runs `compose up -d backend-dev` to recreate it. No env
+# changes, no force-recreate, no prod touch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bring-up-dev-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  up:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 8m
+          script: |
+            set +e
+            cd /opt/shitaleco-dev || { echo "no /opt/shitaleco-dev"; exit 1; }
+            set -a; [ -f .env.dev ] && . .env.dev; set +a
+
+            echo "=== before ==="
+            docker ps -a --filter 'name=shitaleco-dev-backend-dev-1' --format 'table {{.Names}}\t{{.Status}}'
+
+            echo "=== compose up -d backend-dev (no force-recreate) ==="
+            docker compose -p shitaleco-dev --env-file .env.dev -f docker-compose.dev.yml \
+              up -d backend-dev 2>&1 | tail -15
+
+            echo ""
+            echo "=== wait /health (4 min) ==="
+            for i in $(seq 1 48); do
+              sleep 5
+              c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/health 2>/dev/null || echo "000")
+              [ "$c" = "200" ] && { echo "OK after $((i*5))s"; break; }
+              [ $((i % 6)) -eq 0 ] && echo "  $((i*5))s — $c"
+            done
+
+            echo ""
+            echo "=== final ==="
+            docker ps --filter 'name=shitaleco-dev-backend-dev-1' --format 'table {{.Names}}\t{{.Status}}'
+            curl -s -o /dev/null -w "dev /health → %{http_code}\n" -m 5 http://localhost:8001/health
+            echo "env in container:"
+            docker exec shitaleco-dev-backend-dev-1 sh -c 'echo RECOVERY_LOOP_ENABLED=$RECOVERY_LOOP_ENABLED MAIL_AGENT_POLL_SECONDS=$MAIL_AGENT_POLL_SECONDS' 2>&1 | head -1
