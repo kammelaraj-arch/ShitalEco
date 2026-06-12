@@ -1,0 +1,66 @@
+name: Recover backend + dump backend logs
+
+# Pattern: backend starts healthy, dies after ~5-7 min. /health 200 → 502.
+# Container shows 'running' so assert-state doesn't restart it.
+# This workflow: force-recreate backend, wait for healthy, then dump
+# the backend's own logs so we can SEE why uvicorn is dying.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-and-recover-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 8m
+          script: |
+            set +e
+
+            echo "=== Current backend state ==="
+            docker ps -a --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+            echo ""
+            echo "=== Existing backend logs (last 200 lines) — what was it doing before? ==="
+            docker logs --tail 200 shitaleco-backend-1 2>&1 | tail -200
+
+            echo ""
+            echo "=== Force recreate backend ==="
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+            docker rm -f shitaleco-backend-1 2>/dev/null
+            sleep 2
+            timeout 60 docker compose -p shitaleco -f docker-compose.prod.yml up -d --no-deps --force-recreate backend 2>&1
+
+            echo ""
+            echo "=== Wait /health (4 min) ==="
+            for i in $(seq 1 48); do
+              sleep 5
+              c=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              [ "$c" = "200" ] && { echo "OK after $((i*5))s"; break; }
+              [ $((i % 6)) -eq 0 ] && echo "  $((i*5))s — $c"
+            done
+
+            echo ""
+            echo "=== Memory + container stats ==="
+            free -h
+            docker stats --no-stream shitaleco-backend-1 2>&1 | head -3
+
+            echo ""
+            echo "=== Fresh backend startup logs ==="
+            docker logs --tail 80 shitaleco-backend-1 2>&1 | tail -80
+
+            echo ""
+            echo "=== Look for exit/OOM signals ==="
+            dmesg | tail -30 | grep -iE 'kill|oom|memory' || echo "  no recent dmesg kill/oom"
+            docker inspect shitaleco-backend-1 --format '{{.State}}' 2>&1
