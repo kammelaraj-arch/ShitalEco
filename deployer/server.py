@@ -601,132 +601,32 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-# ─── Watchdog ────────────────────────────────────────────────────────────────
-# Background sweep that runs every 60s and force-recreates any required
-# service that's not 'running' (covers 'created', 'exited', 'restarting'
-# stuck-loops, 'unhealthy' from the new container healthchecks).
+# ─── Autonomous watchdog REMOVED (12-Jun) ────────────────────────────────────
+# This file used to run `_watchdog_loop()` in a daemon thread every 60s that
+# `docker compose up -d --force-recreate`d any service it judged unhealthy or
+# absent. That was THE cause of the all-day 12-Jun prod outage:
 #
-# Survives the dev outage scenario: if a deploy leaves admin-dev in
-# Created state (and nobody hits /deploy again for a while), the watchdog
-# catches it within a minute and force-recreates. The user gets dev back
-# without manually triggering anything.
+#   - The prod backend's cold start runs 571 schema patches (~3-4 min). After
+#     the healthcheck start_period it reads as `unhealthy`, so the watchdog
+#     force-recreated it → restarted the cold start → unhealthy again →
+#     INFINITE crashloop. From outside, the backend container was being
+#     DELETED and re-created every ~6 min (compose v5.1.3 = this container's
+#     bundled compose).
+#   - `docker inspect` (timeout=5s) under host load returned a timeout that
+#     the loop treated as `absent`, force-recreating a perfectly HEALTHY
+#     backend.
 #
-# Bounded heal counter per service per hour stops a genuinely-broken
-# image (CrashLoopBackOff equivalent) from being looped on forever.
-
-DEV_REQUIRED  = ["db-dev", "backend-dev", "admin-dev",
-                 "quick-donation-dev", "kiosk-dev", "screen-dev", "nginx-dev"]
-PROD_REQUIRED = ["db", "backend", "admin", "quick-donation", "kiosk",
-                 "screen", "service", "nginx", "certbot", "deployer"]
-WATCHDOG_INTERVAL_SECONDS = 60
-WATCHDOG_HEAL_CAP_PER_HOUR = 4  # per service
-
-
-def _service_state(target: str, svc: str) -> str:
-    cname = f"shitaleco-dev-{svc}-1" if target == "dev" else f"shitaleco-{svc}-1"
-    try:
-        out = subprocess.check_output(
-            ["docker", "inspect", "--format",
-             "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}",
-             cname],
-            stderr=subprocess.DEVNULL, timeout=5,
-        ).decode().strip()
-    except Exception:
-        # ⚠️ Return 'unknown', NOT 'absent'. An inspect TIMEOUT (host under
-        # load) is indistinguishable from a truly-missing container, and the
-        # old 'absent' return caused the watchdog to force-recreate a HEALTHY
-        # backend whose inspect merely timed out — the 12-Jun crashloop.
-        # 'unknown' is never treated as needs_heal.
-        return "unknown|-"
-    return out
-
-
-def _resolve_env_file(target: str) -> str | None:
-    """Pick the env-file the watchdog should pass to `docker compose`.
-    Match the fallback chain in deploy.sh so a heal can't fail with the
-    same compose-interpolation error that caused the dev outages."""
-    if target == "dev":
-        for path in ("/workspace-dev/.env.dev",
-                     "/workspace/.env.dev",
-                     "/workspace/.env"):
-            if os.path.isfile(path):
-                return path
-        return None
-    if os.path.isfile("/workspace/.env"):
-        return "/workspace/.env"
-    return None
-
-
-def _watchdog_heal(target: str, svc: str) -> None:
-    compose_file = "/workspace/docker-compose.prod.yml" if target == "prod" \
-                    else "/workspace/docker-compose.dev.yml"
-    cname = f"shitaleco-dev-{svc}-1" if target == "dev" else f"shitaleco-{svc}-1"
-    # rm if in a state that blocks `up -d`
-    state, _ = (_service_state(target, svc) + "|-").split("|", 1)
-    if state in ("created", "exited"):
-        subprocess.run(["docker", "rm", "-f", cname],
-                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=10)
-    cmd = ["docker", "compose"]
-    env_file = _resolve_env_file(target)
-    if env_file:
-        cmd += ["--env-file", env_file]
-    cmd += ["-f", compose_file, "up", "-d", "--no-deps", "--force-recreate", svc]
-    subprocess.run(
-        cmd,
-        stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=120,
-    )
-
-
-def _watchdog_loop():
-    from collections import defaultdict
-    heal_counts: dict[tuple[str, str], list[float]] = defaultdict(list)
-    while True:
-        try:
-            for target, services in (("dev", DEV_REQUIRED), ("prod", PROD_REQUIRED)):
-                for svc in services:
-                    state_str = _service_state(target, svc)
-                    state, health = (state_str + "|-").split("|")[:2]
-                    # Heal ONLY on definitively-broken states. Deliberately
-                    # NOT healing on:
-                    #   - health == "unhealthy": a slow cold start (prod
-                    #     backend runs 571 schema patches, 3-4 min) trips the
-                    #     healthcheck to unhealthy; force-recreating RESTARTS
-                    #     that cold start → infinite crashloop. Let docker's
-                    #     own restart policy + the container's start_period
-                    #     handle genuinely-wedged processes.
-                    #   - state == "unknown": inspect timed out under load;
-                    #     the container is probably fine. Never recreate on
-                    #     ambiguous evidence.
-                    needs_heal = (
-                        state in ("created", "exited")
-                        or (state == "restarting")
-                    )
-                    if not needs_heal:
-                        continue
-                    # Rate-limit per service per hour
-                    now = time.time()
-                    key = (target, svc)
-                    heal_counts[key] = [t for t in heal_counts[key] if now - t < 3600]
-                    if len(heal_counts[key]) >= WATCHDOG_HEAL_CAP_PER_HOUR:
-                        continue  # don't loop on a broken image
-                    heal_counts[key].append(now)
-                    print(f"[watchdog] {target}/{svc} = {state_str} → force-recreate")
-                    sys.stdout.flush()
-                    _watchdog_heal(target, svc)
-        except Exception as exc:
-            print(f"[watchdog] sweep error: {exc!r}")
-            sys.stdout.flush()
-        time.sleep(WATCHDOG_INTERVAL_SECONDS)
+# Proven by isolation: with this deployer container STOPPED, the backend ran
+# 9 min healthy with ZERO deletions (vs dying every ~6 min before).
+#
+# The deployer now acts ONLY on explicit operator commands (/deploy,
+# /promote-prod, /ops/run). Crash recovery is delegated to docker's native
+# `restart: unless-stopped` policy (set on every service in the compose
+# files), which restarts a genuinely-crashed container IN PLACE — no
+# force-recreate, no cold-start storm. The DEPLOY_WATCHDOG env var is gone;
+# there is no autonomous loop to gate.
 
 
 if __name__ == "__main__":
-    import threading
-    # Kick off watchdog in a daemon thread so it dies with the deployer
-    # process. Logs go to deployer stdout — visible via `docker logs`.
-    watchdog_enabled = os.environ.get("DEPLOY_WATCHDOG", "1") != "0"
-    if watchdog_enabled:
-        threading.Thread(target=_watchdog_loop, daemon=True, name="deploy-watchdog").start()
-        print("[watchdog] started — sweeping every 60s, cap 4 heals/service/hour")
-        sys.stdout.flush()
     server = HTTPServer(("0.0.0.0", 9000), Handler)
     server.serve_forever()

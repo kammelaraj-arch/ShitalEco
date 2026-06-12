@@ -1,0 +1,109 @@
+name: Apply deployer watchdog-removal + bring deployer back clean
+
+# Applies the watchdog-free deployer/server.py + cleaned compose to the host,
+# removes any stale/auto-renamed deployer containers, recreates ONE clean
+# deployer (which loads the bind-mounted watchdog-free server.py), and verifies
+# the backend stays up (the watchdog that deleted it is now gone from code).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-deployer-fix.yml'
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: scp watchdog-free server.py + compose to host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          source: "deployer/server.py,deployer/deploy.sh,docker-compose.prod.yml,docker-compose.dev.yml"
+          target: "/opt/shitaleco/"
+          overwrite: true
+
+      - name: Recreate ONE clean deployer + verify backend stays up
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 14m
+          script: |
+            set +e
+            cd /opt/shitaleco
+            set -a; [ -f .env ] && . .env; set +a
+
+            echo "=== verify server.py on host has watchdog REMOVED ==="
+            grep -q "Autonomous watchdog REMOVED" /opt/shitaleco/deployer/server.py \
+              && echo "  ✓ watchdog-free server.py on host" || echo "  ✗ MISSING"
+            grep -c "_watchdog_loop" /opt/shitaleco/deployer/server.py | sed 's/^/  _watchdog_loop refs (expect 0): /'
+
+            echo ""
+            echo "=== remove stale/auto-renamed deployer containers ==="
+            for c in $(docker ps -a --format '{{.Names}}' | grep -E 'deployer'); do
+              [ "$c" = "shitaleco-deployer-1" ] && continue
+              echo "  rm $c"; docker rm -f "$c" 2>/dev/null
+            done
+            docker rm -f shitaleco-deployer-1 2>/dev/null && echo "  removed old shitaleco-deployer-1"
+
+            echo ""
+            echo "=== recreate ONE clean deployer (loads watchdog-free server.py) ==="
+            docker compose -p shitaleco --env-file .env -f docker-compose.prod.yml up -d --no-deps deployer 2>&1 | tail -5
+            sleep 5
+            docker ps --filter 'name=deployer' --format 'table {{.Names}}\t{{.Status}}'
+            echo "  deployer logs (should NOT contain '[watchdog] started'):"
+            docker logs --tail 10 shitaleco-deployer-1 2>&1 | tail -10
+            docker logs shitaleco-deployer-1 2>&1 | grep -c 'watchdog' | sed 's/^/  watchdog log lines (expect 0): /'
+
+            echo ""
+            echo "=== ensure backend up ==="
+            state=$(docker inspect shitaleco-backend-1 --format '{{.State.Status}}' 2>/dev/null || echo absent)
+            echo "  backend state: $state"
+            if [ "$state" != "running" ]; then
+              docker rm -f shitaleco-backend-1 2>/dev/null; sleep 2
+              docker compose -p shitaleco --env-file .env -f docker-compose.prod.yml up -d --no-deps backend 2>&1 | tail -5
+              for i in $(seq 1 60); do
+                sleep 5
+                c=$(timeout 4 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+                [ "$c" = "200" ] && { echo "  healthy after $((i*5))s"; break; }
+              done
+            fi
+
+            echo ""
+            echo "=== watch 10 min with deployer RUNNING (watchdog-free) — backend must stay ==="
+            BASE=$(docker inspect shitaleco-backend-1 --format '{{.State.StartedAt}}' 2>/dev/null)
+            R0=$(docker inspect shitaleco-backend-1 --format '{{.RestartCount}}' 2>/dev/null)
+            echo "  baseline StartedAt=$BASE RestartCount=$R0"
+            BAD=0
+            for i in $(seq 1 20); do
+              sleep 30
+              now=$(docker inspect shitaleco-backend-1 --format '{{.State.StartedAt}}' 2>/dev/null || echo ABSENT)
+              rc=$(docker inspect shitaleco-backend-1 --format '{{.RestartCount}}' 2>/dev/null || echo "?")
+              c=$(timeout 4 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              if [ -z "$now" ] || [ "$now" = "ABSENT" ]; then
+                echo "  [$((i*30))s] ⚠️ DELETED — watchdog still active?! :8000=$c"; BAD=1
+              elif [ "$now" != "$BASE" ]; then
+                echo "  [$((i*30))s] ⚠️ recreated/restarted ($BASE→$now rc=$rc) :8000=$c"; BAD=1; BASE="$now"
+              else
+                [ $((i % 4)) -eq 0 ] && echo "  [$((i*30))s] stable rc=$rc :8000=$c"
+              fi
+            done
+
+            echo ""
+            if [ "$BAD" = "0" ]; then
+              echo "=== ✅ 10 MIN STABLE, deployer running, ZERO recreates — watchdog removal CONFIRMED ==="
+            else
+              echo "=== ⚠️ still disturbed — investigate (should not happen with watchdog gone) ==="
+            fi
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}'
+            curl -s -o /dev/null -w "host :8000 → %{http_code}\n" -m 5 http://localhost:8000/health
