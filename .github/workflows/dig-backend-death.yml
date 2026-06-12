@@ -1,0 +1,68 @@
+name: Dig actual backend logs at moment of death (READ-ONLY)
+
+# No more guessing. Pull the full backend log of THIS death cycle
+# from container start to whenever /health stopped responding. Then
+# look at what the LAST entries were before silence.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/dig-backend-death.yml'
+  workflow_dispatch:
+
+jobs:
+  dig:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 4m
+          script: |
+            set +e
+
+            echo "============================================================"
+            echo "==  Backend container state + age                          =="
+            echo "============================================================"
+            docker ps -a --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}\t{{.CreatedAt}}'
+            docker inspect shitaleco-backend-1 --format \
+              'State: {{.State.Status}}  Health: {{.State.Health.Status}}  Started: {{.State.StartedAt}}  ExitCode: {{.State.ExitCode}}  OOMKilled: {{.State.OOMKilled}}  Restarts: {{.RestartCount}}'
+
+            echo ""
+            echo "============================================================"
+            echo "==  Docker healthcheck history (last 5)                    =="
+            echo "============================================================"
+            docker inspect shitaleco-backend-1 --format '{{json .State.Health}}' 2>/dev/null \
+              | python3 -c "import json,sys; h=json.load(sys.stdin); print('FailingStreak:', h.get('FailingStreak')); [print(f\"  {e['Start']} exit={e['ExitCode']} out={e['Output'][:200]!r}\") for e in (h.get('Log') or [])]" 2>&1 || echo "  no health history"
+
+            echo ""
+            echo "============================================================"
+            echo "==  LAST 250 backend log lines                             =="
+            echo "============================================================"
+            docker logs --tail 250 --timestamps shitaleco-backend-1 2>&1 | tail -250
+
+            echo ""
+            echo "============================================================"
+            echo "==  Docker events for backend last 30 min                  =="
+            echo "============================================================"
+            docker events --since 30m --until 0s --filter container=shitaleco-backend-1 2>&1 \
+              | grep -vE 'exec_create|exec_start|exec_die' | tail -40
+
+            echo ""
+            echo "============================================================"
+            echo "==  Memory / load right now                                =="
+            echo "============================================================"
+            free -h
+            uptime
+            docker stats --no-stream shitaleco-backend-1 2>&1 | head -3
+
+            echo ""
+            echo "============================================================"
+            echo "==  Recent dmesg kill/oom (host kernel signals)            =="
+            echo "============================================================"
+            dmesg --ctime 2>/dev/null | tail -50 | grep -iE 'kill|oom|memory|out of mem' || echo "  none"
