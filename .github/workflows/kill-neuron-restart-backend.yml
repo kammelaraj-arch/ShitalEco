@@ -1,0 +1,88 @@
+name: Kill Neuron interference + Restart backend
+
+# Found via find-rogue-watcher: a Neuron platform is co-located on this VPS
+# (neuron-deployer container + neuron-vhost-watchdog.timer). One of them
+# was removing shitaleco-backend-1 every 1-4 minutes. This workflow stops
+# the Neuron pieces and brings our backend up clean.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/kill-neuron-restart-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  kill-and-restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH stop Neuron, restart shital backend
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 120s
+          command_timeout: 15m
+          script: |
+            set +e
+            echo "=== Step 1: stop Neuron deployer & its watchdog timer ==="
+            docker stop neuron-deployer 2>&1 | head -5
+            docker rm   neuron-deployer 2>&1 | head -5
+            systemctl stop    neuron-vhost-watchdog.timer 2>&1 | head -5
+            systemctl disable neuron-vhost-watchdog.timer 2>&1 | head -5
+            systemctl stop    neuron-vhost-watchdog.service 2>&1 | head -5
+            systemctl mask    neuron-vhost-watchdog.service 2>&1 | head -5
+            echo "Neuron pieces stopped/masked"
+
+            echo ""
+            echo "=== Step 2: remove the duplicate 'workspace-*' containers ==="
+            # These shared the same images as our shitaleco-* containers but
+            # under project name 'workspace'. Likely Neuron-managed. Clean up.
+            for c in workspace-backend-1 workspace-admin-1 workspace-kiosk-1 \
+                     workspace-quick-donation-1 workspace-screen-1 \
+                     workspace-service-1 workspace-db-1 workspace-nginx-1 \
+                     workspace-deployer-1; do
+              docker rm -f "$c" 2>/dev/null && echo "  removed $c" || true
+            done
+
+            echo ""
+            echo "=== Step 3: clean docker network state ==="
+            docker network prune -f >/dev/null 2>&1 || true
+
+            echo ""
+            echo "=== Step 4: bring up backend (uses local :latest, no pull) ==="
+            cd /opt/shitaleco
+            # Free port 8000 first if anything is still holding it
+            docker rm -f shitaleco-backend-1 2>/dev/null || true
+            fuser -k 8000/tcp 2>/dev/null || true
+            sleep 3
+
+            # Tag the freshest :dev as :latest so we get latest code
+            docker pull ghcr.io/kammelaraj-arch/shitaleco-backend:dev || true
+            docker tag ghcr.io/kammelaraj-arch/shitaleco-backend:dev \
+                       ghcr.io/kammelaraj-arch/shitaleco-backend:latest || true
+
+            docker compose -f docker-compose.prod.yml up -d --no-deps backend
+
+            echo ""
+            echo "=== Step 5: wait for backend /health (up to 10 min) ==="
+            for i in $(seq 1 120); do
+              sleep 5
+              c=$(curl -s -o /dev/null -w "%{http_code}" -m 5 http://localhost:8000/health 2>/dev/null || echo "000")
+              if [ "$c" = "200" ]; then
+                echo "Backend healthy after $((i*5))s"
+                break
+              fi
+              [ $((i % 12)) -eq 0 ] && echo "  attempt $i/120 ($((i*5))s)"
+            done
+
+            echo ""
+            echo "=== Step 6: confirm Neuron is genuinely gone ==="
+            docker ps -a | grep -i neuron || echo "  no neuron containers"
+            systemctl is-enabled neuron-vhost-watchdog.timer 2>&1 || echo "  timer disabled"
+
+            echo ""
+            echo "=== Done ==="
+            docker ps --filter 'name=shitaleco-backend-1' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
