@@ -34,6 +34,18 @@ jobs:
           command_timeout: 15m
           script: |
             set -e
+            echo "=== ALL crons on the host (root + /etc/cron.d/ + /etc/crontab) ==="
+            echo "--- root user crontab ---"
+            crontab -l 2>/dev/null | head -20 || echo "(none)"
+            echo "--- /etc/cron.d/ entries ---"
+            ls -la /etc/cron.d/ 2>/dev/null || true
+            cat /etc/cron.d/* 2>/dev/null | head -40 || true
+            echo "--- /etc/crontab ---"
+            cat /etc/crontab 2>/dev/null | tail -20 || true
+            echo "--- recent /var/log/shital-ops.log (last 30) ---"
+            tail -30 /var/log/shital-ops.log 2>/dev/null || echo "(no shital-ops.log)"
+            echo ""
+
             echo "=== Removing watchdog AND monitor.sh crons (both kill backend mid-cold-start) ==="
             # monitor.sh check_containers() regex only matches "Up N seconds"
             # but Docker shows "Up About a minute" for 45-90s — backend gets
