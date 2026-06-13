@@ -29,6 +29,21 @@ DB_CONTAINER="shitaleco-db-1"
 DB_USER="shitaleco_db_user"
 DB_NAME="shitaleco_db"
 
+# Blue/green-aware backend container resolution. Post-cutover the active
+# container is shitaleco-backend-{blue,green}-1; pre-cutover it's the legacy
+# shitaleco-backend-1. monitor.sh runs every 15 min, so re-reading the marker
+# each invocation is fine.
+ACTIVE_COLOR_FILE="$APP_DIR/active-color"
+if [ -r "$ACTIVE_COLOR_FILE" ]; then
+    _color=$(tr -d '[:space:]' < "$ACTIVE_COLOR_FILE" | tr '[:upper:]' '[:lower:]')
+    case "$_color" in
+        blue|green) BACKEND_CONTAINER="shitaleco-backend-${_color}-1" ;;
+        *)          BACKEND_CONTAINER="shitaleco-backend-1" ;;
+    esac
+else
+    BACKEND_CONTAINER="shitaleco-backend-1"
+fi
+
 # ── Recipient groups ────────────────────────────────────────────────────────
 # Hardcoded defaults. The Admin UI (Azure Backup → Alert Recipients) can
 # override these via api_keys_store; resolve_recipients() pulls overrides
@@ -73,7 +88,7 @@ async def main():
 asyncio.run(main())
 '
     local json
-    json=$(timeout 45 docker exec shitaleco-backend-1 python -c "$fetch" 2>/dev/null) || true
+    json=$(timeout 45 docker exec "$BACKEND_CONTAINER" python -c "$fetch" 2>/dev/null) || true
     [ -z "$json" ] && return 0
 
     local val

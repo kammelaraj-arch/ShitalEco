@@ -45,10 +45,34 @@ def _read_secret_from_env_file() -> str:
         pass
     return ""
 
-ENV_CONTAINERS = {
-    "prod": "shitaleco-backend-1",
-    "dev":  "shitaleco-dev-backend-dev-1",
-}
+def _env_container(env: str) -> str:
+    """Return the live backend container name for `env` ("prod"/"dev").
+
+    For prod this is color-aware: post-cutover the active container is
+    `shitaleco-backend-blue-1` or `shitaleco-backend-green-1`, read from
+    `/workspace/active-color` (bind-mounted from `/opt/shitaleco/active-color`).
+    When the marker file is absent we're still on the legacy single-container
+    path → fall back to `shitaleco-backend-1`. Without this, System Ops shows
+    prod "DOWN" after the cutover — cosmetic but the exact false-down signal
+    that drove churn during the 12-Jun incident.
+    """
+    if env == "dev":
+        return "shitaleco-dev-backend-dev-1"
+    try:
+        with open("/workspace/active-color") as fh:
+            color = fh.read().strip().lower()
+        if color in ("blue", "green"):
+            return f"shitaleco-backend-{color}-1"
+    except OSError:
+        pass
+    return "shitaleco-backend-1"
+
+
+# Iteration helper — replaces the old ENV_CONTAINERS dict. Computed per-call
+# so a cutover that writes /workspace/active-color is picked up immediately
+# without a deployer restart.
+def _env_containers() -> dict:
+    return {"prod": _env_container("prod"), "dev": _env_container("dev")}
 
 
 def run_script(args, script="/app/deploy.sh"):
@@ -128,7 +152,11 @@ DEV_ENV      = "/workspace-dev/.env.dev"  # bind-mounted from /opt/shitaleco-dev
 
 # Whitelisted container names per stack (prevents arbitrary container access).
 PROD_CONTAINERS = {
-    "shitaleco-backend-1", "shitaleco-admin-1", "shitaleco-quick-donation-1",
+    # Legacy single-container + new blue/green pair. All three listed so the
+    # admin UI's Logs / Inspect / Restart pickers work either side of the
+    # cutover. Backend code does not assume only one is running.
+    "shitaleco-backend-1", "shitaleco-backend-blue-1", "shitaleco-backend-green-1",
+    "shitaleco-admin-1", "shitaleco-quick-donation-1",
     "shitaleco-kiosk-1", "shitaleco-screen-1", "shitaleco-service-1",
     "shitaleco-nginx-1", "shitaleco-db-1", "shitaleco-deployer-1",
     "shitaleco-backups-1",
@@ -501,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             envs = {}
-            for env, container in ENV_CONTAINERS.items():
+            for env, container in _env_containers().items():
                 running = inspect_container(container)
                 # Prefer the running container's baked env (truth: what's
                 # actually executing right now). Fall back to the tagged image

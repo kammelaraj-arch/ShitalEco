@@ -107,8 +107,14 @@ function formatTs(ts: string) {
   return `${ts.slice(0,4)}-${ts.slice(4,6)}-${ts.slice(6,8)} ${ts.slice(9,11)}:${ts.slice(11,13)}:${ts.slice(13,15)} UTC`
 }
 
+// Diagnostic picker for Logs / Inspect / Restart. Includes the blue/green
+// container names so post-cutover the operator can still pull logs from the
+// active backend regardless of which color is live. Harmless to list the
+// inactive entry — it'll just show "not running" in the inspect output.
 const PROD_CONTAINERS = [
-  'shitaleco-backend-1', 'shitaleco-admin-1', 'shitaleco-quick-donation-1',
+  'shitaleco-backend-1',
+  'shitaleco-backend-blue-1', 'shitaleco-backend-green-1',
+  'shitaleco-admin-1', 'shitaleco-quick-donation-1',
   'shitaleco-kiosk-1', 'shitaleco-screen-1', 'shitaleco-service-1',
   'shitaleco-nginx-1', 'shitaleco-db-1', 'shitaleco-deployer-1', 'shitaleco-backups-1',
 ]
