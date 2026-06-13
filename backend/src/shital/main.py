@@ -99,11 +99,36 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     else:
         logger.info("recovery_loop_disabled_via_env")
 
+    # ── Scheduled-deploy poller ──────────────────────────────────────────
+    # Polls scheduled_deploys every 60 s; any pending row whose
+    # scheduled_for is in the past gets fired via the deployer. We mark
+    # the row 'fired' BEFORE the deployer call so the promote-induced
+    # backend restart can't double-fire it on the next boot (the row is
+    # already past the WHERE filter). On failure we record the error;
+    # the row stays in 'failed' status so the operator can see why in
+    # System Ops and re-schedule manually.
+    async def _scheduled_deploy_poller() -> None:
+        from shital.services.scheduled_deploys import poll_and_fire
+        # First sweep after 15 s — covers the case where a backend was
+        # restarted past a row's scheduled_for time (within a small grace).
+        await _asyncio.sleep(15)
+        while True:
+            try:
+                fired = await poll_and_fire()
+                if fired:
+                    logger.info("scheduled_deploys_fired", count=fired)
+            except Exception as exc:
+                logger.error("scheduled_deploys_poll_failed", error=str(exc))
+            await _asyncio.sleep(60)
+    _sched_task = _asyncio.create_task(_scheduled_deploy_poller())
+    logger.info("scheduled_deploy_poller_started")
+
     yield
     if _mail_task:
         _mail_task.cancel()
     if _recovery_task is not None:
         _recovery_task.cancel()
+    _sched_task.cancel()
     logger.info("shital_shutdown")
 
 
@@ -2968,6 +2993,29 @@ async def _patch_schema() -> None:
         # audit them later. 'manual' (default) vs 'mail_agent' vs 'import'.
         "ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS source VARCHAR(30) NOT NULL DEFAULT 'manual'",
         "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_source ON purchase_invoices(source) WHERE source <> 'manual'",
+
+        # ── Scheduled deploys ──────────────────────────────────────────────
+        # Persisted queue of "promote at <future time>" requests. Lives in
+        # the DB (not in-memory) so a prod promote — which recreates the
+        # backend container mid-wait — doesn't lose pending entries. The
+        # poller in lifespan() reads this table every 60s and fires due
+        # rows via the deployer's /promote-prod. status flow:
+        #   pending → fired      (poller hit, deployer call dispatched)
+        #   pending → cancelled  (operator clicked ✕)
+        #   pending → failed     (deployer rejected; error column populated)
+        """CREATE TABLE IF NOT EXISTS scheduled_deploys (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            env           VARCHAR(10)  NOT NULL,
+            scheduled_for TIMESTAMPTZ  NOT NULL,
+            status        VARCHAR(20)  NOT NULL DEFAULT 'pending',
+            created_by    VARCHAR(255) NOT NULL,
+            created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            fired_at      TIMESTAMPTZ,
+            error         TEXT
+        )""",
+        # Poller's hot query is "find pending rows that are due". Partial
+        # index keeps it O(1) regardless of total history size.
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_deploys_pending ON scheduled_deploys(scheduled_for) WHERE status = 'pending'",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't

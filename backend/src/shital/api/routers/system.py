@@ -18,10 +18,10 @@ import json
 import os
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Body, Header, HTTPException, status
 from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace
@@ -84,6 +84,85 @@ async def get_environments(ctx: CurrentSpace) -> dict[str, Any]:
         return {"environments": {}, "error": f"Deployer HTTP {e.code}"}
     except Exception as e:
         return {"environments": {}, "error": f"Deployer unreachable: {e}"}
+
+
+@router.get("/scheduled-deploys")
+async def list_scheduled_deploys(ctx: CurrentSpace) -> dict[str, Any]:
+    """Return all currently-pending scheduled deploys plus the last 10 of
+    history (fired/cancelled/failed). The UI shows the pending list as a
+    countdown banner and the history as small audit text."""
+    _require_admin(ctx)
+    async with SessionLocal() as db:
+        pending = (await db.execute(text(
+            "SELECT id, env, scheduled_for, status, created_by, created_at "
+            "FROM scheduled_deploys "
+            "WHERE status = 'pending' "
+            "ORDER BY scheduled_for"
+        ))).all()
+        history = (await db.execute(text(
+            "SELECT id, env, scheduled_for, status, created_by, created_at, fired_at, error "
+            "FROM scheduled_deploys "
+            "WHERE status <> 'pending' "
+            "ORDER BY created_at DESC "
+            "LIMIT 10"
+        ))).all()
+    def _row(r: Any, with_history: bool = False) -> dict[str, Any]:
+        d = {
+            "id": str(r[0]),
+            "env": r[1],
+            "scheduled_for": r[2].isoformat() if r[2] else None,
+            "status": r[3],
+            "created_by": r[4],
+            "created_at": r[5].isoformat() if r[5] else None,
+        }
+        if with_history:
+            d["fired_at"] = r[6].isoformat() if r[6] else None
+            d["error"] = r[7]
+        return d
+    return {
+        "pending": [_row(r) for r in pending],
+        "history": [_row(r, with_history=True) for r in history],
+    }
+
+
+@router.post("/scheduled-deploys/{deploy_id}/cancel")
+async def cancel_scheduled_deploy(
+    deploy_id: str,
+    ctx: CurrentSpace,
+    x_admin_pin: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Cancel a pending scheduled deploy. Same PIN gate as scheduling it."""
+    _require_admin(ctx)
+    if not x_admin_pin:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin PIN required (X-Admin-Pin header)",
+        )
+    from shital.core.fabrics.secrets import SecretsManager
+    if not await SecretsManager.verify_pin(x_admin_pin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Incorrect admin PIN",
+        )
+    async with SessionLocal() as db:
+        # Only cancel rows that are still pending. If the poller already
+        # fired this row, we silently return ok=false rather than racing.
+        result = await db.execute(text(
+            "UPDATE scheduled_deploys SET status='cancelled' "
+            "WHERE id=:id AND status='pending' "
+            "RETURNING id, env, scheduled_for"
+        ), {"id": deploy_id})
+        row = result.first()
+        await db.commit()
+    if row is None:
+        return {"ok": False, "message": "Not found, already fired, or already cancelled"}
+    return {
+        "ok": True,
+        "id": str(row[0]),
+        "env": row[1],
+        "scheduled_for": row[2].isoformat() if row[2] else None,
+        "cancelled_by": ctx.user_email,
+    }
 
 
 @router.get("/promote-status")
@@ -206,11 +285,18 @@ async def trigger_deploy(
     env: str,
     ctx: CurrentSpace,
     x_admin_pin: str | None = Header(default=None),
+    body: dict[str, Any] | None = Body(default=None),
 ) -> dict[str, Any]:
     """
     Trigger a deploy.
       env=dev   → pull latest :dev images, restart dev stack
       env=prod  → retag :dev → :latest, restart prod stack (image promotion)
+
+    When the optional JSON body contains ``{"scheduled_for": "<UTC ISO>"}``
+    the deploy is queued in the ``scheduled_deploys`` table instead of being
+    fired immediately. The poller in main.lifespan picks it up at the
+    chosen time. Useful for promoting outside business hours so the
+    ~3-min cold-start blip lands when no donations are in flight.
     """
     _require_admin(ctx)
     if env not in ("dev", "prod"):
@@ -229,6 +315,46 @@ async def trigger_deploy(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Incorrect admin PIN",
         )
+
+    # Scheduled path: just write a row and return. The poller fires it
+    # later — no deployer contact at schedule time, so a deployer outage
+    # at the moment of click doesn't block the schedule.
+    scheduled_for_raw = (body or {}).get("scheduled_for")
+    if scheduled_for_raw:
+        try:
+            sched = datetime.fromisoformat(str(scheduled_for_raw).replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"scheduled_for must be ISO 8601 UTC: {e}",
+            ) from e
+        if sched.tzinfo is None:
+            sched = sched.replace(tzinfo=UTC)
+        sched = sched.astimezone(UTC)
+        # Reject schedules in the past (or less than 30 s out — the poller
+        # cycle is 60 s so anything inside that just fires "now" anyway and
+        # the operator might as well click "Promote now").
+        now = datetime.now(UTC)
+        if sched < now + timedelta(seconds=30):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scheduled_for must be at least 30 seconds in the future",
+            )
+        async with SessionLocal() as db:
+            row = (await db.execute(text(
+                "INSERT INTO scheduled_deploys (env, scheduled_for, created_by) "
+                "VALUES (:env, :sched, :who) RETURNING id"
+            ), {"env": env, "sched": sched, "who": ctx.user_email})).scalar_one()
+            await db.commit()
+        return {
+            "ok": True,
+            "scheduled": True,
+            "id": str(row),
+            "env": env,
+            "scheduled_for": sched.isoformat(),
+            "created_by": ctx.user_email,
+            "message": f"Scheduled {env} deploy for {sched.isoformat()}",
+        }
 
     deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000").strip()
     deploy_secret = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
