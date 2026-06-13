@@ -270,9 +270,12 @@ jobs:
 
             # ─── Step 10: Final smoke ──────────────────────────────────────
             log "Step 10/10 — final smoke (real DNS, real TLS)"
+            # NB: the API serves its schema at /openapi.json, NOT
+            # /api/v1/openapi.json (verified against live prod 13-Jun) — using
+            # the wrong path here would 404 and fail an otherwise-good cutover.
             for url in \
               https://shital.org.uk/health \
-              https://shital.org.uk/api/v1/openapi.json
+              https://shital.org.uk/openapi.json
             do
               code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo "000")
               log "  $url → $code"
