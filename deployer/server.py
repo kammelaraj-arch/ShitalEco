@@ -51,7 +51,7 @@ ENV_CONTAINERS = {
 }
 
 
-def run_script(args):
+def run_script(args, script="/app/deploy.sh"):
     # Persist the script's stdout+stderr to a small ring of log files so the
     # System Ops panel (GET /last-deploy-log) can surface WHY a Promote /
     # Re-deploy click didn't take effect. Used to be DEVNULL — which is how
@@ -60,8 +60,11 @@ def run_script(args):
     log_dir = "/var/log/shital-deployer"
     os.makedirs(log_dir, exist_ok=True)
     ts = _dt.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    # Tag the log filename with the script name so blue/green runs don't get
+    # mixed up with legacy deploy.sh runs in the directory listing.
+    script_tag = os.path.basename(script).replace(".sh", "")
     safe_args = "-".join(a.lstrip("-").replace("/", "_") for a in args) or "deploy"
-    log_path = os.path.join(log_dir, f"{ts}-{safe_args}.log")
+    log_path = os.path.join(log_dir, f"{ts}-{script_tag}-{safe_args}.log")
     # Symlink "latest" so /last-deploy-log doesn't need to scan the directory.
     latest = os.path.join(log_dir, "latest.log")
     log_fh = open(log_path, "wb")  # noqa: SIM115 — Popen owns the lifetime
@@ -74,10 +77,41 @@ def run_script(args):
     except OSError:
         pass
     subprocess.Popen(
-        ["/bin/bash", "/app/deploy.sh", *args],
+        ["/bin/bash", script, *args],
         stdout=log_fh,
         stderr=subprocess.STDOUT,
     )
+
+
+# ─── Promote strategy ─────────────────────────────────────────────────────────
+# "legacy"   → deploy.sh --promote-prod  (existing recreate path, ~3min blip)
+# "bluegreen"→ promote_bluegreen.sh      (zero-downtime, requires host cutover)
+# Read at request time, not module load — so the operator can flip
+# PROMOTE_STRATEGY in /opt/shitaleco/.env and the next click picks it up
+# (after a deployer restart for env-var refresh, same as DEPLOY_SECRET).
+def _promote_strategy() -> str:
+    return (os.environ.get("PROMOTE_STRATEGY", "legacy") or "legacy").strip().lower()
+
+
+def _promote_state() -> dict:
+    """Read /workspace/.bluegreen-state.json if it exists, else return a
+    legacy/idle stub. Cheap (small file). Used by /promote-status."""
+    strategy = _promote_strategy()
+    base = {"strategy": strategy}
+    if strategy != "bluegreen":
+        return base
+    try:
+        with open("/workspace/.bluegreen-state.json") as fh:
+            base.update(json.load(fh))
+    except (OSError, json.JSONDecodeError):
+        # State file absent or unreadable — return what we know
+        try:
+            with open("/workspace/active-color") as fh:
+                base["active_color"] = fh.read().strip() or None
+        except OSError:
+            base["active_color"] = None
+        base["phase"] = "idle"
+    return base
 
 
 # ─── Ops / diagnostics ────────────────────────────────────────────────────────
@@ -457,6 +491,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"snapshots": entries[:20]})
             return
 
+        if self.path == "/promote-status":
+            self._send_json(200, _promote_state())
+            return
+
         if self.path == "/status":
             if not self._check_secret():
                 self.send_response(403)
@@ -548,7 +586,26 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/promote-prod":
-            run_script(["--promote-prod"])
+            strategy = _promote_strategy()
+            if strategy == "bluegreen":
+                run_script([], script="/app/promote_bluegreen.sh")
+            else:
+                run_script(["--promote-prod"])
+            self.send_response(202)
+            self.end_headers()
+            self.wfile.write(json.dumps({"strategy": strategy}).encode())
+            return
+
+        if self.path == "/promote-rollback":
+            strategy = _promote_strategy()
+            if strategy != "bluegreen":
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(
+                    b"rollback only available when PROMOTE_STRATEGY=bluegreen"
+                )
+                return
+            run_script(["--rollback"], script="/app/promote_bluegreen.sh")
             self.send_response(202)
             self.end_headers()
             return

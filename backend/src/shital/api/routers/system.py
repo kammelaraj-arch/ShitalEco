@@ -86,6 +86,96 @@ async def get_environments(ctx: CurrentSpace) -> dict[str, Any]:
         return {"environments": {}, "error": f"Deployer unreachable: {e}"}
 
 
+@router.get("/promote-status")
+async def get_promote_status(ctx: CurrentSpace) -> dict[str, Any]:
+    """Proxy the deployer's /promote-status. Returns at minimum
+    ``{"strategy": "legacy" | "bluegreen"}``; when bluegreen is active the
+    payload also includes ``active_color``, ``phase``, ``candidate`` and a
+    ``rollback_available`` flag that drives the UI."""
+    _require_admin(ctx)
+    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000").strip()
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
+    if not deploy_secret:
+        # Don't error — System Ops should still render with a default badge.
+        return {"strategy": "unknown", "error": "DEPLOY_SECRET not configured"}
+    req = urllib.request.Request(
+        f"{deployer_url}/promote-status",
+        headers={"X-Deploy-Secret": deploy_secret},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # 404 = old deployer that doesn't know about /promote-status yet.
+        # Treat as legacy so the UI still works during the rollout window.
+        if e.code == 404:
+            return {"strategy": "legacy"}
+        return {"strategy": "unknown", "error": f"Deployer HTTP {e.code}"}
+    except Exception as e:
+        return {"strategy": "unknown", "error": f"Deployer unreachable: {e}"}
+
+
+@router.post("/promote-rollback")
+async def trigger_promote_rollback(
+    ctx: CurrentSpace,
+    x_admin_pin: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Trigger an instant blue/green rollback to the previous colour. Only
+    valid when ``PROMOTE_STRATEGY=bluegreen``; the deployer enforces the same
+    check independently and returns 400 in legacy mode."""
+    _require_admin(ctx)
+    if not x_admin_pin:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin PIN required (X-Admin-Pin header)",
+        )
+    from shital.core.fabrics.secrets import SecretsManager
+    if not await SecretsManager.verify_pin(x_admin_pin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Incorrect admin PIN",
+        )
+    deployer_url = os.environ.get("DEPLOYER_URL", "http://deployer:9000").strip()
+    deploy_secret = os.environ.get("DEPLOY_SECRET", "").strip().strip('"').strip("'")
+    if not deploy_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="DEPLOY_SECRET not configured",
+        )
+    req = urllib.request.Request(
+        f"{deployer_url}/promote-rollback",
+        method="POST",
+        headers={"X-Deploy-Secret": deploy_secret},
+        data=b"",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            code = r.status
+    except urllib.error.HTTPError as e:
+        # 400 = deployer says legacy mode; surface as 409 so the UI doesn't
+        # confusingly say "bad request" when the user clicked an enabled button.
+        if e.code == 400:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Rollback not available — deployer is in legacy mode",
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Deployer rejected: HTTP {e.code}",
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not reach deployer: {e}",
+        ) from e
+    return {
+        "ok": True,
+        "deployer_status": code,
+        "triggered_at": datetime.now(UTC).isoformat(),
+        "triggered_by": ctx.user_email,
+    }
+
+
 @router.get("/deploys")
 async def list_deploys(ctx: CurrentSpace, limit: int = 20, env: str | None = None) -> dict[str, Any]:
     _require_admin(ctx)

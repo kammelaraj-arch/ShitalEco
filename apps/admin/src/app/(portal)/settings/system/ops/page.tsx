@@ -137,6 +137,21 @@ export default function OpsPage() {
   const [environments, setEnvironments] = useState<EnvironmentsResponse | null>(null)
   const [deploys, setDeploys] = useState<DeployEvent[] | null>(null)
 
+  // Promote strategy ("legacy" or "bluegreen") + live blue/green state.
+  // Surfaced from GET /admin/system/promote-status which proxies the
+  // deployer's /promote-status. When strategy === "legacy" only the
+  // strategy field is populated; otherwise active_color/phase/candidate/
+  // rollback_available are also filled in by the running state machine.
+  type PromoteStatus = {
+    strategy: 'legacy' | 'bluegreen' | 'unknown'
+    active_color?: 'blue' | 'green' | null
+    phase?: string
+    candidate?: string
+    rollback_available?: boolean
+    error?: string
+  }
+  const [promoteStatus, setPromoteStatus] = useState<PromoteStatus | null>(null)
+
   // Tail of /var/log/shital-deployer/latest.log — written by deploy.sh. Lets
   // an operator see why a Promote / Re-deploy click did or didn't take effect
   // (bad GHCR auth, missing /workspace mount, container crash on boot…) without
@@ -233,10 +248,11 @@ export default function OpsPage() {
 
   const loadEnvs = useCallback(async () => {
     try {
-      const [vRes, eRes, dRes] = await Promise.all([
+      const [vRes, eRes, dRes, pRes] = await Promise.all([
         fetch(`${API_BASE}/admin/system/version`, { headers: { Authorization: `Bearer ${getToken()}` } }),
         fetch(`${API_BASE}/admin/system/environments`, { headers: { Authorization: `Bearer ${getToken()}` } }),
         fetch(`${API_BASE}/admin/system/deploys?limit=10`, { headers: { Authorization: `Bearer ${getToken()}` } }),
+        fetch(`${API_BASE}/admin/system/promote-status`, { headers: { Authorization: `Bearer ${getToken()}` } }),
       ])
       if (vRes.ok) setVersion(await vRes.json())
       if (eRes.ok) setEnvironments(await eRes.json())
@@ -244,6 +260,7 @@ export default function OpsPage() {
         const d = await dRes.json()
         setDeploys(d.deploys || [])
       }
+      if (pRes.ok) setPromoteStatus(await pRes.json())
     } catch {
       // ignore — page still useful without env panel
     }
@@ -545,6 +562,25 @@ export default function OpsPage() {
                 >
                   {isProd ? '🚀 Promote to Prod' : '🔄 Re-deploy Dev'}
                 </button>
+                {isProd && promoteStatus && (
+                  <div className="mt-2 text-[10px] font-medium text-white/50">
+                    {promoteStatus.strategy === 'bluegreen' ? (
+                      <>
+                        <span className="text-blue-300/80">Blue/Green</span>
+                        {promoteStatus.active_color && (
+                          <> · active <span className="font-mono">{promoteStatus.active_color}</span></>
+                        )}
+                        {promoteStatus.phase && promoteStatus.phase !== 'idle' && (
+                          <> · <span className="text-yellow-300/80">{promoteStatus.phase}</span></>
+                        )}
+                      </>
+                    ) : promoteStatus.strategy === 'legacy' ? (
+                      <span>Strategy: legacy recreate (~3 min blip)</span>
+                    ) : (
+                      <span className="text-white/30">Strategy: {promoteStatus.strategy}</span>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
