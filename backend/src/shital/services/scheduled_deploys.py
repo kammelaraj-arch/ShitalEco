@@ -23,7 +23,6 @@ attacker had your PIN, they would just promote immediately).
 """
 from __future__ import annotations
 
-import json
 import os
 import urllib.error
 import urllib.request
