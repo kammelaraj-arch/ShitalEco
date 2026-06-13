@@ -1,0 +1,290 @@
+name: One-shot blue/green cutover
+
+# Migrates production from the legacy single-container path
+# (shitaleco-backend-1, bound to host port 8000) to the dormant blue/green
+# scaffolding defined in docker-compose.prod.yml (profiles: ["bluegreen"]).
+#
+# WHAT THIS WORKFLOW DOES
+#   1. Starts shitaleco-backend-blue-1 from the current :latest image alongside
+#      the still-serving legacy backend.
+#   2. Waits up to 15 min for blue to report 30 consecutive /health 200s.
+#   3. Atomically rewrites nginx/snippets/active-backend.conf to point at
+#      backend-blue and reloads nginx. Public traffic flips in one syscall.
+#   4. Writes "blue" to /opt/shitaleco/active-color — the marker that
+#      deployer/server.py + the host monitors read post-cutover.
+#   5. Stops (NOT removes) shitaleco-backend-1. Left around as a manual
+#      rollback safety net for ≥24h.
+#   6. Sets PROMOTE_STRATEGY=bluegreen in /opt/shitaleco/.env so the next
+#      System Ops "Promote" routes through promote_bluegreen.sh.
+#   7. Restarts the deployer container so it picks up the new env var.
+#
+# IDEMPOTENCY GUARD
+#   If /opt/shitaleco/active-color already exists the script bails before
+#   touching anything. Cutover is one-way; once you're on blue/green, future
+#   promotes flip colours via promote_bluegreen.sh, not this workflow.
+#
+# ROLLBACK
+#   If the health gate (step 2) or the through-nginx verification (after step
+#   3) fails, the script unwinds: removes active-color, rewrites the snippet
+#   back to `backend:8000` (the compose service-name path that resolves to
+#   shitaleco-backend-1 via docker DNS), reloads nginx, and `docker start`s
+#   the legacy container if it was already stopped. Exits non-zero so the
+#   Actions run reports red.
+#
+# WHEN TO RUN
+#   Manual workflow_dispatch only. Never auto-fires on push. Recommended
+#   window: 21:00 UK or later, when traffic is lowest. Watch with a separate
+#   curl loop against https://shital.org.uk/health to prove zero downtime
+#   during step 3.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CUTOVER to confirm (irreversible from the UI)'
+        required: true
+        type: string
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm intent
+        run: |
+          if [ "${{ inputs.confirm }}" != "CUTOVER" ]; then
+            echo "::error::confirm must equal CUTOVER (got '${{ inputs.confirm }}')"
+            exit 1
+          fi
+          echo "Confirmed. Proceeding."
+
+      - name: Execute cutover on host
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 25m
+          script: |
+            set -euo pipefail
+
+            APP_DIR=/opt/shitaleco
+            SNIPPET="$APP_DIR/nginx/snippets/active-backend.conf"
+            MARKER="$APP_DIR/active-color"
+            ENV_FILE="$APP_DIR/.env"
+            COMPOSE="$APP_DIR/docker-compose.prod.yml"
+            LEGACY=shitaleco-backend-1
+            BLUE=shitaleco-backend-blue-1
+            NGINX=shitaleco-nginx-1
+
+            log() { echo "[$(date -u +%H:%M:%SZ)] $*"; }
+
+            # ─── Step 1: Pre-flight ────────────────────────────────────────
+            log "Step 1/10 — pre-flight"
+
+            [ -f "$SNIPPET" ] || { log "FATAL: $SNIPPET missing — nginx refactor not deployed"; exit 1; }
+            [ -f "$COMPOSE" ] || { log "FATAL: $COMPOSE missing"; exit 1; }
+            [ -f "$ENV_FILE" ] || { log "FATAL: $ENV_FILE missing"; exit 1; }
+
+            if [ -e "$MARKER" ]; then
+              log "FATAL: $MARKER already exists (contents: '$(cat "$MARKER")')."
+              log "        Cutover already ran. Use System Ops to promote, not this workflow."
+              exit 1
+            fi
+
+            legacy_state=$(docker inspect -f '{{.State.Status}}' "$LEGACY" 2>/dev/null || echo absent)
+            if [ "$legacy_state" != "running" ]; then
+              log "FATAL: $LEGACY is '$legacy_state' (expected 'running')."
+              log "        Fix prod first before cutting over."
+              exit 1
+            fi
+
+            if ! docker exec "$LEGACY" curl -fs --max-time 5 http://localhost:8000/health > /dev/null; then
+              log "FATAL: $LEGACY is running but /health is not 200."
+              exit 1
+            fi
+            log "  ✓ $LEGACY running and healthy"
+
+            if docker ps -a --format '{{.Names}}' | grep -qx "$BLUE"; then
+              log "  ! $BLUE already exists from a previous attempt — removing"
+              docker rm -f "$BLUE" >/dev/null
+            fi
+
+            # Capture current snippet content so we can restore it on rollback.
+            ORIGINAL_SNIPPET=$(cat "$SNIPPET")
+            log "  ✓ snippet snapshot captured ($(echo "$ORIGINAL_SNIPPET" | wc -c) bytes)"
+
+            ROLLBACK_NEEDED=0
+            BLUE_STARTED=0
+            SNIPPET_SWAPPED=0
+            MARKER_WRITTEN=0
+            LEGACY_STOPPED=0
+
+            rollback() {
+              [ "$ROLLBACK_NEEDED" -eq 0 ] && return 0
+              log ""
+              log "─── ROLLBACK ─────────────────────────────────────────────"
+              if [ "$LEGACY_STOPPED" -eq 1 ]; then
+                log "  restarting $LEGACY"
+                docker start "$LEGACY" >/dev/null || log "    warn: start failed"
+              fi
+              if [ "$MARKER_WRITTEN" -eq 1 ]; then
+                log "  removing $MARKER"
+                rm -f "$MARKER" || true
+              fi
+              if [ "$SNIPPET_SWAPPED" -eq 1 ]; then
+                log "  restoring snippet to pre-cutover contents"
+                printf '%s\n' "$ORIGINAL_SNIPPET" > "$SNIPPET"
+                docker exec "$NGINX" nginx -t >/dev/null 2>&1 \
+                  && docker exec "$NGINX" nginx -s reload \
+                  || log "    warn: nginx reload during rollback failed"
+              fi
+              if [ "$BLUE_STARTED" -eq 1 ]; then
+                log "  removing $BLUE"
+                docker rm -f "$BLUE" >/dev/null 2>&1 || true
+              fi
+              log "  rollback complete — prod should be back on $LEGACY via $NGINX"
+            }
+            trap 'rc=$?; rollback; exit $rc' ERR
+
+            # ─── Step 2: Start blue from current :latest ───────────────────
+            log "Step 2/10 — starting $BLUE from compose (profile=bluegreen)"
+            docker compose -p shitaleco --env-file "$ENV_FILE" -f "$COMPOSE" \
+              --profile bluegreen up -d backend-blue
+            BLUE_STARTED=1
+            ROLLBACK_NEEDED=1
+
+            # ─── Step 3: Health gate (15 min budget, 30 consec 200s) ───────
+            log "Step 3/10 — waiting for $BLUE health (≤15 min, need 30 consec 200s)"
+            consec=0; needed=30
+            for i in $(seq 1 90); do
+              if docker exec "$BLUE" curl -fs --max-time 5 http://localhost:8000/health >/dev/null 2>&1; then
+                consec=$((consec + 1))
+                if [ $((consec % 5)) -eq 0 ] || [ "$consec" -eq "$needed" ]; then
+                  log "  health ${consec}/${needed} (attempt $i/90)"
+                fi
+                [ "$consec" -ge "$needed" ] && break
+              else
+                if [ "$consec" -gt 0 ]; then
+                  log "  health probe failed (attempt $i/90) — resetting consec counter"
+                fi
+                consec=0
+              fi
+              sleep 10
+            done
+            if [ "$consec" -lt "$needed" ]; then
+              log "FATAL: $BLUE never reached $needed consecutive healthy probes"
+              docker logs --tail=80 "$BLUE" 2>&1 | sed 's/^/    blue: /' || true
+              false
+            fi
+            log "  ✓ $BLUE healthy"
+
+            # ─── Step 4: Atomic nginx switch ───────────────────────────────
+            log "Step 4/10 — rewriting nginx snippet and validating"
+            cat > "${SNIPPET}.next" <<EOF
+            # Active backend upstream — managed by cutover-bluegreen.yml on $(date -u +%Y-%m-%dT%H:%M:%SZ)
+            # Hand edits revert on the next blue/green promote. To change the
+            # active colour use promote_bluegreen.sh, not this file.
+            set \$be http://${BLUE}:8000;
+            EOF
+            # Move BEFORE nginx -t so the test reads the new file.
+            mv -f "${SNIPPET}.next" "$SNIPPET"
+            SNIPPET_SWAPPED=1
+            if ! docker exec "$NGINX" nginx -t 2>&1 | sed 's/^/    nginx -t: /'; then
+              log "FATAL: nginx -t failed with new snippet"
+              false
+            fi
+            log "  ✓ nginx config valid; reloading"
+            docker exec "$NGINX" nginx -s reload
+
+            # ─── Step 5: Mark cutover complete ─────────────────────────────
+            log "Step 5/10 — writing $MARKER"
+            echo blue > "$MARKER"
+            MARKER_WRITTEN=1
+
+            # ─── Step 6: Verify through nginx (60s, 6 probes) ──────────────
+            log "Step 6/10 — verifying $BLUE is serving through $NGINX"
+            for i in 1 2 3 4 5 6; do
+              code=$(curl -k -s -o /dev/null -w '%{http_code}' \
+                       -H 'Host: shital.org.uk' \
+                       --max-time 5 https://localhost/health || echo "000")
+              log "  probe $i/6 — HTTP $code"
+              if [ "$code" != "200" ]; then
+                log "FATAL: through-nginx health probe returned $code"
+                false
+              fi
+              sleep 10
+            done
+            log "  ✓ public traffic served by $BLUE"
+
+            # ─── Step 7: Stop (not remove) legacy ──────────────────────────
+            # Kept on disk so an operator can `docker start shitaleco-backend-1`
+            # as an instant manual rollback within the next 24h. A separate
+            # follow-up workflow can `docker rm` it once we're confident.
+            log "Step 7/10 — stopping $LEGACY (kept on disk as rollback safety net)"
+            docker stop "$LEGACY" >/dev/null
+            LEGACY_STOPPED=1
+
+            # Confirm through-nginx still 200 after stopping legacy. If the
+            # nginx upstream switch was incomplete we'd see this fail.
+            sleep 2
+            code=$(curl -k -s -o /dev/null -w '%{http_code}' \
+                     -H 'Host: shital.org.uk' \
+                     --max-time 5 https://localhost/health || echo "000")
+            log "  post-legacy-stop /health → HTTP $code"
+            if [ "$code" != "200" ]; then
+              log "FATAL: traffic broke after stopping $LEGACY — snippet swap was incomplete"
+              false
+            fi
+
+            # From here on we treat the cutover as committed. The remaining
+            # steps tweak deployer state to enable bluegreen promotes; if any
+            # of them fails the operator can fix manually without traffic
+            # impact, so we disable the rollback trap.
+            ROLLBACK_NEEDED=0
+            trap - ERR
+
+            # ─── Step 8: Flip PROMOTE_STRATEGY in /opt/shitaleco/.env ──────
+            log "Step 8/10 — setting PROMOTE_STRATEGY=bluegreen in $ENV_FILE"
+            if grep -q '^PROMOTE_STRATEGY=' "$ENV_FILE"; then
+              sed -i 's/^PROMOTE_STRATEGY=.*/PROMOTE_STRATEGY=bluegreen/' "$ENV_FILE"
+            else
+              echo 'PROMOTE_STRATEGY=bluegreen' >> "$ENV_FILE"
+            fi
+            grep '^PROMOTE_STRATEGY=' "$ENV_FILE" | sed 's/^/    /'
+
+            # ─── Step 9: Restart deployer to pick up the env change ────────
+            # --no-deps so we don't touch the just-promoted backend container.
+            log "Step 9/10 — restarting deployer to pick up new env"
+            docker compose -p shitaleco --env-file "$ENV_FILE" -f "$COMPOSE" \
+              up -d --no-deps deployer
+
+            # Give the deployer 10s to come back, then probe /promote-status.
+            sleep 10
+            if docker exec "$NGINX" curl -fs --max-time 5 http://deployer:9000/promote-status >/dev/null 2>&1; then
+              log "  ✓ deployer back and /promote-status responding"
+            else
+              log "  warn: deployer /promote-status not reachable yet — check 'docker logs shitaleco-deployer-1'"
+            fi
+
+            # ─── Step 10: Final smoke ──────────────────────────────────────
+            log "Step 10/10 — final smoke (real DNS, real TLS)"
+            for url in \
+              https://shital.org.uk/health \
+              https://shital.org.uk/api/v1/openapi.json
+            do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo "000")
+              log "  $url → $code"
+              [ "$code" = "200" ] || { log "  ✗ smoke failed"; exit 1; }
+            done
+
+            log ""
+            log "═══ CUTOVER COMPLETE ═══════════════════════════════════════"
+            log "  active colour:    blue"
+            log "  legacy container: $LEGACY  (stopped, kept on disk)"
+            log "  promote strategy: bluegreen"
+            log ""
+            log "Next steps for the operator:"
+            log "  1. Make a trivial commit + click Promote — zero-downtime proof."
+            log "  2. After ≥24h confident, 'docker rm $LEGACY' to free disk."
