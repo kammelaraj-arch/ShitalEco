@@ -289,6 +289,12 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # Re-usable snippets included from inside server/location blocks.
+      # active-backend.conf is the single source of truth for which backend
+      # container nginx proxies to — today equivalent to the old inline
+      # `set $be http://backend:8000;`, future blue/green deploys rewrite
+      # this one file and `nginx -s reload`.
+      - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./nginx/hub:/usr/share/nginx/hub:ro
       - ./nginx/errors:/usr/share/nginx/errors:ro
       - /var/www/certbot:/var/www/certbot:ro
