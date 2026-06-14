@@ -1,0 +1,129 @@
+name: Diagnose + recover dev backend
+
+# Combined diagnostic + recovery for the DEV backend.
+#
+# Context (14-Jun): the prod promote of PR #131 failed its 10-min health
+# gate and auto-rolled-back; the same code on dev now also fails to come
+# healthy. Same git tree was healthy at 07:08, so this looks environmental
+# (memory pressure during full-stack churn on the 2 GB VPS, or a slow DDL
+# in _patch_schema under load) rather than a code bug.
+#
+# This workflow:
+#  1) Captures evidence — last 200 lines of dev backend logs, container
+#     State (incl. OOMKilled flag), host memory, dmesg OOM lines, disk.
+#  2) Attempts a SAFE recovery: `up -d --no-deps backend-dev`, wait up to
+#     2 min for /health via the dev container on host port 8001.
+#  3) Prints the after-state so we can see if it self-heals or what it
+#     died from.
+#
+# Touches ONLY the dev stack (-p shitaleco-dev / docker-compose.dev.yml).
+# Does not touch prod nginx, prod backend, or anything outside the dev
+# project. Read-heavy at the start; only the single `up -d --no-deps
+# backend-dev` line mutates state.
+#
+# Triggers on push to either main or the diag branch, so pushing the
+# file is enough to fire it.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - claude/diag-recover-dev-Q40dj
+    paths:
+      - '.github/workflows/diag-recover-dev.yml'
+
+jobs:
+  diag-recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 8m
+          script: |
+            set +e
+
+            DEV_DIR=/opt/shitaleco-dev
+            BACKEND_DEV=shitaleco-dev-backend-dev-1
+            NGINX_DEV=shitaleco-dev-nginx-dev-1
+
+            echo "================ TIME ================"
+            date -u +'%Y-%m-%d %H:%M:%S UTC (host)'
+
+            echo ""
+            echo "================ host memory ================"
+            free -m
+
+            echo ""
+            echo "================ disk root ================"
+            df -h / | head -2
+
+            echo ""
+            echo "================ recent OOM lines in dmesg ================"
+            dmesg 2>/dev/null | tail -200 | grep -iE 'oom|killed process|out of memory' | tail -20
+            [ $? -ne 0 ] && echo "  (no OOM lines in last 200 dmesg lines, or dmesg not readable)"
+
+            echo ""
+            echo "================ docker ps -a (shitaleco-dev-*) ================"
+            docker ps -a --filter 'name=shitaleco-dev-' \
+              --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' | head -25
+
+            echo ""
+            echo "================ backend-dev State (incl. OOMKilled) ================"
+            docker inspect "$BACKEND_DEV" \
+              --format 'StartedAt={{.State.StartedAt}} | FinishedAt={{.State.FinishedAt}} | Status={{.State.Status}} | ExitCode={{.State.ExitCode}} | OOMKilled={{.State.OOMKilled}} | Restarts={{.RestartCount}} | Image={{.Config.Image}} | MemLimit={{.HostConfig.Memory}}bytes' 2>/dev/null \
+              | tr '|' '\n' | sed 's/^/  /' \
+              || echo "  $BACKEND_DEV not present"
+
+            echo ""
+            echo "================ backend-dev: last 200 log lines ================"
+            docker logs --tail 200 "$BACKEND_DEV" 2>&1 | sed 's/^/  /'
+
+            echo ""
+            echo "================ nginx-dev: last 30 log lines ================"
+            docker logs --tail 30 "$NGINX_DEV" 2>&1 | sed 's/^/  /'
+
+            echo ""
+            echo "================ deploy-dev history (tail) ================"
+            if [ -f "$DEV_DIR/backups/deploy-history.jsonl" ]; then
+              tail -5 "$DEV_DIR/backups/deploy-history.jsonl" | sed 's/^/  /'
+            else
+              ls -la "$DEV_DIR/backups/" 2>/dev/null | tail -10
+            fi
+
+            echo ""
+            echo "================ RECOVERY: up -d --no-deps backend-dev ================"
+            cd "$DEV_DIR" 2>/dev/null || { echo "!!! $DEV_DIR not found, abort"; exit 1; }
+            set -a; [ -f .env.dev ] && . .env.dev; [ -f .env ] && . .env; set +a
+            docker compose -p shitaleco-dev --env-file .env.dev -f docker-compose.dev.yml \
+              up -d --no-deps backend-dev 2>&1 | tail -10
+
+            echo ""
+            echo "================ wait up to 120s for /health via :8001 ================"
+            ok=0
+            for i in $(seq 1 24); do
+              sleep 5
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://localhost:8001/health 2>/dev/null || echo 000)
+              st=$(docker inspect "$BACKEND_DEV" --format '{{.State.Status}}/{{.State.ExitCode}}/oom={{.State.OOMKilled}}' 2>/dev/null || echo absent)
+              echo "  [${i}/24] state=$st  curl :8001/health=$code"
+              if [ "$code" = "200" ]; then ok=1; break; fi
+            done
+
+            if [ "$ok" = "1" ]; then
+              echo ""
+              echo "================ /health body ================"
+              curl -s --max-time 6 http://localhost:8001/health; echo
+            else
+              echo ""
+              echo "================ backend-dev NEW log tail (since recover) ================"
+              docker logs --tail 80 "$BACKEND_DEV" 2>&1 | sed 's/^/  /'
+            fi
+
+            echo ""
+            echo "================ public dev probe ================"
+            curl -s -o /dev/null -w "  https://dev.shital.org.uk/health -> %{http_code}\n" --max-time 8 https://dev.shital.org.uk/health
