@@ -97,11 +97,18 @@ jobs:
             fi
 
             echo ""
-            echo "================ RECOVERY: up -d --no-deps backend-dev ================"
+            echo "================ RECOVERY: up -d --no-deps backend-dev nginx-dev ================"
+            # Dev 502 root cause = the dev nginx container (shitaleco-dev-nginx-dev-1)
+            # went MISSING during the dev auto-deploy (same recurring failure as prod
+            # nginx). The dev BACKEND was healthy throughout. Bring up BOTH (backend is
+            # idempotent if already running); nginx-dev is the one that actually fixes
+            # the 502 that dev.shital.org.uk (proxied via prod nginx -> host:8080) shows.
             cd "$DEV_DIR" 2>/dev/null || { echo "!!! $DEV_DIR not found, abort"; exit 1; }
             set -a; [ -f .env.dev ] && . .env.dev; [ -f .env ] && . .env; set +a
             docker compose -p shitaleco-dev --env-file .env.dev -f docker-compose.dev.yml \
-              up -d --no-deps backend-dev 2>&1 | tail -10
+              up -d --no-deps backend-dev nginx-dev 2>&1 | tail -15
+            echo "  -- restart nginx-dev to flush upstream DNS --"
+            docker restart shitaleco-dev-nginx-dev-1 2>&1 | sed 's/^/  /'
 
             echo ""
             echo "================ wait up to 120s for /health via :8001 ================"
