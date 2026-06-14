@@ -30,7 +30,7 @@ from typing import Any, Literal
 
 import structlog
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace
 from shital.capabilities.auth.capabilities import (
@@ -185,7 +185,7 @@ async def _current_volunteer(db, ctx: DigitalSpace) -> dict[str, Any]:
 # ─── 14a. Auth — email one-time code, password, JWT ─────────────────────────
 
 class RequestCodeBody(BaseModel):
-    email: EmailStr
+    email: str
 
 
 @router.post("/service/auth/request-code")
@@ -227,7 +227,7 @@ async def request_code(body: RequestCodeBody) -> dict[str, Any]:
 
 
 class VerifyBody(BaseModel):
-    email: EmailStr
+    email: str
     code: str
 
 
@@ -258,7 +258,7 @@ async def verify_code(body: VerifyBody) -> dict[str, Any]:
 
 
 class PasswordLoginBody(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 
