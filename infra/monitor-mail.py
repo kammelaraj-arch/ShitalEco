@@ -29,7 +29,23 @@ import urllib.parse
 import urllib.request
 
 ENV_FILE = "/opt/shitaleco/.env"
-BACKEND_CONTAINER = "shitaleco-backend-1"
+ACTIVE_COLOR_FILE = "/opt/shitaleco/active-color"
+
+
+def _active_backend_container() -> str:
+    """Resolve the live backend container, honoring the blue/green active-color
+    marker. Post-cutover the marker holds `blue` or `green`; absent → legacy."""
+    try:
+        with open(ACTIVE_COLOR_FILE) as fh:
+            color = fh.read().strip().lower()
+        if color in ("blue", "green"):
+            return f"shitaleco-backend-{color}-1"
+    except OSError:
+        pass
+    return "shitaleco-backend-1"
+
+
+BACKEND_CONTAINER = _active_backend_container()
 SENDER = "noreply@shital.org.uk"
 GRAPH = "https://graph.microsoft.com/v1.0"
 LOGIN = "https://login.microsoftonline.com"

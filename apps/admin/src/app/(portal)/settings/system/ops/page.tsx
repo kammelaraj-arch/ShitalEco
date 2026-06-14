@@ -107,8 +107,14 @@ function formatTs(ts: string) {
   return `${ts.slice(0,4)}-${ts.slice(4,6)}-${ts.slice(6,8)} ${ts.slice(9,11)}:${ts.slice(11,13)}:${ts.slice(13,15)} UTC`
 }
 
+// Diagnostic picker for Logs / Inspect / Restart. Includes the blue/green
+// container names so post-cutover the operator can still pull logs from the
+// active backend regardless of which color is live. Harmless to list the
+// inactive entry — it'll just show "not running" in the inspect output.
 const PROD_CONTAINERS = [
-  'shitaleco-backend-1', 'shitaleco-admin-1', 'shitaleco-quick-donation-1',
+  'shitaleco-backend-1',
+  'shitaleco-backend-blue-1', 'shitaleco-backend-green-1',
+  'shitaleco-admin-1', 'shitaleco-quick-donation-1',
   'shitaleco-kiosk-1', 'shitaleco-screen-1', 'shitaleco-service-1',
   'shitaleco-nginx-1', 'shitaleco-db-1', 'shitaleco-deployer-1', 'shitaleco-backups-1',
 ]
@@ -136,6 +142,48 @@ export default function OpsPage() {
   const [version, setVersion] = useState<VersionInfo | null>(null)
   const [environments, setEnvironments] = useState<EnvironmentsResponse | null>(null)
   const [deploys, setDeploys] = useState<DeployEvent[] | null>(null)
+
+  // Promote strategy ("legacy" or "bluegreen") + live blue/green state.
+  // Surfaced from GET /admin/system/promote-status which proxies the
+  // deployer's /promote-status. When strategy === "legacy" only the
+  // strategy field is populated; otherwise active_color/phase/candidate/
+  // rollback_available are also filled in by the running state machine.
+  type PromoteStatus = {
+    strategy: 'legacy' | 'bluegreen' | 'unknown'
+    active_color?: 'blue' | 'green' | null
+    phase?: string
+    candidate?: string
+    rollback_available?: boolean
+    error?: string
+  }
+  const [promoteStatus, setPromoteStatus] = useState<PromoteStatus | null>(null)
+
+  // ── Scheduled deploys (UI-driven one-shot scheduling) ────────────────────
+  // The PinDialog gets a "Promote now" / "Promote at..." radio. When the
+  // user picks "Promote at...", we POST /admin/system/deploy/prod with a
+  // scheduled_for body; the backend writes a row and the in-process poller
+  // fires it at the chosen time. A countdown banner above the Promote
+  // button lists pending entries; ✕ button calls /scheduled-deploys/:id/cancel.
+  type ScheduledDeploy = {
+    id: string
+    env: string
+    scheduled_for: string
+    status: 'pending' | 'fired' | 'cancelled' | 'failed'
+    created_by: string
+    created_at: string
+    fired_at?: string | null
+    error?: string | null
+  }
+  const [scheduled, setScheduled] = useState<{ pending: ScheduledDeploy[]; history: ScheduledDeploy[] }>({ pending: [], history: [] })
+  const [promoteMode, setPromoteMode] = useState<'now' | 'schedule'>('now')
+  const [promoteAt, setPromoteAt] = useState('')      // datetime-local value
+  // Tick once a second so countdowns re-render. One global tick is fine —
+  // the banner is the only consumer.
+  const [, _tick] = useState(0)
+  useEffect(() => {
+    const i = setInterval(() => _tick(v => v + 1), 1000)
+    return () => clearInterval(i)
+  }, [])
 
   // Tail of /var/log/shital-deployer/latest.log — written by deploy.sh. Lets
   // an operator see why a Promote / Re-deploy click did or didn't take effect
@@ -233,10 +281,12 @@ export default function OpsPage() {
 
   const loadEnvs = useCallback(async () => {
     try {
-      const [vRes, eRes, dRes] = await Promise.all([
+      const [vRes, eRes, dRes, pRes, sRes] = await Promise.all([
         fetch(`${API_BASE}/admin/system/version`, { headers: { Authorization: `Bearer ${getToken()}` } }),
         fetch(`${API_BASE}/admin/system/environments`, { headers: { Authorization: `Bearer ${getToken()}` } }),
         fetch(`${API_BASE}/admin/system/deploys?limit=10`, { headers: { Authorization: `Bearer ${getToken()}` } }),
+        fetch(`${API_BASE}/admin/system/promote-status`, { headers: { Authorization: `Bearer ${getToken()}` } }),
+        fetch(`${API_BASE}/admin/system/scheduled-deploys`, { headers: { Authorization: `Bearer ${getToken()}` } }),
       ])
       if (vRes.ok) setVersion(await vRes.json())
       if (eRes.ok) setEnvironments(await eRes.json())
@@ -244,10 +294,41 @@ export default function OpsPage() {
         const d = await dRes.json()
         setDeploys(d.deploys || [])
       }
+      if (pRes.ok) setPromoteStatus(await pRes.json())
+      if (sRes.ok) setScheduled(await sRes.json())
     } catch {
       // ignore — page still useful without env panel
     }
   }, [])
+
+  // Default the "Promote at" picker to ~1 hour from now (a sane prompt
+  // rather than a blank field). Re-defaults each time the dialog opens.
+  function _defaultScheduleValue(): string {
+    const d = new Date(Date.now() + 60 * 60 * 1000)
+    // Strip seconds for the datetime-local input shape "YYYY-MM-DDTHH:MM".
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  async function cancelScheduled(id: string) {
+    // Inline cancellation — reuse the existing PIN dialog so the user
+    // doesn't have to navigate. Same X-Admin-Pin gate as scheduling it.
+    setActionMsg(null); setPinValue(''); setConfirmInput('')
+    setPinDialog({
+      title: '✕ Cancel scheduled promote',
+      description: 'Stop this promote before it fires. The schedule will not run.',
+      onConfirm: async (pin) => {
+        const res = await fetch(`${API_BASE}/admin/system/scheduled-deploys/${id}/cancel`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${getToken()}`, 'X-Admin-Pin': pin },
+        })
+        const d = await res.json()
+        if (!res.ok) throw new Error(d.detail || `Failed (HTTP ${res.status})`)
+        setActionMsg({ text: d.ok ? 'Scheduled promote cancelled.' : (d.message || 'Could not cancel.'), ok: !!d.ok })
+        await loadEnvs()
+      },
+    })
+  }
 
   useEffect(() => { loadEnvs() }, [loadEnvs])
 
@@ -328,6 +409,10 @@ export default function OpsPage() {
   function openPromoteDialog() {
     setActionMsg(null); setPinValue(''); setConfirmInput('')
     setDeployStatus('idle'); setDeployStatusMsg('')
+    // Default to "Promote now" each time the dialog opens; pre-fill the
+    // datetime-local input in case the operator switches modes.
+    setPromoteMode('now')
+    setPromoteAt(_defaultScheduleValue())
     setPinDialog({
       title: '🚀 Promote DEV → PROD',
       description:
@@ -335,8 +420,29 @@ export default function OpsPage() {
         'A snapshot is saved automatically — you can restore via the Snapshots panel below if anything goes wrong.',
       confirmKeyword: 'PROMOTE',
       onConfirm: async (pin) => {
-        // Snapshot prod's current SHA BEFORE triggering, so the watcher can
-        // tell whether the deploy actually moved prod or rolled back.
+        // If scheduling, just write a row — the poller will fire it later.
+        // No SHA-watcher in that case; the banner takes over.
+        if (promoteMode === 'schedule') {
+          if (!promoteAt) throw new Error('Pick a schedule time first')
+          const sched = new Date(promoteAt)
+          if (Number.isNaN(sched.getTime())) throw new Error('Invalid schedule time')
+          if (sched.getTime() < Date.now() + 30_000) throw new Error('Schedule must be at least 30 s in the future')
+          const res = await fetch(`${API_BASE}/admin/system/deploy/prod`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${getToken()}`,
+              'X-Admin-Pin': pin,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ scheduled_for: sched.toISOString() }),
+          })
+          const d = await res.json()
+          if (!res.ok || !d.ok) throw new Error(d.detail || `Failed (HTTP ${res.status})`)
+          setActionMsg({ text: `Promote scheduled for ${sched.toLocaleString()}.`, ok: true })
+          await loadEnvs()
+          return
+        }
+        // Immediate path — preserves the old behavior, watcher and all.
         const preSha = environments?.environments?.prod?.git_sha || ''
         const res = await fetch(`${API_BASE}/admin/system/deploy/prod`, {
           method: 'POST',
@@ -347,7 +453,6 @@ export default function OpsPage() {
         setActionMsg({ text: 'Promote triggered — watching for outcome (up to 8 min)…', ok: true })
         setDeployStatus('in_progress')
         setDeployStatusMsg(`Watching prod for change from ${preSha ? preSha.slice(0, 7) : '(unknown)'}…`)
-        // Fire-and-forget — runs in the background, updates state as it goes.
         watchPromoteOutcome(preSha).catch(() => {
           setDeployStatus('timeout')
           setDeployStatusMsg('Watcher errored — refresh manually.')
@@ -545,6 +650,50 @@ export default function OpsPage() {
                 >
                   {isProd ? '🚀 Promote to Prod' : '🔄 Re-deploy Dev'}
                 </button>
+                {isProd && promoteStatus && (
+                  <div className="mt-2 text-[10px] font-medium text-white/50">
+                    {promoteStatus.strategy === 'bluegreen' ? (
+                      <>
+                        <span className="text-blue-300/80">Blue/Green</span>
+                        {promoteStatus.active_color && (
+                          <> · active <span className="font-mono">{promoteStatus.active_color}</span></>
+                        )}
+                        {promoteStatus.phase && promoteStatus.phase !== 'idle' && (
+                          <> · <span className="text-yellow-300/80">{promoteStatus.phase}</span></>
+                        )}
+                      </>
+                    ) : promoteStatus.strategy === 'legacy' ? (
+                      <span>Strategy: legacy recreate (~3 min blip)</span>
+                    ) : (
+                      <span className="text-white/30">Strategy: {promoteStatus.strategy}</span>
+                    )}
+                  </div>
+                )}
+                {isProd && scheduled.pending.filter(s => s.env === 'prod').map(s => {
+                  const ms = new Date(s.scheduled_for).getTime() - Date.now()
+                  const isPast = ms < 0
+                  let label: string
+                  if (isPast) {
+                    label = 'firing now…'
+                  } else {
+                    const total = Math.round(ms / 1000)
+                    const h = Math.floor(total / 3600)
+                    const m = Math.floor((total % 3600) / 60)
+                    const sec = total % 60
+                    label = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`
+                  }
+                  return (
+                    <div key={s.id} className="mt-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-xs">
+                      <span className="text-indigo-200/90">⏰ Scheduled</span>
+                      <span className="text-white/80 font-mono">{new Date(s.scheduled_for).toLocaleString()}</span>
+                      <span className="text-indigo-300/70 font-bold">in {label}</span>
+                      <button onClick={() => cancelScheduled(s.id)}
+                        className="ml-auto px-2 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] font-bold hover:bg-red-500/30">
+                        ✕ Cancel
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             )
           })}
@@ -847,6 +996,50 @@ export default function OpsPage() {
                   autoFocus
                   placeholder={pinDialog.confirmKeyword}
                   className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-amber-500/50" />
+              </div>
+            )}
+            {pinDialog.confirmKeyword === 'PROMOTE' && (
+              <div className="space-y-2">
+                <label className="block text-white/50 text-xs font-semibold uppercase tracking-wide">When</label>
+                <div className="flex gap-2">
+                  <label className={`flex-1 cursor-pointer px-3 py-2.5 rounded-xl border text-sm text-center transition-colors ${
+                    promoteMode === 'now'
+                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200 font-bold'
+                      : 'bg-white/5 border-white/10 text-white/60'
+                  }`}>
+                    <input type="radio" name="promoteMode" className="sr-only"
+                      checked={promoteMode === 'now'} onChange={() => setPromoteMode('now')} />
+                    Promote now
+                  </label>
+                  <label className={`flex-1 cursor-pointer px-3 py-2.5 rounded-xl border text-sm text-center transition-colors ${
+                    promoteMode === 'schedule'
+                      ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-200 font-bold'
+                      : 'bg-white/5 border-white/10 text-white/60'
+                  }`}>
+                    <input type="radio" name="promoteMode" className="sr-only"
+                      checked={promoteMode === 'schedule'} onChange={() => setPromoteMode('schedule')} />
+                    Promote at…
+                  </label>
+                </div>
+                {promoteMode === 'schedule' && (
+                  <input type="datetime-local"
+                    value={promoteAt}
+                    min={_defaultScheduleValue()}
+                    onChange={e => setPromoteAt(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-indigo-500/50" />
+                )}
+                {promoteMode === 'schedule' && promoteAt && (
+                  <div className="text-white/40 text-xs">
+                    Fires in {(() => {
+                      const ms = new Date(promoteAt).getTime() - Date.now()
+                      if (ms < 0) return '⚠ already past — pick a future time'
+                      const m = Math.round(ms / 60_000)
+                      if (m < 60) return `${m} min`
+                      if (m < 60 * 24) return `${Math.floor(m / 60)}h ${m % 60}m`
+                      return `${Math.floor(m / 60 / 24)}d ${Math.floor((m / 60) % 24)}h`
+                    })()}
+                  </div>
+                )}
               </div>
             )}
             <div>

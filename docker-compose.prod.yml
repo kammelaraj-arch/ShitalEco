@@ -101,6 +101,122 @@ services:
       start_period: 120s
       retries: 3
 
+  # ── Blue/Green backend twins (DORMANT — never auto-started) ──────────────────
+  # These services exist so that, when blue/green promotes are enabled
+  # (PROMOTE_STRATEGY=bluegreen in /opt/shitaleco/.env + a one-time host-side
+  # cutover), the deployer's promote_bluegreen.sh state machine has two
+  # well-defined container names to alternate between.
+  #
+  # They are gated by `profiles: ["bluegreen"]`. A normal `docker compose up
+  # -d` IGNORES them entirely — only `docker compose --profile bluegreen up
+  # -d backend-blue` (or -green) starts them. The deployer is expected to use
+  # `docker run` directly (not compose) so it can control port binding per
+  # active colour without touching this file.
+  #
+  # Differences from the live `backend:` service above:
+  #   - container_name pinned (so the deployer can address them deterministically).
+  #   - No `ports:` mapping — only the active colour binds host:8000, and that
+  #     is done at `docker run` time by the deployer, not declared here. If
+  #     both colours declared `8000:8000` and both ran simultaneously you'd
+  #     get a port conflict; omitting the mapping makes the YAML safe to keep
+  #     in the repo even while the legacy `backend` service is also running.
+  #   - Everything else (image, env, volumes, healthcheck, network) is identical.
+  backend-blue:
+    profiles: ["bluegreen"]
+    container_name: shitaleco-backend-blue-1
+    image: ghcr.io/kammelaraj-arch/shitaleco-backend:latest
+    restart: unless-stopped
+    mem_limit: 1024M
+    cpus: 1.0
+    command: >
+      sh -c "alembic upgrade head 2>&1 || echo 'WARNING: alembic failed';
+             exec uvicorn shital.main:app --host 0.0.0.0 --port 8000
+                  --workers 1 --loop uvloop --http httptools"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shitaleco_db_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-shitaleco_db}
+      APP_ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001,http://localhost:3002}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      MS_CLIENT_ID: ${MS_CLIENT_ID:-}
+      MS_TENANT_ID: ${MS_TENANT_ID:-}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
+      MS_REDIRECT_URI: ${MS_REDIRECT_URI:-https://admin.shital.org.uk/admin/auth-callback/}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      PAYPAL_ENV: ${PAYPAL_ENV:-live}
+      DEPLOY_SECRET: ${DEPLOY_SECRET:?DEPLOY_SECRET must be set in /opt/shitaleco/.env}
+      DEPLOYER_URL: http://deployer:9000
+      MAIL_AGENT_MAILBOXES: ${MAIL_AGENT_MAILBOXES:-accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk}
+      MAIL_AGENT_MODE: ${MAIL_AGENT_MODE:-auto}
+      RECOVERY_LOOP_ENABLED: ${RECOVERY_LOOP_ENABLED:-1}
+    volumes:
+      - /opt/shitaleco/backups:/opt/shitaleco/backups
+      - /opt/shitaleco/media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
+  backend-green:
+    profiles: ["bluegreen"]
+    container_name: shitaleco-backend-green-1
+    image: ghcr.io/kammelaraj-arch/shitaleco-backend:latest
+    restart: unless-stopped
+    mem_limit: 1024M
+    cpus: 1.0
+    command: >
+      sh -c "alembic upgrade head 2>&1 || echo 'WARNING: alembic failed';
+             exec uvicorn shital.main:app --host 0.0.0.0 --port 8000
+                  --workers 1 --loop uvloop --http httptools"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shitaleco_db_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-shitaleco_db}
+      APP_ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001,http://localhost:3002}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      MS_CLIENT_ID: ${MS_CLIENT_ID:-}
+      MS_TENANT_ID: ${MS_TENANT_ID:-}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
+      MS_REDIRECT_URI: ${MS_REDIRECT_URI:-https://admin.shital.org.uk/admin/auth-callback/}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      PAYPAL_ENV: ${PAYPAL_ENV:-live}
+      DEPLOY_SECRET: ${DEPLOY_SECRET:?DEPLOY_SECRET must be set in /opt/shitaleco/.env}
+      DEPLOYER_URL: http://deployer:9000
+      MAIL_AGENT_MAILBOXES: ${MAIL_AGENT_MAILBOXES:-accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk}
+      MAIL_AGENT_MODE: ${MAIL_AGENT_MODE:-auto}
+      RECOVERY_LOOP_ENABLED: ${RECOVERY_LOOP_ENABLED:-1}
+    volumes:
+      - /opt/shitaleco/backups:/opt/shitaleco/backups
+      - /opt/shitaleco/media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
   admin:
     image: ghcr.io/kammelaraj-arch/shitaleco-admin:latest
     restart: unless-stopped
@@ -248,6 +364,14 @@ services:
       DEPLOY_BRANCH: ${DEPLOY_BRANCH:-main}
       DOCKER_BUILDKIT: "1"
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Promote strategy. "legacy" (default) = the existing deploy.sh
+      # --promote-prod path (recreate the single backend container, ~3min blip).
+      # "bluegreen" = the future state machine in promote_bluegreen.sh: start
+      # an idle-colour backend, health-gate, atomic nginx switch, retire old
+      # colour after a grace period. The blue/green path requires a one-time
+      # host-side cutover (see promote_bluegreen.sh comments) before being
+      # safe to enable; keep this set to "legacy" until that cutover is done.
+      PROMOTE_STRATEGY: ${PROMOTE_STRATEGY:-legacy}
       # NOTE: the deployer's autonomous 60s watchdog loop was REMOVED from
       # deployer/server.py entirely (it crashlooped prod all day on 12-Jun by
       # force-recreating a healthy-but-slow-cold-starting backend). There is no
@@ -265,6 +389,7 @@ services:
       # Lesson learned: anything baked into a container image goes stale.
       - ./deployer/deploy.sh:/app/deploy.sh:ro
       - ./deployer/server.py:/app/server.py:ro
+      - ./deployer/promote_bluegreen.sh:/app/promote_bluegreen.sh:ro
     networks:
       - internal
 
@@ -289,6 +414,12 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # Re-usable snippets included from inside server/location blocks.
+      # active-backend.conf is the single source of truth for which backend
+      # container nginx proxies to — today equivalent to the old inline
+      # `set $be http://backend:8000;`, future blue/green deploys rewrite
+      # this one file and `nginx -s reload`.
+      - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./nginx/hub:/usr/share/nginx/hub:ro
       - ./nginx/errors:/usr/share/nginx/errors:ro
       - /var/www/certbot:/var/www/certbot:ro
