@@ -24,14 +24,13 @@ import os
 import random
 import time
 import uuid
-from datetime import UTC, date, datetime, time as dtime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as dtime
 from typing import Any, Literal
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
-
-logger = structlog.get_logger()
 
 from shital.api.deps import CurrentSpace
 from shital.capabilities.auth.capabilities import (
@@ -42,6 +41,7 @@ from shital.capabilities.auth.capabilities import (
 from shital.capabilities.notifications.capabilities import EmailInput, send_email
 from shital.core.space.context import DigitalSpace
 
+logger = structlog.get_logger()
 router = APIRouter(tags=["sevak"])
 
 CODE_TTL_MINUTES = 10
