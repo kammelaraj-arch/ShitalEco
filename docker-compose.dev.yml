@@ -201,6 +201,10 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf-dev/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/hub:/usr/share/nginx/hub:ro
+      # Sevak volunteer app (Flutter web, built with --base-href /sevak/).
+      # Static files served directly by nginx-dev at /sevak/ — no extra
+      # container/image. CanvasKit loads from the gstatic CDN at runtime.
+      - ./nginx/sevak:/usr/share/nginx/sevak:ro
     depends_on:
       - backend-dev
       - admin-dev
