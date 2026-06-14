@@ -2259,6 +2259,65 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_event  ON sava_volunteers(event_date DESC)",
         "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_branch ON sava_volunteers(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_email  ON sava_volunteers(LOWER(email)) WHERE email != ''",
+        # ── Sevak app (volunteer mobile/web app) — Tier 1 ─────────────────────
+        # Identity reuses the existing `volunteers` rows; app_role lets an admin
+        # elevate a volunteer to coordinator/branch_admin for the app.
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS app_role VARCHAR(20) NOT NULL DEFAULT 'volunteer'",
+        """CREATE TABLE IF NOT EXISTS volunteer_auth_codes (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            email       VARCHAR(255) NOT NULL,
+            code        VARCHAR(10)  NOT NULL,
+            expires_at  TIMESTAMPTZ  NOT NULL,
+            used_at     TIMESTAMPTZ,
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_vauth_codes_email ON volunteer_auth_codes(email, expires_at)",
+        """CREATE TABLE IF NOT EXISTS volunteer_credentials (
+            volunteer_id  UUID PRIMARY KEY REFERENCES volunteers(id) ON DELETE CASCADE,
+            password_hash TEXT NOT NULL,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS volunteer_devices (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            volunteer_id UUID NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
+            platform     VARCHAR(10) NOT NULL,
+            fcm_token    TEXT UNIQUE NOT NULL,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_vol_devices_volunteer ON volunteer_devices(volunteer_id)",
+        """CREATE TABLE IF NOT EXISTS help_requests (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id    VARCHAR(100) NOT NULL DEFAULT 'main',
+            title        VARCHAR(255) NOT NULL,
+            description  TEXT NOT NULL DEFAULT '',
+            location     VARCHAR(255) NOT NULL DEFAULT '',
+            starts_at    TIMESTAMPTZ NOT NULL,
+            needed_count INTEGER NOT NULL DEFAULT 1,
+            status       VARCHAR(20) NOT NULL DEFAULT 'open',
+            created_by   UUID,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_help_requests_branch ON help_requests(branch_id, status, starts_at)",
+        """CREATE TABLE IF NOT EXISTS request_responses (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            request_id   UUID NOT NULL REFERENCES help_requests(id) ON DELETE CASCADE,
+            volunteer_id UUID NOT NULL,
+            status       VARCHAR(10) NOT NULL,
+            responded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (request_id, volunteer_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS app_notifications (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            volunteer_id UUID NOT NULL,
+            type         VARCHAR(20) NOT NULL DEFAULT 'request',
+            title        VARCHAR(255) NOT NULL,
+            body         TEXT NOT NULL DEFAULT '',
+            request_id   UUID,
+            read         BOOLEAN NOT NULL DEFAULT false,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_app_notifications_vol ON app_notifications(volunteer_id, read, created_at DESC)",
         # ── Recurring giving: failure tracking + admin cancel audit ───────────
         # Track payment failures (BILLING.SUBSCRIPTION.PAYMENT.FAILED webhooks)
         # so we can surface "card needs updating" warnings in admin without
@@ -4049,6 +4108,7 @@ _mount("shital.api.routers.bank_imports",          "router")
 _mount("shital.api.routers.board",                 "router")
 _mount("shital.api.routers.board_voting",          "router")
 _mount("shital.api.routers.volunteers",            "router")
+_mount("shital.api.routers.sevak",                 "router")
 _mount("shital.api.routers.form_config",           "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.accounts",             "router")
