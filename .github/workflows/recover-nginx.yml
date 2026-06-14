@@ -80,3 +80,5 @@ jobs:
             curl -s -o /dev/null -w "  http://localhost:80/         → %{http_code}\n" -m 5 http://localhost:80/
             curl -s -o /dev/null -w "  http://localhost:8000/health → %{http_code}\n" -m 5 http://localhost:8000/health
             curl -k -s -o /dev/null -w "  https://localhost/health (via nginx) → %{http_code}\n" -m 5 -H "Host: shital.org.uk" https://localhost/health
+
+
