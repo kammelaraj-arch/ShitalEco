@@ -2152,7 +2152,7 @@ async def _patch_schema() -> None:
             skills_other_text           TEXT                DEFAULT '',
             -- Availability (JSONB; { weekday: { morning|afternoon|evening: "HH:MM-HH:MM" } })
             availability                JSONB               DEFAULT '{}'::jsonb,
-            availability_pattern        VARCHAR(20)         DEFAULT '',
+            availability_pattern        TEXT                DEFAULT '',
             -- Consents (paper form has 3 separate signatures + declarations)
             declaration_signed_at       TIMESTAMPTZ,
             confidentiality_agreed      BOOLEAN             DEFAULT false,
@@ -2228,6 +2228,11 @@ async def _patch_schema() -> None:
         # literal 'remote' as a sentinel for online/remote-only. Distinct from
         # `branch_id` (which is the org branch that owns the application).
         "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_branches JSONB NOT NULL DEFAULT '[]'::jsonb",
+        # Widen availability_pattern: the old VARCHAR(20) overflowed for
+        # multi-day selections (e.g. "monday,thursday:evening" = 23 chars),
+        # which 500'd the public register endpoint. TEXT fits any selection.
+        # Widening is a metadata-only change in Postgres (no rewrite/lock).
+        "ALTER TABLE volunteers ALTER COLUMN availability_pattern TYPE TEXT",
         # ── Sava (one-day event) volunteers ───────────────────────────────────
         # Lighter-weight than the long-term Volunteer Registration. For
         # devotees who want to help at a single event (Shila Pooja, Aarti,
