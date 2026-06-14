@@ -2318,6 +2318,60 @@ async def _patch_schema() -> None:
             created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_app_notifications_vol ON app_notifications(volunteer_id, read, created_at DESC)",
+        # ── Sevak app — Tier 2 (rota, attendance, events) ─────────────────────
+        """CREATE TABLE IF NOT EXISTS schedule_slots (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id   VARCHAR(100) NOT NULL DEFAULT 'main',
+            weekday     INTEGER NOT NULL,
+            start_time  TIME NOT NULL,
+            end_time    TIME NOT NULL,
+            title       VARCHAR(255) NOT NULL,
+            area        VARCHAR(255) NOT NULL DEFAULT '',
+            capacity    INTEGER NOT NULL DEFAULT 1,
+            active      BOOLEAN NOT NULL DEFAULT true,
+            created_by  UUID,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_schedule_slots_branch ON schedule_slots(branch_id, active, weekday)",
+        """CREATE TABLE IF NOT EXISTS slot_bookings (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            slot_id      UUID NOT NULL REFERENCES schedule_slots(id) ON DELETE CASCADE,
+            volunteer_id UUID NOT NULL,
+            date         DATE NOT NULL,
+            booked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (slot_id, volunteer_id, date)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_slot_bookings_slot_date ON slot_bookings(slot_id, date)",
+        """CREATE TABLE IF NOT EXISTS slot_attendance (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            slot_id       UUID NOT NULL REFERENCES schedule_slots(id) ON DELETE CASCADE,
+            volunteer_id  UUID NOT NULL,
+            date          DATE NOT NULL,
+            hours         NUMERIC(5,2) NOT NULL DEFAULT 0,
+            checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (slot_id, volunteer_id, date)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_slot_attendance_vol ON slot_attendance(volunteer_id, date)",
+        """CREATE TABLE IF NOT EXISTS events (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id   VARCHAR(100) NOT NULL DEFAULT 'main',
+            title       VARCHAR(255) NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            location    VARCHAR(255) NOT NULL DEFAULT '',
+            starts_at   TIMESTAMPTZ NOT NULL,
+            ends_at     TIMESTAMPTZ,
+            image_url   TEXT,
+            created_by  UUID,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_events_branch ON events(branch_id, starts_at)",
+        """CREATE TABLE IF NOT EXISTS event_rsvps (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id     UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            volunteer_id UUID NOT NULL,
+            going        BOOLEAN NOT NULL DEFAULT true,
+            UNIQUE (event_id, volunteer_id)
+        )""",
         # ── Recurring giving: failure tracking + admin cancel audit ───────────
         # Track payment failures (BILLING.SUBSCRIPTION.PAYMENT.FAILED webhooks)
         # so we can surface "card needs updating" warnings in admin without

@@ -19,13 +19,19 @@ this same router family. New tables are created idempotently in
 """
 from __future__ import annotations
 
+import json
+import os
 import random
+import time
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time as dtime, timedelta
 from typing import Any, Literal
 
+import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, EmailStr
+
+logger = structlog.get_logger()
 
 from shital.api.deps import CurrentSpace
 from shital.capabilities.auth.capabilities import (
@@ -95,6 +101,71 @@ def _session(vol: dict[str, Any]) -> dict[str, Any]:
         payload["role"].upper(), payload["branch_ids"][0],
     )
     return {"token": token, "volunteer": payload}
+
+
+_fcm_token_cache: dict[str, Any] = {}
+
+
+async def _fcm_access_token() -> str | None:
+    """OAuth token for FCM HTTP v1 from a service-account JSON. Returns None
+    (push disabled) unless GOOGLE_APPLICATION_CREDENTIALS + FCM_PROJECT_ID are set."""
+    path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not path or not os.environ.get("FCM_PROJECT_ID") or not os.path.exists(path):
+        return None
+    if _fcm_token_cache.get("exp", 0) > time.time() + 60:
+        return _fcm_token_cache["token"]
+    import httpx
+    from jose import jwt as jose_jwt
+    with open(path) as f:
+        sa = json.load(f)
+    now = int(time.time())
+    assertion = jose_jwt.encode(
+        {"iss": sa["client_email"],
+         "scope": "https://www.googleapis.com/auth/firebase.messaging",
+         "aud": "https://oauth2.googleapis.com/token", "iat": now, "exp": now + 3600},
+        sa["private_key"], algorithm="RS256")
+    async with httpx.AsyncClient() as client:
+        r = await client.post("https://oauth2.googleapis.com/token", data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": assertion}, timeout=15)
+    if r.status_code != 200:
+        return None
+    body = r.json()
+    _fcm_token_cache.update(token=body["access_token"],
+                            exp=time.time() + body.get("expires_in", 3600))
+    return body["access_token"]
+
+
+async def _send_push(db, volunteer_ids: list[str], title: str, body: str,
+                     data: dict[str, str] | None = None) -> None:
+    """Best-effort FCM push to a set of volunteers' devices. Never raises —
+    push must never break the request that triggered it. No-op if FCM unconfigured."""
+    try:
+        if not volunteer_ids:
+            return
+        access = await _fcm_access_token()
+        if not access:
+            return  # push not configured — silently skip
+        from sqlalchemy import text
+        rows = await db.execute(text(
+            "SELECT fcm_token FROM volunteer_devices WHERE volunteer_id = ANY(:ids)"),
+            {"ids": volunteer_ids})
+        tokens = [r["fcm_token"] for r in rows.mappings().all()]
+        if not tokens:
+            return
+        import httpx
+        project = os.environ["FCM_PROJECT_ID"]
+        url = f"https://fcm.googleapis.com/v1/projects/{project}/messages:send"
+        headers = {"Authorization": f"Bearer {access}"}
+        async with httpx.AsyncClient(timeout=15) as client:
+            for tk in tokens:
+                msg = {"message": {"token": tk,
+                                   "notification": {"title": title, "body": body},
+                                   "data": data or {},
+                                   "android": {"priority": "high"}}}
+                await client.post(url, headers=headers, json=msg)
+    except Exception as exc:  # noqa: BLE001 — push is best-effort
+        logger.warning("sevak_push_failed", error=str(exc))
 
 
 async def _current_volunteer(db, ctx: DigitalSpace) -> dict[str, Any]:
@@ -378,17 +449,20 @@ async def create_request(body: CreateRequestBody, ctx: CurrentSpace) -> dict[str
         vols = await db.execute(text(
             "SELECT id FROM volunteers WHERE UPPER(status)='APPROVED' AND branch_id = :b"),
             {"b": body.branch_id})
+        vol_ids = [str(v["id"]) for v in vols.mappings().all()]
         title = f"Volunteers needed: {body.title}"
         sub = f"{body.location or body.branch_id} · {body.needed_count} needed"
-        for v in vols.mappings().all():
+        for vid in vol_ids:
             await db.execute(text("""
                 INSERT INTO app_notifications
                     (id, volunteer_id, type, title, body, request_id, read, created_at)
                 VALUES (:id, :vid, 'request', :title, :body, :rid, false, :now)
-            """), {"id": str(uuid.uuid4()), "vid": str(v["id"]), "title": title,
+            """), {"id": str(uuid.uuid4()), "vid": vid, "title": title,
                    "body": sub, "rid": req_id, "now": _now()})
         await db.commit()
-    # TODO(tier-1.1): FCM push fan-out to volunteer_devices (reuse send_push helper).
+        # Best-effort FCM push (no-op if push not configured).
+        await _send_push(db, vol_ids, title, sub,
+                         data={"type": "request", "request_id": req_id})
     return {"ok": True, "id": req_id}
 
 
@@ -465,3 +539,374 @@ async def mark_all_read(ctx: CurrentSpace) -> dict[str, Any]:
             {"vid": ctx.user_id})
         await db.commit()
     return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Tier 2 — weekly rota, attendance/hours, events, documents, reports
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _monday(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+# ─── Rota (weekly recurring slots; book per occurrence) ─────────────────────
+
+class SlotBody(BaseModel):
+    branch_id: str
+    weekday: int          # 0=Mon .. 6=Sun
+    start_time: str       # "18:00"
+    end_time: str
+    title: str
+    area: str = ""
+    capacity: int
+
+
+@router.get("/service/slots")
+async def list_slots(ctx: CurrentSpace, week: str = "") -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    week_start = _monday(date.fromisoformat(week)) if week else _monday(date.today())
+    async with SessionLocal() as db:
+        vol = await _current_volunteer(db, ctx)
+        branches = _branch_ids(vol)
+        rows = await db.execute(text("""
+            SELECT id, branch_id, weekday, start_time, end_time, title, area, capacity
+            FROM schedule_slots
+            WHERE active AND branch_id = ANY(:branches)
+            ORDER BY weekday, start_time
+        """), {"branches": branches})
+        out = []
+        for s in rows.mappings().all():
+            occ = week_start + timedelta(days=int(s["weekday"]))
+            booked = await db.execute(text(
+                "SELECT count(*) AS n FROM slot_bookings WHERE slot_id=:sid AND date=:d"),
+                {"sid": s["id"], "d": occ})
+            mine = await db.execute(text(
+                "SELECT 1 FROM slot_bookings WHERE slot_id=:sid AND date=:d AND volunteer_id=:vid"),
+                {"sid": s["id"], "d": occ, "vid": ctx.user_id})
+            out.append({
+                "slot_id": str(s["id"]), "date": occ.isoformat(),
+                "weekday": int(s["weekday"]),
+                "start_time": str(s["start_time"])[:5], "end_time": str(s["end_time"])[:5],
+                "title": s["title"], "area": s["area"], "capacity": s["capacity"],
+                "booked_count": booked.mappings().first()["n"],
+                "my_booking": mine.first() is not None,
+            })
+    return {"slots": out}
+
+
+@router.post("/service/slots", status_code=201)
+async def create_slot(body: SlotBody, ctx: CurrentSpace) -> dict[str, Any]:
+    if ctx.role not in COORDINATOR_ROLES:
+        raise HTTPException(403, "Admin role required")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        sid = str(uuid.uuid4())
+        await db.execute(text("""
+            INSERT INTO schedule_slots
+                (id, branch_id, weekday, start_time, end_time, title, area, capacity, active, created_by, created_at)
+            VALUES (:id, :b, :wd, :st, :et, :title, :area, :cap, true, :by, :now)
+        """), {"id": sid, "b": body.branch_id, "wd": body.weekday,
+               "st": body.start_time, "et": body.end_time, "title": body.title,
+               "area": body.area, "cap": body.capacity, "by": ctx.user_id, "now": _now()})
+        await db.commit()
+    return {"ok": True, "id": sid}
+
+
+@router.delete("/service/slots/{slot_id}")
+async def deactivate_slot(slot_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    if ctx.role not in COORDINATOR_ROLES:
+        raise HTTPException(403, "Admin role required")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        await db.execute(text("UPDATE schedule_slots SET active=false WHERE id=:id"),
+                         {"id": slot_id})
+        await db.commit()
+    return {"ok": True}
+
+
+class BookBody(BaseModel):
+    date: date
+
+
+@router.post("/service/slots/{slot_id}/book")
+async def book_slot(slot_id: str, body: BookBody, ctx: CurrentSpace) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        cap = await db.execute(text(
+            "SELECT capacity FROM schedule_slots WHERE id=:id AND active"), {"id": slot_id})
+        cap_row = cap.mappings().first()
+        if not cap_row:
+            raise HTTPException(404, "Slot not found")
+        booked = await db.execute(text(
+            "SELECT count(*) AS n FROM slot_bookings WHERE slot_id=:id AND date=:d"),
+            {"id": slot_id, "d": body.date})
+        if booked.mappings().first()["n"] >= cap_row["capacity"]:
+            raise HTTPException(409, "This slot is full")
+        await db.execute(text("""
+            INSERT INTO slot_bookings (id, slot_id, volunteer_id, date, booked_at)
+            VALUES (:id, :sid, :vid, :d, :now)
+            ON CONFLICT (slot_id, volunteer_id, date) DO NOTHING
+        """), {"id": str(uuid.uuid4()), "sid": slot_id, "vid": ctx.user_id,
+               "d": body.date, "now": _now()})
+        await db.commit()
+    return {"ok": True}
+
+
+@router.post("/service/slots/{slot_id}/cancel")
+async def cancel_slot(slot_id: str, body: BookBody, ctx: CurrentSpace) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        await db.execute(text(
+            "DELETE FROM slot_bookings WHERE slot_id=:sid AND volunteer_id=:vid AND date=:d"),
+            {"sid": slot_id, "vid": ctx.user_id, "d": body.date})
+        await db.commit()
+    return {"ok": True}
+
+
+# ─── Attendance & hours ─────────────────────────────────────────────────────
+
+@router.post("/service/slots/{slot_id}/checkin")
+async def checkin_slot(slot_id: str, body: BookBody, ctx: CurrentSpace) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        slot = await db.execute(text(
+            "SELECT start_time, end_time FROM schedule_slots WHERE id=:id"), {"id": slot_id})
+        srow = slot.mappings().first()
+        if not srow:
+            raise HTTPException(404, "Slot not found")
+        booked = await db.execute(text(
+            "SELECT 1 FROM slot_bookings WHERE slot_id=:id AND volunteer_id=:vid AND date=:d"),
+            {"id": slot_id, "vid": ctx.user_id, "d": body.date})
+        if booked.first() is None:
+            raise HTTPException(409, "You have not booked this slot")
+        st, et = srow["start_time"], srow["end_time"]
+        if isinstance(st, str):
+            st = dtime.fromisoformat(st)
+        if isinstance(et, str):
+            et = dtime.fromisoformat(et)
+        hours = (datetime.combine(body.date, et) - datetime.combine(body.date, st)).seconds / 3600
+        await db.execute(text("""
+            INSERT INTO slot_attendance (id, slot_id, volunteer_id, date, hours, checked_in_at)
+            VALUES (:id, :sid, :vid, :d, :h, :now)
+            ON CONFLICT (slot_id, volunteer_id, date) DO NOTHING
+        """), {"id": str(uuid.uuid4()), "sid": slot_id, "vid": ctx.user_id,
+               "d": body.date, "h": hours, "now": _now()})
+        await db.commit()
+    return {"ok": True, "hours_logged": hours}
+
+
+@router.get("/service/me/hours")
+async def my_hours(ctx: CurrentSpace) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        total = await db.execute(text(
+            "SELECT COALESCE(sum(hours),0) AS h FROM slot_attendance WHERE volunteer_id=:v"),
+            {"v": ctx.user_id})
+        month = await db.execute(text("""
+            SELECT COALESCE(sum(hours),0) AS h FROM slot_attendance
+            WHERE volunteer_id=:v AND date >= date_trunc('month', now())
+        """), {"v": ctx.user_id})
+        return {"hours_total": float(total.mappings().first()["h"]),
+                "hours_this_month": float(month.mappings().first()["h"])}
+
+
+# ─── Events & festivals ─────────────────────────────────────────────────────
+
+async def _event_dict(db, row: dict[str, Any], vid: str) -> dict[str, Any]:
+    from sqlalchemy import text
+    cnt = await db.execute(text(
+        "SELECT count(*) AS n FROM event_rsvps WHERE event_id=:e AND going"), {"e": row["id"]})
+    mine = await db.execute(text(
+        "SELECT going FROM event_rsvps WHERE event_id=:e AND volunteer_id=:v"),
+        {"e": row["id"], "v": vid})
+    mrow = mine.mappings().first()
+    return {
+        "id": str(row["id"]), "branch_id": row["branch_id"], "title": row["title"],
+        "description": row["description"], "location": row["location"],
+        "starts_at": row["starts_at"].isoformat() if row["starts_at"] else None,
+        "ends_at": row["ends_at"].isoformat() if row["ends_at"] else None,
+        "image_url": row["image_url"],
+        "rsvp_count": cnt.mappings().first()["n"],
+        "my_rsvp": bool(mrow and mrow["going"]),
+    }
+
+
+@router.get("/service/events")
+async def list_events(ctx: CurrentSpace, scope: str = "upcoming") -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    cmp_, order = (">", "ASC") if scope == "upcoming" else ("<=", "DESC")
+    async with SessionLocal() as db:
+        vol = await _current_volunteer(db, ctx)
+        rows = await db.execute(text(f"""
+            SELECT id, branch_id, title, description, location, starts_at, ends_at, image_url
+            FROM events WHERE branch_id = ANY(:b) AND starts_at {cmp_} :now
+            ORDER BY starts_at {order} LIMIT 100
+        """), {"b": _branch_ids(vol), "now": _now()})
+        return {"events": [await _event_dict(db, dict(r), ctx.user_id)
+                           for r in rows.mappings().all()]}
+
+
+@router.get("/service/events/{event_id}")
+async def get_event(event_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        r = await db.execute(text("""
+            SELECT id, branch_id, title, description, location, starts_at, ends_at, image_url
+            FROM events WHERE id=:id
+        """), {"id": event_id})
+        row = r.mappings().first()
+        if not row:
+            raise HTTPException(404, "Not found")
+        return await _event_dict(db, dict(row), ctx.user_id)
+
+
+class AutoRequest(BaseModel):
+    title: str
+    needed_count: int
+    starts_at: datetime
+
+
+class CreateEventBody(BaseModel):
+    branch_id: str
+    title: str
+    description: str = ""
+    location: str = ""
+    starts_at: datetime
+    ends_at: datetime | None = None
+    auto_requests: list[AutoRequest] = []
+
+
+@router.post("/service/events", status_code=201)
+async def create_event(body: CreateEventBody, ctx: CurrentSpace) -> dict[str, Any]:
+    if ctx.role not in COORDINATOR_ROLES:
+        raise HTTPException(403, "Coordinator role required")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        eid = str(uuid.uuid4())
+        await db.execute(text("""
+            INSERT INTO events (id, branch_id, title, description, location, starts_at, ends_at, created_by, created_at)
+            VALUES (:id, :b, :title, :desc, :loc, :starts, :ends, :by, :now)
+        """), {"id": eid, "b": body.branch_id, "title": body.title,
+               "desc": body.description, "loc": body.location,
+               "starts": body.starts_at, "ends": body.ends_at,
+               "by": ctx.user_id, "now": _now()})
+        for ar in body.auto_requests:
+            rid = str(uuid.uuid4())
+            await db.execute(text("""
+                INSERT INTO help_requests
+                    (id, branch_id, title, description, location, starts_at, needed_count, status, created_by, created_at)
+                VALUES (:id, :b, :title, :desc, :loc, :starts, :needed, 'open', :by, :now)
+            """), {"id": rid, "b": body.branch_id,
+                   "title": f"Volunteers for {body.title}",
+                   "desc": f"For event: {body.title}", "loc": body.location,
+                   "starts": ar.starts_at, "needed": ar.needed_count,
+                   "by": ctx.user_id, "now": _now()})
+        await db.commit()
+    return {"ok": True, "id": eid}
+
+
+class RsvpBody(BaseModel):
+    going: bool
+
+
+@router.post("/service/events/{event_id}/rsvp")
+async def rsvp_event(event_id: str, body: RsvpBody, ctx: CurrentSpace) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO event_rsvps (id, event_id, volunteer_id, going)
+            VALUES (:id, :e, :v, :g)
+            ON CONFLICT (event_id, volunteer_id) DO UPDATE SET going = EXCLUDED.going
+        """), {"id": str(uuid.uuid4()), "e": event_id, "v": ctx.user_id, "g": body.going})
+        await db.commit()
+    return {"ok": True}
+
+
+# ─── Documents (reuse the existing `documents` table) ────────────────────────
+
+@router.get("/service/documents")
+async def list_documents(ctx: CurrentSpace) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        vol = await _current_volunteer(db, ctx)
+        rows = await db.execute(text("""
+            SELECT id, title, category, branch_id, file_url, file_size, updated_at
+            FROM documents
+            WHERE deleted_at IS NULL AND (branch_id = ANY(:b) OR branch_id = 'main')
+            ORDER BY category, title
+        """), {"b": _branch_ids(vol)})
+        return {"documents": [
+            {"id": str(r["id"]), "title": r["title"],
+             "category": (r["category"] or "other").lower(),
+             "branch_id": r["branch_id"], "url": r["file_url"],
+             "size_bytes": r["file_size"],
+             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None}
+            for r in rows.mappings().all()]}
+
+
+# ─── Reports (admin) ────────────────────────────────────────────────────────
+
+@router.get("/service/reports/summary")
+async def reports_summary(ctx: CurrentSpace, branch_id: str = "") -> dict[str, Any]:
+    if ctx.role not in COORDINATOR_ROLES:
+        raise HTTPException(403, "Admin role required")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        vol = await _current_volunteer(db, ctx)
+        branches = [branch_id] if branch_id else _branch_ids(vol)
+
+        async def scalar(sql, params):
+            r = await db.execute(text(sql), params)
+            return r.mappings().first()["n"]
+
+        active = await scalar(
+            "SELECT count(*) AS n FROM volunteers WHERE UPPER(status)='APPROVED' AND branch_id = ANY(:b)",
+            {"b": branches})
+        pending = await scalar(
+            "SELECT count(*) AS n FROM volunteers WHERE UPPER(status)='PENDING' AND branch_id = ANY(:b)",
+            {"b": branches})
+        open_reqs = await scalar(
+            "SELECT count(*) AS n FROM help_requests WHERE status='open' AND branch_id = ANY(:b)",
+            {"b": branches})
+        accepts = await scalar(
+            "SELECT count(*) AS n FROM request_responses WHERE status='accept'", {})
+        total_resp = await scalar("SELECT count(*) AS n FROM request_responses", {})
+        hrs_total = await scalar("""
+            SELECT COALESCE(sum(a.hours),0) AS n FROM slot_attendance a
+            JOIN schedule_slots s ON s.id=a.slot_id WHERE s.branch_id = ANY(:b)""", {"b": branches})
+        hrs_month = await scalar("""
+            SELECT COALESCE(sum(a.hours),0) AS n FROM slot_attendance a
+            JOIN schedule_slots s ON s.id=a.slot_id
+            WHERE s.branch_id = ANY(:b) AND a.date >= date_trunc('month', now())""", {"b": branches})
+        rate = round(accepts * 100 / total_resp) if total_resp else 0
+        return {
+            "active_volunteers": active, "pending_applications": pending,
+            "open_requests": open_reqs, "response_rate_pct": rate,
+            "hours_this_month": float(hrs_month), "hours_total": float(hrs_total),
+        }
