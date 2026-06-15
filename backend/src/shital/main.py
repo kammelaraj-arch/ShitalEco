@@ -3232,6 +3232,51 @@ async def _patch_schema() -> None:
     await _seed_email_templates()
     await _seed_release_notes()
     await _seed_document_categories()
+    await _seed_dev_test_volunteer()
+
+
+async def _seed_dev_test_volunteer() -> None:
+    """DEV ONLY — provision one APPROVED volunteer with a known password so the
+    Sevak app login can be exercised without admin approval + an emailed code.
+
+    Hard-gated to APP_ENV=development so it can NEVER create a sign-in-able
+    account on production. Idempotent (keyed on a fixed reference_number).
+    Credentials (dev only): sevak.test@shirdisai.org.uk / SevakTest!2026
+    """
+    if settings.APP_ENV != "development":
+        return
+    from sqlalchemy import text
+
+    from shital.capabilities.auth.capabilities import _hash_password
+    from shital.core.fabrics.database import SessionLocal
+
+    email = "sevak.test@shirdisai.org.uk"
+    password = "SevakTest!2026"  # noqa: S105 — dev-only fixture, not a prod secret
+    try:
+        async with SessionLocal() as db:
+            res = await db.execute(text("""
+                INSERT INTO volunteers (reference_number, first_names, last_name,
+                    email, age_range, status, app_role, branch_id,
+                    preferred_branches, created_at, updated_at)
+                VALUES ('VOL-DEVTEST', 'Sevak', 'Tester', :email, '26-35',
+                    'APPROVED', 'coordinator', 'wembley',
+                    '["wembley"]'::jsonb, NOW(), NOW())
+                ON CONFLICT (reference_number) DO UPDATE
+                    SET status = 'APPROVED', app_role = 'coordinator',
+                        email = EXCLUDED.email, updated_at = NOW()
+                RETURNING id
+            """), {"email": email})
+            vid = res.mappings().first()["id"]
+            await db.execute(text("""
+                INSERT INTO volunteer_credentials (volunteer_id, password_hash, updated_at)
+                VALUES (:id, :hash, NOW())
+                ON CONFLICT (volunteer_id) DO UPDATE
+                    SET password_hash = EXCLUDED.password_hash, updated_at = NOW()
+            """), {"id": str(vid), "hash": _hash_password(password)})
+            await db.commit()
+        logger.info("seed_dev_test_volunteer_ok", email=email)
+    except Exception:
+        logger.exception("seed_dev_test_volunteer_failed")
 
 
 async def _seed_api_key_metadata() -> None:
