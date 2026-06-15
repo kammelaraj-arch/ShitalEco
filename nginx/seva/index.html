@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seva</title>
+<style>
+  :root { --bg:#0e0c08; --card:#1a1712; --gold:#D4A843; --gold2:#b8902f; --text:#f3ead6; --muted:#9c9180; }
+  * { box-sizing:border-box; font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
+  body { margin:0; background:var(--bg); color:var(--text); min-height:100vh; }
+  .wrap { max-width:480px; margin:0 auto; padding:28px 20px 60px; }
+  h1 { font-size:30px; letter-spacing:3px; text-align:center; color:var(--gold); margin:24px 0 4px; font-weight:800; }
+  .tag { text-align:center; color:var(--muted); margin:0 0 28px; font-size:14px; }
+  .card { background:var(--card); border:1px solid #2a261d; border-radius:16px; padding:22px; margin-bottom:18px; }
+  h2 { font-size:16px; color:var(--gold); margin:0 0 14px; letter-spacing:1px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; letter-spacing:.5px; }
+  input, select { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #34301f; background:#0f0d09; color:var(--text); font-size:15px; }
+  button { width:100%; padding:14px; margin-top:18px; border:none; border-radius:10px; background:linear-gradient(135deg,var(--gold),var(--gold2)); color:#1a1207; font-weight:700; font-size:16px; cursor:pointer; }
+  button.sec { background:transparent; border:1px solid var(--gold); color:var(--gold); }
+  .row { display:flex; gap:10px; }
+  .row > * { flex:1; }
+  .msg { margin-top:12px; font-size:13px; min-height:18px; }
+  .err { color:#ff8f8f; } .ok { color:#9ddb9d; }
+  .hidden { display:none; }
+  .org { border:1px solid #2a261d; border-radius:12px; padding:14px; margin-bottom:12px; }
+  .org h3 { margin:0 0 4px; font-size:16px; }
+  .pill { display:inline-block; font-size:11px; color:var(--muted); border:1px solid #34301f; border-radius:20px; padding:2px 9px; margin-right:6px; }
+  .toggle { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:14px; }
+  .toggle input { width:auto; }
+  .foot { text-align:center; color:var(--muted); font-size:12px; margin-top:24px; }
+  .badge { background:#2a2417; color:var(--gold); font-size:11px; padding:3px 8px; border-radius:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SEVA</h1>
+  <p class="tag">Volunteering &amp; seva for temples and groups</p>
+
+  <!-- SIGN UP -->
+  <div class="card" id="signupCard">
+    <h2>CREATE YOUR ACCOUNT</h2>
+    <div class="row">
+      <div><label>FIRST NAME</label><input id="fn" autocomplete="off"></div>
+      <div><label>SURNAME</label><input id="ln" autocomplete="off"></div>
+    </div>
+    <label>EMAIL</label><input id="em" type="email" autocomplete="off">
+    <div class="row">
+      <div><label>PHONE</label><input id="ph" autocomplete="off"></div>
+      <div><label>LANGUAGE</label>
+        <select id="lang"><option value="en">English</option><option value="hi">हिन्दी</option>
+        <option value="mr">मराठी</option><option value="te">తెలుగు</option><option value="gu">ગુજરાતી</option></select>
+      </div>
+    </div>
+    <label>PASSWORD (min 8)</label><input id="pw" type="password">
+    <button onclick="signup()">Sign up</button>
+    <button class="sec" onclick="show('loginCard')">I already have an account</button>
+    <div class="msg" id="suMsg"></div>
+  </div>
+
+  <!-- LOGIN -->
+  <div class="card hidden" id="loginCard">
+    <h2>SIGN IN</h2>
+    <label>EMAIL</label><input id="lem" type="email" autocomplete="off">
+    <label>PASSWORD</label><input id="lpw" type="password">
+    <button onclick="login()">Sign in</button>
+    <button class="sec" onclick="show('signupCard')">Create an account instead</button>
+    <div class="msg" id="liMsg"></div>
+  </div>
+
+  <!-- OTP -->
+  <div class="card hidden" id="otpCard">
+    <h2>VERIFY YOUR EMAIL</h2>
+    <p class="tag" style="text-align:left">Enter the 6-digit code we sent to <b id="otpEmail"></b>.</p>
+    <label>CODE</label><input id="otp" inputmode="numeric" maxlength="6">
+    <button onclick="verify()">Verify &amp; activate</button>
+    <div class="msg" id="otpMsg"></div>
+  </div>
+
+  <!-- DISCOVER / JOIN -->
+  <div class="card hidden" id="appCard">
+    <h2>FOLLOW A TEMPLE OR GROUP</h2>
+    <p class="tag" style="text-align:left">Welcome, <b id="who"></b>. Pick a group, choose a branch, and opt in to volunteering.</p>
+    <div id="orgs"></div>
+    <div class="msg" id="appMsg"></div>
+    <button class="sec" onclick="loadMe()">Refresh my groups</button>
+    <div id="mine"></div>
+  </div>
+
+  <p class="foot">Seva platform · dev · SHITAL is organisation #1</p>
+</div>
+
+<script>
+const API = "/seva-api/api/v1";
+let token = null, email = null;
+const $ = id => document.getElementById(id);
+function show(id){ ["signupCard","loginCard","otpCard","appCard"].forEach(c=>$(c).classList.toggle("hidden", c!==id)); }
+async function api(path, method, body){
+  const h = {"Content-Type":"application/json"};
+  if (token) h["Authorization"] = "Bearer "+token;
+  const r = await fetch(API+path, {method:method||"GET", headers:h, body: body?JSON.stringify(body):undefined});
+  const t = await r.text(); let j={}; try{ j=JSON.parse(t);}catch(e){}
+  if(!r.ok) throw new Error(j.detail||("Request failed ("+r.status+")"));
+  return j;
+}
+async function signup(){
+  const m=$("suMsg"); m.className="msg"; m.textContent="…";
+  try{
+    email = $("em").value.trim().toLowerCase();
+    const r = await api("/auth/signup","POST",{first_name:$("fn").value.trim(),last_name:$("ln").value.trim(),
+      email, phone:$("ph").value.trim(), preferred_language:$("lang").value, password:$("pw").value});
+    $("otpEmail").textContent = email; show("otpCard");
+    if(r.dev_code){ $("otp").value=r.dev_code; $("otpMsg").className="msg ok"; $("otpMsg").textContent="dev: code auto-filled ("+r.dev_code+")"; }
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+async function verify(){
+  const m=$("otpMsg");
+  try{
+    const r = await api("/auth/verify-otp","POST",{email, code:$("otp").value.trim(), purpose:"signup"});
+    token = r.token; await enterApp(r.user);
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+async function login(){
+  const m=$("liMsg"); m.className="msg"; m.textContent="…";
+  try{
+    const r = await api("/auth/login","POST",{email:$("lem").value.trim().toLowerCase(), password:$("lpw").value});
+    token = r.token; await enterApp(r.user);
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+async function enterApp(user){
+  $("who").textContent = (user.first_name||"")+" "+(user.last_name||"");
+  show("appCard"); await loadOrgs(); await loadMe();
+}
+async function loadOrgs(){
+  const r = await api("/orgs"); const box=$("orgs"); box.innerHTML="";
+  for(const o of r.organisations){
+    const d = await api("/orgs/"+o.slug);
+    const branches = d.branches.map(b=>`<option value="${b.id}">${b.name}</option>`).join("");
+    const el=document.createElement("div"); el.className="org";
+    el.innerHTML = `<h3>${o.name}</h3><span class="pill">${o.type}</span>
+      <label>Branch</label><select id="br_${o.id}">${branches}</select>
+      <div class="toggle"><input type="checkbox" id="vol_${o.id}"><span>Opt in to volunteering</span></div>
+      <div class="toggle"><input type="checkbox" id="ods_${o.id}"><span>Available for one-day seva</span></div>
+      <button onclick="join('${o.id}')">Follow this group</button>`;
+    box.appendChild(el);
+  }
+}
+async function join(orgId){
+  const m=$("appMsg"); m.className="msg"; m.textContent="…";
+  try{
+    await api("/orgs/"+orgId+"/join","POST",{branches:[{branch_id:$("br_"+orgId).value,
+      volunteering_opt_in:$("vol_"+orgId).checked, one_day_seva_opt_in:$("ods_"+orgId).checked}]});
+    m.className="msg ok"; m.textContent="Followed! See 'My groups' below."; await loadMe();
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+async function loadMe(){
+  const r = await api("/me"); const box=$("mine");
+  if(!r.memberships.length){ box.innerHTML=""; return; }
+  box.innerHTML = "<h2 style='margin-top:20px'>MY GROUPS</h2>" + r.memberships.map(m=>{
+    const br = m.branches.map(b=>`<span class="pill">${b.name}${b.volunteering_opt_in?" · volunteering":""}${b.one_day_seva_opt_in?" · one-day seva":""}</span>`).join("");
+    return `<div class="org"><h3>${m.org_name} <span class="badge">${m.org_role}</span></h3>${br||"<span class='pill'>no branch</span>"}</div>`;
+  }).join("");
+}
+</script>
+</body>
+</html>

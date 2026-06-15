@@ -187,6 +187,59 @@ services:
     networks:
       - dev-internal
 
+  # ── Seva platform (NEW multi-tenant app) — isolated backend + own DB ────────
+  # Separate product from SHITAL; runs in the dev stack only so it can be
+  # served at dev.shital.org.uk/seva/ (app) + /seva-api/ (API) via nginx-dev,
+  # exactly like /sevak/. Own DB volume (pgdata-seva); never shares SHITAL data.
+  db-seva:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 96M
+    environment:
+      POSTGRES_DB: seva_dev
+      POSTGRES_USER: seva
+      POSTGRES_PASSWORD: SevaDev2026!
+    volumes:
+      - pgdata-seva:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seva -d seva_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dev-internal
+
+  backend-seva:
+    image: ghcr.io/kammelaraj-arch/seva-platform:dev
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://seva:SevaDev2026!@db-seva:5432/seva_dev
+      JWT_SECRET: ${SEVA_JWT_SECRET:-seva-dev-jwt-secret-not-for-prod}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      EMAIL_FROM: no-reply@shital.org.uk
+      CORS_ORIGINS: https://dev.shital.org.uk,http://localhost:8080
+    depends_on:
+      db-seva:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - dev-internal
+
   nginx-dev:
     image: nginx:alpine
     restart: unless-stopped
@@ -205,6 +258,8 @@ services:
       # Static files served directly by nginx-dev at /sevak/ — no extra
       # container/image. CanvasKit loads from the gstatic CDN at runtime.
       - ./nginx/sevak:/usr/share/nginx/sevak:ro
+      # Seva platform app (Flutter web, --base-href /seva/).
+      - ./nginx/seva:/usr/share/nginx/seva:ro
     depends_on:
       - backend-dev
       - admin-dev
@@ -225,6 +280,7 @@ services:
 
 volumes:
   pgdata-dev:
+  pgdata-seva:
 
 networks:
   dev-internal:
