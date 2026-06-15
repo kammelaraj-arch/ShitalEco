@@ -2,19 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Seva</title>
 <style>
   :root { --bg:#0e0c08; --card:#1a1712; --gold:#D4A843; --gold2:#b8902f; --text:#f3ead6; --muted:#9c9180; }
   * { box-sizing:border-box; font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
-  body { margin:0; background:var(--bg); color:var(--text); min-height:100vh; }
-  .wrap { max-width:480px; margin:0 auto; padding:28px 20px 60px; }
-  h1 { font-size:30px; letter-spacing:3px; text-align:center; color:var(--gold); margin:24px 0 4px; font-weight:800; }
-  .tag { text-align:center; color:var(--muted); margin:0 0 28px; font-size:14px; }
-  .card { background:var(--card); border:1px solid #2a261d; border-radius:16px; padding:22px; margin-bottom:18px; }
+  html,body { margin:0; background:var(--bg); color:var(--text); min-height:100%; }
+  body { background:radial-gradient(1200px 600px at 50% -10%, #1a160d 0%, var(--bg) 60%); }
+
+  /* Layout shell — mobile-first single column; two columns on wider screens */
+  .shell { max-width:1060px; margin:0 auto; padding:24px 16px 64px; }
+  .hero { text-align:center; margin-bottom:10px; }
+  .hero h1 { font-size:clamp(30px,8vw,40px); letter-spacing:3px; color:var(--gold); margin:18px 0 6px; font-weight:800; }
+  .hero .tag { color:var(--muted); margin:0; font-size:clamp(13px,3.6vw,16px); }
+  .points { list-style:none; padding:0; margin:16px 0 0; color:var(--muted); font-size:15px; display:none; }
+  .points li { margin:10px 0; }
+  .panel { width:100%; }
+
+  .card { background:var(--card); border:1px solid #2a261d; border-radius:16px; padding:22px; margin:0 auto 18px; max-width:520px; }
   h2 { font-size:16px; color:var(--gold); margin:0 0 14px; letter-spacing:1px; }
   label { display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; letter-spacing:.5px; }
-  input, select { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #34301f; background:#0f0d09; color:var(--text); font-size:15px; }
+  input, select { width:100%; padding:13px 14px; border-radius:10px; border:1px solid #34301f; background:#0f0d09; color:var(--text); font-size:16px; }
   button { width:100%; padding:14px; margin-top:14px; border:none; border-radius:10px; background:linear-gradient(135deg,var(--gold),var(--gold2)); color:#1a1207; font-weight:700; font-size:16px; cursor:pointer; }
   button.sec { background:transparent; border:1px solid var(--gold); color:var(--gold); }
   button.social { background:#0f0d09; border:1px solid #34301f; color:var(--text); font-weight:600; }
@@ -26,16 +34,37 @@
   .hidden { display:none; }
   .org { border:1px solid #2a261d; border-radius:12px; padding:14px; margin-bottom:12px; }
   .org h3 { margin:0 0 4px; font-size:16px; }
-  .pill { display:inline-block; font-size:11px; color:var(--muted); border:1px solid #34301f; border-radius:20px; padding:2px 9px; margin-right:6px; }
+  .pill { display:inline-block; font-size:11px; color:var(--muted); border:1px solid #34301f; border-radius:20px; padding:2px 9px; margin:0 6px 4px 0; }
   .toggle { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:14px; } .toggle input { width:auto; }
   .foot { text-align:center; color:var(--muted); font-size:12px; margin-top:24px; }
   .badge { background:#2a2417; color:var(--gold); font-size:11px; padding:3px 8px; border-radius:6px; }
+
+  @media (min-width:560px){ .shell{ padding:36px 24px 72px; } }
+  /* Tablet & desktop: side-by-side hero + form, generous spacing */
+  @media (min-width:880px){
+    .shell { display:flex; gap:56px; align-items:flex-start; padding:64px 32px; }
+    .hero { flex:1; text-align:left; position:sticky; top:64px; padding-top:8px; }
+    .hero h1 { margin-top:0; }
+    .hero .tag { font-size:18px; }
+    .points { display:block; }
+    .panel { width:480px; flex:0 0 480px; }
+    .card { margin-left:0; margin-right:0; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>SEVA</h1>
-  <p class="tag">Volunteering &amp; seva for temples and groups</p>
+<div class="shell">
+  <aside class="hero">
+    <h1>SEVA</h1>
+    <p class="tag">Volunteering &amp; seva for temples and groups</p>
+    <ul class="points">
+      <li>🛕 Follow your temples &amp; groups — one or many</li>
+      <li>🙏 Opt in to volunteering &amp; one-day seva, per branch</li>
+      <li>📅 Events, seva requests &amp; rota, all in one place</li>
+      <li>🔐 Sign in with Google, Microsoft, Facebook, or email</li>
+    </ul>
+  </aside>
+  <main class="panel">
 
   <div class="card" id="chooseCard">
     <h2>HOW WILL YOU USE SEVA?</h2>
@@ -45,7 +74,6 @@
     <button class="sec" onclick="show('loginCard')" style="margin-top:18px">I already have an account</button>
   </div>
 
-  <!-- 1) CAPTURE DETAILS -->
   <div class="card hidden" id="detailsCard">
     <h2 id="dHead">YOUR DETAILS</h2>
     <div class="row">
@@ -62,7 +90,6 @@
     <div class="msg" id="dMsg"></div>
   </div>
 
-  <!-- 2) CHOOSE SIGN-IN METHOD -->
   <div class="card hidden" id="authCard">
     <h2>HOW WOULD YOU LIKE TO SIGN IN?</h2>
     <p class="tag" style="text-align:left">Your details are saved. Now secure your account.</p>
@@ -75,7 +102,6 @@
     <div class="msg" id="authMsg"></div>
   </div>
 
-  <!-- 2b) PASSWORD -->
   <div class="card hidden" id="pwCard">
     <h2>SET A PASSWORD</h2>
     <label>PASSWORD (min 8)</label><input id="pw" type="password" autocomplete="new-password">
@@ -84,7 +110,6 @@
     <div class="msg" id="pwMsg"></div>
   </div>
 
-  <!-- OTP -->
   <div class="card hidden" id="otpCard">
     <h2>ENTER YOUR CODE</h2>
     <p class="tag" style="text-align:left">We sent a 6-digit code to <b id="otpEmail"></b>.</p>
@@ -93,7 +118,6 @@
     <div class="msg" id="otpMsg"></div>
   </div>
 
-  <!-- LOGIN -->
   <div class="card hidden" id="loginCard">
     <h2>SIGN IN</h2>
     <button class="social" id="l_google" onclick="goSocial('google')">Continue with Google</button>
@@ -108,7 +132,6 @@
     <div class="msg" id="liMsg"></div>
   </div>
 
-  <!-- REGISTER ORG / GROUP -->
   <div class="card hidden" id="applyCard">
     <h2 id="apHead">REGISTER YOUR ORGANISATION</h2>
     <p class="tag" style="text-align:left">Submit for approval. Once approved you become its admin.</p>
@@ -122,7 +145,6 @@
     <div class="msg" id="apMsg"></div>
   </div>
 
-  <!-- DISCOVER / JOIN -->
   <div class="card hidden" id="appCard">
     <h2>FOLLOW A TEMPLE OR GROUP</h2>
     <p class="tag" style="text-align:left">Welcome, <b id="who"></b>. Pick a group, choose a branch, opt in to volunteering.</p>
@@ -133,6 +155,7 @@
   </div>
 
   <p class="foot">Seva platform · dev · SHITAL is organisation #1</p>
+  </main>
 </div>
 
 <script>
@@ -140,7 +163,7 @@ const API = "/seva-api/api/v1";
 let token = null, otpPurpose = "signup";
 const $ = id => document.getElementById(id);
 const LS = window.localStorage;
-function show(id){ ["chooseCard","detailsCard","authCard","pwCard","otpCard","loginCard","applyCard","appCard"].forEach(c=>$(c).classList.toggle("hidden", c!==id)); }
+function show(id){ ["chooseCard","detailsCard","authCard","pwCard","otpCard","loginCard","applyCard","appCard"].forEach(c=>$(c).classList.toggle("hidden", c!==id)); window.scrollTo(0,0); }
 async function api(path, method, body){
   const h = {"Content-Type":"application/json"};
   if (token) h["Authorization"] = "Bearer "+token;
@@ -151,19 +174,14 @@ async function api(path, method, body){
 }
 function acct(){ return LS.getItem("seva_acct") || "person"; }
 function email(){ return LS.getItem("seva_email") || ""; }
-function pick(t){
-  LS.setItem("seva_acct", t);
-  $("dHead").textContent = t==="person" ? "YOUR DETAILS" : "ADMIN DETAILS";
-  show("detailsCard");
-}
+function pick(t){ LS.setItem("seva_acct", t); $("dHead").textContent = t==="person" ? "YOUR DETAILS" : "ADMIN DETAILS"; show("detailsCard"); }
 async function saveDetails(){
   const m=$("dMsg"); m.className="msg"; m.textContent="…";
   try{
     const em = $("em").value.trim().toLowerCase();
     await api("/auth/register-details","POST",{first_name:$("fn").value.trim(), last_name:$("ln").value.trim(),
       email:em, phone:$("ph").value.trim(), preferred_language:$("lang").value});
-    LS.setItem("seva_email", em);
-    await refreshProviders(); show("authCard");
+    LS.setItem("seva_email", em); await refreshProviders(); show("authCard");
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
 async function refreshProviders(){
@@ -174,14 +192,12 @@ async function refreshProviders(){
   });
 }
 function goSocial(p){
-  const btn=$("g_"+p)||$("l_"+p);
-  if(btn && btn.disabled){ const mm=$("authMsg")||$("liMsg"); return; }
+  const btn=$("g_"+p)||$("l_"+p); if(btn && btn.disabled) return;
   window.location.href = API + "/auth/oauth/"+p+"/start?email=" + encodeURIComponent(email());
 }
 async function signupPassword(){
   const m=$("pwMsg"); m.className="msg"; m.textContent="…";
-  try{
-    otpPurpose="signup";
+  try{ otpPurpose="signup";
     const r = await api("/auth/signup","POST",{first_name:$("fn").value.trim(), last_name:$("ln").value.trim(),
       email:email(), phone:$("ph").value.trim(), preferred_language:$("lang").value, password:$("pw").value});
     $("otpEmail").textContent=email(); show("otpCard"); devCode(r);
@@ -189,8 +205,7 @@ async function signupPassword(){
 }
 async function emailCode(){
   const m=$("authMsg"); m.className="msg"; m.textContent="…";
-  try{
-    otpPurpose="signup";
+  try{ otpPurpose="signup";
     const r = await api("/auth/signup","POST",{first_name:$("fn").value.trim(), last_name:$("ln").value.trim(),
       email:email(), phone:$("ph").value.trim(), preferred_language:$("lang").value});
     $("otpEmail").textContent=email(); show("otpCard"); devCode(r);
@@ -199,22 +214,19 @@ async function emailCode(){
 function devCode(r){ if(r&&r.dev_code){ $("otp").value=r.dev_code; $("otpMsg").className="msg ok"; $("otpMsg").textContent="dev: code auto-filled ("+r.dev_code+")"; } }
 async function verify(){
   const m=$("otpMsg");
-  try{
-    const r = await api("/auth/verify-otp","POST",{email:email(), code:$("otp").value.trim(), purpose:otpPurpose});
+  try{ const r = await api("/auth/verify-otp","POST",{email:email(), code:$("otp").value.trim(), purpose:otpPurpose});
     token=r.token; await postLogin(r.user);
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
 async function loginPassword(){
   const m=$("liMsg"); m.className="msg"; m.textContent="…";
-  try{
-    const r = await api("/auth/login","POST",{email:$("lem").value.trim().toLowerCase(), password:$("lpw").value});
+  try{ const r = await api("/auth/login","POST",{email:$("lem").value.trim().toLowerCase(), password:$("lpw").value});
     token=r.token; await postLogin(r.user, true);
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
 async function sendLoginCode(){
   const m=$("liMsg"); m.className="msg"; m.textContent="…";
-  try{
-    LS.setItem("seva_email", $("lem").value.trim().toLowerCase()); otpPurpose="login";
+  try{ LS.setItem("seva_email", $("lem").value.trim().toLowerCase()); otpPurpose="login";
     const r = await api("/auth/request-otp","POST",{email:email(), purpose:"login"});
     $("otpEmail").textContent=email(); show("otpCard"); devCode(r);
     if(!r.dev_code){ $("otpMsg").className="msg"; $("otpMsg").textContent="If that email has an account, a code is on its way."; }
@@ -229,15 +241,11 @@ async function postLogin(user, isLogin){
 }
 async function applyOrg(){
   const m=$("apMsg"); m.className="msg"; m.textContent="…";
-  try{
-    await api("/orgs/apply","POST",{name:$("orgName").value.trim(), type:$("orgType").value, country:$("orgCountry").value.trim()||"GB"});
+  try{ await api("/orgs/apply","POST",{name:$("orgName").value.trim(), type:$("orgType").value, country:$("orgCountry").value.trim()||"GB"});
     m.className="msg ok"; m.textContent="Submitted! '"+$("orgName").value.trim()+"' is pending approval. You'll be its admin once approved.";
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
-async function enterApp(user){
-  $("who").textContent = (user.first_name||"")+" "+(user.last_name||"");
-  show("appCard"); await loadOrgs(); await loadMe();
-}
+async function enterApp(user){ $("who").textContent = (user.first_name||"")+" "+(user.last_name||""); show("appCard"); await loadOrgs(); await loadMe(); }
 async function loadOrgs(){
   const r = await api("/orgs"); const box=$("orgs"); box.innerHTML="";
   for(const o of r.organisations){
@@ -254,8 +262,7 @@ async function loadOrgs(){
 }
 async function join(orgId){
   const m=$("appMsg"); m.className="msg"; m.textContent="…";
-  try{
-    await api("/orgs/"+orgId+"/join","POST",{branches:[{branch_id:$("br_"+orgId).value,
+  try{ await api("/orgs/"+orgId+"/join","POST",{branches:[{branch_id:$("br_"+orgId).value,
       volunteering_opt_in:$("vol_"+orgId).checked, one_day_seva_opt_in:$("ods_"+orgId).checked}]});
     m.className="msg ok"; m.textContent="Followed! See 'My groups' below."; await loadMe();
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
@@ -268,7 +275,6 @@ async function loadMe(){
     return `<div class="org"><h3>${m.org_name} <span class="badge">${m.org_role}</span></h3>${br||"<span class='pill'>no branch</span>"}</div>`;
   }).join("");
 }
-// Handle OAuth return (?token=...) and provider errors.
 (async function init(){
   const u = new URL(window.location.href); const t = u.searchParams.get("token"); const err = u.searchParams.get("error");
   if(t){ token=t; history.replaceState({}, "", u.pathname);
