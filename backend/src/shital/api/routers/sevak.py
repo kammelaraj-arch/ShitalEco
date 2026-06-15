@@ -266,11 +266,17 @@ class PasswordLoginBody(BaseModel):
 async def password_login(body: PasswordLoginBody) -> dict[str, Any]:
     from sqlalchemy import text
 
+    from shital.core.fabrics.config import settings
     from shital.core.fabrics.database import SessionLocal
+    _dev = settings.APP_ENV == "development"
     async with SessionLocal() as db:
         vol = await _approved_volunteer_by_email(db, body.email)
         if vol is None:
-            raise HTTPException(401, "Invalid email or password")
+            # DEV ONLY: surface why so the cause is visible without log access.
+            raise HTTPException(401, (
+                f"dev: no APPROVED volunteer for "
+                f"'{body.email.strip().lower()}'" if _dev
+                else "Invalid email or password"))
         res = await db.execute(
             text("SELECT password_hash FROM volunteer_credentials WHERE volunteer_id = :id"),
             {"id": str(vol["id"])})
@@ -278,7 +284,10 @@ async def password_login(body: PasswordLoginBody) -> dict[str, Any]:
         if not cred:
             raise HTTPException(409, "password_not_set")
         if not _verify_password(body.password, cred["password_hash"]):
-            raise HTTPException(401, "Invalid email or password")
+            raise HTTPException(401, (
+                f"dev: password mismatch for '{body.email.strip().lower()}' "
+                f"(got {len(body.password)} chars)" if _dev
+                else "Invalid email or password"))
         return _session(vol)
 
 
