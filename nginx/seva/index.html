@@ -15,18 +15,19 @@
   h2 { font-size:16px; color:var(--gold); margin:0 0 14px; letter-spacing:1px; }
   label { display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; letter-spacing:.5px; }
   input, select { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #34301f; background:#0f0d09; color:var(--text); font-size:15px; }
-  button { width:100%; padding:14px; margin-top:18px; border:none; border-radius:10px; background:linear-gradient(135deg,var(--gold),var(--gold2)); color:#1a1207; font-weight:700; font-size:16px; cursor:pointer; }
+  button { width:100%; padding:14px; margin-top:14px; border:none; border-radius:10px; background:linear-gradient(135deg,var(--gold),var(--gold2)); color:#1a1207; font-weight:700; font-size:16px; cursor:pointer; }
   button.sec { background:transparent; border:1px solid var(--gold); color:var(--gold); }
-  .row { display:flex; gap:10px; }
-  .row > * { flex:1; }
+  button.social { background:#0f0d09; border:1px solid #34301f; color:var(--text); font-weight:600; text-align:left; padding-left:18px; }
+  .choice { text-align:left; padding:16px; } .choice b { display:block; font-size:16px; color:var(--text); } .choice span { font-size:13px; color:var(--muted); }
+  .or { text-align:center; color:var(--muted); font-size:12px; margin:16px 0 4px; letter-spacing:1px; }
+  .row { display:flex; gap:10px; } .row > * { flex:1; }
   .msg { margin-top:12px; font-size:13px; min-height:18px; }
   .err { color:#ff8f8f; } .ok { color:#9ddb9d; }
   .hidden { display:none; }
   .org { border:1px solid #2a261d; border-radius:12px; padding:14px; margin-bottom:12px; }
   .org h3 { margin:0 0 4px; font-size:16px; }
   .pill { display:inline-block; font-size:11px; color:var(--muted); border:1px solid #34301f; border-radius:20px; padding:2px 9px; margin-right:6px; }
-  .toggle { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:14px; }
-  .toggle input { width:auto; }
+  .toggle { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:14px; } .toggle input { width:auto; }
   .foot { text-align:center; color:var(--muted); font-size:12px; margin-top:24px; }
   .badge { background:#2a2417; color:var(--gold); font-size:11px; padding:3px 8px; border-radius:6px; }
 </style>
@@ -36,9 +37,23 @@
   <h1>SEVA</h1>
   <p class="tag">Volunteering &amp; seva for temples and groups</p>
 
-  <!-- SIGN UP -->
-  <div class="card" id="signupCard">
-    <h2>CREATE YOUR ACCOUNT</h2>
+  <!-- CHOOSE ACCOUNT TYPE -->
+  <div class="card" id="chooseCard">
+    <h2>HOW WILL YOU USE SEVA?</h2>
+    <button class="sec choice" onclick="pick('person')"><b>👤 I'm a person</b><span>Volunteer or do seva for the temples &amp; groups you follow.</span></button>
+    <button class="sec choice" onclick="pick('organisation')"><b>🛕 We're an organisation</b><span>Register a temple / registered organisation.</span></button>
+    <button class="sec choice" onclick="pick('group')"><b>👥 We're a group</b><span>Register a community or religious group.</span></button>
+    <button class="sec" onclick="show('loginCard')" style="margin-top:18px">I already have an account</button>
+  </div>
+
+  <!-- SIGN UP (passwordless) -->
+  <div class="card hidden" id="signupCard">
+    <h2 id="suHead">CREATE YOUR ACCOUNT</h2>
+    <p class="tag" id="suSub" style="text-align:left"></p>
+    <button class="social" onclick="social('Google')">  Continue with Google</button>
+    <button class="social" onclick="social('Microsoft')">  Continue with Microsoft</button>
+    <button class="social" onclick="social('Facebook')">  Continue with Facebook</button>
+    <p class="or">— OR WITH EMAIL —</p>
     <div class="row">
       <div><label>FIRST NAME</label><input id="fn" autocomplete="off"></div>
       <div><label>SURNAME</label><input id="ln" autocomplete="off"></div>
@@ -51,29 +66,49 @@
         <option value="mr">मराठी</option><option value="te">తెలుగు</option><option value="gu">ગુજરાતી</option></select>
       </div>
     </div>
-    <label>PASSWORD (min 8)</label><input id="pw" type="password">
+    <label>PASSWORD <span style="text-transform:none">(optional — set one if you prefer)</span></label>
+    <input id="pw" type="password" autocomplete="new-password">
     <button onclick="signup()">Sign up</button>
-    <button class="sec" onclick="show('loginCard')">I already have an account</button>
+    <button class="sec" onclick="show('chooseCard')">Back</button>
     <div class="msg" id="suMsg"></div>
   </div>
 
-  <!-- LOGIN -->
+  <!-- LOGIN (passwordless) -->
   <div class="card hidden" id="loginCard">
     <h2>SIGN IN</h2>
+    <button class="social" onclick="social('Google')">  Continue with Google</button>
+    <button class="social" onclick="social('Microsoft')">  Continue with Microsoft</button>
+    <button class="social" onclick="social('Facebook')">  Continue with Facebook</button>
+    <p class="or">— OR WITH EMAIL —</p>
     <label>EMAIL</label><input id="lem" type="email" autocomplete="off">
     <label>PASSWORD</label><input id="lpw" type="password">
-    <button onclick="login()">Sign in</button>
-    <button class="sec" onclick="show('signupCard')">Create an account instead</button>
+    <button onclick="loginPassword()">Sign in</button>
+    <button class="sec" onclick="sendLoginCode()">Sign in with a code instead</button>
+    <button class="sec" onclick="show('chooseCard')">Back</button>
     <div class="msg" id="liMsg"></div>
   </div>
 
   <!-- OTP -->
   <div class="card hidden" id="otpCard">
-    <h2>VERIFY YOUR EMAIL</h2>
-    <p class="tag" style="text-align:left">Enter the 6-digit code we sent to <b id="otpEmail"></b>.</p>
+    <h2>ENTER YOUR CODE</h2>
+    <p class="tag" style="text-align:left">We sent a 6-digit code to <b id="otpEmail"></b>.</p>
     <label>CODE</label><input id="otp" inputmode="numeric" maxlength="6">
-    <button onclick="verify()">Verify &amp; activate</button>
+    <button onclick="verify()">Verify &amp; continue</button>
     <div class="msg" id="otpMsg"></div>
+  </div>
+
+  <!-- REGISTER ORG / GROUP -->
+  <div class="card hidden" id="applyCard">
+    <h2 id="apHead">REGISTER YOUR ORGANISATION</h2>
+    <p class="tag" style="text-align:left">Submit for approval. Once approved you become its admin and can add branches, events &amp; seva requests.</p>
+    <label>NAME</label><input id="orgName">
+    <div class="row">
+      <div><label>TYPE</label><select id="orgType"><option value="temple">Temple</option><option value="gurudwara">Gurudwara</option><option value="group">Group</option><option value="other">Other</option></select></div>
+      <div><label>COUNTRY</label><input id="orgCountry" value="GB" maxlength="2"></div>
+    </div>
+    <button onclick="applyOrg()">Submit for approval</button>
+    <button class="sec" onclick="enterApp(window._user)">Skip — explore as a member</button>
+    <div class="msg" id="apMsg"></div>
   </div>
 
   <!-- DISCOVER / JOIN -->
@@ -91,9 +126,21 @@
 
 <script>
 const API = "/seva-api/api/v1";
-let token = null, email = null;
+let token = null, email = null, acctType = "person", otpPurpose = "signup";
 const $ = id => document.getElementById(id);
-function show(id){ ["signupCard","loginCard","otpCard","appCard"].forEach(c=>$(c).classList.toggle("hidden", c!==id)); }
+function show(id){ ["chooseCard","signupCard","loginCard","otpCard","applyCard","appCard"].forEach(c=>$(c).classList.toggle("hidden", c!==id)); }
+function social(p){
+  const card = $("signupCard").classList.contains("hidden") ? "liMsg" : "suMsg";
+  const m=$(card); m.className="msg"; m.textContent=p+" sign-in is being set up — please use email for now.";
+}
+function pick(t){
+  acctType = t;
+  const labels = {person:["Create your Seva account","You'll then choose temples/groups to follow."],
+    organisation:["Create your admin account","Your personal login first, then register your organisation."],
+    group:["Create your admin account","Your personal login first, then register your group."]};
+  $("suHead").textContent = labels[t][0].toUpperCase(); $("suSub").textContent = labels[t][1];
+  show("signupCard");
+}
 async function api(path, method, body){
   const h = {"Content-Type":"application/json"};
   if (token) h["Authorization"] = "Bearer "+token;
@@ -105,25 +152,48 @@ async function api(path, method, body){
 async function signup(){
   const m=$("suMsg"); m.className="msg"; m.textContent="…";
   try{
-    email = $("em").value.trim().toLowerCase();
+    email = $("em").value.trim().toLowerCase(); otpPurpose="signup";
     const r = await api("/auth/signup","POST",{first_name:$("fn").value.trim(),last_name:$("ln").value.trim(),
-      email, phone:$("ph").value.trim(), preferred_language:$("lang").value, password:$("pw").value});
+      email, phone:$("ph").value.trim(), preferred_language:$("lang").value, password: $("pw").value || null});
     $("otpEmail").textContent = email; show("otpCard");
     if(r.dev_code){ $("otp").value=r.dev_code; $("otpMsg").className="msg ok"; $("otpMsg").textContent="dev: code auto-filled ("+r.dev_code+")"; }
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+async function loginPassword(){
+  const m=$("liMsg"); m.className="msg"; m.textContent="…";
+  try{
+    const r = await api("/auth/login","POST",{email:$("lem").value.trim().toLowerCase(), password:$("lpw").value});
+    token=r.token; window._user=r.user; await enterApp(r.user);
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+async function sendLoginCode(){
+  const m=$("liMsg"); m.className="msg"; m.textContent="…";
+  try{
+    email = $("lem").value.trim().toLowerCase(); otpPurpose="login";
+    const r = await api("/auth/request-otp","POST",{email, purpose:"login"});
+    $("otpEmail").textContent = email; show("otpCard");
+    if(r.dev_code){ $("otp").value=r.dev_code; $("otpMsg").className="msg ok"; $("otpMsg").textContent="dev: code auto-filled ("+r.dev_code+")"; }
+    else { $("otpMsg").className="msg"; $("otpMsg").textContent="If that email has an account, a code is on its way."; }
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
 async function verify(){
   const m=$("otpMsg");
   try{
-    const r = await api("/auth/verify-otp","POST",{email, code:$("otp").value.trim(), purpose:"signup"});
-    token = r.token; await enterApp(r.user);
+    const r = await api("/auth/verify-otp","POST",{email, code:$("otp").value.trim(), purpose:otpPurpose});
+    token = r.token; window._user = r.user;
+    if(otpPurpose==="login" || acctType==="person"){ await enterApp(r.user); }
+    else {
+      $("apHead").textContent = acctType==="group" ? "REGISTER YOUR GROUP" : "REGISTER YOUR ORGANISATION";
+      $("orgType").value = acctType==="group" ? "group" : "temple";
+      show("applyCard");
+    }
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
-async function login(){
-  const m=$("liMsg"); m.className="msg"; m.textContent="…";
+async function applyOrg(){
+  const m=$("apMsg"); m.className="msg"; m.textContent="…";
   try{
-    const r = await api("/auth/login","POST",{email:$("lem").value.trim().toLowerCase(), password:$("lpw").value});
-    token = r.token; await enterApp(r.user);
+    await api("/orgs/apply","POST",{name:$("orgName").value.trim(), type:$("orgType").value, country:$("orgCountry").value.trim()||"GB"});
+    m.className="msg ok"; m.textContent="Submitted! '"+$("orgName").value.trim()+"' is pending approval. You'll be its admin once approved.";
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
 async function enterApp(user){

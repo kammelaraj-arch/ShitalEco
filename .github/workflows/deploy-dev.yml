@@ -189,6 +189,10 @@ jobs:
             for c in db backend admin quick-donation kiosk screen nginx; do
               docker rm -f "shitaleco-dev-${c}-dev-1" 2>/dev/null || true
             done
+            # Seva platform containers (different naming: shitaleco-dev-<svc>-1)
+            for c in db-seva backend-seva; do
+              docker rm -f "shitaleco-dev-${c}-1" 2>/dev/null || true
+            done
 
             echo "=== Bring dev stack up ==="
             docker compose -p shitaleco-dev -f docker-compose.dev.yml up -d
