@@ -3251,7 +3251,7 @@ async def _seed_dev_test_volunteer() -> None:
     from shital.core.fabrics.database import SessionLocal
 
     email = "sevak.test@shirdisai.org.uk"
-    password = "SevakTest!2026"  # noqa: S105 — dev-only fixture, not a prod secret
+    password = "sevaktest2026"  # noqa: S105 — dev-only fixture, not a prod secret
     try:
         async with SessionLocal() as db:
             res = await db.execute(text("""
