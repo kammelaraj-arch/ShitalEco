@@ -152,6 +152,15 @@
     <div class="msg" id="appMsg"></div>
     <button class="sec" onclick="loadMe()">Refresh my groups</button>
     <div id="mine"></div>
+    <button class="sec hidden" id="adminBtn" onclick="openAdmin()" style="margin-top:20px">⚙ Integrations (admin)</button>
+  </div>
+
+  <div class="card hidden" id="adminCard">
+    <h2>INTEGRATIONS (ADMIN)</h2>
+    <p class="tag" style="text-align:left">Enter OAuth credentials — <b>encrypted at rest</b>, write-only. Leave blank to keep the current value.</p>
+    <div id="secrets"></div>
+    <button class="sec" onclick="enterApp(window._user)">Back</button>
+    <div class="msg" id="secMsg"></div>
   </div>
 
   <p class="foot">Seva platform · dev · SHITAL is organisation #1</p>
@@ -163,7 +172,7 @@ const API = "/seva-api/api/v1";
 let token = null, otpPurpose = "signup";
 const $ = id => document.getElementById(id);
 const LS = window.localStorage;
-function show(id){ ["chooseCard","detailsCard","authCard","pwCard","otpCard","loginCard","applyCard","appCard"].forEach(c=>$(c).classList.toggle("hidden", c!==id)); window.scrollTo(0,0); }
+function show(id){ ["chooseCard","detailsCard","authCard","pwCard","otpCard","loginCard","applyCard","appCard","adminCard"].forEach(c=>$(c).classList.toggle("hidden", c!==id)); window.scrollTo(0,0); }
 async function api(path, method, body){
   const h = {"Content-Type":"application/json"};
   if (token) h["Authorization"] = "Bearer "+token;
@@ -245,7 +254,29 @@ async function applyOrg(){
     m.className="msg ok"; m.textContent="Submitted! '"+$("orgName").value.trim()+"' is pending approval. You'll be its admin once approved.";
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
-async function enterApp(user){ $("who").textContent = (user.first_name||"")+" "+(user.last_name||""); show("appCard"); await loadOrgs(); await loadMe(); }
+async function enterApp(user){
+  $("who").textContent = (user.first_name||"")+" "+(user.last_name||"");
+  show("appCard");
+  $("adminBtn").classList.toggle("hidden", !user.is_platform_admin);
+  await loadOrgs(); await loadMe();
+}
+async function openAdmin(){ show("adminCard"); await loadSecrets(); }
+async function loadSecrets(){
+  const r = await api("/admin/secrets"); const box=$("secrets"); box.innerHTML="";
+  for(const s of r.secrets){
+    const div=document.createElement("div"); div.style.marginBottom="12px";
+    div.innerHTML = `<label>${s.key} ${s.configured?'<span class="badge">configured</span>':'<span class="pill">not set</span>'}</label>
+      <div class="row"><input id="sec_${s.key}" type="${s.secret?'password':'text'}" placeholder="${s.configured?'•••• set — type to replace':''}" autocomplete="off">
+      <button style="flex:0 0 92px;margin-top:0" onclick="saveSecret('${s.key}')">Save</button></div>`;
+    box.appendChild(div);
+  }
+}
+async function saveSecret(key){
+  const m=$("secMsg"); const v=$("sec_"+key).value;
+  if(!v){ m.className="msg err"; m.textContent="Enter a value to save."; return; }
+  try{ await api("/admin/secrets/"+key,"PUT",{value:v}); m.className="msg ok"; m.textContent=key+" saved (encrypted)."; await loadSecrets(); }
+  catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
 async function loadOrgs(){
   const r = await api("/orgs"); const box=$("orgs"); box.innerHTML="";
   for(const o of r.organisations){
