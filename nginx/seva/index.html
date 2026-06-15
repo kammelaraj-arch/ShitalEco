@@ -17,12 +17,12 @@
   input, select { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #34301f; background:#0f0d09; color:var(--text); font-size:15px; }
   button { width:100%; padding:14px; margin-top:14px; border:none; border-radius:10px; background:linear-gradient(135deg,var(--gold),var(--gold2)); color:#1a1207; font-weight:700; font-size:16px; cursor:pointer; }
   button.sec { background:transparent; border:1px solid var(--gold); color:var(--gold); }
-  button.social { background:#0f0d09; border:1px solid #34301f; color:var(--text); font-weight:600; text-align:left; padding-left:18px; }
+  button.social { background:#0f0d09; border:1px solid #34301f; color:var(--text); font-weight:600; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
   .choice { text-align:left; padding:16px; } .choice b { display:block; font-size:16px; color:var(--text); } .choice span { font-size:13px; color:var(--muted); }
   .or { text-align:center; color:var(--muted); font-size:12px; margin:16px 0 4px; letter-spacing:1px; }
   .row { display:flex; gap:10px; } .row > * { flex:1; }
-  .msg { margin-top:12px; font-size:13px; min-height:18px; }
-  .err { color:#ff8f8f; } .ok { color:#9ddb9d; }
+  .msg { margin-top:12px; font-size:13px; min-height:18px; } .err { color:#ff8f8f; } .ok { color:#9ddb9d; }
   .hidden { display:none; }
   .org { border:1px solid #2a261d; border-radius:12px; padding:14px; margin-bottom:12px; }
   .org h3 { margin:0 0 4px; font-size:16px; }
@@ -37,7 +37,6 @@
   <h1>SEVA</h1>
   <p class="tag">Volunteering &amp; seva for temples and groups</p>
 
-  <!-- CHOOSE ACCOUNT TYPE -->
   <div class="card" id="chooseCard">
     <h2>HOW WILL YOU USE SEVA?</h2>
     <button class="sec choice" onclick="pick('person')"><b>👤 I'm a person</b><span>Volunteer or do seva for the temples &amp; groups you follow.</span></button>
@@ -46,46 +45,43 @@
     <button class="sec" onclick="show('loginCard')" style="margin-top:18px">I already have an account</button>
   </div>
 
-  <!-- SIGN UP (passwordless) -->
-  <div class="card hidden" id="signupCard">
-    <h2 id="suHead">CREATE YOUR ACCOUNT</h2>
-    <p class="tag" id="suSub" style="text-align:left"></p>
-    <button class="social" onclick="social('Google')">  Continue with Google</button>
-    <button class="social" onclick="social('Microsoft')">  Continue with Microsoft</button>
-    <button class="social" onclick="social('Facebook')">  Continue with Facebook</button>
-    <p class="or">— OR WITH EMAIL —</p>
+  <!-- 1) CAPTURE DETAILS -->
+  <div class="card hidden" id="detailsCard">
+    <h2 id="dHead">YOUR DETAILS</h2>
     <div class="row">
       <div><label>FIRST NAME</label><input id="fn" autocomplete="off"></div>
       <div><label>SURNAME</label><input id="ln" autocomplete="off"></div>
     </div>
+    <label>MOBILE</label><input id="ph" autocomplete="off" inputmode="tel">
     <label>EMAIL</label><input id="em" type="email" autocomplete="off">
-    <div class="row">
-      <div><label>PHONE</label><input id="ph" autocomplete="off"></div>
-      <div><label>LANGUAGE</label>
-        <select id="lang"><option value="en">English</option><option value="hi">हिन्दी</option>
-        <option value="mr">मराठी</option><option value="te">తెలుగు</option><option value="gu">ગુજરાતી</option></select>
-      </div>
-    </div>
-    <label>PASSWORD <span style="text-transform:none">(optional — set one if you prefer)</span></label>
-    <input id="pw" type="password" autocomplete="new-password">
-    <button onclick="signup()">Sign up</button>
+    <label>LANGUAGE</label>
+    <select id="lang"><option value="en">English</option><option value="hi">हिन्दी</option>
+      <option value="mr">मराठी</option><option value="te">తెలుగు</option><option value="gu">ગુજરાતી</option></select>
+    <button onclick="saveDetails()">Continue</button>
     <button class="sec" onclick="show('chooseCard')">Back</button>
-    <div class="msg" id="suMsg"></div>
+    <div class="msg" id="dMsg"></div>
   </div>
 
-  <!-- LOGIN (passwordless) -->
-  <div class="card hidden" id="loginCard">
-    <h2>SIGN IN</h2>
-    <button class="social" onclick="social('Google')">  Continue with Google</button>
-    <button class="social" onclick="social('Microsoft')">  Continue with Microsoft</button>
-    <button class="social" onclick="social('Facebook')">  Continue with Facebook</button>
-    <p class="or">— OR WITH EMAIL —</p>
-    <label>EMAIL</label><input id="lem" type="email" autocomplete="off">
-    <label>PASSWORD</label><input id="lpw" type="password">
-    <button onclick="loginPassword()">Sign in</button>
-    <button class="sec" onclick="sendLoginCode()">Sign in with a code instead</button>
-    <button class="sec" onclick="show('chooseCard')">Back</button>
-    <div class="msg" id="liMsg"></div>
+  <!-- 2) CHOOSE SIGN-IN METHOD -->
+  <div class="card hidden" id="authCard">
+    <h2>HOW WOULD YOU LIKE TO SIGN IN?</h2>
+    <p class="tag" style="text-align:left">Your details are saved. Now secure your account.</p>
+    <button class="social" id="g_google" onclick="goSocial('google')">Continue with Google</button>
+    <button class="social" id="g_microsoft" onclick="goSocial('microsoft')">Continue with Microsoft</button>
+    <button class="social" id="g_facebook" onclick="goSocial('facebook')">Continue with Facebook</button>
+    <p class="or">— OR —</p>
+    <button onclick="show('pwCard')">Set a password</button>
+    <button class="sec" onclick="emailCode()">Email me a sign-in code</button>
+    <div class="msg" id="authMsg"></div>
+  </div>
+
+  <!-- 2b) PASSWORD -->
+  <div class="card hidden" id="pwCard">
+    <h2>SET A PASSWORD</h2>
+    <label>PASSWORD (min 8)</label><input id="pw" type="password" autocomplete="new-password">
+    <button onclick="signupPassword()">Create account</button>
+    <button class="sec" onclick="show('authCard')">Back</button>
+    <div class="msg" id="pwMsg"></div>
   </div>
 
   <!-- OTP -->
@@ -97,10 +93,25 @@
     <div class="msg" id="otpMsg"></div>
   </div>
 
+  <!-- LOGIN -->
+  <div class="card hidden" id="loginCard">
+    <h2>SIGN IN</h2>
+    <button class="social" id="l_google" onclick="goSocial('google')">Continue with Google</button>
+    <button class="social" id="l_microsoft" onclick="goSocial('microsoft')">Continue with Microsoft</button>
+    <button class="social" id="l_facebook" onclick="goSocial('facebook')">Continue with Facebook</button>
+    <p class="or">— OR WITH EMAIL —</p>
+    <label>EMAIL</label><input id="lem" type="email" autocomplete="off">
+    <label>PASSWORD</label><input id="lpw" type="password">
+    <button onclick="loginPassword()">Sign in</button>
+    <button class="sec" onclick="sendLoginCode()">Sign in with a code instead</button>
+    <button class="sec" onclick="show('chooseCard')">Back</button>
+    <div class="msg" id="liMsg"></div>
+  </div>
+
   <!-- REGISTER ORG / GROUP -->
   <div class="card hidden" id="applyCard">
     <h2 id="apHead">REGISTER YOUR ORGANISATION</h2>
-    <p class="tag" style="text-align:left">Submit for approval. Once approved you become its admin and can add branches, events &amp; seva requests.</p>
+    <p class="tag" style="text-align:left">Submit for approval. Once approved you become its admin.</p>
     <label>NAME</label><input id="orgName">
     <div class="row">
       <div><label>TYPE</label><select id="orgType"><option value="temple">Temple</option><option value="gurudwara">Gurudwara</option><option value="group">Group</option><option value="other">Other</option></select></div>
@@ -114,7 +125,7 @@
   <!-- DISCOVER / JOIN -->
   <div class="card hidden" id="appCard">
     <h2>FOLLOW A TEMPLE OR GROUP</h2>
-    <p class="tag" style="text-align:left">Welcome, <b id="who"></b>. Pick a group, choose a branch, and opt in to volunteering.</p>
+    <p class="tag" style="text-align:left">Welcome, <b id="who"></b>. Pick a group, choose a branch, opt in to volunteering.</p>
     <div id="orgs"></div>
     <div class="msg" id="appMsg"></div>
     <button class="sec" onclick="loadMe()">Refresh my groups</button>
@@ -126,21 +137,10 @@
 
 <script>
 const API = "/seva-api/api/v1";
-let token = null, email = null, acctType = "person", otpPurpose = "signup";
+let token = null, otpPurpose = "signup";
 const $ = id => document.getElementById(id);
-function show(id){ ["chooseCard","signupCard","loginCard","otpCard","applyCard","appCard"].forEach(c=>$(c).classList.toggle("hidden", c!==id)); }
-function social(p){
-  const card = $("signupCard").classList.contains("hidden") ? "liMsg" : "suMsg";
-  const m=$(card); m.className="msg"; m.textContent=p+" sign-in is being set up — please use email for now.";
-}
-function pick(t){
-  acctType = t;
-  const labels = {person:["Create your Seva account","You'll then choose temples/groups to follow."],
-    organisation:["Create your admin account","Your personal login first, then register your organisation."],
-    group:["Create your admin account","Your personal login first, then register your group."]};
-  $("suHead").textContent = labels[t][0].toUpperCase(); $("suSub").textContent = labels[t][1];
-  show("signupCard");
-}
+const LS = window.localStorage;
+function show(id){ ["chooseCard","detailsCard","authCard","pwCard","otpCard","loginCard","applyCard","appCard"].forEach(c=>$(c).classList.toggle("hidden", c!==id)); }
 async function api(path, method, body){
   const h = {"Content-Type":"application/json"};
   if (token) h["Authorization"] = "Bearer "+token;
@@ -149,45 +149,83 @@ async function api(path, method, body){
   if(!r.ok) throw new Error(j.detail||("Request failed ("+r.status+")"));
   return j;
 }
-async function signup(){
-  const m=$("suMsg"); m.className="msg"; m.textContent="…";
+function acct(){ return LS.getItem("seva_acct") || "person"; }
+function email(){ return LS.getItem("seva_email") || ""; }
+function pick(t){
+  LS.setItem("seva_acct", t);
+  $("dHead").textContent = t==="person" ? "YOUR DETAILS" : "ADMIN DETAILS";
+  show("detailsCard");
+}
+async function saveDetails(){
+  const m=$("dMsg"); m.className="msg"; m.textContent="…";
   try{
-    email = $("em").value.trim().toLowerCase(); otpPurpose="signup";
-    const r = await api("/auth/signup","POST",{first_name:$("fn").value.trim(),last_name:$("ln").value.trim(),
-      email, phone:$("ph").value.trim(), preferred_language:$("lang").value, password: $("pw").value || null});
-    $("otpEmail").textContent = email; show("otpCard");
-    if(r.dev_code){ $("otp").value=r.dev_code; $("otpMsg").className="msg ok"; $("otpMsg").textContent="dev: code auto-filled ("+r.dev_code+")"; }
+    const em = $("em").value.trim().toLowerCase();
+    await api("/auth/register-details","POST",{first_name:$("fn").value.trim(), last_name:$("ln").value.trim(),
+      email:em, phone:$("ph").value.trim(), preferred_language:$("lang").value});
+    LS.setItem("seva_email", em);
+    await refreshProviders(); show("authCard");
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+async function refreshProviders(){
+  let enabled=[]; try{ enabled=(await api("/auth/oauth/providers")).providers||[]; }catch(e){}
+  ["google","microsoft","facebook"].forEach(p=>{
+    const on = enabled.includes(p);
+    ["g_","l_"].forEach(px=>{ const b=$(px+p); if(b){ b.disabled=!on; if(!on) b.title="Not configured yet"; }});
+  });
+}
+function goSocial(p){
+  const btn=$("g_"+p)||$("l_"+p);
+  if(btn && btn.disabled){ const mm=$("authMsg")||$("liMsg"); return; }
+  window.location.href = API + "/auth/oauth/"+p+"/start?email=" + encodeURIComponent(email());
+}
+async function signupPassword(){
+  const m=$("pwMsg"); m.className="msg"; m.textContent="…";
+  try{
+    otpPurpose="signup";
+    const r = await api("/auth/signup","POST",{first_name:$("fn").value.trim(), last_name:$("ln").value.trim(),
+      email:email(), phone:$("ph").value.trim(), preferred_language:$("lang").value, password:$("pw").value});
+    $("otpEmail").textContent=email(); show("otpCard"); devCode(r);
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+async function emailCode(){
+  const m=$("authMsg"); m.className="msg"; m.textContent="…";
+  try{
+    otpPurpose="signup";
+    const r = await api("/auth/signup","POST",{first_name:$("fn").value.trim(), last_name:$("ln").value.trim(),
+      email:email(), phone:$("ph").value.trim(), preferred_language:$("lang").value});
+    $("otpEmail").textContent=email(); show("otpCard"); devCode(r);
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+function devCode(r){ if(r&&r.dev_code){ $("otp").value=r.dev_code; $("otpMsg").className="msg ok"; $("otpMsg").textContent="dev: code auto-filled ("+r.dev_code+")"; } }
+async function verify(){
+  const m=$("otpMsg");
+  try{
+    const r = await api("/auth/verify-otp","POST",{email:email(), code:$("otp").value.trim(), purpose:otpPurpose});
+    token=r.token; await postLogin(r.user);
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
 async function loginPassword(){
   const m=$("liMsg"); m.className="msg"; m.textContent="…";
   try{
     const r = await api("/auth/login","POST",{email:$("lem").value.trim().toLowerCase(), password:$("lpw").value});
-    token=r.token; window._user=r.user; await enterApp(r.user);
+    token=r.token; await postLogin(r.user, true);
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
 async function sendLoginCode(){
   const m=$("liMsg"); m.className="msg"; m.textContent="…";
   try{
-    email = $("lem").value.trim().toLowerCase(); otpPurpose="login";
-    const r = await api("/auth/request-otp","POST",{email, purpose:"login"});
-    $("otpEmail").textContent = email; show("otpCard");
-    if(r.dev_code){ $("otp").value=r.dev_code; $("otpMsg").className="msg ok"; $("otpMsg").textContent="dev: code auto-filled ("+r.dev_code+")"; }
-    else { $("otpMsg").className="msg"; $("otpMsg").textContent="If that email has an account, a code is on its way."; }
+    LS.setItem("seva_email", $("lem").value.trim().toLowerCase()); otpPurpose="login";
+    const r = await api("/auth/request-otp","POST",{email:email(), purpose:"login"});
+    $("otpEmail").textContent=email(); show("otpCard"); devCode(r);
+    if(!r.dev_code){ $("otpMsg").className="msg"; $("otpMsg").textContent="If that email has an account, a code is on its way."; }
   }catch(e){ m.className="msg err"; m.textContent=e.message; }
 }
-async function verify(){
-  const m=$("otpMsg");
-  try{
-    const r = await api("/auth/verify-otp","POST",{email, code:$("otp").value.trim(), purpose:otpPurpose});
-    token = r.token; window._user = r.user;
-    if(otpPurpose==="login" || acctType==="person"){ await enterApp(r.user); }
-    else {
-      $("apHead").textContent = acctType==="group" ? "REGISTER YOUR GROUP" : "REGISTER YOUR ORGANISATION";
-      $("orgType").value = acctType==="group" ? "group" : "temple";
-      show("applyCard");
-    }
-  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+async function postLogin(user, isLogin){
+  window._user=user;
+  if(!isLogin && acct()!=="person"){
+    $("apHead").textContent = acct()==="group" ? "REGISTER YOUR GROUP" : "REGISTER YOUR ORGANISATION";
+    $("orgType").value = acct()==="group" ? "group" : "temple"; show("applyCard");
+  } else { await enterApp(user); }
 }
 async function applyOrg(){
   const m=$("apMsg"); m.className="msg"; m.textContent="…";
@@ -230,6 +268,13 @@ async function loadMe(){
     return `<div class="org"><h3>${m.org_name} <span class="badge">${m.org_role}</span></h3>${br||"<span class='pill'>no branch</span>"}</div>`;
   }).join("");
 }
+// Handle OAuth return (?token=...) and provider errors.
+(async function init(){
+  const u = new URL(window.location.href); const t = u.searchParams.get("token"); const err = u.searchParams.get("error");
+  if(t){ token=t; history.replaceState({}, "", u.pathname);
+    try{ const me=await api("/me"); await postLogin(me.user, acct()==="person"); }catch(e){ show("chooseCard"); } return; }
+  if(err){ show("chooseCard"); }
+})();
 </script>
 </body>
 </html>

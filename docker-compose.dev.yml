@@ -228,6 +228,15 @@ services:
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       EMAIL_FROM: no-reply@shital.org.uk
       CORS_ORIGINS: https://dev.shital.org.uk,http://localhost:8080
+      # Social login — auto-enabled per provider when its credentials are set.
+      GOOGLE_CLIENT_ID: ${SEVA_GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${SEVA_GOOGLE_CLIENT_SECRET:-}
+      MS_CLIENT_ID: ${SEVA_MS_CLIENT_ID:-}
+      MS_CLIENT_SECRET: ${SEVA_MS_CLIENT_SECRET:-}
+      FACEBOOK_APP_ID: ${SEVA_FACEBOOK_APP_ID:-}
+      FACEBOOK_APP_SECRET: ${SEVA_FACEBOOK_APP_SECRET:-}
+      OAUTH_REDIRECT_BASE: https://dev.shital.org.uk/seva-api/api/v1
+      APP_RETURN_URL: https://dev.shital.org.uk/seva/
     depends_on:
       db-seva:
         condition: service_healthy
