@@ -58,10 +58,10 @@ function ytSrc(c){
   return "";
 }
 function target(c){
-  if(c.mode==="live" && c.live_kind==="hls"){
+  if(c.mode==="live"){
     if(!inWindow(c)) return {type:"idle", msg:"Live darshan resumes at "+(c.daily_start||"08:00")};
-    if(c.hls_url) return {type:"hls", url:c.hls_url};
-    return {type:"idle", msg:"Live darshan not configured yet"};
+    if(c.live_kind==="hls") return c.hls_url ? {type:"hls", url:c.hls_url} : {type:"idle", msg:"Live darshan not configured yet"};
+    const s=ytSrc(c); return s ? {type:"yt", src:s} : {type:"idle", msg:"Live darshan starting soon…"};
   }
   const s=ytSrc(c); return s ? {type:"yt", src:s} : {type:"idle", msg:"Channel starting soon…"};
 }
