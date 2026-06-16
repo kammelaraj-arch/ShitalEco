@@ -102,7 +102,7 @@ function render(c){
   apply(c);
 }
 function esc(s){ return s.replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
-function tick(){ const d=new Date(); $("time").textContent=hhmm(d); $("date").textContent=d.toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'}); }
+function tick(){ const d=new Date(); $("time").textContent=pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds()); $("date").textContent=d.toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'}); }
 function unmute(){ const v=document.querySelector("#stage video"); if(v){ v.muted=false; v.play().catch(()=>{}); }
   const f=document.querySelector("#stage iframe"); if(f){ f.src=f.src.replace("mute=1","mute=0"); } $("tap").style.display="none"; }
 async function load(){ try{ const r=await fetch(API,{cache:"no-store"}); if(r.ok) render(await r.json()); }catch(e){} }
