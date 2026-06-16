@@ -1,0 +1,38 @@
+# MediaMTX — ingests the temple's RTMP push (Reolink relayed by ffmpeg) and
+# republishes it as HLS for the TV display (browser / Android TV / Samsung / LG).
+logLevel: info
+
+# ── HLS output (served to clients via nginx /darshan/) ──────────────────────
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: yes
+hlsVariant: mpegts          # .ts segments = widest TV/browser compatibility
+hlsSegmentCount: 7
+hlsSegmentDuration: 2s
+hlsAllowOrigin: '*'
+
+# ── RTMP ingest (the temple pushes here) ────────────────────────────────────
+rtmp: yes
+rtmpAddress: :1935
+
+rtsp: no
+webrtc: no
+srt: no
+api: no
+metrics: no
+
+# Anyone may watch (read); publishing needs the push key.
+# DEV push key — rotate for production (and ideally allowlist the temple IP).
+authInternalUsers:
+  - user: any
+    permissions:
+      - action: read
+  - user: temple
+    pass: ShitalDarshan2026!
+    permissions:
+      - action: publish
+        path: darshan
+
+paths:
+  darshan:
+    source: publisher
