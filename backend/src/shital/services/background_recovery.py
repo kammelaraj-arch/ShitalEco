@@ -595,10 +595,213 @@ async def daily_digest_loop() -> None:
             logger.error("daily_sumup_digest_failed", error=str(exc))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Stripe account-health check  (15-Jun incident: account silently blocked from
+# live charges → every Terminal tap declined at confirm, found out hours later.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _stripe_account_health_once() -> dict[str, Any]:
+    """Ask Stripe whether the account can actually take live card charges, and
+    raise/clear a system_alerts row accordingly. The digest mailer turns an open
+    CRITICAL alert into an email to MONITOR_ALERT_RECIPIENTS, so a block pages ops
+    within one loop iteration instead of hours. Reuses the same system_alerts →
+    email path that infra/monitor.sh uses; auto-resolves when charges return.
+
+    The stripe SDK is sync, so the blocking retrieve runs in a worker thread to
+    avoid stalling the event loop.
+    """
+    import uuid as _uuid
+
+    from shital.services.secrets_manager import SecretsManager
+
+    api_key = await SecretsManager.get("STRIPE_SECRET_KEY") or settings.STRIPE_SECRET_KEY
+    if not api_key:
+        return {"skipped": "stripe_not_configured"}
+
+    def _retrieve() -> dict[str, Any]:
+        import stripe
+        stripe.api_key = api_key
+        acct = stripe.Account.retrieve()
+        caps = dict(getattr(acct, "capabilities", {}) or {})
+        reqs = dict(getattr(acct, "requirements", {}) or {})
+        return {
+            "charges_enabled": bool(getattr(acct, "charges_enabled", False)),
+            "payouts_enabled": bool(getattr(acct, "payouts_enabled", False)),
+            # 'active' once the account can take in-person card payments
+            "card_present": (caps.get("card_present_payments")
+                             or caps.get("card_payments") or ""),
+            "disabled_reason": reqs.get("disabled_reason") or "",
+            "currently_due": list(reqs.get("currently_due") or []),
+        }
+
+    try:
+        info = await asyncio.to_thread(_retrieve)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+    cp = (info["card_present"] or "").lower()
+    # Healthy = can take charges AND (card-present active, or capability not
+    # reported at all — then we trust charges_enabled alone).
+    healthy = info["charges_enabled"] and cp in ("active", "")
+
+    host, check = "stripe", "stripe_live_charges"
+    async with SessionLocal() as db:
+        if healthy:
+            await db.execute(text("""
+                UPDATE system_alerts SET resolved_at = NOW()
+                WHERE host = :h AND check_name = :ck
+                  AND resolved_at IS NULL AND status <> 'ok'
+            """), {"h": host, "ck": check})
+            await db.commit()
+            return {"healthy": True, **info}
+
+        # Unhealthy — raise exactly ONE open alert per episode (don't re-insert
+        # while one is still open; the digest mailer de-dups sending via digested_at).
+        existing = (await db.execute(text("""
+            SELECT 1 FROM system_alerts
+            WHERE host = :h AND check_name = :ck
+              AND resolved_at IS NULL AND status <> 'ok'
+            LIMIT 1
+        """), {"h": host, "ck": check})).first()
+        if existing:
+            return {"healthy": False, "alert": "already_open", **info}
+
+        due = ", ".join(info["currently_due"][:8]) or "—"
+        msg = "Stripe CANNOT take live card donations — every card tap is being declined."
+        detail = (
+            f"charges_enabled={info['charges_enabled']}, "
+            f"card_present_capability={cp or 'n/a'}, "
+            f"disabled_reason={info['disabled_reason'] or 'n/a'}. "
+            f"Requirements due: {due}. "
+            f"FIX: complete account activation at "
+            f"https://dashboard.stripe.com/account/onboarding"
+        )
+        await db.execute(text("""
+            INSERT INTO system_alerts (id, host, check_name, severity, status, message, detail)
+            VALUES (CAST(:id AS UUID), :h, :ck, 'critical', 'fail', :m, :d)
+        """), {"id": str(_uuid.uuid4()), "h": host, "ck": check, "m": msg, "d": detail})
+        await db.commit()
+        logger.error("stripe_account_blocked", **info)
+        return {"healthy": False, "alert": "raised", **info}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stripe reconcile  (Stripe Terminal has NO webhook here, so this sweep is the
+# ONLY thing that moves a Stripe donation off PENDING — the safety net SumUp
+# already has. Captures real fee/net on success + decline reason on failure.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _stripe_reconcile_once(days: int = 14) -> dict[str, Any]:
+    """Resolve PENDING Stripe Terminal donations from Stripe (source of truth).
+    Mirrors _sumup_reconcile_once. Matches BOTH 'STRIPE' and 'STRIPE_TERMINAL'
+    (the DB stores 'STRIPE_TERMINAL'). Idempotent: every UPDATE is guarded by
+    `status IN ('PENDING','')` so it never clobbers an already-resolved row."""
+    from shital.services.secrets_manager import SecretsManager
+
+    api_key = await SecretsManager.get("STRIPE_SECRET_KEY") or settings.STRIPE_SECRET_KEY
+    if not api_key:
+        return {"skipped": "stripe_not_configured"}
+
+    summary: dict[str, Any] = {
+        "scanned": 0, "completed": 0, "failed": 0, "cancelled": 0,
+        "still_pending": 0, "errors": 0, "no_ref": 0, "days_window": days,
+    }
+
+    def _retrieve_pi(pi_id: str) -> dict[str, Any]:
+        import stripe
+        stripe.api_key = api_key
+        pi = stripe.PaymentIntent.retrieve(pi_id, expand=["latest_charge.balance_transaction"])
+        out: dict[str, Any] = {"status": (pi.get("status") or ""),
+                               "fee": None, "net": None, "card_type": None,
+                               "err_code": None, "err_msg": None}
+        lpe = pi.get("last_payment_error") or {}
+        if lpe:
+            out["err_code"] = (lpe.get("decline_code") or lpe.get("code") or "")[:60] or None
+            out["err_msg"] = (lpe.get("message") or "")[:500] or None
+        ch = pi.get("latest_charge")
+        if isinstance(ch, dict):
+            bt = ch.get("balance_transaction")
+            if isinstance(bt, dict):
+                if bt.get("fee") is not None:
+                    out["fee"] = round(int(bt["fee"]) / 100, 2)
+                if bt.get("net") is not None:
+                    out["net"] = round(int(bt["net"]) / 100, 2)
+            pmd = ch.get("payment_method_details") or {}
+            card = pmd.get("card_present") or pmd.get("card") or {}
+            if isinstance(card, dict) and card.get("brand"):
+                out["card_type"] = str(card["brand"]).upper()[:30]
+            if not out["err_msg"] and ch.get("failure_message"):
+                out["err_code"] = (ch.get("failure_code") or "")[:60] or None
+                out["err_msg"] = (ch.get("failure_message") or "")[:500] or None
+        return out
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT id::text AS id, payment_ref, created_at
+            FROM donations
+            WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
+              AND UPPER(COALESCE(payment_provider, '')) IN ('STRIPE', 'STRIPE_TERMINAL')
+              AND deleted_at IS NULL
+              AND created_at >= NOW() - (:days || ' days')::interval
+        """), {"days": str(days)})).mappings().all()
+
+        for r in rows:
+            summary["scanned"] += 1
+            pi_id = (r["payment_ref"] or "").strip()
+            if not pi_id.startswith("pi_"):
+                summary["no_ref"] += 1
+                continue
+            try:
+                info = await asyncio.to_thread(_retrieve_pi, pi_id)
+            except Exception:  # noqa: BLE001
+                summary["errors"] += 1
+                continue
+            st = (info["status"] or "").lower()
+            params = {"id": r["id"], "fee": info["fee"], "net": info["net"],
+                      "ct": info["card_type"], "ec": info["err_code"], "em": info["err_msg"]}
+            if st == "succeeded":
+                await db.execute(text("""
+                    UPDATE donations SET status = 'COMPLETED',
+                        actual_fee_amount = COALESCE(:fee, actual_fee_amount),
+                        actual_net_amount = COALESCE(:net, actual_net_amount),
+                        settled_at = CASE WHEN :net IS NOT NULL THEN NOW() ELSE settled_at END,
+                        card_type  = COALESCE(:ct, card_type),
+                        updated_at = NOW()
+                    WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                      AND UPPER(COALESCE(status, '')) IN ('PENDING', '')
+                """), params)
+                summary["completed"] += 1
+            elif st in ("canceled", "requires_payment_method", "requires_confirmation", "requires_action"):
+                # No capture. Only resolve if >15 min old so an in-progress tap
+                # (kiosk session is 120s) is never cancelled mid-flight. A genuine
+                # decline carries last_payment_error → FAILED; otherwise abandoned
+                # → CANCELLED. A later retry is always a NEW pi_, so this is safe.
+                age = datetime.now(UTC) - r["created_at"]
+                if age <= timedelta(minutes=15) and st != "canceled":
+                    summary["still_pending"] += 1
+                    continue
+                new_status = "FAILED" if info["err_msg"] else "CANCELLED"
+                await db.execute(text("""
+                    UPDATE donations SET status = :st,
+                        last_failure_code    = COALESCE(:ec, last_failure_code),
+                        last_failure_message = COALESCE(:em, last_failure_message),
+                        card_type  = COALESCE(:ct, card_type),
+                        updated_at = NOW()
+                    WHERE id = CAST(:id AS UUID) AND deleted_at IS NULL
+                      AND UPPER(COALESCE(status, '')) IN ('PENDING', '')
+                """), {**params, "st": new_status})
+                summary["failed" if new_status == "FAILED" else "cancelled"] += 1
+            else:  # processing / unknown → leave for the next pass
+                summary["still_pending"] += 1
+        await db.commit()
+    return summary
+
+
 async def recovery_loop() -> None:
     """Forever-loop. Sleeps RECOVERY_INTERVAL_SECONDS between passes.
-    Each pass runs the SumUp sweep then the alert digest, independently —
-    a failure in one does not affect the other."""
+    Each pass runs the SumUp sweep, the Stripe reconcile, the Stripe account-health
+    check, then the alert digest, independently — a failure in one does not affect
+    the others."""
     # Initial delay so the schema patch + Digital DNA load finish first.
     await asyncio.sleep(60)
     while True:
@@ -607,6 +810,16 @@ async def recovery_loop() -> None:
             logger.info("recovery_sumup_sweep", result=sumup)
         except Exception as exc:  # noqa: BLE001
             logger.error("recovery_sumup_failed", error=str(exc))
+        try:
+            stripe_recon = await _stripe_reconcile_once()
+            logger.info("recovery_stripe_sweep", result=stripe_recon)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("recovery_stripe_sweep_failed", error=str(exc))
+        try:
+            stripe_health = await _stripe_account_health_once()
+            logger.info("recovery_stripe_health", result=stripe_health)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("recovery_stripe_health_failed", error=str(exc))
         try:
             digest = await _alert_digest_once()
             logger.info("recovery_alert_digest", result=digest)

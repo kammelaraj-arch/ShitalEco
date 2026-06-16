@@ -1426,6 +1426,22 @@ async def import_sumup_paid_list(body: SumUpPaidImport, ctx: CurrentSpace) -> di
     return summary
 
 
+@router.post("/stripe/reconcile-pending")
+async def reconcile_pending_stripe(ctx: CurrentSpace, days: int = 14) -> dict[str, Any]:
+    """Sweep PENDING Stripe Terminal donations from the last `days` days and
+    resolve each against Stripe (the source of truth). Stripe has no webhook
+    here, so this route + the 15-min background sweep are the only things that
+    move a Stripe donation off PENDING. Captures the real fee/net (from the
+    charge's balance_transaction) on success and the decline reason + card type
+    on failure. Use days=90 for a one-shot backlog backfill. Idempotent —
+    every UPDATE is guarded by status IN ('PENDING','')."""
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="admin only")
+    days = max(1, min(int(days), 90))
+    from shital.services.background_recovery import _stripe_reconcile_once
+    return await _stripe_reconcile_once(days=days)
+
+
 @router.post("/sumup/reconcile-pending")
 async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 14) -> dict[str, Any]:
     """Sweep PENDING SumUp donations from the last `days` days, resolve them
