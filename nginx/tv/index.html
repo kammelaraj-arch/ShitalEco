@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SHITAL TV</title>
+<style>
+  :root { --gold:#D4A843; }
+  * { box-sizing:border-box; margin:0; }
+  html,body { height:100%; background:#000; color:#fff; font-family:-apple-system,Segoe UI,Roboto,sans-serif; overflow:hidden; }
+  #stage { position:fixed; inset:0; background:#000; }
+  iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+  .placeholder { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(1000px 600px at 50% 30%, #241d10, #000); }
+  .placeholder .om { font-size:90px; color:var(--gold); }
+  .placeholder h1 { font-size:42px; letter-spacing:4px; color:var(--gold); margin-top:10px; }
+  .placeholder p { color:#bbb; margin-top:8px; font-size:20px; }
+  /* Overlays */
+  .brand { position:fixed; top:18px; left:24px; display:flex; align-items:center; gap:12px; z-index:5;
+    text-shadow:0 2px 8px rgba(0,0,0,.8); }
+  .brand img { height:46px; }
+  .brand .t { font-size:22px; font-weight:700; letter-spacing:1px; color:var(--gold); }
+  .clock { position:fixed; top:18px; right:24px; z-index:5; text-align:right; text-shadow:0 2px 8px rgba(0,0,0,.8); }
+  .clock .time { font-size:30px; font-weight:700; } .clock .date { font-size:15px; color:#cfc8b8; }
+  .ticker { position:fixed; left:0; right:0; bottom:0; z-index:5; background:linear-gradient(0deg, rgba(0,0,0,.85), rgba(0,0,0,.0));
+    padding:18px 0 12px; overflow:hidden; white-space:nowrap; }
+  .ticker .run { display:inline-block; padding-left:100%; animation:scroll 30s linear infinite; font-size:22px; color:#fff; }
+  .ticker .run b { color:var(--gold); margin:0 28px; }
+  @keyframes scroll { to { transform:translateX(-100%); } }
+  .tap { position:fixed; inset:0; z-index:6; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.4); cursor:pointer; }
+  .tap span { background:var(--gold); color:#1a1207; padding:14px 26px; border-radius:30px; font-weight:700; font-size:20px; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div class="placeholder" id="ph"><div class="om">🕉</div><h1 id="phTitle">SHITAL TV</h1><p>Channel starting soon…</p></div>
+  </div>
+  <div class="brand"><img id="logo" style="display:none"><span class="t" id="title"></span></div>
+  <div class="clock" id="clockBox"><div class="time" id="time"></div><div class="date" id="date"></div></div>
+  <div class="ticker" id="tickerBox" style="display:none"><div class="run" id="ticker"></div></div>
+  <div class="tap" id="tap" onclick="unmute()"><span>▶ Tap for sound</span></div>
+
+<script>
+const API = "/tv-api/api/v1/tv/shital";
+let curSrc = "";
+function pad(n){ return String(n).padStart(2,'0'); }
+function hhmm(d){ return pad(d.getHours())+":"+pad(d.getMinutes()); }
+function inRange(now,a,b){ return a && b && (a<=b ? (now>=a&&now<b) : (now>=a||now<b)); }
+function ytId(s){ s=(s||'').trim(); if(!s) return '';
+  if(/^[\w-]{11}$/.test(s)) return s;
+  try{ const u=new URL(s); if(u.searchParams.get('v')) return u.searchParams.get('v');
+    const p=u.pathname.split('/').filter(Boolean);
+    const i=p.findIndex(x=>['live','embed','shorts','v'].includes(x));
+    if(i>=0&&p[i+1]) return p[i+1];
+    if(u.hostname.includes('youtu.be')) return p[0]||''; }catch(e){}
+  return s; }
+function srcFor(c){
+  const base="https://www.youtube.com/embed/";
+  const com="autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3";
+  if(c.mode==="scheduled" && (c.schedule||[]).length){
+    const now=hhmm(new Date());
+    const slot=(c.schedule).find(s=>inRange(now,s.start,s.end));
+    if(slot && (slot.id)) return base+ytId(slot.id)+"?"+com;
+  }
+  if(c.mode==="playlist" && (c.playlist||[]).length){
+    const ids=c.playlist.map(p=>ytId(p.id||p)).filter(Boolean);
+    if(ids.length) return base+ids[0]+"?"+com+"&loop=1&playlist="+ids.join(",");
+  }
+  if(c.live_is_channel && c.live_youtube_id) return base+"live_stream?channel="+c.live_youtube_id+"&"+com;
+  if(c.live_youtube_id) return base+ytId(c.live_youtube_id)+"?"+com;
+  return "";
+}
+function render(c){
+  document.getElementById("title").textContent = c.title||"";
+  document.getElementById("phTitle").textContent = c.title||"SHITAL TV";
+  const logo=document.getElementById("logo");
+  if(c.logo_url){ logo.src=c.logo_url; logo.style.display="block"; } else logo.style.display="none";
+  document.getElementById("clockBox").style.display = c.show_clock===false ? "none":"block";
+  const tk=(c.ticker||[]).filter(Boolean);
+  const tb=document.getElementById("tickerBox");
+  if(tk.length){ document.getElementById("ticker").innerHTML = tk.map(t=>"<b>•</b>"+escapeHtml(t)).join(""); tb.style.display="block"; }
+  else tb.style.display="none";
+  const src=srcFor(c);
+  if(src!==curSrc){
+    curSrc=src; const stage=document.getElementById("stage");
+    stage.querySelectorAll("iframe").forEach(e=>e.remove());
+    if(src){
+      document.getElementById("ph").style.display="none";
+      const f=document.createElement("iframe"); f.allow="autoplay; encrypted-media; fullscreen"; f.allowFullscreen=true; f.src=src;
+      stage.appendChild(f); document.getElementById("tap").style.display="flex";
+    } else { document.getElementById("ph").style.display="flex"; }
+  }
+}
+function escapeHtml(s){ return s.replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function tick(){ const d=new Date();
+  document.getElementById("time").textContent = hhmm(d);
+  document.getElementById("date").textContent = d.toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'}); }
+function unmute(){ // reload current iframe unmuted on user tap
+  const f=document.querySelector("#stage iframe"); if(f){ f.src=f.src.replace("mute=1","mute=0"); }
+  document.getElementById("tap").style.display="none";
+}
+async function load(){
+  try{ const r=await fetch(API,{cache:"no-store"}); if(r.ok){ render(await r.json()); } }catch(e){}
+}
+tick(); setInterval(tick,1000);
+load(); setInterval(load, 30000);
+</script>
+</body>
+</html>

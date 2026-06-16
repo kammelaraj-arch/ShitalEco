@@ -269,6 +269,8 @@ services:
       - ./nginx/sevak:/usr/share/nginx/sevak:ro
       # Seva platform app (Flutter web, --base-href /seva/).
       - ./nginx/seva:/usr/share/nginx/seva:ro
+      # Temple TV channel (display /tv/ + admin /tv/admin/).
+      - ./nginx/tv:/usr/share/nginx/tv:ro
     depends_on:
       - backend-dev
       - admin-dev

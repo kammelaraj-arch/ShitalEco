@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SHITAL TV — Admin</title>
+<style>
+  :root { --bg:#0e0c08; --card:#1a1712; --gold:#D4A843; --gold2:#b8902f; --text:#f3ead6; --muted:#9c9180; }
+  * { box-sizing:border-box; font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
+  body { margin:0; background:var(--bg); color:var(--text); }
+  .wrap { max-width:640px; margin:0 auto; padding:24px 18px 60px; }
+  h1 { color:var(--gold); letter-spacing:2px; font-size:24px; }
+  .card { background:var(--card); border:1px solid #2a261d; border-radius:14px; padding:20px; margin-bottom:16px; }
+  h2 { color:var(--gold); font-size:15px; letter-spacing:1px; margin:0 0 12px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; letter-spacing:.5px; }
+  input,select,textarea { width:100%; padding:11px 13px; border-radius:9px; border:1px solid #34301f; background:#0f0d09; color:var(--text); font-size:15px; }
+  textarea { min-height:84px; resize:vertical; }
+  button { padding:12px 18px; border:none; border-radius:9px; background:linear-gradient(135deg,var(--gold),var(--gold2)); color:#1a1207; font-weight:700; font-size:15px; cursor:pointer; }
+  button.sec { background:transparent; border:1px solid var(--gold); color:var(--gold); }
+  .row { display:flex; gap:10px; align-items:center; } .row > * { flex:1; }
+  .msg { margin-top:12px; font-size:13px; min-height:18px; } .err{color:#ff8f8f;} .ok{color:#9ddb9d;}
+  .hidden { display:none; }
+  .modes { display:flex; gap:8px; } .modes button { flex:1; }
+  .modes button.active { outline:2px solid var(--gold); }
+  .sched-row { display:flex; gap:8px; margin-bottom:8px; }
+  .sched-row input { flex:1; } .sched-row input.t { max-width:90px; }
+  a { color:var(--gold); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🕉 SHITAL TV — Admin</h1>
+
+  <div class="card" id="loginCard">
+    <h2>SIGN IN</h2>
+    <label>EMAIL</label><input id="em" type="email" autocomplete="off">
+    <label>PASSWORD</label><input id="pw" type="password">
+    <button onclick="login()" style="width:100%;margin-top:14px">Sign in</button>
+    <div class="msg" id="liMsg"></div>
+  </div>
+
+  <div id="editor" class="hidden">
+    <div class="card">
+      <h2>NOW PLAYING</h2>
+      <div class="modes">
+        <button class="sec" data-mode="live" onclick="setMode('live')">📡 Live darshan</button>
+        <button class="sec" data-mode="playlist" onclick="setMode('playlist')">▶ Playlist</button>
+        <button class="sec" data-mode="scheduled" onclick="setMode('scheduled')">🕒 Scheduled</button>
+      </div>
+
+      <div id="liveBox">
+        <label>YOUTUBE LIVE URL OR VIDEO ID</label>
+        <input id="liveId" placeholder="https://www.youtube.com/watch?v=…  or  /live/…">
+        <label class="row" style="margin-top:10px"><input type="checkbox" id="isChannel" style="width:auto;flex:0"> &nbsp;This is a channel's perpetual live (paste the channel ID above instead)</label>
+      </div>
+
+      <div id="playlistBox" class="hidden">
+        <label>PLAYLIST — one YouTube URL or ID per line (loops)</label>
+        <textarea id="playlist" placeholder="https://youtu.be/…&#10;https://youtu.be/…"></textarea>
+      </div>
+
+      <div id="scheduleBox" class="hidden">
+        <label>SCHEDULE — start, end (24h), and video</label>
+        <div id="sched"></div>
+        <button class="sec" onclick="addSlot()" style="margin-top:8px">+ Add slot</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>DISPLAY</h2>
+      <label>CHANNEL / FESTIVAL TITLE</label><input id="title">
+      <label>LOGO URL (optional)</label><input id="logo">
+      <label>TICKER — one announcement per line</label>
+      <textarea id="ticker" placeholder="Om Sai Ram 🙏&#10;Guru Purnima celebrations this Sunday"></textarea>
+      <label class="row" style="margin-top:10px"><input type="checkbox" id="showClock" style="width:auto;flex:0"> &nbsp;Show clock</label>
+    </div>
+
+    <div class="row">
+      <button onclick="save()">Save &amp; publish</button>
+      <a class="sec" href="/tv/" target="_blank" style="text-align:center;padding:12px;border:1px solid var(--gold);border-radius:9px;text-decoration:none">Open TV display ↗</a>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+</div>
+
+<script>
+const API = "/tv-api/api/v1";
+let token=null, mode="live";
+const $=id=>document.getElementById(id);
+async function api(path,method,body){
+  const h={"Content-Type":"application/json"}; if(token) h.Authorization="Bearer "+token;
+  const r=await fetch(API+path,{method:method||"GET",headers:h,body:body?JSON.stringify(body):undefined});
+  const t=await r.text(); let j={}; try{j=JSON.parse(t);}catch(e){}
+  if(!r.ok) throw new Error(j.detail||("Request failed ("+r.status+")")); return j;
+}
+async function login(){
+  const m=$("liMsg"); m.className="msg"; m.textContent="…";
+  try{ const r=await api("/auth/login","POST",{email:$("em").value.trim().toLowerCase(),password:$("pw").value});
+    token=r.token; $("loginCard").classList.add("hidden"); $("editor").classList.remove("hidden"); await loadCfg();
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+function setMode(md){ mode=md;
+  document.querySelectorAll(".modes button").forEach(b=>b.classList.toggle("active", b.dataset.mode===md));
+  $("liveBox").classList.toggle("hidden", md!=="live");
+  $("playlistBox").classList.toggle("hidden", md!=="playlist");
+  $("scheduleBox").classList.toggle("hidden", md!=="scheduled");
+}
+function addSlot(s){ s=s||{start:"07:00",end:"08:00",id:""};
+  const d=document.createElement("div"); d.className="sched-row";
+  d.innerHTML=`<input class="t start" value="${s.start||''}" placeholder="07:00"><input class="t end" value="${s.end||''}" placeholder="08:00">
+    <input class="vid" value="${s.id||''}" placeholder="YouTube URL or ID"><button class="sec" style="flex:0 0 40px" onclick="this.parentElement.remove()">✕</button>`;
+  $("sched").appendChild(d);
+}
+async function loadCfg(){
+  const c=await api("/tv/shital");
+  setMode(c.mode||"live");
+  $("liveId").value=c.live_youtube_id||""; $("isChannel").checked=!!c.live_is_channel;
+  $("playlist").value=(c.playlist||[]).map(p=>p.id||p).join("\n");
+  $("sched").innerHTML=""; (c.schedule||[]).forEach(addSlot);
+  $("title").value=c.title||""; $("logo").value=c.logo_url||"";
+  $("ticker").value=(c.ticker||[]).join("\n"); $("showClock").checked=c.show_clock!==false;
+}
+async function save(){
+  const m=$("msg"); m.className="msg"; m.textContent="…";
+  const lines=id=>$(id).value.split("\n").map(s=>s.trim()).filter(Boolean);
+  const schedule=[...document.querySelectorAll(".sched-row")].map(r=>({
+    start:r.querySelector(".start").value.trim(), end:r.querySelector(".end").value.trim(), id:r.querySelector(".vid").value.trim()
+  })).filter(s=>s.id);
+  try{
+    await api("/tv/shital","PUT",{
+      mode, live_youtube_id:$("liveId").value.trim(), live_is_channel:$("isChannel").checked,
+      playlist:lines("playlist").map(x=>({id:x})), schedule,
+      title:$("title").value.trim(), logo_url:$("logo").value.trim(),
+      ticker:lines("ticker"), show_clock:$("showClock").checked
+    });
+    m.className="msg ok"; m.textContent="Saved & published — the TV display updates within ~30s.";
+  }catch(e){ m.className="msg err"; m.textContent=e.message; }
+}
+</script>
+</body>
+</html>
