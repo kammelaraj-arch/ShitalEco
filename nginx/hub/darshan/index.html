@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Live Darshan — Shirdi Sai Temple</title>
+  <meta name="description" content="Watch the live darshan from Shirdi Sai Temple. Live aarti, bhajans and festival broadcasts.">
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0 }
+    :root { --bg:#0a0606; --saffron:#FF9933; --gold:#fbbf24 }
+    html,body { background:var(--bg); color:#fff; min-height:100vh;
+      font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif }
+    body::before { content:''; position:fixed; inset:0; pointer-events:none;
+      background:radial-gradient(ellipse 70% 45% at 50% 0%, rgba(255,153,51,0.12) 0%, transparent 60%) }
+    a { color:var(--gold); text-decoration:none }
+    .wrap { max-width:1100px; margin:0 auto; padding:20px 16px 56px; position:relative }
+
+    header { display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding-bottom:16px; margin-bottom:18px; border-bottom:1px solid rgba(255,255,255,0.08) }
+    .brand { display:flex; align-items:center; gap:12px }
+    .brand .logo { width:46px; height:46px; border-radius:12px; flex-shrink:0;
+      background:linear-gradient(135deg,#d97706,#b91c1c); display:flex; align-items:center;
+      justify-content:center; font-size:1.4rem; box-shadow:0 6px 22px rgba(185,28,28,0.3) }
+    .brand h1 { font-size:1.15rem; font-weight:900; letter-spacing:-0.3px }
+    .brand p { font-size:0.72rem; color:rgba(255,255,255,0.45); margin-top:1px }
+    .live-pill { display:inline-flex; align-items:center; gap:7px; font-size:0.7rem;
+      font-weight:800; letter-spacing:0.06em; text-transform:uppercase; padding:6px 12px;
+      border-radius:999px; background:rgba(239,68,68,0.18); color:#fca5a5;
+      border:1px solid rgba(239,68,68,0.4) }
+    .live-pill.off { background:rgba(255,255,255,0.05); color:rgba(255,255,255,0.4);
+      border-color:rgba(255,255,255,0.12) }
+    .live-pill .dot { width:7px; height:7px; border-radius:50%; background:currentColor;
+      box-shadow:0 0 6px currentColor; animation:pulse 1.6s ease-in-out infinite }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    .player { background:#000; aspect-ratio:16/9; border-radius:16px; overflow:hidden;
+      position:relative; box-shadow:0 12px 48px rgba(0,0,0,0.5) }
+    .player iframe { position:absolute; inset:0; width:100%; height:100%; border:0 }
+    .placeholder { position:absolute; inset:0; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; text-align:center; padding:24px;
+      background:radial-gradient(circle at 50% 40%, rgba(255,153,51,0.10), transparent 65%) }
+    .placeholder .om { font-size:4rem; margin-bottom:14px; opacity:0.9 }
+    .placeholder h2 { font-size:1.4rem; font-weight:800; margin-bottom:8px }
+    .placeholder p { color:rgba(255,255,255,0.55); max-width:30em; line-height:1.6 }
+    .placeholder .sub { margin-top:14px; font-size:0.85rem; color:var(--gold); font-weight:700 }
+
+    .nowbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+      gap:12px; margin-top:16px }
+    .nowbar .title { font-size:1.1rem; font-weight:800 }
+    .nowbar .meta { font-size:0.78rem; color:rgba(255,255,255,0.45); margin-top:2px }
+
+    .cta { display:flex; gap:10px; flex-wrap:wrap }
+    .btn { display:inline-flex; align-items:center; gap:8px; padding:11px 18px; border-radius:14px;
+      font-size:0.85rem; font-weight:800; cursor:pointer; border:1px solid transparent }
+    .btn-donate { background:linear-gradient(135deg,#fbbf24,#f59e0b); color:#3b0a00 }
+    .btn-ghost { background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.85);
+      border-color:rgba(255,255,255,0.12) }
+
+    .footer { margin-top:28px; text-align:center; color:rgba(255,255,255,0.3); font-size:0.75rem }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">🛕</div>
+      <div>
+        <h1>Live Darshan</h1>
+        <p>Shirdi Sai Temple · Wembley, UK</p>
+      </div>
+    </div>
+    <span id="pill" class="live-pill off"><span class="dot"></span> Off air</span>
+  </header>
+
+  <div class="player" id="player">
+    <div class="placeholder" id="placeholder">
+      <div class="om">🕉️</div>
+      <h2>Darshan is not live right now</h2>
+      <p>The live stream appears here automatically when a broadcast begins.
+         Please check back at aarti times, or watch past broadcasts on our channel.</p>
+      <div class="sub" id="nextHint"></div>
+    </div>
+  </div>
+
+  <div class="nowbar">
+    <div>
+      <div class="title" id="nowTitle">Waiting for the next broadcast…</div>
+      <div class="meta" id="nowMeta">This page refreshes automatically.</div>
+    </div>
+    <div class="cta">
+      <a class="btn btn-donate" href="https://service.shital.org.uk/" target="_blank" rel="noopener">🙏 Donate</a>
+      <a class="btn btn-ghost" href="/">← Home</a>
+    </div>
+  </div>
+
+  <p class="footer">Sairam · Live darshan auto-starts when the temple goes live.</p>
+</div>
+
+<script>
+  // Reuses the already-live backend: GET /api/v1/broadcast/now returns
+  // { state: 'LIVE'|'SCHEDULED_NOW'|'UPCOMING'|'OFFLINE', event: { youtube_video_id, title, ... } }.
+  // /now already auto-detects the temple's YouTube live stream (via the
+  // YOUTUBE_* keys in admin) before falling back to DB state — so this page
+  // needs no config: it shows the live player the moment the channel is live.
+  var API = '/api/v1/broadcast/now';
+  var currentVideo = null;
+  var pill = document.getElementById('pill');
+  var player = document.getElementById('player');
+  var placeholder = document.getElementById('placeholder');
+  var nowTitle = document.getElementById('nowTitle');
+  var nowMeta = document.getElementById('nowMeta');
+  var nextHint = document.getElementById('nextHint');
+
+  function showLive(videoId, title) {
+    if (currentVideo === videoId) return;          // already playing this stream
+    currentVideo = videoId;
+    var src = 'https://www.youtube.com/embed/' + encodeURIComponent(videoId)
+      + '?autoplay=1&mute=1&rel=0&playsinline=1&modestbranding=1';
+    player.innerHTML = '<iframe src="' + src + '" allow="autoplay; encrypted-media; picture-in-picture"'
+      + ' allowfullscreen title="Live Darshan"></iframe>';
+    pill.className = 'live-pill';
+    pill.innerHTML = '<span class="dot"></span> Live now';
+    nowTitle.textContent = title || 'Live Darshan';
+    nowMeta.textContent = 'Streaming live now';
+  }
+
+  function showOffline(state, ev) {
+    if (currentVideo !== null) { currentVideo = null; player.innerHTML = ''; player.appendChild(placeholder); }
+    pill.className = 'live-pill off';
+    pill.innerHTML = '<span class="dot"></span> Off air';
+    if (state === 'UPCOMING' && ev && ev.title) {
+      nowTitle.textContent = 'Up next: ' + ev.title;
+      var when = ev.scheduled_at ? new Date(ev.scheduled_at).toLocaleString('en-GB',
+        { weekday:'short', hour:'2-digit', minute:'2-digit' }) : '';
+      nowMeta.textContent = when ? ('Scheduled for ' + when) : 'Scheduled soon';
+      nextHint.textContent = when ? ('Next broadcast: ' + when) : '';
+    } else {
+      nowTitle.textContent = 'No live broadcast right now';
+      nowMeta.textContent = 'This page refreshes automatically.';
+      nextHint.textContent = '';
+    }
+  }
+
+  async function tick() {
+    try {
+      var r = await fetch(API, { cache: 'no-store' });
+      var d = await r.json();
+      var ev = d && d.event;
+      if (d && d.state === 'LIVE' && ev && ev.youtube_video_id) {
+        showLive(ev.youtube_video_id, ev.title);
+      } else if (d && d.state === 'SCHEDULED_NOW' && ev && (ev.youtube_video_id || ev.asset_yt)) {
+        showLive(ev.youtube_video_id || ev.asset_yt, ev.title || (ev.asset_title || 'Scheduled programme'));
+      } else {
+        showOffline(d ? d.state : 'OFFLINE', ev);
+      }
+    } catch (e) {
+      // Network/API hiccup — keep whatever is showing; retry next tick.
+    }
+  }
+
+  tick();
+  setInterval(tick, 60000);   // re-check every 60s (matches the /tv page cadence)
+</script>
+</body>
+</html>
