@@ -249,6 +249,22 @@ services:
     networks:
       - dev-internal
 
+  # ── Media server: temple RTMP push -> HLS for the TV display ────────────────
+  mediamtx:
+    image: bluenviron/mediamtx:1.9.3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 192M
+    ports:
+      - "1935:1935"   # RTMP ingest (temple pushes the Reolink feed here)
+    volumes:
+      - ./streaming/mediamtx.yml:/mediamtx.yml:ro
+    networks:
+      - dev-internal
+
   nginx-dev:
     image: nginx:alpine
     restart: unless-stopped

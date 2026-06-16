@@ -49,9 +49,25 @@
       </div>
 
       <div id="liveBox">
-        <label>YOUTUBE LIVE URL OR VIDEO ID</label>
-        <input id="liveId" placeholder="https://www.youtube.com/watch?v=…  or  /live/…">
-        <label class="row" style="margin-top:10px"><input type="checkbox" id="isChannel" style="width:auto;flex:0"> &nbsp;This is a channel's perpetual live (paste the channel ID above instead)</label>
+        <label>LIVE SOURCE</label>
+        <select id="liveKind" onchange="liveKindChange()">
+          <option value="hls">📷 Temple camera (live darshan)</option>
+          <option value="youtube">▶ YouTube</option>
+        </select>
+        <div id="hlsFields">
+          <label>STREAM URL (HLS)</label>
+          <input id="hlsUrl" value="/darshan/index.m3u8">
+          <div class="row" style="margin-top:6px">
+            <div><label>SHOW FROM</label><input id="dStart" class="t" placeholder="08:00"></div>
+            <div><label>SHOW UNTIL</label><input id="dEnd" class="t" placeholder="21:00"></div>
+          </div>
+          <p style="color:var(--muted);font-size:12px;margin-top:8px">Outside these hours the TV shows a “resumes at” card. Leave both blank for 24/7. The temple device pushes the camera to this stream.</p>
+        </div>
+        <div id="ytFields" class="hidden">
+          <label>YOUTUBE LIVE URL OR VIDEO ID</label>
+          <input id="liveId" placeholder="https://www.youtube.com/watch?v=…  or  /live/…">
+          <label class="row" style="margin-top:10px"><input type="checkbox" id="isChannel" style="width:auto;flex:0"> &nbsp;This is a channel's perpetual live (paste the channel ID above)</label>
+        </div>
       </div>
 
       <div id="playlistBox" class="hidden">
@@ -105,6 +121,10 @@ function setMode(md){ mode=md;
   $("playlistBox").classList.toggle("hidden", md!=="playlist");
   $("scheduleBox").classList.toggle("hidden", md!=="scheduled");
 }
+function liveKindChange(){ const k=$("liveKind").value;
+  $("hlsFields").classList.toggle("hidden", k!=="hls");
+  $("ytFields").classList.toggle("hidden", k!=="youtube");
+}
 function addSlot(s){ s=s||{start:"07:00",end:"08:00",id:""};
   const d=document.createElement("div"); d.className="sched-row";
   d.innerHTML=`<input class="t start" value="${s.start||''}" placeholder="07:00"><input class="t end" value="${s.end||''}" placeholder="08:00">
@@ -114,6 +134,9 @@ function addSlot(s){ s=s||{start:"07:00",end:"08:00",id:""};
 async function loadCfg(){
   const c=await api("/tv/shital");
   setMode(c.mode||"live");
+  $("liveKind").value=c.live_kind||"hls"; liveKindChange();
+  $("hlsUrl").value=c.hls_url||"/darshan/index.m3u8";
+  $("dStart").value=c.daily_start||""; $("dEnd").value=c.daily_end||"";
   $("liveId").value=c.live_youtube_id||""; $("isChannel").checked=!!c.live_is_channel;
   $("playlist").value=(c.playlist||[]).map(p=>p.id||p).join("\n");
   $("sched").innerHTML=""; (c.schedule||[]).forEach(addSlot);
@@ -128,7 +151,9 @@ async function save(){
   })).filter(s=>s.id);
   try{
     await api("/tv/shital","PUT",{
-      mode, live_youtube_id:$("liveId").value.trim(), live_is_channel:$("isChannel").checked,
+      mode, live_kind:$("liveKind").value,
+      hls_url:$("hlsUrl").value.trim(), daily_start:$("dStart").value.trim(), daily_end:$("dEnd").value.trim(),
+      live_youtube_id:$("liveId").value.trim(), live_is_channel:$("isChannel").checked,
       playlist:lines("playlist").map(x=>({id:x})), schedule,
       title:$("title").value.trim(), logo_url:$("logo").value.trim(),
       ticker:lines("ticker"), show_clock:$("showClock").checked
