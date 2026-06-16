@@ -7,42 +7,6 @@ import { AddressLookup } from '../components/AddressLookup'
 const TITLES = ['', 'Dr', 'Mr', 'Mrs', 'Ms', 'Master', 'Other']
 const AGE_RANGES = ['18-25', '26-35', '36-45', '46-55', '55+']
 
-// Skills checklist mirrors paper-form V1.2 page 4 layout. Each row is one
-// category with its options. Categories collapsed by default to stop the
-// form being a wall of 55 chips on first paint.
-const SKILLS_CATALOG: Array<{ key: string; label: string; icon: string; options: string[] }> = [
-  { key: 'Administrative',  label: 'Administrative',   icon: '📋', options: ['General Office Duties', 'Accountancy', 'Research', 'Secretarial', 'Other'] },
-  { key: 'Logistics',       label: 'Logistics',        icon: '🚚', options: ['Driving', 'Loading / Unloading', 'Warehouse Management', 'Import / Export', 'Other'] },
-  { key: 'Cultural',        label: 'Cultural',         icon: '🎭', options: ['Singing', 'Dancing', 'Drama', 'Other'] },
-  { key: 'Communications',  label: 'Communications',   icon: '📣', options: ['Marketing / PR', 'Community Relations', 'Cataloguing', 'Conducting Surveys', 'Social Media', 'Other'] },
-  { key: 'IT',              label: 'IT',               icon: '💻', options: ['Data Entry', 'Web Developing', 'Networking', 'Other'] },
-  { key: 'Religious',       label: 'Religious',        icon: '🕉️', options: ['Bhajans / Shlokas', 'Other'] },
-  { key: 'EventManagement', label: 'Event Management', icon: '🎪', options: ['Advertising / Publicity', 'Public Relations', 'First Aider', 'Security', 'Other'] },
-  { key: 'Education',       label: 'Education',        icon: '📚', options: ['Tuition', 'Teaching', 'Counselling', 'Consultancy', 'Language', 'Other'] },
-  { key: 'Hospitality',     label: 'Hospitality',      icon: '🏠', options: ['Care Taker', 'Child Minder', 'Other'] },
-  { key: 'CharityServices', label: 'Charity Services', icon: '🤲', options: ['Fund Raising', 'Distributing Food', 'Other'] },
-  { key: 'Other',           label: 'Other Skills',     icon: '🛠️', options: ['DIY', 'Carpentry', 'Electrical', 'Plumbing', 'Cooking', 'Other'] },
-]
-
-const WEEKDAYS: Array<{ key: string; label: string; short: string }> = [
-  { key: 'monday',    label: 'Monday',    short: 'Mon' },
-  { key: 'tuesday',   label: 'Tuesday',   short: 'Tue' },
-  { key: 'wednesday', label: 'Wednesday', short: 'Wed' },
-  { key: 'thursday',  label: 'Thursday',  short: 'Thu' },
-  { key: 'friday',    label: 'Friday',    short: 'Fri' },
-  { key: 'saturday',  label: 'Saturday',  short: 'Sat' },
-  { key: 'sunday',    label: 'Sunday',    short: 'Sun' },
-]
-
-const TIME_SLOTS: Array<{ key: string; label: string; hint: string }> = [
-  { key: 'morning',   label: 'Morning',   hint: '~9am – noon' },
-  { key: 'afternoon', label: 'Afternoon', hint: '~noon – 5pm' },
-  { key: 'evening',   label: 'Evening',   hint: '~5pm onwards' },
-  { key: 'flexible',  label: 'Flexible',  hint: 'Any time' },
-]
-
-const AVAILABILITY_PATTERNS = ['weekly', 'fortnightly', 'monthly', 'events-only', 'flexible']
-
 const inp = 'w-full px-4 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 focus:border-saffron-400/50 outline-none text-ivory-100 placeholder-white/30'
 const lbl = 'block text-xs font-bold uppercase tracking-widest mb-1.5'
 
@@ -130,7 +94,6 @@ const WIZARD_STEPS: Array<{ key: string; title: string }> = [
   { key: 'where',      title: 'Where to help'       },
   { key: 'background', title: 'Health & background' },
   { key: 'references', title: 'References'          },
-  { key: 'skills',     title: 'Skills & schedule'   },
   { key: 'review',     title: 'Review & submit'     },
 ]
 
@@ -163,7 +126,7 @@ function validateStep(stepIdx: number, f: Form): string[] {
     if (!f.ref2_email.trim() && !f.ref2_mobile.trim() && !f.ref2_phone.trim())
       errs.push('Referee 2 contact (email or phone) is required')
   }
-  if (stepIdx === 5) {
+  if (stepIdx === 4) {
     if (!f.declaration_agreed) errs.push('You must agree to the volunteer activity declaration')
     if (!f.confidentiality_agreed) errs.push('You must agree to the confidentiality undertaking')
   }
@@ -309,57 +272,6 @@ export function VolunteerRegistrationPage() {
           ? p.preferred_branches.filter(c => c !== code)
           : [...p.preferred_branches, code],
       }
-    })
-  }
-
-  function toggleSkill(category: string, option: string) {
-    setForm(p => {
-      const current = p.skills[category] || []
-      const next = current.includes(option)
-        ? current.filter(o => o !== option)
-        : [...current, option]
-      const skills = { ...p.skills }
-      if (next.length) skills[category] = next
-      else delete skills[category]
-      return { ...p, skills }
-    })
-  }
-
-  function toggleAvailDay(day: string) {
-    setForm(p => {
-      const has = p.availability.days.includes(day)
-      return {
-        ...p,
-        availability: {
-          ...p.availability,
-          days: has ? p.availability.days.filter(d => d !== day) : [...p.availability.days, day],
-        },
-      }
-    })
-  }
-  function toggleAvailTime(slot: string) {
-    setForm(p => {
-      const has = p.availability.times.includes(slot)
-      return {
-        ...p,
-        availability: {
-          ...p.availability,
-          times: has ? p.availability.times.filter(t => t !== slot) : [...p.availability.times, slot],
-        },
-      }
-    })
-  }
-  function setAvailNotes(notes: string) {
-    setForm(p => ({ ...p, availability: { ...p.availability, notes } }))
-  }
-
-  // Skills categories collapsed by default — track which ones are open.
-  const [openSkillCats, setOpenSkillCats] = useState<Set<string>>(new Set())
-  function toggleCat(key: string) {
-    setOpenSkillCats(p => {
-      const n = new Set(p)
-      if (n.has(key)) n.delete(key); else n.add(key)
-      return n
     })
   }
 
@@ -771,140 +683,8 @@ export function VolunteerRegistrationPage() {
 
       </>)}
 
-      {/* ── STEP 4 — Skills + Availability ──────────────────────────────── */}
+      {/* ── STEP 4 — Review & Submit (declarations) ─────────────────────── */}
       {wizardStep === 4 && (<>
-      <Section title={t('section.skills.title', 'Your Skills (optional)')}>
-        <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          {t('section.skills.intro', 'Optional — but the more you tell us, the better we can match you with suitable opportunities. Tap a category to expand.')}
-        </p>
-        <div className="space-y-2">
-          {SKILLS_CATALOG.map(cat => {
-            const selected = form.skills[cat.key] || []
-            const open = openSkillCats.has(cat.key) || selected.length > 0
-            return (
-              <div key={cat.key} className="rounded-xl overflow-hidden"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <button type="button" onClick={() => toggleCat(cat.key)}
-                  className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-white/5 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <span className="text-lg">{cat.icon}</span>
-                    <span className="font-bold text-sm text-ivory-100">{cat.label}</span>
-                    {selected.length > 0 && (
-                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-                        style={{ background: 'rgba(212,175,55,0.2)', color: '#FFD980' }}>
-                        {selected.length} picked
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-white/40 text-sm">{open ? '−' : '+'}</span>
-                </button>
-                {open && (
-                  <div className="px-4 pb-4 pt-1 flex flex-wrap gap-2">
-                    {cat.options.map(opt => {
-                      const active = selected.includes(opt)
-                      return (
-                        <button key={opt} type="button" onClick={() => toggleSkill(cat.key, opt)}
-                          className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-                          style={{
-                            background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
-                            border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
-                            color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
-                          }}>
-                          {opt}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-        <div className="mt-4">
-          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>{t('section.skills.other_label', 'Anything else? (free-text)')}</label>
-          <textarea value={form.skills_other_text} onChange={e => update('skills_other_text', e.target.value)} rows={2}
-            className={inp + ' resize-none'} placeholder={t('section.skills.other_placeholder', 'First Aid, Musical Instruments, Languages etc.')} />
-        </div>
-      </Section>
-
-      {/* Availability */}
-      <Section title={t('section.availability.title', 'Availability (optional)')}>
-        <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-          {t('section.availability.intro', "Optional — tell us roughly when you can help. Tap any that apply, or skip and we'll discuss at interview.")}
-        </p>
-
-        <div className="mb-4">
-          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Days</p>
-          <div className="flex flex-wrap gap-2">
-            {WEEKDAYS.map(d => {
-              const active = form.availability.days.includes(d.key)
-              return (
-                <button key={d.key} type="button" onClick={() => toggleAvailDay(d.key)}
-                  className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-                  style={{
-                    background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
-                    color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
-                  }}>
-                  {d.short}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="mb-4">
-          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Times of day</p>
-          <div className="flex flex-wrap gap-2">
-            {TIME_SLOTS.map(s => {
-              const active = form.availability.times.includes(s.key)
-              return (
-                <button key={s.key} type="button" onClick={() => toggleAvailTime(s.key)}
-                  className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-                  style={{
-                    background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
-                    color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
-                  }}>
-                  {s.label} <span className="opacity-50">· {s.hint}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="mb-4">
-          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>How often</p>
-          <div className="flex flex-wrap gap-2">
-            {AVAILABILITY_PATTERNS.map(p => {
-              const active = form.availability_pattern === p
-              return (
-                <button key={p} type="button" onClick={() => update('availability_pattern', active ? '' : p)}
-                  className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all capitalize"
-                  style={{
-                    background: active ? 'linear-gradient(135deg,rgba(212,175,55,0.3),rgba(212,175,55,0.15))' : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${active ? '#D4AF37' : 'rgba(255,255,255,0.1)'}`,
-                    color: active ? '#FFD980' : 'rgba(255,248,220,0.7)',
-                  }}>
-                  {p.replace('-', ' ')}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div>
-          <label className={lbl} style={{ color: 'rgba(212,175,55,0.6)' }}>Anything else about your availability? (optional)</label>
-          <textarea value={form.availability.notes} onChange={e => setAvailNotes(e.target.value)} rows={2}
-            className={inp + ' resize-none'}
-            placeholder="e.g. school holidays only, alternate weekends, every Tuesday from January…" />
-        </div>
-      </Section>
-
-      </>)}
-
-      {/* ── STEP 5 — Review & Submit (declarations) ─────────────────────── */}
-      {wizardStep === 5 && (<>
       <Section title="Review">
         <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
           Quick summary of what you've told us. Tap "Back" to change anything.
@@ -919,8 +699,6 @@ export function VolunteerRegistrationPage() {
               ? form.preferred_branches.map(p => p === 'remote' ? '🌐 Remote' : p.charAt(0).toUpperCase() + p.slice(1)).join(', ')
               : '—'
           }</p>
-          <p><span className="text-gold-400 font-semibold">Skills picked:</span> {Object.values(form.skills).reduce((n, arr) => n + arr.length, 0) || 0}</p>
-          <p><span className="text-gold-400 font-semibold">Available days:</span> {form.availability.days.length || 0}</p>
           <p><span className="text-gold-400 font-semibold">References:</span> {[form.ref1_first_names && form.ref1_last_name, form.ref2_first_names && form.ref2_last_name].filter(Boolean).length} provided</p>
         </div>
       </Section>
