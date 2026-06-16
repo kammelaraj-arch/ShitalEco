@@ -82,12 +82,20 @@ take_snapshot() {
   local out="${SNAP_DIR}/${reason}-${ts}-${GIT_SHA:0:7}.sql.gz"
   local err_log="${SNAP_DIR}/${reason}-${ts}-pg_dump.log"
   echo "=== Taking ${reason} snapshot ${ts} ==="
+  # 14-Jun fix: take_snapshot is called from the promote block (~L179) BEFORE
+  # the main `/workspace/.env` load (~L342), so POSTGRES_USER/DB/PASSWORD were
+  # falling back to defaults that don't match prod → pg_dump auth failed → every
+  # "Promote Snapshot" showed "✗ no DB / DB dump missing" (no DB rollback).
+  # Source the env here (idempotent) so credentials are correct regardless of
+  # call order, and pass PGPASSWORD into the exec for password-auth setups.
+  if [ -f /workspace/.env ]; then set -a; . /workspace/.env; set +a; fi
   # The deployer's CWD is /workspace, which is NOT the prod compose project
   # ("shitaleco" — derived from /opt/shitaleco on the host). Pass an explicit
   # project name + absolute compose file path so `docker compose exec` finds
   # the running db container regardless of where the deployer was started.
   set +e
-  docker compose -p shitaleco -f /workspace/docker-compose.prod.yml exec -T db \
+  docker compose -p shitaleco -f /workspace/docker-compose.prod.yml exec -T \
+       -e PGPASSWORD="${POSTGRES_PASSWORD:-}" db \
        pg_dump -U "${POSTGRES_USER:-shitaleco_db_user}" \
                -d "${POSTGRES_DB:-shitaleco_db}" \
        2>"$err_log" | gzip > "$out"
@@ -135,6 +143,34 @@ gc_snapshots() {
             && echo "  untagged ${svc}:${tag}" || true
         done
   done
+}
+
+# Ensure the target's nginx is running and actually serving the PUBLIC path.
+# Recreates it if missing, restarts it to flush stale upstream DNS, then probes
+# through nginx. Called on BOTH the success path AND the health-gate-rollback
+# path so a failed promote can never leave the front door (nginx) down — that
+# gap turned a clean auto-rollback into the 14-Jun 38-min full outage.
+ensure_nginx_up() {
+  local svc cname i code
+  if [ "$TARGET" = "dev" ]; then svc=nginx-dev; cname=shitaleco-dev-nginx-dev-1
+  else svc=nginx; cname=shitaleco-nginx-1; fi
+  if ! docker inspect "$cname" >/dev/null 2>&1; then
+    echo "  ${cname} absent — recreating"
+    $COMPOSE_CMD up -d --no-deps "$svc" 2>&1 | tail -5
+  fi
+  docker restart "$cname" 2>&1 | sed 's/^/    /' || $COMPOSE_CMD up -d --no-deps "$svc"
+  for i in 1 2 3 4 5 6; do
+    sleep 3
+    if [ "$TARGET" = "dev" ]; then
+      code=$(curl -s -o /dev/null -w '%{http_code}' -m 4 http://localhost:8080/health 2>/dev/null || echo 000)
+    else
+      code=$(curl -k -s -o /dev/null -w '%{http_code}' -m 4 -H 'Host: shital.org.uk' https://localhost/health 2>/dev/null || echo 000)
+    fi
+    echo "    nginx public /health → ${code}"
+    [ "$code" = "200" ] && return 0
+  done
+  echo "  !!! nginx still not serving /health after self-heal"
+  return 1
 }
 
 # ── Restore mode: rollback to a specific snapshot ────────────────────────────
@@ -580,6 +616,12 @@ if [ "$BACKEND_OK" -eq 0 ]; then
                ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>/dev/null || true
     $COMPOSE_CMD up -d --no-deps --force-recreate backend
   fi
+  # CRITICAL (14-Jun fix): this failure path used to `exit 1` below WITHOUT ever
+  # touching nginx. If nginx had gone missing during the deploy churn, it stayed
+  # down → a clean backend auto-rollback became a full 38-min outage. Always
+  # restore + verify the front door before bailing out.
+  echo "=== Rollback path: ensuring nginx is up ==="
+  ensure_nginx_up || echo "  !!! nginx self-heal FAILED on rollback path — manual check required"
   # Escape the log tail so it survives JSONL encoding (no raw newlines/quotes).
   LOG_TAIL=$(tail -20 "$BACKEND_LOG_DUMP" 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read())[1:-1])' 2>/dev/null || echo "")
   REASON_ESC=$(echo "${HEALTH_FAIL_REASON:-/health did not return 200 after 600s}" | sed 's/"/\\"/g')
