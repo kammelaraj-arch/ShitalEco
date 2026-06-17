@@ -173,6 +173,27 @@ ensure_nginx_up() {
   return 1
 }
 
+# ── Front-door exit guard ────────────────────────────────────────────────────
+# PERMANENT FIX (17-Jun outage): a promote that died ANYWHERE other than the
+# explicit rollback path used to exit without ever restoring nginx, so the
+# public site stayed 503 until a human re-ran a recovery workflow. `set -e` is
+# on, so any failed command aborts the script — this EXIT trap guarantees that
+# on ANY non-zero exit (prod only) we restore the front door before leaving.
+# A SIGKILL (OOM) can't be trapped — the host watchdog (infra/watchdog-prod.sh)
+# covers that case. Together they make "deploy died → site down" unrecoverable
+# only if BOTH the in-process trap AND the external cron fail.
+_GUARD_RAN=0
+_deploy_exit_guard() {
+  local rc=$?
+  [ "$_GUARD_RAN" = "1" ] && return
+  _GUARD_RAN=1
+  if [ "$TARGET" = "prod" ] && [ "$rc" -ne 0 ]; then
+    echo "=== EXIT GUARD (rc=${rc}): restoring nginx front door before exit ==="
+    ensure_nginx_up || echo "  !!! exit-guard nginx self-heal failed — host watchdog will retry"
+  fi
+}
+trap _deploy_exit_guard EXIT
+
 # ── Restore mode: rollback to a specific snapshot ────────────────────────────
 if [ -n "$RESTORE_ID" ]; then
   echo "=== Restore mode — snapshot id=${RESTORE_ID} ==="
