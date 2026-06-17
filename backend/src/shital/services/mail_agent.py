@@ -42,12 +42,19 @@ logger = logging.getLogger("shital.mail_agent")
 _client: AsyncAnthropic | None = None
 
 
-def _claude() -> AsyncAnthropic:
+async def _claude() -> AsyncAnthropic:
     global _client
     if _client is None:
-        if not settings.ANTHROPIC_API_KEY:
+        # Resolve from the encrypted API-key store first (where Admin → API
+        # Keys writes), falling back to env-var-loaded settings. This matches
+        # is_rules_mode_active(), which already consults the store to pick
+        # agent mode — without this, a key set only via the UI would select
+        # agent mode and then crash here on client init.
+        from shital.core.fabrics.secrets import SecretsManager
+        key = await SecretsManager.get("ANTHROPIC_API_KEY", settings.ANTHROPIC_API_KEY)
+        if not key:
             raise RuntimeError("ANTHROPIC_API_KEY not configured")
-        _client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        _client = AsyncAnthropic(api_key=key)
     return _client
 
 
@@ -669,7 +676,7 @@ async def triage_email(mailbox: str, message_meta: dict[str, Any]) -> dict[str, 
                 pass
 
     # ─── Agentic loop ───────────────────────────────────────────────────────
-    client = _claude()
+    client = await _claude()
     messages: list[dict[str, Any]] = [{"role": "user", "content": content_blocks}]
     tool_log: list[dict[str, Any]] = []
     classification = "other"

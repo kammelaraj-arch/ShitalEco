@@ -45,37 +45,49 @@ async def _token() -> str:
     if _token_cache["value"] and _token_cache["exp"] > now + 60:
         return str(_token_cache["value"])
 
-    if not (settings.MS_TENANT_ID and settings.MS_CLIENT_ID):
+    # Resolve Graph credentials from the encrypted API-key store first, falling
+    # back to env-var-loaded settings. The store is where the Admin → API Keys
+    # page writes, so operators can configure the mail agent entirely from the
+    # UI without setting container env vars or redeploying. SecretsManager.get
+    # itself already layers store → os.environ → fallback.
+    from shital.core.fabrics.secrets import SecretsManager
+    tenant_id     = await SecretsManager.get("MS_TENANT_ID",       settings.MS_TENANT_ID)
+    client_id     = await SecretsManager.get("MS_CLIENT_ID",       settings.MS_CLIENT_ID)
+    client_secret = await SecretsManager.get("MS_CLIENT_SECRET",   settings.MS_CLIENT_SECRET)
+    agent_user    = await SecretsManager.get("MAIL_AGENT_USER",    settings.MAIL_AGENT_USER)
+    agent_pw      = await SecretsManager.get("MAIL_AGENT_PASSWORD", settings.MAIL_AGENT_PASSWORD)
+
+    if not (tenant_id and client_id):
         raise RuntimeError("MS_CLIENT_ID / MS_TENANT_ID not configured")
-    url = _TOKEN_URL_FMT.format(tenant=settings.MS_TENANT_ID)
+    url = _TOKEN_URL_FMT.format(tenant=tenant_id)
 
     # ── Path A: service account ROPC (delegated) ────────────────────────────
-    if settings.MAIL_AGENT_USER and settings.MAIL_AGENT_PASSWORD:
+    if agent_user and agent_pw:
         # Scope must be a SPECIFIC delegated permission for ROPC — `.default`
         # works for app-only but not reliably for ROPC unless the app has
         # admin-consented delegated perms. Asking for Mail.Read directly is
         # the well-trodden path.
         data: dict[str, str] = {
-            "client_id":  settings.MS_CLIENT_ID,
+            "client_id":  client_id,
             "grant_type": "password",
-            "username":   settings.MAIL_AGENT_USER,
-            "password":   settings.MAIL_AGENT_PASSWORD,
+            "username":   agent_user,
+            "password":   agent_pw,
             "scope":      "https://graph.microsoft.com/Mail.Read offline_access",
         }
         # If the Azure AD app is a confidential client, include the secret.
         # Some tenants reject ROPC without it; some require its absence.
-        if settings.MS_CLIENT_SECRET:
-            data["client_secret"] = settings.MS_CLIENT_SECRET
+        if client_secret:
+            data["client_secret"] = client_secret
         mode = "ropc"
 
     # ── Path B: app-only client_credentials (no user) ───────────────────────
     else:
-        if not settings.MS_CLIENT_SECRET:
+        if not client_secret:
             raise RuntimeError("Need MAIL_AGENT_USER+PASSWORD (delegated) "
                                "or MS_CLIENT_SECRET (app-only) to acquire a token")
         data = {
-            "client_id":     settings.MS_CLIENT_ID,
-            "client_secret": settings.MS_CLIENT_SECRET,
+            "client_id":     client_id,
+            "client_secret": client_secret,
             "scope":         "https://graph.microsoft.com/.default",
             "grant_type":    "client_credentials",
         }
@@ -92,7 +104,7 @@ async def _token() -> str:
     _token_cache["value"] = body["access_token"]
     _token_cache["exp"]   = now + int(body.get("expires_in", 3600))
     if _token_cache["mode"] != mode:
-        who = settings.MAIL_AGENT_USER if mode == "ropc" else "<app-only>"
+        who = agent_user if mode == "ropc" else "<app-only>"
         logger.info("mailbox_auth_mode mode=%s user=%s", mode, who)
         _token_cache["mode"] = mode
     return str(body["access_token"])

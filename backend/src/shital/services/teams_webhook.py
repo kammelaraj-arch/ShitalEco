@@ -20,7 +20,11 @@ async def send_alert(title: str, message: str, *, severity: str = "amber",
                      link_url: str = "", link_label: str = "Open in Admin") -> bool:
     """Post a MessageCard to the configured Teams channel. Returns True if
     Teams accepted (200), False otherwise. Never raises — alerts are best-effort."""
-    if not settings.TEAMS_WEBHOOK_URL:
+    # Resolve from the encrypted API-key store first (Admin → API Keys),
+    # falling back to env-var settings.
+    from shital.core.fabrics.secrets import SecretsManager
+    webhook_url = await SecretsManager.get("TEAMS_WEBHOOK_URL", settings.TEAMS_WEBHOOK_URL)
+    if not webhook_url:
         return False
     payload: dict[str, object] = {
         "@type":      "MessageCard",
@@ -40,7 +44,7 @@ async def send_alert(title: str, message: str, *, severity: str = "amber",
         }]
     try:
         async with httpx.AsyncClient(timeout=10) as cx:
-            r = await cx.post(settings.TEAMS_WEBHOOK_URL, json=payload)
+            r = await cx.post(webhook_url, json=payload)
         return r.status_code in (200, 202)
     except Exception:
         return False
