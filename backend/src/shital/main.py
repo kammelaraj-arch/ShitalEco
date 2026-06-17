@@ -1890,6 +1890,21 @@ async def _patch_schema() -> None:
         "ALTER TABLE basket_items ADD COLUMN IF NOT EXISTS gift_aid_amount NUMERIC(12,2) NOT NULL DEFAULT 0",
         # Source channel on donations (kiosk, quick-donation, service, paypal, etc.)
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'kiosk'",
+        # ── Payment failure detail + actual settlement (Stripe/SumUp robustness) ──
+        # last_failure_* : why a card payment failed (Stripe last_payment_error /
+        #   SumUp decline). card_type: VISA/MASTERCARD/AMEX/OTHER for "why declined"
+        #   visibility. Populated by the reconciliation sweeps + webhooks.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS last_failure_code    VARCHAR(60)  DEFAULT NULL",
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS last_failure_message VARCHAR(500) DEFAULT NULL",
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS card_type            VARCHAR(30)  DEFAULT NULL",
+        # actual_* : the REAL fee the processor kept and the REAL amount Shital
+        #   receives, from settlement data (Stripe balance_transaction / SumUp
+        #   transaction). NULL until settled — existing fee_amount/net_amount stay
+        #   as the at-sale estimate. settled_at/payout_id link to the bank payout.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS actual_fee_amount NUMERIC(12,2) DEFAULT NULL",
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS actual_net_amount NUMERIC(12,2) DEFAULT NULL",
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS settled_at        TIMESTAMPTZ   DEFAULT NULL",
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS payout_id         VARCHAR(120)  DEFAULT NULL",
         # ── CRM: Contacts table ───────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS contacts (
             id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
