@@ -885,6 +885,18 @@ JSON
   exit 3
 fi
 
+# ── Install / refresh the prod self-heal watchdog ───────────────────────────
+# Host cron (every 2 min), EXTERNAL to this deployer, that restarts nginx (and
+# if needed the backend) when the public /health stays down. This is the net
+# that catches a promote where the deployer itself dies mid-run and leaves
+# nginx pointing at a stale backend IP (the 17-Jun 40-min outage). Best-effort:
+# never fail a healthy deploy just because the cron install hiccuped.
+if [ "$TARGET" = "prod" ] && [ -f /workspace/infra/install-prod-watchdog.sh ]; then
+  echo "=== Installing/refreshing prod self-heal watchdog ==="
+  bash /workspace/infra/install-prod-watchdog.sh 2>&1 | sed 's/^/  /' \
+    || echo "  !!! watchdog install failed (non-fatal) — check manually"
+fi
+
 # ── Success ─────────────────────────────────────────────────────────────────
 echo "=== Deploy complete $(date) — commit ${GIT_SHA} → ${STACK_NAME} ==="
 
