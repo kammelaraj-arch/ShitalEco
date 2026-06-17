@@ -355,6 +355,27 @@ else
 fi
 echo "=== Compose command: $COMPOSE_CMD ==="
 
+# ── Free RAM before the prod promote (prevents OOM mid-promote) ──────────────
+# ROOT CAUSE of the 17-Jun repeat outages: on the 2GB VPS, pulling the new
+# image + running the first-boot migration WHILE the full dev stack (a second
+# backend + postgres + frontends) is also resident pushes the box into the
+# OOM-killer, which reaps the deployer (and nginx) mid-promote → every domain
+# 503s with no clean rollback. The 1200s health gate never even mattered
+# because the deployer was killed before it ran. Stop the dev stack for the
+# duration of the prod promote so the migration has headroom. Prod-only,
+# best-effort; dev is non-critical and is restarted on the success path below.
+if [ "$TARGET" = "prod" ]; then
+  echo "=== Freeing RAM: stopping dev stack for the duration of the promote ==="
+  free -h 2>/dev/null | sed 's/^/  before: /' || true
+  DEV_RUNNING_IDS=$(docker ps -q --filter 'name=shitaleco-dev-' 2>/dev/null || true)
+  if [ -n "$DEV_RUNNING_IDS" ]; then
+    docker stop $DEV_RUNNING_IDS >/dev/null 2>&1 && echo "  stopped $(echo "$DEV_RUNNING_IDS" | wc -l) dev container(s)" || true
+  else
+    echo "  (no dev containers running)"
+  fi
+  free -h 2>/dev/null | sed 's/^/  after:  /' || true
+fi
+
 echo "=== Pulling images for ${STACK_NAME} stack ==="
 if [ "$TARGET" = "dev" ]; then
   # Dev stack pulls :dev (most CI builds)
@@ -923,6 +944,20 @@ if [ "$TARGET" = "prod" ] && [ -f /workspace/infra/install-prod-watchdog.sh ]; t
   echo "=== Installing/refreshing prod self-heal watchdog ==="
   bash /workspace/infra/install-prod-watchdog.sh 2>&1 | sed 's/^/  /' \
     || echo "  !!! watchdog install failed (non-fatal) — check manually"
+fi
+
+# ── Restart the dev stack we paused to free RAM for the promote ──────────────
+# Best-effort: prod is healthy and migrations have committed by now, so bringing
+# dev back no longer competes with the migration. `docker start` is lightweight
+# (containers already exist — just paused). If the promote had FAILED we'd have
+# exited above, so reaching here means prod is good and it's safe to restore dev.
+if [ "$TARGET" = "prod" ]; then
+  DEV_STOPPED_IDS=$(docker ps -aq --filter 'name=shitaleco-dev-' --filter 'status=exited' 2>/dev/null || true)
+  if [ -n "$DEV_STOPPED_IDS" ]; then
+    echo "=== Restarting dev stack paused for the promote ==="
+    docker start $DEV_STOPPED_IDS >/dev/null 2>&1 && echo "  dev stack restarted" \
+      || echo "  (dev restart best-effort failed — next dev push will restore it)"
+  fi
 fi
 
 # ── Success ─────────────────────────────────────────────────────────────────
