@@ -573,19 +573,26 @@ JSON
 fi
 
 echo "=== Waiting for backend health (${HEALTH_URL}) ==="
-# 120 × 5s = 600s (10 min). Prod cold start can take 90-300s depending on
-# how many schema patches lifespan applies (donations table grows; each
-# ALTER takes longer). The old 60-attempt (300s) window was rolling back
-# valid promotes that just needed another 30-60s to come up. Bumped to
-# 10 min, with extra grace if the container is RUNNING but /health not
-# yet 200 — we only hard-fail when the container has CRASHED.
+# 240 × 5s = 1200s (20 min). PERMANENT FIX (17-Jun): the old 600s ceiling was
+# BELOW this box's first-boot time. lifespan() runs alembic + _patch_schema
+# (60+ ALTERs) + sync_from_digital_dna + 5 seeders synchronously before /health
+# answers; on the 2GB VPS with the current donations/orders row counts that
+# exceeds 10 min on the first boot after a schema change. The gate timed out →
+# auto-rollback → the migrations never committed → next promote started over:
+# a doom loop where prod could NEVER update (stuck on f36c1c5 for 5 days while
+# every promote showed "/health did not return 200 after 1200s"). The dev
+# WORKFLOW already uses 900s and boots fine; the deployer's deploy.sh (used by
+# BOTH "Promote to Prod" and "Re-deploy Dev") was still on 600s. Raising the
+# ceiling is safe: the loop below FAST-FAILS the moment the container actually
+# crashes, so we only ever wait the full window for a backend that is alive and
+# still migrating (which, once it commits, makes every later boot fast).
 BACKEND_LOG_DUMP="/workspace/backups/promote-backend-$(date -u +'%Y%m%dT%H%M%SZ').log"
 mkdir -p "$(dirname "$BACKEND_LOG_DUMP")"
 BACKEND_OK=0
 HEALTH_FAIL_REASON=""
 BACKEND_CONTAINER="$($COMPOSE_CMD ps -q backend 2>/dev/null || $COMPOSE_CMD ps -q backend-dev 2>/dev/null || true)"
 
-for i in $(seq 1 120); do
+for i in $(seq 1 240); do
   sleep 5
   if curl -sf --max-time 5 "$HEALTH_URL" > /dev/null 2>&1; then
     echo "Backend healthy after ${i} attempts ($((i*5))s)"
@@ -597,7 +604,7 @@ for i in $(seq 1 120); do
   if [ $((i % 6)) -eq 0 ]; then
     if [ -n "$BACKEND_CONTAINER" ]; then
       state=$(docker inspect --format '{{.State.Status}} (restarts={{.RestartCount}}, exit={{.State.ExitCode}})' "$BACKEND_CONTAINER" 2>/dev/null || echo "?")
-      echo "  ${i}/120 — backend container: ${state}"
+      echo "  ${i}/240 — backend container: ${state}"
       # If the container has CRASHED (exited non-zero), fail fast — no
       # point waiting 10 min for /health when the process is dead.
       exit_code=$(docker inspect --format '{{.State.ExitCode}}' "$BACKEND_CONTAINER" 2>/dev/null || echo "0")
@@ -608,7 +615,7 @@ for i in $(seq 1 120); do
         break
       fi
     else
-      echo "  ${i}/120 — (container handle lost; still polling /health)"
+      echo "  ${i}/240 — (container handle lost; still polling /health)"
     fi
   fi
 done
@@ -626,7 +633,7 @@ COMMIT_MSG=$(cd /workspace && git log -1 --format='%s' "$GIT_SHA" 2>/dev/null | 
 
 if [ "$BACKEND_OK" -eq 0 ]; then
   echo "!!! Backend unhealthy on ${STACK_NAME} — rolling back to :previous ==="
-  echo "    Reason: ${HEALTH_FAIL_REASON:-/health did not return 200 after 600s}"
+  echo "    Reason: ${HEALTH_FAIL_REASON:-/health did not return 200 after 1200s}"
   echo ""
   echo "── Last 50 lines of backend logs ──────────────────────────────────"
   tail -50 "$BACKEND_LOG_DUMP" 2>/dev/null || echo "(no logs captured)"
@@ -645,7 +652,7 @@ if [ "$BACKEND_OK" -eq 0 ]; then
   ensure_nginx_up || echo "  !!! nginx self-heal FAILED on rollback path — manual check required"
   # Escape the log tail so it survives JSONL encoding (no raw newlines/quotes).
   LOG_TAIL=$(tail -20 "$BACKEND_LOG_DUMP" 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read())[1:-1])' 2>/dev/null || echo "")
-  REASON_ESC=$(echo "${HEALTH_FAIL_REASON:-/health did not return 200 after 600s}" | sed 's/"/\\"/g')
+  REASON_ESC=$(echo "${HEALTH_FAIL_REASON:-/health did not return 200 after 1200s}" | sed 's/"/\\"/g')
   cat >> "$HISTORY_FILE" <<JSON
 {"at":"$(date -u +'%Y-%m-%dT%H:%M:%SZ')","env":"${HISTORY_TAG}","sha":"${GIT_SHA}","short":"${SHORT_SHA}","branch":"${DEPLOY_BRANCH}","status":"rolled_back","message":"${REASON_ESC}","log_tail":"${LOG_TAIL}","log_file":"${BACKEND_LOG_DUMP}"}
 JSON
