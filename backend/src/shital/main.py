@@ -2167,7 +2167,7 @@ async def _patch_schema() -> None:
             skills_other_text           TEXT                DEFAULT '',
             -- Availability (JSONB; { weekday: { morning|afternoon|evening: "HH:MM-HH:MM" } })
             availability                JSONB               DEFAULT '{}'::jsonb,
-            availability_pattern        VARCHAR(20)         DEFAULT '',
+            availability_pattern        TEXT                DEFAULT '',
             -- Consents (paper form has 3 separate signatures + declarations)
             declaration_signed_at       TIMESTAMPTZ,
             confidentiality_agreed      BOOLEAN             DEFAULT false,
@@ -2243,6 +2243,11 @@ async def _patch_schema() -> None:
         # literal 'remote' as a sentinel for online/remote-only. Distinct from
         # `branch_id` (which is the org branch that owns the application).
         "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_branches JSONB NOT NULL DEFAULT '[]'::jsonb",
+        # Widen availability_pattern: the old VARCHAR(20) overflowed for
+        # multi-day selections (e.g. "monday,thursday:evening" = 23 chars),
+        # which 500'd the public register endpoint. TEXT fits any selection.
+        # Widening is a metadata-only change in Postgres (no rewrite/lock).
+        "ALTER TABLE volunteers ALTER COLUMN availability_pattern TYPE TEXT",
         # ── Sava (one-day event) volunteers ───────────────────────────────────
         # Lighter-weight than the long-term Volunteer Registration. For
         # devotees who want to help at a single event (Shila Pooja, Aarti,
@@ -2274,6 +2279,119 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_event  ON sava_volunteers(event_date DESC)",
         "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_branch ON sava_volunteers(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_sava_volunteers_email  ON sava_volunteers(LOWER(email)) WHERE email != ''",
+        # ── Sevak app (volunteer mobile/web app) — Tier 1 ─────────────────────
+        # Identity reuses the existing `volunteers` rows; app_role lets an admin
+        # elevate a volunteer to coordinator/branch_admin for the app.
+        "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS app_role VARCHAR(20) NOT NULL DEFAULT 'volunteer'",
+        """CREATE TABLE IF NOT EXISTS volunteer_auth_codes (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            email       VARCHAR(255) NOT NULL,
+            code        VARCHAR(10)  NOT NULL,
+            expires_at  TIMESTAMPTZ  NOT NULL,
+            used_at     TIMESTAMPTZ,
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_vauth_codes_email ON volunteer_auth_codes(email, expires_at)",
+        """CREATE TABLE IF NOT EXISTS volunteer_credentials (
+            volunteer_id  UUID PRIMARY KEY REFERENCES volunteers(id) ON DELETE CASCADE,
+            password_hash TEXT NOT NULL,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS volunteer_devices (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            volunteer_id UUID NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
+            platform     VARCHAR(10) NOT NULL,
+            fcm_token    TEXT UNIQUE NOT NULL,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_vol_devices_volunteer ON volunteer_devices(volunteer_id)",
+        """CREATE TABLE IF NOT EXISTS help_requests (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id    VARCHAR(100) NOT NULL DEFAULT 'main',
+            title        VARCHAR(255) NOT NULL,
+            description  TEXT NOT NULL DEFAULT '',
+            location     VARCHAR(255) NOT NULL DEFAULT '',
+            starts_at    TIMESTAMPTZ NOT NULL,
+            needed_count INTEGER NOT NULL DEFAULT 1,
+            status       VARCHAR(20) NOT NULL DEFAULT 'open',
+            created_by   UUID,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_help_requests_branch ON help_requests(branch_id, status, starts_at)",
+        """CREATE TABLE IF NOT EXISTS request_responses (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            request_id   UUID NOT NULL REFERENCES help_requests(id) ON DELETE CASCADE,
+            volunteer_id UUID NOT NULL,
+            status       VARCHAR(10) NOT NULL,
+            responded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (request_id, volunteer_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS app_notifications (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            volunteer_id UUID NOT NULL,
+            type         VARCHAR(20) NOT NULL DEFAULT 'request',
+            title        VARCHAR(255) NOT NULL,
+            body         TEXT NOT NULL DEFAULT '',
+            request_id   UUID,
+            read         BOOLEAN NOT NULL DEFAULT false,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_app_notifications_vol ON app_notifications(volunteer_id, read, created_at DESC)",
+        # ── Sevak app — Tier 2 (rota, attendance, events) ─────────────────────
+        """CREATE TABLE IF NOT EXISTS schedule_slots (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id   VARCHAR(100) NOT NULL DEFAULT 'main',
+            weekday     INTEGER NOT NULL,
+            start_time  TIME NOT NULL,
+            end_time    TIME NOT NULL,
+            title       VARCHAR(255) NOT NULL,
+            area        VARCHAR(255) NOT NULL DEFAULT '',
+            capacity    INTEGER NOT NULL DEFAULT 1,
+            active      BOOLEAN NOT NULL DEFAULT true,
+            created_by  UUID,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_schedule_slots_branch ON schedule_slots(branch_id, active, weekday)",
+        """CREATE TABLE IF NOT EXISTS slot_bookings (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            slot_id      UUID NOT NULL REFERENCES schedule_slots(id) ON DELETE CASCADE,
+            volunteer_id UUID NOT NULL,
+            date         DATE NOT NULL,
+            booked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (slot_id, volunteer_id, date)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_slot_bookings_slot_date ON slot_bookings(slot_id, date)",
+        """CREATE TABLE IF NOT EXISTS slot_attendance (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            slot_id       UUID NOT NULL REFERENCES schedule_slots(id) ON DELETE CASCADE,
+            volunteer_id  UUID NOT NULL,
+            date          DATE NOT NULL,
+            hours         NUMERIC(5,2) NOT NULL DEFAULT 0,
+            checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (slot_id, volunteer_id, date)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_slot_attendance_vol ON slot_attendance(volunteer_id, date)",
+        """CREATE TABLE IF NOT EXISTS events (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id   VARCHAR(100) NOT NULL DEFAULT 'main',
+            title       VARCHAR(255) NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            location    VARCHAR(255) NOT NULL DEFAULT '',
+            starts_at   TIMESTAMPTZ NOT NULL,
+            ends_at     TIMESTAMPTZ,
+            image_url   TEXT,
+            created_by  UUID,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_events_branch ON events(branch_id, starts_at)",
+        """CREATE TABLE IF NOT EXISTS event_rsvps (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id     UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            volunteer_id UUID NOT NULL,
+            going        BOOLEAN NOT NULL DEFAULT true,
+            UNIQUE (event_id, volunteer_id)
+        )""",
         # ── Recurring giving: failure tracking + admin cancel audit ───────────
         # Track payment failures (BILLING.SUBSCRIPTION.PAYMENT.FAILED webhooks)
         # so we can surface "card needs updating" warnings in admin without
@@ -3129,6 +3247,51 @@ async def _patch_schema() -> None:
     await _seed_email_templates()
     await _seed_release_notes()
     await _seed_document_categories()
+    await _seed_dev_test_volunteer()
+
+
+async def _seed_dev_test_volunteer() -> None:
+    """DEV ONLY — provision one APPROVED volunteer with a known password so the
+    Sevak app login can be exercised without admin approval + an emailed code.
+
+    Hard-gated to APP_ENV=development so it can NEVER create a sign-in-able
+    account on production. Idempotent (keyed on a fixed reference_number).
+    Credentials (dev only): sevak.test@shirdisai.org.uk / SevakTest!2026
+    """
+    if settings.APP_ENV != "development":
+        return
+    from sqlalchemy import text
+
+    from shital.capabilities.auth.capabilities import _hash_password
+    from shital.core.fabrics.database import SessionLocal
+
+    email = "sevak.test@shirdisai.org.uk"
+    password = "sevaktest2026"  # noqa: S105 — dev-only fixture, not a prod secret
+    try:
+        async with SessionLocal() as db:
+            res = await db.execute(text("""
+                INSERT INTO volunteers (reference_number, first_names, last_name,
+                    email, age_range, status, app_role, branch_id,
+                    preferred_branches, created_at, updated_at)
+                VALUES ('VOL-DEVTEST', 'Sevak', 'Tester', :email, '26-35',
+                    'APPROVED', 'coordinator', 'wembley',
+                    '["wembley"]'::jsonb, NOW(), NOW())
+                ON CONFLICT (reference_number) DO UPDATE
+                    SET status = 'APPROVED', app_role = 'coordinator',
+                        email = EXCLUDED.email, updated_at = NOW()
+                RETURNING id
+            """), {"email": email})
+            vid = res.mappings().first()["id"]
+            await db.execute(text("""
+                INSERT INTO volunteer_credentials (volunteer_id, password_hash, updated_at)
+                VALUES (:id, :hash, NOW())
+                ON CONFLICT (volunteer_id) DO UPDATE
+                    SET password_hash = EXCLUDED.password_hash, updated_at = NOW()
+            """), {"id": str(vid), "hash": _hash_password(password)})
+            await db.commit()
+        logger.info("seed_dev_test_volunteer_ok", email=email)
+    except Exception:
+        logger.exception("seed_dev_test_volunteer_failed")
 
 
 async def _seed_api_key_metadata() -> None:
@@ -4064,6 +4227,7 @@ _mount("shital.api.routers.bank_imports",          "router")
 _mount("shital.api.routers.board",                 "router")
 _mount("shital.api.routers.board_voting",          "router")
 _mount("shital.api.routers.volunteers",            "router")
+_mount("shital.api.routers.sevak",                 "router")
 _mount("shital.api.routers.form_config",           "router")
 _mount("shital.api.routers.contacts",             "router")
 _mount("shital.api.routers.accounts",             "router")

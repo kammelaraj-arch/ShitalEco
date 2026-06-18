@@ -187,6 +187,84 @@ services:
     networks:
       - dev-internal
 
+  # ── Seva platform (NEW multi-tenant app) — isolated backend + own DB ────────
+  # Separate product from SHITAL; runs in the dev stack only so it can be
+  # served at dev.shital.org.uk/seva/ (app) + /seva-api/ (API) via nginx-dev,
+  # exactly like /sevak/. Own DB volume (pgdata-seva); never shares SHITAL data.
+  db-seva:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 96M
+    environment:
+      POSTGRES_DB: seva_dev
+      POSTGRES_USER: seva
+      POSTGRES_PASSWORD: SevaDev2026!
+    volumes:
+      - pgdata-seva:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seva -d seva_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dev-internal
+
+  backend-seva:
+    image: ghcr.io/kammelaraj-arch/seva-platform:dev
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://seva:SevaDev2026!@db-seva:5432/seva_dev
+      JWT_SECRET: ${SEVA_JWT_SECRET:-seva-dev-jwt-secret-not-for-prod}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      EMAIL_FROM: no-reply@shital.org.uk
+      CORS_ORIGINS: https://dev.shital.org.uk,http://localhost:8080
+      # Social login — auto-enabled per provider when its credentials are set.
+      GOOGLE_CLIENT_ID: ${SEVA_GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${SEVA_GOOGLE_CLIENT_SECRET:-}
+      MS_CLIENT_ID: ${SEVA_MS_CLIENT_ID:-}
+      MS_CLIENT_SECRET: ${SEVA_MS_CLIENT_SECRET:-}
+      FACEBOOK_APP_ID: ${SEVA_FACEBOOK_APP_ID:-}
+      FACEBOOK_APP_SECRET: ${SEVA_FACEBOOK_APP_SECRET:-}
+      OAUTH_REDIRECT_BASE: https://dev.shital.org.uk/seva-api/api/v1
+      APP_RETURN_URL: https://dev.shital.org.uk/seva/
+    depends_on:
+      db-seva:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - dev-internal
+
+  # ── Media server: temple RTMP push -> HLS for the live darshan TV ───────────
+  mediamtx:
+    image: bluenviron/mediamtx:1.9.3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 192M
+    ports:
+      - "1935:1935"   # RTMP ingest (temple pushes the Reolink feed here)
+    volumes:
+      - ./streaming/mediamtx.yml:/mediamtx.yml:ro
+    networks:
+      - dev-internal
+
   nginx-dev:
     image: nginx:alpine
     restart: unless-stopped
@@ -201,6 +279,14 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf-dev/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/hub:/usr/share/nginx/hub:ro
+      # Sevak volunteer app (Flutter web, built with --base-href /sevak/).
+      # Static files served directly by nginx-dev at /sevak/ — no extra
+      # container/image. CanvasKit loads from the gstatic CDN at runtime.
+      - ./nginx/sevak:/usr/share/nginx/sevak:ro
+      # Seva platform app (Flutter web, --base-href /seva/).
+      - ./nginx/seva:/usr/share/nginx/seva:ro
+      # Temple TV channel (display /tv/ + admin /tv/admin/).
+      - ./nginx/tv:/usr/share/nginx/tv:ro
     depends_on:
       - backend-dev
       - admin-dev
@@ -221,6 +307,7 @@ services:
 
 volumes:
   pgdata-dev:
+  pgdata-seva:
 
 networks:
   dev-internal:

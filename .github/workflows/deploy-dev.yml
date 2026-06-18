@@ -81,13 +81,21 @@ jobs:
           IMAGE_MATCHED: ${{ steps.wait_image.outputs.image_matched }}
           IMAGE_SHA:     ${{ steps.wait_image.outputs.current_sha }}
           TARGET_SHA:    ${{ github.sha }}
+          # Seva platform secrets (empty until you set them in repo secrets)
+          SEVA_JWT_SECRET:          ${{ secrets.SEVA_JWT_SECRET }}
+          SEVA_GOOGLE_CLIENT_ID:    ${{ secrets.SEVA_GOOGLE_CLIENT_ID }}
+          SEVA_GOOGLE_CLIENT_SECRET: ${{ secrets.SEVA_GOOGLE_CLIENT_SECRET }}
+          SEVA_MS_CLIENT_ID:        ${{ secrets.SEVA_MS_CLIENT_ID }}
+          SEVA_MS_CLIENT_SECRET:    ${{ secrets.SEVA_MS_CLIENT_SECRET }}
+          SEVA_FACEBOOK_APP_ID:     ${{ secrets.SEVA_FACEBOOK_APP_ID }}
+          SEVA_FACEBOOK_APP_SECRET: ${{ secrets.SEVA_FACEBOOK_APP_SECRET }}
         with:
           host: 192.248.147.205
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
           timeout: 600s
-          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,DEPLOY_SECRET,DEPLOY_REF,IMAGE_MATCHED,IMAGE_SHA,TARGET_SHA
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,DEPLOY_SECRET,DEPLOY_REF,IMAGE_MATCHED,IMAGE_SHA,TARGET_SHA,SEVA_JWT_SECRET,SEVA_GOOGLE_CLIENT_ID,SEVA_GOOGLE_CLIENT_SECRET,SEVA_MS_CLIENT_ID,SEVA_MS_CLIENT_SECRET,SEVA_FACEBOOK_APP_ID,SEVA_FACEBOOK_APP_SECRET
           script: |
             set -eu
             if [ "${IMAGE_MATCHED:-false}" = "true" ]; then
@@ -155,9 +163,18 @@ jobs:
             inject .env.dev DEPLOY_SECRET          "$DEPLOY_SECRET"
             inject .env.dev MAIL_AGENT_MAILBOXES   "accounts@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
             inject .env.dev MAIL_AGENT_MODE        "auto"
+            # Seva platform secrets (so docker compose substitution picks them up)
+            inject .env.dev SEVA_JWT_SECRET           "${SEVA_JWT_SECRET:-}"
+            inject .env.dev SEVA_GOOGLE_CLIENT_ID     "${SEVA_GOOGLE_CLIENT_ID:-}"
+            inject .env.dev SEVA_GOOGLE_CLIENT_SECRET "${SEVA_GOOGLE_CLIENT_SECRET:-}"
+            inject .env.dev SEVA_MS_CLIENT_ID         "${SEVA_MS_CLIENT_ID:-}"
+            inject .env.dev SEVA_MS_CLIENT_SECRET     "${SEVA_MS_CLIENT_SECRET:-}"
+            inject .env.dev SEVA_FACEBOOK_APP_ID      "${SEVA_FACEBOOK_APP_ID:-}"
+            inject .env.dev SEVA_FACEBOOK_APP_SECRET  "${SEVA_FACEBOOK_APP_SECRET:-}"
 
             set -a; source .env.dev; set +a
             ufw allow 8080/tcp 2>/dev/null || true
+            ufw allow 1935/tcp 2>/dev/null || true   # RTMP ingest for temple darshan push
 
             # ── Login to GHCR + pull pre-built :dev images ──────────────────────
             echo "$GH_PAT" | docker login ghcr.io -u kammelaraj-arch --password-stdin
@@ -188,6 +205,10 @@ jobs:
             docker compose -p shitaleco-dev -f docker-compose.dev.yml down 2>/dev/null || true
             for c in db backend admin quick-donation kiosk screen nginx; do
               docker rm -f "shitaleco-dev-${c}-dev-1" 2>/dev/null || true
+            done
+            # Seva + media-server containers (naming: shitaleco-dev-<svc>-1)
+            for c in db-seva backend-seva mediamtx; do
+              docker rm -f "shitaleco-dev-${c}-1" 2>/dev/null || true
             done
 
             echo "=== Bring dev stack up ==="
