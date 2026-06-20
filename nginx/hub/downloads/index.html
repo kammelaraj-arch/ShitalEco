@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Software Downloads — Shital</title>
+  <meta name="description" content="Download the Shital apps and kiosk installers — Android APKs, Windows installer, Linux packages.">
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0 }
+    :root { --bg:#080c10; }
+    html,body { background:var(--bg); color:#fff; min-height:100vh;
+      font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif }
+    body::before { content:''; position:fixed; inset:0; pointer-events:none;
+      background:radial-gradient(ellipse 70% 45% at 20% 0%, rgba(185,28,28,0.10) 0%, transparent 60%) }
+    a { color:inherit; text-decoration:none }
+    .wrap { max-width:1040px; margin:0 auto; padding:36px 20px 64px; position:relative }
+
+    header { display:flex; align-items:center; gap:18px; padding-bottom:24px; margin-bottom:32px;
+      border-bottom:1px solid rgba(255,255,255,0.06) }
+    .logo { width:52px; height:52px; border-radius:14px; flex-shrink:0;
+      background:linear-gradient(135deg,#d97706,#b91c1c); display:flex; align-items:center;
+      justify-content:center; font-size:1.55rem; box-shadow:0 8px 26px rgba(185,28,28,0.30) }
+    header h1 { font-size:1.55rem; font-weight:900; letter-spacing:-0.4px }
+    header p  { color:rgba(255,255,255,0.42); font-size:0.85rem; margin-top:3px }
+    .back { margin-left:auto; font-size:0.75rem; color:rgba(255,255,255,0.45);
+      padding:7px 14px; border-radius:99px; border:1px solid rgba(255,255,255,0.10) }
+    .back:hover { color:#fff; border-color:rgba(255,255,255,0.25) }
+
+    section { margin-bottom:36px }
+    .section-label { font-size:0.7rem; font-weight:700; text-transform:uppercase;
+      letter-spacing:0.1em; color:rgba(255,255,255,0.32); margin-bottom:14px }
+
+    .grid { display:grid; gap:14px; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)) }
+
+    .tile { position:relative; display:flex; flex-direction:column; gap:0; overflow:hidden;
+      padding:1.15rem 1.2rem 1rem; border-radius:1.1rem;
+      background:rgba(255,255,255,0.028); border:1px solid rgba(255,255,255,0.07);
+      transition:background .18s,border-color .18s,transform .18s,box-shadow .18s }
+    .tile::before { content:''; position:absolute; top:0; left:0; bottom:0; width:3px;
+      background:var(--c); opacity:0.7 }
+    .tile:hover { background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.13);
+      transform:translateY(-2px); box-shadow:0 8px 26px rgba(0,0,0,0.32) }
+
+    .head { display:flex; align-items:flex-start; gap:0.75rem; margin-bottom:0.7rem }
+    .icon { width:2.3rem; height:2.3rem; border-radius:0.65rem; flex-shrink:0;
+      display:flex; align-items:center; justify-content:center; font-size:1.2rem;
+      background:color-mix(in srgb, var(--c) 16%, transparent) }
+    .name { font-size:0.95rem; font-weight:800; padding-top:0.3rem; line-height:1.2 }
+    .desc { font-size:0.78rem; color:rgba(255,255,255,0.42); line-height:1.55;
+      flex:1; margin-bottom:0.95rem }
+    .foot { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:auto }
+    .ext { font-size:0.62rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
+      padding:0.22rem 0.55rem; border-radius:99px;
+      background:color-mix(in srgb, var(--c) 14%, transparent); color:var(--c) }
+    .dl { font-size:0.72rem; font-weight:700; color:rgba(255,255,255,0.65);
+      padding:0.35rem 0.8rem; border-radius:8px;
+      background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10) }
+    .tile:hover .dl { background:rgba(255,255,255,0.12); color:#fff }
+
+    .note { font-size:0.75rem; color:rgba(255,255,255,0.4); padding:14px 16px;
+      border:1px solid rgba(255,255,255,0.08); border-radius:12px;
+      background:rgba(255,255,255,0.018); line-height:1.6 }
+    .note code { font-family:'SF Mono',Consolas,monospace; font-size:0.85em;
+      background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:4px }
+    .footer { margin-top:36px; text-align:center; color:rgba(255,255,255,0.25); font-size:0.72rem }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">⬇️</div>
+    <div>
+      <h1>Software Downloads</h1>
+      <p>Apps and installers for kiosks, tablets and donation devices</p>
+    </div>
+    <a class="back" href="/">← Home</a>
+  </header>
+
+  <section>
+    <div class="section-label">📱 Android — sideload to a phone or tablet</div>
+    <div class="grid">
+      <a class="tile" style="--c:#FF9933"
+         href="https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-quick-donation-latest.apk">
+        <div class="head"><div class="icon">📱</div><div class="name">Quick Donation for Android</div></div>
+        <div class="desc">APK for trustee phones — take card &amp; Google Pay donations on the go.
+          Auto-stays in sync with <code>donate.shital.org.uk</code>.</div>
+        <div class="foot"><span class="ext">.apk</span><span class="dl">Download</span></div>
+      </a>
+
+      <a class="tile" style="--c:#10B981"
+         href="https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-kiosk-latest.apk">
+        <div class="head"><div class="icon">🤖</div><div class="name">Kiosk for Android</div></div>
+        <div class="desc">Locked-down full-screen kiosk APK for dedicated tablets (Device Admin + boot-on-start).
+          Use for self-service donation stands.</div>
+        <div class="foot"><span class="ext">.apk</span><span class="dl">Download</span></div>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-label">🖥️ Desktop &amp; signage</div>
+    <div class="grid">
+      <a class="tile" style="--c:#3B82F6"
+         href="https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-kiosk-windows-setup.exe">
+        <div class="head"><div class="icon">🪟</div><div class="name">Kiosk for Windows</div></div>
+        <div class="desc">x64 NSIS installer — for touch-screens, tills and donation kiosks.</div>
+        <div class="foot"><span class="ext">.exe</span><span class="dl">Download</span></div>
+      </a>
+
+      <a class="tile" style="--c:#F59E0B"
+         href="https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-kiosk-linux-x64.AppImage">
+        <div class="head"><div class="icon">🐧</div><div class="name">Kiosk for Linux (portable)</div></div>
+        <div class="desc">AppImage — runs without install on most x64 distros.</div>
+        <div class="foot"><span class="ext">.AppImage</span><span class="dl">Download</span></div>
+      </a>
+
+      <a class="tile" style="--c:#F59E0B"
+         href="https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-kiosk-linux-x64.deb">
+        <div class="head"><div class="icon">🐧</div><div class="name">Kiosk for Debian / Ubuntu</div></div>
+        <div class="desc">apt-installable .deb package for x64 Linux.</div>
+        <div class="foot"><span class="ext">.deb</span><span class="dl">Download</span></div>
+      </a>
+
+      <a class="tile" style="--c:#F43F5E"
+         href="https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-kiosk-raspberry-pi.deb">
+        <div class="head"><div class="icon">🍓</div><div class="name">Kiosk for Raspberry Pi 4 / 5</div></div>
+        <div class="desc">ARM64 .deb — for low-cost digital signage screens.</div>
+        <div class="foot"><span class="ext">.deb</span><span class="dl">Download</span></div>
+      </a>
+    </div>
+  </section>
+
+  <p class="note">
+    All downloads come from the public <a href="https://github.com/kammelaraj-arch/ShitalEco/releases/tag/kiosk-latest"
+       style="color:#fbbf24;text-decoration:underline">kiosk-latest</a> GitHub release —
+    URLs above are stable, so bookmark and re-download to update. Android APKs will warn
+    about "unknown sources" — that's expected; allow it from your device's security settings.
+  </p>
+
+  <p class="footer">Sairam · shital.org.uk</p>
+</div>
+</body>
+</html>
