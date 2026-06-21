@@ -744,7 +744,10 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                     )}
                     {isVisible('date') && (
                       <td className="px-4 py-3 text-white/60 text-sm whitespace-nowrap">
-                        {new Date(d.created_at).toLocaleDateString('en-GB')}
+                        <div>{new Date(d.created_at).toLocaleDateString('en-GB')}</div>
+                        <div className="text-xs text-white/40 font-mono">
+                          {new Date(d.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
                       </td>
                     )}
                     {isVisible('amount') && (
