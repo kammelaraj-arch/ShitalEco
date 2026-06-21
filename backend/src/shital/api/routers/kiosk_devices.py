@@ -401,7 +401,23 @@ async def kiosk_heartbeat(device_id: str) -> dict[str, Any]:
             {"id": device_id},
         )
         await db.commit()
-    return {"ok": True, "updated": bool(getattr(result, "rowcount", 0))}
+    updated = bool(getattr(result, "rowcount", 0))
+    # Tell the client honestly when its stored kiosk_device_id no longer
+    # matches any row (device was re-paired / soft-deleted in admin). Returning
+    # 410 Gone lets the client auto-recover by re-fetching its device id via
+    # refresh-config — no staff re-login required. The previous {ok:true,
+    # updated:false} was invisible to the client so devices silently zombied
+    # for hours showing OFFLINE while actively taking donations.
+    if not updated:
+        import logging
+        logging.getLogger("shital.kiosk").warning(
+            "heartbeat_unknown_device device_id=%s — client should refresh-config", device_id,
+        )
+        raise HTTPException(
+            status_code=410,
+            detail={"reason": "unknown_or_deleted_device", "device_id": device_id},
+        )
+    return {"ok": True, "updated": True}
 
 
 @router.post("/{device_id}/regen-token")

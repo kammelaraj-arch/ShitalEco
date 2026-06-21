@@ -33,17 +33,33 @@ export function QuickDonationApp() {
   // call, so the device went stale ~6 min after the staff member walked
   // away). Fire-and-forget POST to the public /heartbeat endpoint — no
   // auth/token plumbing needed.
+  //
+  // Auto-heal on 410 Gone: backend returns 410 when our stored kioskDeviceId
+  // no longer matches a row (device was re-paired / soft-deleted in admin).
+  // Re-fetch the current device id via /refresh-config using the cached
+  // username — no staff re-login required. Next beat then matches.
   useEffect(() => {
     if (!kioskDeviceId) return
-    const beat = () => {
-      fetch(`${API_BASE}/kiosk-devices/${kioskDeviceId}/heartbeat`, {
-        method: 'POST', cache: 'no-store',
-      }).catch(() => { /* offline — try next tick */ })
+    const beat = async () => {
+      try {
+        const r = await fetch(`${API_BASE}/kiosk-devices/${kioskDeviceId}/heartbeat`, {
+          method: 'POST', cache: 'no-store',
+        })
+        if (r.status === 410 && loggedInUsername) {
+          const cfg = await fetch(
+            `${API_BASE}/kiosk/quick-donation/refresh-config?username=${encodeURIComponent(loggedInUsername)}`,
+            { cache: 'no-store' },
+          ).then(x => x.json()).catch(() => null)
+          if (cfg && cfg.ok && cfg.kiosk_device_id) {
+            setKioskDeviceId(cfg.kiosk_device_id)  // next tick beats against the live id
+          }
+        }
+      } catch { /* offline — try next tick */ }
     }
     beat()
     const id = setInterval(beat, 30_000)
     return () => clearInterval(id)
-  }, [kioskDeviceId])
+  }, [kioskDeviceId, loggedInUsername])
 
   // Wait for persisted state to load before deciding whether to show admin setup.
   // Without this check, isDeviceLoggedIn is always false on first render (before

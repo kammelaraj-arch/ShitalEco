@@ -348,6 +348,20 @@ async def create_pending_order(body: OrderPendingInput):
             "cid": contact_id, "ikey": body.order_ref, "now": now,
         })
 
+        # Defence in depth: a device that is actively transacting is
+        # provably alive, so bump last_seen_at here too. Makes "we're
+        # taking donations but admin says OFFLINE" structurally impossible
+        # even when the dedicated /heartbeat endpoint silently no-ops
+        # against a stale id (the 17-Jun "On Main Hundi" symptom).
+        if body.device_id:
+            try:
+                await db.execute(text("""
+                    UPDATE kiosk_devices SET last_seen_at = NOW()
+                    WHERE id = CAST(:did AS UUID) AND deleted_at IS NULL
+                """), {"did": body.device_id})
+            except Exception:
+                pass  # never fail a checkout on a presence-tracking write
+
         await db.execute(text(
             "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
             "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
