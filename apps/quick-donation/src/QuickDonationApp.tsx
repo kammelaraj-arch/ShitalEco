@@ -19,12 +19,47 @@ const THEME_BG: Record<string, string> = {
 }
 
 export function QuickDonationApp() {
-  const { screen, setScreen, isDeviceLoggedIn, _hasHydrated, stripeReaderId, sumupReaderId, cloverDeviceId, kioskTheme, bgColor, loggedInUsername, setDeviceFlags, setBranchId, setReader, setKioskDeviceId } = useDonationStore()
+  const { screen, setScreen, isDeviceLoggedIn, _hasHydrated, stripeReaderId, sumupReaderId, cloverDeviceId, kioskTheme, bgColor, loggedInUsername, kioskDeviceId, setDeviceFlags, setBranchId, setReader, setKioskDeviceId } = useDonationStore()
 
   // Any of stripe terminal / sumup / clover counts as "a reader is set up".
   // Without this guard, staff land on the tile screen, tap an amount, and
   // only THEN see the "no card reader configured" dead-end on Processing.
   const hasAnyReader = !!(stripeReaderId.trim() || sumupReaderId.trim() || cloverDeviceId.trim())
+
+  // Heartbeat — every 30s while the app is open and a kioskDeviceId is set.
+  // Mirrors apps/kiosk/src/renderer/KioskApp.tsx. Without this the device
+  // shows OFFLINE in Admin → Kiosks even when fully online (the only thing
+  // bumping kiosk_devices.last_seen_at was the initial /quick-donation/login
+  // call, so the device went stale ~6 min after the staff member walked
+  // away). Fire-and-forget POST to the public /heartbeat endpoint — no
+  // auth/token plumbing needed.
+  //
+  // Auto-heal on 410 Gone: backend returns 410 when our stored kioskDeviceId
+  // no longer matches a row (device was re-paired / soft-deleted in admin).
+  // Re-fetch the current device id via /refresh-config using the cached
+  // username — no staff re-login required. Next beat then matches.
+  useEffect(() => {
+    if (!kioskDeviceId) return
+    const beat = async () => {
+      try {
+        const r = await fetch(`${API_BASE}/kiosk-devices/${kioskDeviceId}/heartbeat`, {
+          method: 'POST', cache: 'no-store',
+        })
+        if (r.status === 410 && loggedInUsername) {
+          const cfg = await fetch(
+            `${API_BASE}/kiosk/quick-donation/refresh-config?username=${encodeURIComponent(loggedInUsername)}`,
+            { cache: 'no-store' },
+          ).then(x => x.json()).catch(() => null)
+          if (cfg && cfg.ok && cfg.kiosk_device_id) {
+            setKioskDeviceId(cfg.kiosk_device_id)  // next tick beats against the live id
+          }
+        }
+      } catch { /* offline — try next tick */ }
+    }
+    beat()
+    const id = setInterval(beat, 30_000)
+    return () => clearInterval(id)
+  }, [kioskDeviceId, loggedInUsername])
 
   // Wait for persisted state to load before deciding whether to show admin setup.
   // Without this check, isDeviceLoggedIn is always false on first render (before
