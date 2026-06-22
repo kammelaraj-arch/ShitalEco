@@ -1,0 +1,56 @@
+name: Kill the dev-watchdog cron (it's recreating containers every 2 min)
+
+# Docker events show backend-dev + nginx-dev being killed and recreated every
+# ~2 min. No OOM, no crashes — something on the host is calling
+# `docker compose up -d`. Almost certainly the host-side dev watchdog cron
+# from a past session (deploy-dev.yml installs one at /opt/shitaleco-dev/infra/watchdog-dev.sh).
+# Remove the cron + let the dev stack actually stay up.
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/kill-dev-watchdog-cron.yml
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 3m
+          script: |
+            set +e
+            echo "=== current root crontab ==="
+            crontab -l 2>&1 | head -20
+            echo ""
+            echo "=== removing any 'shital-dev-watchdog' cron line ==="
+            (crontab -l 2>/dev/null | grep -v 'shital-dev-watchdog' | grep -v 'watchdog-dev' ) | crontab -
+            echo "=== crontab AFTER ==="
+            crontab -l 2>&1 | head -20
+            echo ""
+            echo "=== check for ANY other cron tabs that might be touching docker compose ==="
+            ls -la /etc/cron.d/ 2>&1 | head
+            grep -rE 'docker compose|shitaleco' /etc/cron.* /var/spool/cron 2>/dev/null | head
+            echo ""
+            echo "=== also kill any in-flight watchdog process ==="
+            pkill -f 'watchdog-dev.sh' 2>&1 && echo "killed running watchdog" || echo "no running watchdog process"
+            echo ""
+            echo "=== now ONE final clean compose up -d (the LAST time we touch it) ==="
+            cd /opt/shitaleco-dev
+            if [ -f .env.dev ]; then set -a; . .env.dev; set +a; fi
+            docker compose -f docker-compose.dev.yml --env-file .env.dev up -d 2>&1 | tail -10
+            echo ""
+            echo "=== wait 90s for backend-dev to actually finish startup (no more interruptions now) ==="
+            sleep 90
+            echo ""
+            echo "=== state after 90s ==="
+            docker ps --filter 'name=shitaleco-dev-' --format 'table {{.Names}}\t{{.Status}}'
+            echo ""
+            curl -sk -o /dev/null -w "/health → %{http_code}\n" -m 8 https://dev.shital.org.uk/health
+            n=$(curl -sk -m 12 https://dev.shital.org.uk/openapi.json 2>/dev/null | grep -c 'refresh-from-paypal' 2>/dev/null | head -1)
+            echo "openapi refresh-from-paypal: ${n:-0}"
