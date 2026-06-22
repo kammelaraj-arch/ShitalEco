@@ -37,7 +37,7 @@ services:
       resources:
         limits:
           cpus: '0.75'
-          memory: 384M
+          memory: 1G
     ports:
       - "8001:8000"
     environment:
