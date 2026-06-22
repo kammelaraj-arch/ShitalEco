@@ -1,0 +1,89 @@
+name: Fix dev backend memory limit NOW
+
+# Backend-dev has a 384M docker memory limit in /opt/shitaleco-dev/docker-compose.dev.yml.
+# The new code's startup (function_registry sync) pushes over that → OOM-kill →
+# restart: on-failure → crash loop. The host has 3.8GB free. Bump to 1G in place,
+# then force-recreate so the new limit takes effect immediately.
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/fix-dev-memory-now.yml
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 5m
+          script: |
+            set +e
+            cd /opt/shitaleco-dev
+            echo "=== current backend-dev memory limit ==="
+            grep -A 2 'backend-dev:' docker-compose.dev.yml | grep -E 'memory|cpus' || true
+            grep -nE 'memory:' docker-compose.dev.yml | head -5
+
+            echo ""
+            echo "=== Bump backend-dev memory limit 384M → 1G + keep cpus 0.75 ==="
+            # Replace memory line only inside the backend-dev block (between
+            # 'backend-dev:' and the next service '  <something>:'). sed range
+            # addressing handles this without touching other services.
+            sed -i '/^  backend-dev:/,/^  [a-z][a-z]*:/{s/memory:\s*384M/memory: 1G/}' docker-compose.dev.yml
+            echo "=== after edit ==="
+            sed -n '/^  backend-dev:/,/^  [a-z][a-z]*:/p' docker-compose.dev.yml | head -20
+
+            echo ""
+            echo "=== Stop crashlooping container + force-recreate with new limit ==="
+            if [ -f .env.dev ]; then set -a; . .env.dev; set +a; fi
+            docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --force-recreate backend-dev 2>&1 | tail -10
+
+            echo ""
+            echo "=== Wait up to 3 min for backend-dev /health = 200 + STAY healthy for 60s ==="
+            OK=0
+            for i in $(seq 1 36); do
+              sleep 5
+              c=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost:8001/health 2>/dev/null || echo 000)
+              if [ "$c" = "200" ]; then
+                OK=1; echo "  backend-dev → 200 after $((i*5))s"; break
+              fi
+              [ $((i % 6)) -eq 0 ] && echo "  attempt $i/36 → $c"
+            done
+
+            if [ "$OK" = "1" ]; then
+              echo "=== Hold check: stays healthy for 60s? ==="
+              ok_hold=1
+              for i in 1 2 3 4 5 6; do
+                sleep 10
+                c=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost:8001/health 2>/dev/null || echo 000)
+                echo "  hold $((i*10))s → $c"
+                [ "$c" != "200" ] && ok_hold=0
+              done
+              if [ "$ok_hold" = "1" ]; then
+                echo ""
+                echo "✅ Backend-dev held healthy for 60s — fix worked"
+              else
+                echo "!!! Backend-dev dropped during the hold check — still crashlooping"
+                docker logs --tail 80 shitaleco-dev-backend-dev-1 2>&1 | tail -80
+                exit 5
+              fi
+            else
+              echo "!!! Backend-dev never reached 200"
+              docker logs --tail 80 shitaleco-dev-backend-dev-1 2>&1 | tail -80
+              exit 4
+            fi
+
+            echo ""
+            echo "=== Verify the new code is now running ==="
+            n=$(curl -sk -m 12 https://dev.shital.org.uk/openapi.json 2>/dev/null | grep -c 'refresh-from-paypal' 2>/dev/null || echo 0)
+            echo "  openapi has refresh-from-paypal: $n"
+            if [ "$n" -gt 0 ]; then
+              echo "✅ Dev is on NEW code"
+            else
+              echo "!!! Dev is up but on OLD code — image may need a real pull"
+            fi
