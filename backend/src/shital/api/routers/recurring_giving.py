@@ -1285,6 +1285,64 @@ async def admin_reactivate_subscription(
     return {"success": True, "action": "reactivate", "paypal_subscription_id": paypal_id}
 
 
+@router.post("/admin/giving/subscriptions/{sub_id}/refresh-from-paypal")
+async def admin_refresh_subscription_from_paypal(
+    sub_id: str, space: CurrentSpace,
+) -> dict[str, Any]:
+    """Pull the live status from PayPal and sync our DB row. Manual fallback
+    for the case where the BILLING.SUBSCRIPTION.ACTIVATED webhook never
+    arrived (wrong webhook URL, env mismatch, signature mismatch, etc.) and
+    a sub is stuck on PENDING_APPROVAL even though the donor has subscribed.
+
+    Returns the PayPal status, the mapped DB status, and whether the row
+    actually changed — operators can see at a glance whether PayPal agrees
+    with what we're showing.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    paypal_id, current_status = await _lookup_paypal_sub_id(sub_id)
+    paypal_status, verified = await _get_subscription_status(paypal_id)
+
+    if not verified:
+        raise HTTPException(
+            502,
+            detail="PayPal API unreachable — try again in a moment.",
+        )
+    if paypal_status == "NOT_FOUND":
+        raise HTTPException(
+            404,
+            detail="PayPal does not know this subscription_id (donor may have abandoned approval).",
+        )
+
+    new_db_status = _PAYPAL_TO_DB_STATUS.get(paypal_status or "", paypal_status or "UNKNOWN")
+    changed = new_db_status != current_status
+
+    if changed:
+        cancelled = new_db_status in ("CANCELLED", "EXPIRED")
+        await _handle_subscription_status(paypal_id, new_db_status, cancelled=cancelled)
+    else:
+        # Even when status hasn't changed, stamp updated_at so the operator
+        # sees "checked just now" in the UI.
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                UPDATE recurring_giving_subscriptions
+                SET    updated_at = NOW()
+                WHERE  paypal_subscription_id = :sid
+            """), {"sid": paypal_id})
+            await db.commit()
+
+    return {
+        "success": True,
+        "paypal_subscription_id": paypal_id,
+        "paypal_status": paypal_status,
+        "db_status_before": current_status,
+        "db_status_after": new_db_status,
+        "changed": changed,
+    }
+
+
 # ── Admin: webhook event audit log ────────────────────────────────────────────
 
 @router.get("/admin/giving/webhook-events")
