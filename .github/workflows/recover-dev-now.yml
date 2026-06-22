@@ -60,7 +60,7 @@ jobs:
 
             echo ""
             echo "=========================================="
-            echo "=== BRING DEV STACK UP (no pull — use whatever :dev is on disk) ==="
+            echo "=== BRING DEV STACK UP — PULL LATEST :dev FIRST, then force-recreate ==="
             echo "=========================================="
             cd /opt/shitaleco-dev
             if [ ! -f docker-compose.dev.yml ]; then
@@ -68,7 +68,18 @@ jobs:
               ls -la /opt/shitaleco-dev 2>/dev/null | head -10
               exit 2
             fi
-            docker compose -f docker-compose.dev.yml --env-file .env.dev up -d 2>&1 | tail -20
+            # GHCR login (GH_PAT comes from .env.dev) so the pull below works
+            if [ -f .env.dev ]; then set -a; . .env.dev; set +a; fi
+            if [ -n "${GITHUB_TOKEN:-}" ]; then
+              echo "$GITHUB_TOKEN" | docker login ghcr.io -u kammelaraj-arch --password-stdin 2>/dev/null && echo "  ✓ GHCR login" || echo "  ! GHCR login failed"
+            fi
+            echo "=== Pulling latest :dev images ==="
+            docker compose -f docker-compose.dev.yml --env-file .env.dev pull 2>&1 | tail -15
+            echo ""
+            echo "=== Force-recreating backend-dev so the NEW :dev is used (not the cached one) ==="
+            docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --force-recreate backend-dev 2>&1 | tail -10
+            echo "=== Up the rest (nginx, frontends) without force-recreate ==="
+            docker compose -f docker-compose.dev.yml --env-file .env.dev up -d 2>&1 | tail -10
 
             echo ""
             echo "=========================================="
