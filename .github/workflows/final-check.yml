@@ -1,0 +1,62 @@
+name: Final dev verification
+
+# Branch is based on current main HEAD (f9367f9) → CI on this branch will
+# NOT poison :dev with older code. Just SSHes in and shows the current
+# state of dev backend + GHCR :dev.
+on:
+  push:
+    branches:
+      - claude/diag-final-check
+    paths:
+      - .github/workflows/final-check.yml
+
+jobs:
+  v:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 3m
+          script: |
+            set +e
+            echo "=== current dev backend state ==="
+            docker ps --filter 'name=shitaleco-dev-backend-dev-1' --format 'table {{.Names}}\t{{.Status}}'
+            docker inspect shitaleco-dev-backend-dev-1 --format 'Image={{.Image}}  StartedAt={{.State.StartedAt}}' 2>&1
+            echo ""
+            echo "=== GHCR :dev pull + GIT_SHA label ==="
+            cd /opt/shitaleco-dev && [ -f .env.dev ] && set -a && . .env.dev && set +a
+            [ -n "${GITHUB_TOKEN:-}" ] && echo "$GITHUB_TOKEN" | docker login ghcr.io -u kammelaraj-arch --password-stdin >/dev/null 2>&1
+            docker pull ghcr.io/kammelaraj-arch/shitaleco-backend:dev 2>&1 | tail -3
+            echo "  GIT_SHA in :dev:"
+            docker inspect ghcr.io/kammelaraj-arch/shitaleco-backend:dev --format '{{range .Config.Env}}{{println .}}{{end}}' 2>&1 | grep '^GIT_SHA='
+            echo "  expected GIT_SHA: f9367f958e31340ccdfef729f513955da07c6bb3"
+            echo ""
+            echo "=== Refresh-from-paypal check on the PULLED :dev image ==="
+            docker run --rm --entrypoint sh ghcr.io/kammelaraj-arch/shitaleco-backend:dev -c '
+              grep -c "refresh-from-paypal" /app/src/shital/api/routers/recurring_giving.py 2>&1
+            ' 2>&1
+            echo ""
+            echo "=== if backend has wrong image, force-recreate ==="
+            cur_img=$(docker inspect shitaleco-dev-backend-dev-1 --format '{{.Image}}' 2>/dev/null | sed 's|sha256:||' | cut -c1-12)
+            new_img=$(docker images ghcr.io/kammelaraj-arch/shitaleco-backend:dev --format '{{.ID}}' | head -1)
+            echo "running container image:  $cur_img"
+            echo "latest :dev image:        $new_img"
+            if [ "$cur_img" != "$new_img" ]; then
+              echo "  → MISMATCH — force-recreating backend-dev"
+              docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --force-recreate backend-dev nginx-dev 2>&1 | tail -8
+              sleep 75
+              echo "  after 75s:"
+              docker ps --filter 'name=shitaleco-dev-backend-dev-1' --format 'table {{.Names}}\t{{.Status}}'
+              curl -sk -o /dev/null -w "  /health → %{http_code}\n" -m 8 https://dev.shital.org.uk/health
+              n=$(curl -sk -m 12 https://dev.shital.org.uk/openapi.json 2>/dev/null | grep -c 'refresh-from-paypal' 2>/dev/null | head -1)
+              echo "  openapi refresh-from-paypal: ${n:-0}"
+            else
+              echo "  ✓ container matches latest :dev — no recreate needed"
+              curl -sk -o /dev/null -w "  /health → %{http_code}\n" -m 8 https://dev.shital.org.uk/health
+              n=$(curl -sk -m 12 https://dev.shital.org.uk/openapi.json 2>/dev/null | grep -c 'refresh-from-paypal' 2>/dev/null | head -1)
+              echo "  openapi refresh-from-paypal: ${n:-0}"
+            fi
