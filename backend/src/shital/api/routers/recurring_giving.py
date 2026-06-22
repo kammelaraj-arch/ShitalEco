@@ -1,3 +1,4 @@
+# CI rebuild trigger 2026-06-22T21:30 — fix dev :dev image
 """Recurring (monthly) giving — PayPal Subscriptions integration."""
 from __future__ import annotations
 
