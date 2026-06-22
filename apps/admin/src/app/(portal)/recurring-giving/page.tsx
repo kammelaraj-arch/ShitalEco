@@ -57,6 +57,41 @@ export default function RecurringGivingPage() {
 
   useEffect(() => { loadTiers(); loadSubs() }, [])
 
+  // Track which sub-id is currently being refreshed (per-row spinner) and
+  // the most recent refresh result for the inline status note.
+  const [refreshingId, setRefreshingId] = useState<string | null>(null)
+  const [refreshNote, setRefreshNote] = useState<Record<string, string>>({})
+
+  async function refreshFromPayPal(subId: string) {
+    setRefreshingId(subId)
+    setRefreshNote(n => ({ ...n, [subId]: '' }))
+    try {
+      const r = await fetch(
+        `${API}/admin/giving/subscriptions/${subId}/refresh-from-paypal`,
+        { method: 'POST', headers: authHeaders() },
+      )
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        setRefreshNote(n => ({
+          ...n,
+          [subId]: body?.detail || `HTTP ${r.status}`,
+        }))
+      } else {
+        setRefreshNote(n => ({
+          ...n,
+          [subId]: body.changed
+            ? `PayPal says ${body.paypal_status} → ${body.db_status_after}`
+            : `PayPal agrees: ${body.paypal_status} (no change)`,
+        }))
+        await loadSubs()
+      }
+    } catch (e) {
+      setRefreshNote(n => ({ ...n, [subId]: e instanceof Error ? e.message : 'Network error' }))
+    } finally {
+      setRefreshingId(null)
+    }
+  }
+
   function openNew() { setForm(EMPTY); setEditId(null); setShowForm(true); setError('') }
   function openEdit(t: Tier) {
     setForm({ amount: t.amount, label: t.label, description: t.description, frequency: t.frequency,
@@ -159,9 +194,19 @@ export default function RecurringGivingPage() {
                 </div>
                 <p className="text-sm text-white/70 mt-0.5">{s.donor_name || 'Anonymous'}{s.donor_email && ` · ${s.donor_email}`}</p>
                 <p className="text-xs text-white/40 mt-0.5">PayPal: {s.paypal_subscription_id} · {s.branch_id}</p>
+                {refreshNote[s.id] && (
+                  <p className="text-xs text-saffron-400 mt-1">↻ {refreshNote[s.id]}</p>
+                )}
               </div>
-              <div className="text-right text-xs text-white/40 flex-shrink-0">
+              <div className="text-right text-xs text-white/40 flex-shrink-0 flex flex-col items-end gap-2">
                 <p>{s.approved_at ? new Date(s.approved_at).toLocaleDateString('en-GB') : 'Pending'}</p>
+                <button
+                  onClick={() => refreshFromPayPal(s.id)}
+                  disabled={refreshingId === s.id || !s.paypal_subscription_id}
+                  title="Ask PayPal what the real status is — use when a sub is stuck on PENDING_APPROVAL but the donor says they signed up"
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/8 text-white/70 hover:bg-white/15 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">
+                  {refreshingId === s.id ? '↻ Checking…' : '↻ Refresh from PayPal'}
+                </button>
               </div>
             </div>
           ))}
