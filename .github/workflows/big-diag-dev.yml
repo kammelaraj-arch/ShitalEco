@@ -1,0 +1,54 @@
+name: BIG diag — full dev state snapshot
+
+# One comprehensive diagnostic. Captures: host RAM, all dev container states
+# with restart counts + OOMKilled flag, nginx-dev + backend-dev tail logs,
+# recent docker events. Auto-fires on push.
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/big-diag-dev.yml
+
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 3m
+          script: |
+            set +e
+            echo "========== HOST =========="
+            free -h
+            uptime
+            echo ""
+            echo "========== ALL DEV CONTAINERS =========="
+            docker ps -a --filter 'name=shitaleco-dev-' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+            echo ""
+            echo "========== RESTART COUNTS + OOM FLAG =========="
+            for c in shitaleco-dev-backend-dev-1 shitaleco-dev-nginx-dev-1 shitaleco-dev-db-dev-1; do
+              s=$(docker inspect "$c" --format 'Restarts={{.RestartCount}}  OOM={{.State.OOMKilled}}  Status={{.State.Status}}  Exit={{.State.ExitCode}}  StartedAt={{.State.StartedAt}}  FinishedAt={{.State.FinishedAt}}' 2>&1)
+              echo "$c: $s"
+            done
+            echo ""
+            echo "========== nginx-dev LAST 40 LINES =========="
+            docker logs --tail 40 shitaleco-dev-nginx-dev-1 2>&1 | tail -40
+            echo ""
+            echo "========== backend-dev LAST 30 LINES (head) =========="
+            docker logs --tail 30 shitaleco-dev-backend-dev-1 2>&1 | tail -30
+            echo ""
+            echo "========== docker events for dev in last 5 min =========="
+            since=$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || date -u -v -5M '+%Y-%m-%dT%H:%M:%S')
+            timeout 4 docker events --since "$since" --until "$(date -u '+%Y-%m-%dT%H:%M:%S')" 2>&1 | grep -E 'shitaleco-dev-(backend-dev|nginx-dev)' | tail -30
+            echo ""
+            echo "========== nginx-dev config: backend upstream resolver =========="
+            docker exec shitaleco-dev-nginx-dev-1 sh -c 'cat /etc/nginx/conf.d/default.conf 2>/dev/null | head -40' 2>&1 | head -40
+            echo ""
+            echo "========== external probes NOW =========="
+            curl -sk -o /dev/null -w "  /        → %{http_code}\n" -m 8 https://dev.shital.org.uk/
+            curl -sk -o /dev/null -w "  /health  → %{http_code}\n" -m 8 https://dev.shital.org.uk/health
