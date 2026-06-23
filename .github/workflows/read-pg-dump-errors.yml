@@ -1,5 +1,5 @@
-# READ-ONLY round 2 — find why take_snapshot writes 0-byte error log
-name: Read pg_dump round 2 (READ-ONLY)
+# READ-ONLY round 3 — bash reproduction inside deployer container
+name: Read pg_dump round 3 (READ-ONLY)
 on:
   push:
     branches:
@@ -20,38 +20,27 @@ jobs:
           command_timeout: 120s
           script: |
             set +e
-            echo "=== ALL files in /opt/shitaleco/backups (last 10) ==="
-            ls -lt /opt/shitaleco/backups/ 2>&1 | head -15
+            echo "=== deployer container — bash + git availability ==="
+            docker exec shitaleco-deployer-1 sh -c 'which bash; bash --version 2>&1 | head -1; which git; ls -la /workspace/.git 2>&1 | head -3' 2>&1
 
             echo ""
-            echo "=== any *.sql.gz from today? ==="
-            ls -lt /opt/shitaleco/backups/*.sql.gz 2>&1 | head -5
+            echo "=== git rev-parse HEAD inside deployer ==="
+            docker exec shitaleco-deployer-1 sh -c 'cd /workspace && git rev-parse HEAD 2>&1' 2>&1
 
             echo ""
-            echo "=== deployer container tools ==="
-            docker exec shitaleco-deployer-1 sh -c 'which docker; which gzip; which pg_dump 2>&1; docker compose version 2>&1 | head -1' 2>&1
-
-            echo ""
-            echo "=== /workspace inside deployer — is docker-compose.prod.yml present? ==="
-            docker exec shitaleco-deployer-1 sh -c 'ls -la /workspace/docker-compose.prod.yml /workspace/.env 2>&1; pwd' 2>&1
-
-            echo ""
-            echo "=== SNAP_DIR write test from inside deployer (mirror take_snapshot env) ==="
-            docker exec shitaleco-deployer-1 sh -c '
-              ls -ld /opt/shitaleco/backups 2>&1
-              # Where does the deployer think SNAP_DIR is? Check env + default
-              env | grep -E "^SNAP_DIR=" 2>&1 || echo "SNAP_DIR not in env (uses default)"
-              grep -nE "^SNAP_DIR=" /workspace/deployer/deploy.sh 2>&1 | head -3
-            ' 2>&1
-
-            echo ""
-            echo "=== reproduce exact take_snapshot pg_dump | gzip incantation FROM INSIDE deployer ==="
-            docker exec shitaleco-deployer-1 sh -c '
-              if [ -f /workspace/.env ]; then set -a; . /workspace/.env; set +a; fi
-              ts=$(date -u +%Y%m%dT%H%M%SZ)
-              out="/tmp/diag-${ts}.sql.gz"
-              err="/tmp/diag-${ts}.log"
+            echo "=== EXACT take_snapshot reproduction via bash -c (PIPESTATUS works) ==="
+            docker exec shitaleco-deployer-1 bash -c '
               set +e
+              if [ -f /workspace/.env ]; then set -a; . /workspace/.env; set +a; fi
+              cd /workspace
+              GIT_SHA=$(git rev-parse HEAD 2>&1)
+              echo "GIT_SHA=[$GIT_SHA]"
+              SNAP_DIR=/workspace/backups
+              ts=$(date -u +%Y%m%dT%H%M%SZ)
+              out="${SNAP_DIR}/diag3-${ts}-${GIT_SHA:0:7}.sql.gz"
+              err="${SNAP_DIR}/diag3-${ts}-pg_dump.log"
+              echo "out=$out"
+              echo "err=$err"
               docker compose -p shitaleco -f /workspace/docker-compose.prod.yml exec -T \
                    -e PGPASSWORD="${POSTGRES_PASSWORD:-}" db \
                    pg_dump -U "${POSTGRES_USER:-shitaleco_db_user}" \
@@ -59,14 +48,20 @@ jobs:
                    2>"$err" | gzip > "$out"
               pg_rc=${PIPESTATUS[0]}
               gz_rc=${PIPESTATUS[1]}
-              set -e
               echo "pg_rc=$pg_rc  gz_rc=$gz_rc"
-              echo "out file:"; ls -la "$out" 2>&1
-              echo "err file:"; ls -la "$err" 2>&1
-              echo "first line of out (decompressed):"; gunzip -c "$out" 2>&1 | head -3
-              echo "err contents:"; cat "$err" 2>&1
+              ls -la "$out" "$err" 2>&1
+              echo "--- success-branch test ---"
+              if [ "$pg_rc" -eq 0 ] && [ "$gz_rc" -eq 0 ] && [ -s "$out" ]; then
+                echo "✓ would take success branch (size: $(du -h "$out" | cut -f1))"
+                # clean up diag files so we do not pollute
+                rm -f "$out" "$err"
+              else
+                echo "✗ would take FAIL branch — pg_rc=$pg_rc gz_rc=$gz_rc out_size=$(stat -c%s "$out" 2>/dev/null || echo MISSING)"
+                cat "$err" 2>&1
+                rm -f "$out" "$err"
+              fi
             ' 2>&1 | tail -30
 
             echo ""
-            echo "=== tail of deployer log around tonight's 22:07 promote ==="
-            docker logs shitaleco-deployer-1 --since 30m 2>&1 | grep -iE 'snapshot|pg_dump|✓|✗' | tail -20
+            echo "=== deployer log around tonight\047s promote (snapshot lines) ==="
+            docker logs shitaleco-deployer-1 --since 1h 2>&1 | grep -E 'snapshot|pg_dump|DB dump|✓|✗' | tail -25
