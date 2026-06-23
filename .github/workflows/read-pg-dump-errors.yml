@@ -1,5 +1,5 @@
-# READ-ONLY — fetch pg_dump error logs from prod backups dir
-name: Read pg_dump error logs (READ-ONLY)
+# READ-ONLY round 2 — find why take_snapshot writes 0-byte error log
+name: Read pg_dump round 2 (READ-ONLY)
 on:
   push:
     branches:
@@ -17,32 +17,56 @@ jobs:
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
-          command_timeout: 90s
+          command_timeout: 120s
           script: |
             set +e
-            echo "=== latest 5 pg_dump error logs ==="
-            ls -lt /opt/shitaleco/backups/*-pg_dump.log 2>/dev/null | head -5
+            echo "=== ALL files in /opt/shitaleco/backups (last 10) ==="
+            ls -lt /opt/shitaleco/backups/ 2>&1 | head -15
 
             echo ""
-            echo "=== latest pg_dump error log content ==="
-            f=$(ls -t /opt/shitaleco/backups/*-pg_dump.log 2>/dev/null | head -1)
-            echo "file: $f"
-            [ -n "$f" ] && cat "$f"
+            echo "=== any *.sql.gz from today? ==="
+            ls -lt /opt/shitaleco/backups/*.sql.gz 2>&1 | head -5
 
             echo ""
-            echo "=== /opt/shitaleco/.env has POSTGRES_* ? ==="
-            grep -E '^POSTGRES_(USER|PASSWORD|DB)=' /opt/shitaleco/.env 2>&1 | sed 's/PASSWORD=.*/PASSWORD=<set>/'
+            echo "=== deployer container tools ==="
+            docker exec shitaleco-deployer-1 sh -c 'which docker; which gzip; which pg_dump 2>&1; docker compose version 2>&1 | head -1' 2>&1
 
             echo ""
-            echo "=== confirm deploy.sh on host has the PR #133 pg_dump fix ==="
-            grep -nE 'PGPASSWORD|\. /workspace/.env|sourced env|14-Jun fix' /opt/shitaleco/deployer/deploy.sh | head -10
+            echo "=== /workspace inside deployer — is docker-compose.prod.yml present? ==="
+            docker exec shitaleco-deployer-1 sh -c 'ls -la /workspace/docker-compose.prod.yml /workspace/.env 2>&1; pwd' 2>&1
 
             echo ""
-            echo "=== test pg_dump manually with the same incantation ==="
-            cd /opt/shitaleco
-            set -a; . .env; set +a
-            timeout 15 docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
-              -e PGPASSWORD="${POSTGRES_PASSWORD:-}" db \
-              pg_dump -U "${POSTGRES_USER:-shitaleco_db_user}" -d "${POSTGRES_DB:-shitaleco_db}" 2>&1 | head -10
-            rc=$?
-            echo "exit code: $rc"
+            echo "=== SNAP_DIR write test from inside deployer (mirror take_snapshot env) ==="
+            docker exec shitaleco-deployer-1 sh -c '
+              ls -ld /opt/shitaleco/backups 2>&1
+              # Where does the deployer think SNAP_DIR is? Check env + default
+              env | grep -E "^SNAP_DIR=" 2>&1 || echo "SNAP_DIR not in env (uses default)"
+              grep -nE "^SNAP_DIR=" /workspace/deployer/deploy.sh 2>&1 | head -3
+            ' 2>&1
+
+            echo ""
+            echo "=== reproduce exact take_snapshot pg_dump | gzip incantation FROM INSIDE deployer ==="
+            docker exec shitaleco-deployer-1 sh -c '
+              if [ -f /workspace/.env ]; then set -a; . /workspace/.env; set +a; fi
+              ts=$(date -u +%Y%m%dT%H%M%SZ)
+              out="/tmp/diag-${ts}.sql.gz"
+              err="/tmp/diag-${ts}.log"
+              set +e
+              docker compose -p shitaleco -f /workspace/docker-compose.prod.yml exec -T \
+                   -e PGPASSWORD="${POSTGRES_PASSWORD:-}" db \
+                   pg_dump -U "${POSTGRES_USER:-shitaleco_db_user}" \
+                           -d "${POSTGRES_DB:-shitaleco_db}" \
+                   2>"$err" | gzip > "$out"
+              pg_rc=${PIPESTATUS[0]}
+              gz_rc=${PIPESTATUS[1]}
+              set -e
+              echo "pg_rc=$pg_rc  gz_rc=$gz_rc"
+              echo "out file:"; ls -la "$out" 2>&1
+              echo "err file:"; ls -la "$err" 2>&1
+              echo "first line of out (decompressed):"; gunzip -c "$out" 2>&1 | head -3
+              echo "err contents:"; cat "$err" 2>&1
+            ' 2>&1 | tail -30
+
+            echo ""
+            echo "=== tail of deployer log around tonight's 22:07 promote ==="
+            docker logs shitaleco-deployer-1 --since 30m 2>&1 | grep -iE 'snapshot|pg_dump|✓|✗' | tail -20
