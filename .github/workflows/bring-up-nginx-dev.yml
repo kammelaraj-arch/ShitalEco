@@ -1,4 +1,4 @@
-name: Bring up nginx-dev (container is missing)
+# bring nginx-dev back 2026-06-23T21:17
 
 # nginx-dev container doesn't exist on the host — diag confirmed:
 # "Error: No such container: shitaleco-dev-nginx-dev-1"
