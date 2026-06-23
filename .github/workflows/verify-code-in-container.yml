@@ -1,4 +1,4 @@
-name: Verify code in the running backend-dev container
+# verify code in container 2026-06-23T21:22
 
 # Read the actual file inside the running container and curl /openapi.json
 # from INSIDE the container (bypassing nginx). Tells us definitively whether
