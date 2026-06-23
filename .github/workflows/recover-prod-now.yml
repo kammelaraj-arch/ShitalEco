@@ -1,4 +1,4 @@
-name: Recover prod now (one-shot)
+# PROD DOWN — recovery 22:10
 
 # Brings the prod stack back up after a promote-killed-the-deployer outage.
 # Auto-fires on push to this branch — no manual dispatch needed (the GitHub
