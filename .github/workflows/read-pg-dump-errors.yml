@@ -1,0 +1,48 @@
+# READ-ONLY — fetch pg_dump error logs from prod backups dir
+name: Read pg_dump error logs (READ-ONLY)
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/read-pg-dump-errors.yml
+
+jobs:
+  r:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 90s
+          script: |
+            set +e
+            echo "=== latest 5 pg_dump error logs ==="
+            ls -lt /opt/shitaleco/backups/*-pg_dump.log 2>/dev/null | head -5
+
+            echo ""
+            echo "=== latest pg_dump error log content ==="
+            f=$(ls -t /opt/shitaleco/backups/*-pg_dump.log 2>/dev/null | head -1)
+            echo "file: $f"
+            [ -n "$f" ] && cat "$f"
+
+            echo ""
+            echo "=== /opt/shitaleco/.env has POSTGRES_* ? ==="
+            grep -E '^POSTGRES_(USER|PASSWORD|DB)=' /opt/shitaleco/.env 2>&1 | sed 's/PASSWORD=.*/PASSWORD=<set>/'
+
+            echo ""
+            echo "=== confirm deploy.sh on host has the PR #133 pg_dump fix ==="
+            grep -nE 'PGPASSWORD|\. /workspace/.env|sourced env|14-Jun fix' /opt/shitaleco/deployer/deploy.sh | head -10
+
+            echo ""
+            echo "=== test pg_dump manually with the same incantation ==="
+            cd /opt/shitaleco
+            set -a; . .env; set +a
+            timeout 15 docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
+              -e PGPASSWORD="${POSTGRES_PASSWORD:-}" db \
+              pg_dump -U "${POSTGRES_USER:-shitaleco_db_user}" -d "${POSTGRES_DB:-shitaleco_db}" 2>&1 | head -10
+            rc=$?
+            echo "exit code: $rc"
