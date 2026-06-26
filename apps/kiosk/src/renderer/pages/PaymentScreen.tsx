@@ -162,10 +162,30 @@ export function PaymentScreen() {
   }, [provider, cloverOrderId])
 
   const handleCancel = async () => {
+    // Tell the physical reader to abort BEFORE navigating away. Previously this
+    // only fired for Stripe — SumUp / Clover readers kept showing the amount
+    // because the kiosk silently dropped the cancel locally without telling
+    // the provider, leaving the donor staring at a reader prompt they can no
+    // longer dismiss without staff. Fire-and-forget per provider; if the API
+    // call fails we still navigate back (the reader will time out eventually).
     if (provider === 'STRIPE_TERMINAL' && readerId) {
       await fetch(`${API_BASE}/kiosk/terminal/cancel-action`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reader_id: readerId, payment_intent_id: paymentIntentId }),
+      }).catch(() => {})
+    } else if (provider === 'SUMUP' && sumupCheckoutId) {
+      // Backend route: DELETE /kiosk/sumup/checkout/{checkout_id}
+      // calls SumUp's cancel API which dismisses the prompt on the reader.
+      await fetch(`${API_BASE}/kiosk/sumup/checkout/${sumupCheckoutId}`, {
+        method: 'DELETE',
+      }).catch(() => {})
+    } else if (provider === 'CLOVER' && cloverOrderId) {
+      // Clover doesn't have a one-shot cancel endpoint in our backend — best
+      // effort: hit the status endpoint to record cancellation; the reader
+      // will time out on its own. Add a dedicated DELETE route later if
+      // donors hit this often.
+      await fetch(`${API_BASE}/kiosk/clover/payment/${cloverOrderId}?cancel=true`, {
+        method: 'DELETE',
       }).catch(() => {})
     }
     setScreen('basket')
