@@ -89,6 +89,38 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
 
+    // Quick-link to PayPal: /?amount=11&branch=wembley_main
+    // Creates the PayPal subscription server-side and redirects the browser
+    // straight to PayPal's hosted approval form — donor sees the card-entry
+    // page in 1 click, no in-app amount picker / details step. Used for QR
+    // codes / email-blast links / hub buttons. Skipped if 'status' param is
+    // also present (donor is coming BACK from PayPal — don't loop).
+    const amountParam = params.get('amount')
+    const status = params.get('status')
+    if (amountParam && !status) {
+      const amount = Number(amountParam)
+      if (Number.isFinite(amount) && amount >= 1 && amount <= 1000) {
+        const branch = params.get('branch') || ''
+        const API = (import.meta.env.VITE_API_URL as string | undefined) || '/api/v1'
+        fetch(`${API}/service/giving/quick-link`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount, branch_id: branch || 'main' }),
+        })
+          .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+          .then(d => {
+            if (d?.approval_url) {
+              window.location.href = d.approval_url
+            } else {
+              // Backend up but couldn't reach PayPal — fall back to the picker.
+              setScreen('monthly-giving')
+            }
+          })
+          .catch(() => setScreen('monthly-giving'))
+        return  // Don't run the rest of the boot — we're redirecting anyway.
+      }
+    }
+
     // Deep-link screen param (e.g. ?screen=monthly-giving from kiosk)
     const urlScreen = params.get('screen')
     if (

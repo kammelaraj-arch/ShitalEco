@@ -405,6 +405,123 @@ class ApproveBody(BaseModel):
     tier_label: str = ""
 
 
+class QuickLinkBody(BaseModel):
+    amount: float
+    branch_id: str = "main"
+    label: str = ""  # optional plan label override
+
+
+@router.post("/service/giving/quick-link")
+async def giving_quick_link(body: QuickLinkBody) -> dict[str, Any]:
+    """One-click PayPal deep link — create a subscription and return the
+    PayPal approval URL so the donor can be redirected straight to PayPal.
+
+    Donor info is NOT taken upfront — PayPal collects name/email/address on
+    its own checkout form (the "Pay with debit or credit card" page). We
+    record a PENDING_CONTACT row keyed by paypal_subscription_id and the
+    webhook fills in donor details after PayPal completes the subscription.
+
+    Used for QR codes / email links / hub buttons:
+      https://service.shital.org.uk/?amount=11&branch=wembley_main
+      → frontend POSTs here → window.location = approval_url → donor lands
+      on the PayPal payment form in 1 click.
+    """
+    import uuid
+    from datetime import datetime
+    from sqlalchemy import text
+    from shital.core.fabrics.secrets import SecretsManager
+    from shital.core.fabrics.database import SessionLocal
+
+    amount = float(body.amount)
+    if amount < 1 or amount > 1000:
+        raise HTTPException(400, detail="Amount must be between £1 and £1,000")
+
+    client_id = await SecretsManager.get("PAYPAL_CLIENT_ID") or ""
+    secret    = await SecretsManager.get("PAYPAL_CLIENT_SECRET") or ""
+    env       = await SecretsManager.get("PAYPAL_ENV") or "live"
+    if not client_id or not secret:
+        raise HTTPException(500, detail="PayPal not configured")
+    base = "https://api-m.paypal.com" if env == "live" else "https://api-m.sandbox.paypal.com"
+
+    approval_url: str | None = None
+    sub_id: str | None = None
+    plan_id: str | None = None
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.post(f"{base}/v1/oauth2/token",
+                             auth=(client_id, secret), data={"grant_type": "client_credentials"})
+            r.raise_for_status()
+            token = r.json()["access_token"]
+            hdrs  = {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                     "Prefer": "return=representation"}
+            product_id = await _ensure_product(token, base)
+            # Fresh plan per amount — cheap, PayPal allows many plans per product.
+            plan_label = (body.label or f"Shital Temple Monthly — £{amount:.2f}").strip()[:200]
+            plan_r = await c.post(f"{base}/v1/billing/plans", headers=hdrs, json={
+                "product_id": product_id,
+                "name": plan_label,
+                "status": "ACTIVE",
+                "billing_cycles": [{
+                    "frequency": {"interval_unit": "MONTH", "interval_count": 1},
+                    "tenure_type": "REGULAR", "sequence": 1, "total_cycles": 0,
+                    "pricing_scheme": {"fixed_price": {"value": f"{amount:.2f}", "currency_code": "GBP"}},
+                }],
+                "payment_preferences": {"auto_bill_outstanding": True, "payment_failure_threshold": 3},
+            })
+            plan_r.raise_for_status()
+            plan_id = plan_r.json()["id"]
+            # NO subscriber block → PayPal collects donor info on its form.
+            sub_r = await c.post(f"{base}/v1/billing/subscriptions", headers=hdrs, json={
+                "plan_id": plan_id,
+                "application_context": {
+                    "brand_name": "Shital Temple",
+                    "return_url": "https://service.shital.org.uk/?screen=monthly-giving&status=approved",
+                    "cancel_url": "https://service.shital.org.uk/?screen=monthly-giving&status=cancelled",
+                    "user_action": "SUBSCRIBE_NOW",
+                },
+            })
+            sub_r.raise_for_status()
+            sub_data = sub_r.json()
+            sub_id   = sub_data.get("id")
+            for link in sub_data.get("links", []):
+                if link.get("rel") == "approve":
+                    approval_url = link["href"]
+                    break
+    except Exception as exc:
+        logger.warning("quick_link_paypal_error", error=str(exc))
+        raise HTTPException(502, detail=f"PayPal subscription create failed: {exc}")
+
+    if not approval_url or not sub_id:
+        raise HTTPException(502, detail="PayPal returned no approval URL")
+
+    # Pre-create PENDING_CONTACT row — webhook later upgrades it with donor details.
+    now = datetime.utcnow()
+    signup_id = str(uuid.uuid4())
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO recurring_giving_subscriptions
+                (id, paypal_subscription_id, paypal_plan_id, amount, frequency, status, branch_id,
+                 donor_name, donor_email, donor_first_name, donor_surname,
+                 donor_postcode, donor_address, first_source, created_at, updated_at)
+            VALUES
+                (:id, :sub_id, :plan_id, :amt, 'MONTH', 'PENDING_CONTACT', :bid,
+                 '', '', '', '', '', '', 'quick-link', :now, :now)
+        """), {
+            "id": signup_id, "sub_id": sub_id, "plan_id": plan_id,
+            "amt": amount, "bid": body.branch_id, "now": now,
+        })
+        await db.commit()
+
+    return {
+        "ok": True,
+        "approval_url": approval_url,
+        "subscription_id": sub_id,
+        "plan_id": plan_id,
+        "amount": amount,
+        "branch_id": body.branch_id,
+    }
+
+
 @router.post("/service/giving/subscription/approve")
 async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
     """Record a donor-approved PayPal subscription in the database.
