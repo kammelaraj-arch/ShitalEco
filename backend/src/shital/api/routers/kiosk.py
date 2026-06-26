@@ -3024,24 +3024,23 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 "org_name": dev_row["org_name"] or "",
             }
 
-    # Merge kiosk_devices reader (preferred) with kiosk_profiles reader (fallback)
-    profile_provider = (profile.get("device_provider") or "stripe_terminal") if profile else "stripe_terminal"
-    profile_sumup_serial = (profile.get("sumup_reader_serial") or "") if profile else ""
-    profile_stripe_id = (profile.get("stripe_reader_id") or "") if profile else ""
-
-    # If kiosk_devices had a configured reader, use it; otherwise fall back to kiosk_profiles
+    # Return the EXACT reader assigned to this kiosk device — NO FALLBACK.
+    # A previous version silently fell back to the user's kiosk_profiles reader
+    # (typically a Stripe terminal), so e.g. FKKW assigned to Wembley Solo 2
+    # (SumUp) would silently switch to a Stripe reader if anything looked off.
+    # That's a revenue/wrong-provider hazard — surface the misconfig instead.
     if device_reader_id or device_sumup_serial or device_clover_id:
         effective_reader_id = device_reader_id
-        effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
+        effective_reader_label = device_reader_label
         effective_provider = device_reader_provider
         effective_sumup_serial = device_sumup_serial
         effective_clover_id = device_clover_id
     else:
-        effective_reader_id = profile_stripe_id or None
-        effective_reader_label = (profile.get("device_label") if profile else None)
-        effective_provider = profile_provider
-        effective_sumup_serial = profile_sumup_serial
-        effective_clover_id = ""  # kiosk_profiles has no clover field yet
+        effective_reader_id = None
+        effective_reader_label = None
+        effective_provider = None
+        effective_sumup_serial = ""
+        effective_clover_id = ""
 
     return {
         "authenticated": True,

@@ -188,18 +188,35 @@ async def get_device_by_token(token: str, ctx: OptionalSpace) -> dict[str, Any]:
             await db.commit()
             raise HTTPException(status_code=404, detail="Device not found or token invalid")
 
-        # Look up the stripe_reader_id and label from terminal_devices
+        # Return the EXACT reader assigned to this device — no fallback.
+        # Must include provider + sumup_reader_serial + clover_device_id so
+        # the kiosk app doesn't silently default to Stripe when a SumUp /
+        # Clover reader is assigned (FKKW → Wembley Solo 2 [SumUp] regression).
         stripe_reader_id = None
         reader_label = None
+        reader_provider = None
+        sumup_reader_serial = None
+        clover_device_id = None
+        reader_status = None
         if row["card_reader_id"]:
             rd = await db.execute(
-                text("SELECT stripe_reader_id, label FROM terminal_devices WHERE id = :id"),
+                text("""
+                    SELECT stripe_reader_id, label, provider,
+                           COALESCE(sumup_reader_serial, '') AS sumup_reader_serial,
+                           COALESCE(clover_device_id, '')   AS clover_device_id,
+                           status
+                    FROM terminal_devices WHERE id = :id
+                """),
                 {"id": str(row["card_reader_id"])},
             )
             rd_row = rd.mappings().first()
             if rd_row:
                 stripe_reader_id = rd_row["stripe_reader_id"]
                 reader_label = rd_row["label"]
+                reader_provider = rd_row["provider"]
+                sumup_reader_serial = rd_row["sumup_reader_serial"]
+                clover_device_id = rd_row["clover_device_id"]
+                reader_status = rd_row["status"]
 
         # Resolve menu codes from the device's profile, or fall back to the
         # default profile for the kiosk app, or finally to all active menus.
@@ -232,6 +249,10 @@ async def get_device_by_token(token: str, ctx: OptionalSpace) -> dict[str, Any]:
         **dict(row),
         "stripe_reader_id": stripe_reader_id,
         "reader_label": reader_label,
+        "reader_provider": reader_provider,
+        "sumup_reader_serial": sumup_reader_serial,
+        "clover_device_id": clover_device_id,
+        "reader_status": reader_status,
         "menu_codes": menu_codes,
     }
 
