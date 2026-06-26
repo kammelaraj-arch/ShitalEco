@@ -1,0 +1,57 @@
+# READ-ONLY — check FKKW device's assigned card reader in the DB
+name: Check FKKW device reader (READ-ONLY)
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/check-fkkw-reader.yml
+
+jobs:
+  r:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 60s
+          script: |
+            set +e
+            cd /opt/shitaleco
+            set -a; . .env; set +a
+            echo "=== FKKW device row (kiosk_devices) ==="
+            docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
+              -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
+              psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
+                SELECT id, device_id, device_type, branch_id, status, terminal_device_id
+                FROM kiosk_devices
+                WHERE device_id ILIKE '%FKKW%' OR id::text ILIKE '%FKKW%'
+                ORDER BY created_at DESC NULLS LAST LIMIT 5;
+              " 2>&1 | head -20
+
+            echo ""
+            echo "=== Reader joined via terminal_devices ==="
+            docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
+              -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
+              psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
+                SELECT kd.device_id AS kiosk_id, kd.branch_id AS kiosk_branch,
+                       td.id AS term_id, td.label AS reader_label, td.provider, td.status AS reader_status,
+                       td.stripe_reader_id, td.branch_id AS reader_branch
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.terminal_device_id
+                WHERE kd.device_id ILIKE '%FKKW%';
+              " 2>&1 | head -20
+
+            echo ""
+            echo "=== All readers in Wembley branches (for context) ==="
+            docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
+              -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
+              psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
+                SELECT id, label, provider, branch_id, status
+                FROM terminal_devices
+                WHERE branch_id ILIKE '%wembley%' OR label ILIKE '%solo%' OR label ILIKE '%wembley%'
+                ORDER BY branch_id, label;
+              " 2>&1 | head -20
