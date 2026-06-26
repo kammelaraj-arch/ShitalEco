@@ -1,0 +1,74 @@
+# Block PR merge until the branch is rebased on top of current main.
+#
+# Why this exists: 26-Jun 2026, the donations grid lost its HH:MM time line.
+# Root cause: branch claude/recover-prod-now-Q40dj was created from main BEFORE
+# PR #140 landed on main. When that branch eventually got merged, its OLDER
+# version of donations/page.tsx (without HH:MM) overwrote the newer one. CI
+# rebuilt the admin image from the regressed file, promote pulled :latest →
+# prod regressed. Same pattern can re-introduce any old version of ANY file
+# touched by both branches.
+#
+# Enforcement: every PR targeting main must contain ALL commits from main.
+# If `git rev-list HEAD..origin/main` is non-empty, the branch is behind and
+# this check fails. The author must rebase + force-with-lease push before the
+# PR can be merged. GitHub branch protection should mark this check Required
+# so the green Merge button stays disabled until rebase is done.
+name: Require rebase on main
+
+on:
+  pull_request:
+    branches:
+      - main
+  # Also run on push so author sees the result before they open a PR.
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  rebase-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history (need merge-base vs main)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # For PRs check the PR head, not the auto-merge ref — we want to
+          # know if the AUTHOR's branch is behind, not whether the synthetic
+          # merge commit is up to date.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Fetch latest main
+        run: git fetch origin main:refs/remotes/origin/main
+
+      - name: Compare branch HEAD against origin/main
+        run: |
+          BEHIND=$(git rev-list --count HEAD..origin/main)
+          AHEAD=$(git rev-list --count origin/main..HEAD)
+          MERGE_BASE=$(git merge-base HEAD origin/main)
+          MAIN_HEAD=$(git rev-parse origin/main)
+          BRANCH_HEAD=$(git rev-parse HEAD)
+          echo ""
+          echo "Branch HEAD : $BRANCH_HEAD"
+          echo "main  HEAD  : $MAIN_HEAD"
+          echo "merge-base  : $MERGE_BASE"
+          echo "ahead of main: $AHEAD commits"
+          echo "behind  main: $BEHIND commits"
+          echo ""
+          if [ "$BEHIND" -gt 0 ]; then
+            echo "❌ This branch is $BEHIND commits BEHIND main."
+            echo ""
+            echo "   Merging without rebasing risks overwriting newer files on main"
+            echo "   with older versions from this branch (regression). Last time this"
+            echo "   happened the Donations grid lost its HH:MM display."
+            echo ""
+            echo "   Fix:"
+            echo "     git fetch origin main"
+            echo "     git rebase origin/main"
+            echo "     # resolve any conflicts, then:"
+            echo "     git push --force-with-lease"
+            echo ""
+            echo "   Commits on main that are missing from this branch:"
+            git --no-pager log --oneline HEAD..origin/main | head -30
+            exit 1
+          fi
+          echo "✅ Branch is up to date with main — safe to merge."
