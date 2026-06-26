@@ -1159,11 +1159,34 @@ async def sumup_checkout_status(checkout_id: str):
     """
 
 
+    # Normalize SumUp's various vocabularies to a single set:
+    #   PAID     — donor's card charged successfully
+    #   FAILED   — declined / rejected
+    #   EXPIRED  — donor walked away / session timeout
+    #   CANCELLED — donor or app cancelled before tap
+    #   PENDING  — still waiting
+    # Solo reader checkouts use SUCCESSFUL; Checkouts-API uses PAID; transactions
+    # array uses SUCCESSFUL/PAID interchangeably. Without normalization the
+    # kiosk frontend's `status === 'PAID'` check missed Solo reader successes
+    # and the app sat stuck on "Waiting for card..." after the card was tapped.
+    def _normalize_sumup_status(raw: str | None) -> str:
+        s = (raw or "PENDING").upper().strip()
+        if s in {"PAID", "SUCCESSFUL", "SUCCESS", "COMPLETED"}:
+            return "PAID"
+        if s in {"FAILED", "DECLINED", "REJECTED", "ERROR"}:
+            return "FAILED"
+        if s in {"CANCELLED", "CANCELED", "VOIDED"}:
+            return "CANCELLED"
+        if s == "EXPIRED":
+            return "EXPIRED"
+        return "PENDING"
+
     # Fast path: webhook already delivered the final status
     try:
         cached = await cache_get(f"sumup:checkout:{checkout_id}")
         if cached and cached.get("status") not in (None, "PENDING"):
-            return {"status": cached["status"], "source": "webhook"}
+            return {"status": _normalize_sumup_status(cached.get("status")),
+                    "raw_status": cached.get("status"), "source": "webhook"}
     except Exception:
         cached = None  # Redis unavailable — fall through to API poll
 
@@ -1178,13 +1201,24 @@ async def sumup_checkout_status(checkout_id: str):
                 headers={"Authorization": f"Bearer {access_token}"},
             )
         data = resp.json()
-        status = data.get("status", "PENDING")
-        if status and status != "PENDING":
+        # Solo reader: the checkout.status often stays PENDING while the
+        # transactions[] array carries the real outcome. Promote a
+        # transaction-level SUCCESSFUL/FAILED to the checkout status so
+        # polling sees the terminal state.
+        raw_status = data.get("status", "PENDING")
+        txns = data.get("transactions") or []
+        if txns:
+            t_status = (txns[-1] or {}).get("status")
+            if t_status and (raw_status == "PENDING" or not raw_status):
+                raw_status = t_status
+        normalized = _normalize_sumup_status(raw_status)
+        if normalized != "PENDING":
             try:
-                await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+                await cache_set(f"sumup:checkout:{checkout_id}",
+                                {"status": normalized}, ttl=3600)
             except Exception:
                 pass
-        return {"status": status, "raw": data}
+        return {"status": normalized, "raw_status": raw_status, "raw": data}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 

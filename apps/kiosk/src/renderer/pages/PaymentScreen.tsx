@@ -108,24 +108,37 @@ export function PaymentScreen() {
     if (provider !== 'SUMUP' || !sumupCheckoutId) return
     setReaderStatus('processing')
     setStatusMessage('Waiting for card on SumUp reader...')
+    // Accept every status string SumUp uses across its Checkouts API + Solo
+    // reader API + webhook payloads. Backend now normalizes to PAID/FAILED/
+    // EXPIRED/CANCELLED/PENDING, but we keep the union here too so an older
+    // cached backend response can't strand the kiosk on "Waiting for card…".
+    const SUCCESS = new Set(['PAID', 'SUCCESSFUL', 'SUCCESS', 'COMPLETED'])
+    const FAILED  = new Set(['FAILED', 'DECLINED', 'REJECTED', 'ERROR'])
+    const CANCELLED = new Set(['CANCELLED', 'CANCELED', 'VOIDED'])
+    const EXPIRED   = new Set(['EXPIRED'])
     const poll = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/kiosk/sumup/checkout/${sumupCheckoutId}`)
         const d = await res.json()
-        if (d.status === 'PAID') {
+        const s = String(d.status || '').toUpperCase()
+        if (SUCCESS.has(s)) {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
           await confirmOrder(orderRef, sumupCheckoutId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
-        } else if (d.status === 'FAILED') {
+        } else if (FAILED.has(s)) {
           clearInterval(poll)
           setReaderStatus('failed')
           setStatusMessage('Payment declined.')
-        } else if (d.status === 'EXPIRED') {
+        } else if (EXPIRED.has(s)) {
           clearInterval(poll)
           setReaderStatus('cancelled')
           setStatusMessage('Payment session expired.')
+        } else if (CANCELLED.has(s)) {
+          clearInterval(poll)
+          setReaderStatus('cancelled')
+          setStatusMessage('Payment was cancelled.')
         }
       } catch { }
     }, 2500)
