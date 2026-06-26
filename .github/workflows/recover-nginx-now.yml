@@ -1,0 +1,67 @@
+# P0 — recreate prod nginx that died after promote
+name: P0 — recover nginx now
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/recover-nginx-now.yml
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 3m
+          script: |
+            set +e
+            cd /opt/shitaleco
+
+            echo "=== current nginx container state ==="
+            docker ps -a --filter 'name=shitaleco-nginx-1' --format 'table {{.Names}}\t{{.Status}}'
+
+            echo ""
+            echo "=== host systemd nginx grabbing ports 80/443? (was a problem post-reboot) ==="
+            ss -tlnp 'sport = :80 or sport = :443' 2>&1 | head -10
+            systemctl is-active nginx 2>&1 | head -1
+
+            echo ""
+            echo "=== compose up nginx (no force-recreate first, to preserve cert volumes) ==="
+            docker compose -p shitaleco -f docker-compose.prod.yml --env-file .env up -d nginx 2>&1 | tail -10
+
+            sleep 4
+            echo ""
+            echo "=== restart nginx to flush stale backend IP from any older nginx ==="
+            docker restart shitaleco-nginx-1 2>&1 | tail -5
+
+            sleep 5
+            echo ""
+            echo "=== after recovery — public probes ==="
+            for url in https://shital.org.uk/health https://kiosk.shital.org.uk/api/v1/health https://admin.shital.org.uk/admin/ https://donate.shital.org.uk/donate/; do
+              code=$(curl -sk -o /dev/null -w '%{http_code}' -m 8 "$url" 2>/dev/null || echo 000)
+              echo "  $url → $code"
+            done
+
+            echo ""
+            echo "=== nginx last 30 log lines ==="
+            docker logs shitaleco-nginx-1 --tail 30 2>&1 | tail -30
+
+            echo ""
+            echo "=== if STILL 000, force-recreate nginx ==="
+            code=$(curl -sk -o /dev/null -w '%{http_code}' -m 6 https://shital.org.uk/health 2>/dev/null || echo 000)
+            if [ "$code" != "200" ]; then
+              echo ">>> still ${code}, attempting force-recreate"
+              docker compose -p shitaleco -f docker-compose.prod.yml --env-file .env up -d --force-recreate --no-deps nginx 2>&1 | tail -10
+              sleep 6
+              for url in https://shital.org.uk/health https://kiosk.shital.org.uk/api/v1/health https://admin.shital.org.uk/admin/; do
+                code=$(curl -sk -o /dev/null -w '%{http_code}' -m 8 "$url" 2>/dev/null || echo 000)
+                echo "  POST-RECREATE $url → $code"
+              done
+            else
+              echo ">>> ✅ recovered"
+            fi
