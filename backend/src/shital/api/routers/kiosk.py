@@ -2223,18 +2223,27 @@ async def send_receipt(body: ReceiptInput):
     return {"sent": False, "method": "none", "error": f"Unsupported type '{body.type}' or service not configured"}
 
 
-BRANCHES = [
-    {"id": "main",      "name": "Wembley",       "name_gu": "વેમ્બ્લી",    "name_hi": "वेम्बली",    "city": "Wembley, London",   "postcode": "HA9 0EW"},
-    {"id": "leicester", "name": "Leicester",     "name_gu": "લેસ્ટર",     "name_hi": "लेस्टर",     "city": "Leicester",          "postcode": "LE1"},
-    {"id": "reading",   "name": "Reading",       "name_gu": "રીડિંગ",     "name_hi": "रीडिंग",     "city": "Reading, Berkshire", "postcode": "RG1"},
-    {"id": "mk",        "name": "Milton Keynes", "name_gu": "મિલ્ટન કીન્સ", "name_hi": "मिल्टन कीन्स", "city": "Milton Keynes",      "postcode": "MK9"},
-]
-
-
 @router.get("/branches")
 async def list_branches():
-    """List all Shital Temple branches for kiosk branch selection."""
-    return {"branches": BRANCHES}
+    """List active branches from the DB for kiosk branch selection.
+
+    Previously returned a hardcoded 4-entry list whose IDs (main / mk /
+    reading / leicester) didn't match the DB rows (wembley_main /
+    milton_keynes_branch / reading_branch / leicester) — so any kiosk
+    that called this got phantom branches and couldn't see newly-added
+    ones. Now queries the same branches table the Service app uses.
+    """
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            SELECT branch_id AS id, name,
+                   COALESCE(city, '') AS city,
+                   COALESCE(postcode, '') AS postcode
+            FROM   branches
+            WHERE  is_active = true
+            ORDER  BY name
+        """))
+        rows = [dict(r) for r in result.mappings()]
+    return {"branches": rows}
 
 
 # ─── Kiosk Print Receipt Template ─────────────────────────────────────────────

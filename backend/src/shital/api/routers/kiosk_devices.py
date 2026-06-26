@@ -411,25 +411,56 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
 # they couldn't already do by hitting the public config endpoints.
 @router.post("/{device_id}/heartbeat")
 async def kiosk_heartbeat(device_id: str) -> dict[str, Any]:
+    """
+    Kiosk → backend every ~30s. Two jobs in one round-trip:
+      1. Bump last_seen_at so the admin Kiosks panel shows ONLINE.
+      2. Atomically read + clear any pending_command queued by an admin
+         (e.g. 'refresh', 'restart', 'logout') and return it to the kiosk
+         so it can act on it. Clearing on read means the command fires at
+         most once per click — no looping if the kiosk reload succeeds.
+
+    Returns 410 Gone if device_id doesn't match a live kiosk_devices row,
+    so the kiosk knows its identity has changed (deleted / token rotated)
+    and can re-prompt for login instead of heartbeating into the void.
+    """
     async with SessionLocal() as db:
-        result = await db.execute(
+        # Atomic read-then-clear via CTE: snapshot the old pending_command
+        # value (which RETURNING alone can't give us — Postgres has no OLD),
+        # then update last_seen_at + null out the command.
+        row = (await db.execute(
             text("""
-                UPDATE kiosk_devices
-                SET    last_seen_at = NOW()
-                WHERE  id = CAST(:id AS UUID)
-                  AND  deleted_at IS NULL
+                WITH old AS (
+                    SELECT pending_command, pending_command_at
+                    FROM   kiosk_devices
+                    WHERE  id = CAST(:id AS UUID)
+                      AND  deleted_at IS NULL
+                    FOR UPDATE
+                ),
+                upd AS (
+                    UPDATE kiosk_devices
+                    SET    last_seen_at       = NOW(),
+                           pending_command    = NULL,
+                           pending_command_at = NULL,
+                           updated_at         = NOW()
+                    WHERE  id = CAST(:id AS UUID)
+                      AND  deleted_at IS NULL
+                    RETURNING id
+                )
+                SELECT old.pending_command AS prev_cmd,
+                       old.pending_command_at AS prev_cmd_at,
+                       upd.id AS matched_id
+                FROM   upd LEFT JOIN old ON true
             """),
             {"id": device_id},
-        )
+        )).mappings().first()
         await db.commit()
-    updated = bool(getattr(result, "rowcount", 0))
     # Tell the client honestly when its stored kiosk_device_id no longer
     # matches any row (device was re-paired / soft-deleted in admin). Returning
     # 410 Gone lets the client auto-recover by re-fetching its device id via
     # refresh-config — no staff re-login required. The previous {ok:true,
     # updated:false} was invisible to the client so devices silently zombied
     # for hours showing OFFLINE while actively taking donations.
-    if not updated:
+    if not row:
         import logging
         logging.getLogger("shital.kiosk").warning(
             "heartbeat_unknown_device device_id=%s — client should refresh-config", device_id,
@@ -438,7 +469,12 @@ async def kiosk_heartbeat(device_id: str) -> dict[str, Any]:
             status_code=410,
             detail={"reason": "unknown_or_deleted_device", "device_id": device_id},
         )
-    return {"ok": True, "updated": True}
+    return {
+        "ok": True,
+        "updated": True,
+        "command":  row.get("prev_cmd"),
+        "queued_at": row["prev_cmd_at"].isoformat() if row.get("prev_cmd_at") else None,
+    }
 
 
 @router.post("/{device_id}/regen-token")
