@@ -122,19 +122,32 @@ export function IdleScreen() {
         )}
       </motion.div>
 
-      {/* Org name */}
+      {/* Primary call-to-action — replaced the temple name here so donors
+          immediately understand the kiosk's purpose. Temple name moved to
+          a smaller line below so the branding is still visible. */}
       <motion.h1
-        className="text-5xl font-black mb-2 tracking-tight text-gold-gradient select-none relative z-10"
+        className="text-6xl font-black mb-2 tracking-tight text-gold-gradient select-none relative z-10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
       >
-        {orgName}
+        Donate Here
       </motion.h1>
 
+      {/* Temple name — small, still visible so devotees know which temple */}
       <motion.p
-        className="text-xl mb-2 font-light tracking-widest uppercase select-none relative z-10"
+        className="text-lg mb-1 font-semibold tracking-wide select-none relative z-10"
         style={{ color: th.headerSub }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+      >
+        {orgName}
+      </motion.p>
+
+      <motion.p
+        className="text-base mb-2 font-light tracking-widest uppercase select-none relative z-10"
+        style={{ color: `${th.headerSub}99` }}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.4 }}

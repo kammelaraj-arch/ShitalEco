@@ -13,7 +13,7 @@ export function generateId(): string {
   })
 }
 
-export type KioskTheme = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine' | 'crimson'
+export type KioskTheme = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine' | 'crimson' | 'ivory'
 
 export const THEMES: Record<KioskTheme, {
   name: string; emoji: string; desc: string
@@ -106,6 +106,23 @@ export const THEMES: Record<KioskTheme, {
     basketBtn: '#DC143C', basketBtnHover: '#B91C1C',
     langActive: '#DC143C', langInactive: '#DC143C/40',
   },
+  ivory: {
+    // High-contrast light theme — for kiosks in bright sunlight where dark
+    // saffron/crimson backgrounds get washed out and the screen is hard to
+    // read from across the temple hall. Cream/white background, dark saffron
+    // text, gold accents. Same visual identity, much more legible outdoors.
+    name: 'Ivory Light', emoji: '☁️', desc: 'Bright & legible',
+    headerBg: '#FFFFFF', headerBorder: '#FF9933/40', headerText: '#1C0000', headerSub: '#B85C00',
+    logoBg: 'linear-gradient(135deg,#FF9933,#FF6600)', logoText: '#FFFFFF',
+    sidebarFrom: '#FFFBF5', sidebarTo: '#FFF3E0', sidebarBorder: '#FF9933/30',
+    sidebarText: '#5D2E00', sidebarActiveBg: '#FF9933', sidebarActiveText: '#FFFFFF', sidebarIndicator: '#FF6600',
+    mainBg: '#FFFEFA', sectionHeaderBg: '#FFFFFF', sectionHeaderBorder: '#FF9933/20',
+    sectionTitleColor: '#1C0000', sectionCountColor: '#B85C00',
+    promotedBg: 'linear-gradient(to right,#FFF3E0,#FEF9C3)', promotedBorder: '#FFD700/40', promotedTitleColor: '#92400E',
+    basketBarBg: '#1C0000', basketBarBorder: '#FF9933/40', basketBarText: '#FFFFFF', basketBarSubText: '#FFD700',
+    basketBtn: '#FF9933', basketBtnHover: '#FF7700',
+    langActive: '#B85C00', langInactive: '#B85C00/40',
+  },
 }
 
 export const IDLE_BACKGROUNDS: Record<KioskTheme, string> = {
@@ -115,6 +132,9 @@ export const IDLE_BACKGROUNDS: Record<KioskTheme, string> = {
   peacock: 'linear-gradient(160deg, #003333 0%, #004D40 40%, #003333 100%)',
   jasmine: 'linear-gradient(160deg, #3d1a00 0%, #2d1200 40%, #3d1a00 100%)',
   crimson: 'linear-gradient(160deg, #5C0000 0%, #9B0000 40%, #5C0000 100%)',
+  // Ivory: white cream → soft saffron blush → white again. Stands out
+  // against the donor's dim/lit surroundings without any glare.
+  ivory:   'linear-gradient(160deg, #FFFEFA 0%, #FFF3E0 40%, #FFFEFA 100%)',
 }
 
 export const IDLE_RING_COLORS: Record<KioskTheme, string> = {
@@ -124,6 +144,8 @@ export const IDLE_RING_COLORS: Record<KioskTheme, string> = {
   peacock: 'rgba(77,208,225,0.45)',
   jasmine: 'rgba(255,202,40,0.45)',
   crimson: 'rgba(220,20,60,0.55)',
+  // Darker saffron so the ambient rings stay visible against the cream bg.
+  ivory:   'rgba(255,102,0,0.35)',
 }
 
 export type KioskScreen =

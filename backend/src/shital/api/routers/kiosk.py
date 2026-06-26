@@ -764,8 +764,18 @@ async def list_square_devices():
 
 @router.get("/square/terminal-checkout/{checkout_id}")
 async def square_checkout_status(checkout_id: str):
-    """Poll Square Terminal checkout status."""
+    """Poll Square Terminal checkout status.
 
+    Normalizes Square's vocabulary to the same {PAID|FAILED|CANCELLED|
+    EXPIRED|PENDING} set as the other providers so the kiosk frontend has
+    one switch instead of four. Square's native statuses:
+        PENDING / IN_PROGRESS  →  PENDING (still waiting on donor)
+        COMPLETED              →  PAID
+        CANCEL_REQUESTED       →  PENDING (cancel in flight, not done yet)
+        CANCELED               →  CANCELLED
+        (Square doesn't have an explicit FAILED — declines come back as
+         CANCELED with a cancel_reason; we surface that in raw_status.)
+    """
     base = "https://connect.squareup.com" if settings.SQUARE_ENVIRONMENT == "production" else "https://connect.squareupsandbox.com"
     headers = {"Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}", "Square-Version": "2024-06-04"}
     try:
@@ -773,13 +783,24 @@ async def square_checkout_status(checkout_id: str):
             resp = await client.get(f"{base}/v2/terminals/checkouts/{checkout_id}", headers=headers, timeout=10)
         data = resp.json()
         checkout = data.get("checkout", {})
+        raw = (checkout.get("status") or "UNKNOWN").upper()
+        if raw == "COMPLETED":
+            normalized = "PAID"
+        elif raw == "CANCELED":
+            normalized = "CANCELLED"
+        elif raw in {"PENDING", "IN_PROGRESS", "CANCEL_REQUESTED"}:
+            normalized = "PENDING"
+        else:
+            normalized = "PENDING"  # UNKNOWN — keep polling
         return {
-            "status": checkout.get("status", "UNKNOWN"),
+            "status": normalized,
+            "raw_status": raw,
             "checkout_id": checkout_id,
+            "cancel_reason": checkout.get("cancel_reason", ""),
             "amount": checkout.get("amount_money", {}).get("amount", 0) / 100,
         }
     except Exception as e:
-        return {"status": "UNKNOWN", "error": str(e)}
+        return {"status": "error", "error": str(e)}
 
 
 # ─── Clover Flex / Cloud Pay Display ─────────────────────────────────────────
@@ -873,6 +894,11 @@ async def clover_payment_status(order_id: str):
     base = _clover_base(environment)
     headers = {"Authorization": f"Bearer {access_token}"}
 
+    # Normalizes Clover's order+payments shape to the standard
+    # {PAID|FAILED|CANCELLED|EXPIRED|PENDING} set the kiosk frontend uses
+    # across all providers. Clover doesn't expose a single status field —
+    # it's the latest payment.result on the order; CANCELLED comes from
+    # order.state=LOCKED when the donor backs out of the prompt.
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -883,12 +909,13 @@ async def clover_payment_status(order_id: str):
         payments = data.get("payments", {}).get("elements", [])
         for p in payments:
             if p.get("result") == "SUCCESS":
-                return {"status": "COMPLETED", "payment_id": p.get("id"), "amount": p.get("amount", 0) / 100}
+                return {"status": "PAID", "raw_status": "SUCCESS",
+                        "payment_id": p.get("id"), "amount": p.get("amount", 0) / 100}
             if p.get("result") in ("FAIL", "VOIDED"):
-                return {"status": "FAILED"}
+                return {"status": "FAILED", "raw_status": p.get("result")}
         if data.get("state") == "LOCKED":
-            return {"status": "CANCELLED"}
-        return {"status": "PENDING"}
+            return {"status": "CANCELLED", "raw_status": "LOCKED"}
+        return {"status": "PENDING", "raw_status": data.get("state", "OPEN")}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
