@@ -1,4 +1,4 @@
-# READ-ONLY — verify prod is healthy after promote
+# READ-ONLY — verify prod healthy + new code live after promote (rebased branch)
 name: Check prod post-promote (READ-ONLY)
 on:
   push:
@@ -17,51 +17,43 @@ jobs:
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
-          command_timeout: 90s
+          command_timeout: 120s
           script: |
             set +e
 
             echo "=== Public probes (prod URLs) ==="
-            for url in https://shital.org.uk/health https://kiosk.shital.org.uk/api/v1/health https://admin.shital.org.uk/admin/ https://donate.shital.org.uk/donate/; do
+            for url in https://shital.org.uk/health https://kiosk.shital.org.uk/health https://admin.shital.org.uk/admin/ https://donate.shital.org.uk/donate/ https://service.shital.org.uk/; do
               code=$(curl -sk -o /dev/null -w '%{http_code}' -m 8 "$url" 2>/dev/null || echo 000)
               echo "  $url → $code"
             done
 
             echo ""
-            echo "=== prod backend container state ==="
+            echo "=== all prod containers ==="
+            docker ps --filter 'name=shitaleco-' --format 'table {{.Names}}\t{{.Status}}' | head -15
+
+            echo ""
+            echo "=== backend state ==="
             docker inspect shitaleco-backend-1 --format \
               'Status={{.State.Status}}  StartedAt={{.State.StartedAt}}  Restarts={{.RestartCount}}  OOM={{.State.OOMKilled}}' 2>&1
 
             echo ""
-            echo "=== prod backend image SHA — does the running image match the new code? ==="
-            docker inspect shitaleco-backend-1 --format 'Image={{.Image}}' 2>&1
-            docker exec shitaleco-backend-1 sh -c 'cat /app/.git-sha 2>/dev/null || echo "(no /app/.git-sha)"' 2>&1
-            # Heartbeat-with-command should now return JSON with command field (proves new code)
+            echo "=== new-code proof: heartbeat returns 'command' field (rebased baca289) ==="
             curl -sk -m 6 -X POST https://kiosk.shital.org.uk/api/v1/kiosk-devices/c5c4df64-beba-45d1-b8bb-ff31639bf3fd/heartbeat -o /tmp/hb.json -w 'HTTP %{http_code}\n' 2>&1
-            echo "heartbeat response body:"; cat /tmp/hb.json 2>&1; echo
+            echo "heartbeat body:"; cat /tmp/hb.json 2>&1; echo
 
             echo ""
-            echo "=== FKKW heartbeat freshness (kiosk app should still be ticking after promote) ==="
-            cd /opt/shitaleco
-            set -a; . .env; set +a
-            docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
-              -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
-              psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
-                SELECT name, last_seen_at, (NOW() - last_seen_at) AS age, pending_command
-                FROM kiosk_devices
-                WHERE deleted_at IS NULL
-                ORDER BY last_seen_at DESC NULLS LAST
-                LIMIT 6;
-              " 2>&1 | head -15
+            echo "=== new-code proof: quick-link PayPal endpoint exists (74545de) ==="
+            curl -sk -m 8 -o /dev/null -w 'quick-link → %{http_code}\n' \
+              -X POST https://service.shital.org.uk/api/v1/service/giving/quick-link \
+              -H 'Content-Type: application/json' -d '{"amount":1,"branch_id":"main"}' 2>&1
 
             echo ""
-            echo "=== Latest promote snapshot — did pg_dump finally produce a .sql.gz ? ==="
+            echo "=== did the promote snapshot finally produce a real .sql.gz? (pg_dump PIPESTATUS fix) ==="
             ls -lt /opt/shitaleco/backups/promote-*.sql.gz 2>/dev/null | head -3
-            echo "--- latest pg_dump error log (should be empty/absent now) ---"
             f=$(ls -t /opt/shitaleco/backups/promote-*-pg_dump.log 2>/dev/null | head -1)
-            echo "file: $f"
-            [ -n "$f" ] && wc -c "$f" && tail -10 "$f"
+            echo "latest pg_dump err log: $f"
+            [ -n "$f" ] && wc -c "$f"
 
             echo ""
-            echo "=== last 6 promote-history entries ==="
-            tail -6 /opt/shitaleco/backups/deploy-history.jsonl 2>&1 | head -6
+            echo "=== last 4 deploy-history entries ==="
+            tail -4 /opt/shitaleco/backups/deploy-history.jsonl 2>&1 | head -4
