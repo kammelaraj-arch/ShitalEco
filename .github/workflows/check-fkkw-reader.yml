@@ -1,5 +1,5 @@
-# READ-ONLY — check FKKW device's assigned card reader in the DB (corrected schema)
-name: Check FKKW device reader v2 (READ-ONLY)
+# READ-ONLY — list branches table + check duplicate readers
+name: Check branches + readers (READ-ONLY)
 on:
   push:
     branches:
@@ -22,38 +22,33 @@ jobs:
             set +e
             cd /opt/shitaleco
             set -a; . .env; set +a
-            echo "=== FKKW device row + assigned reader ==="
-            docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
-              -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
-              psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -x -c "
-                SELECT kd.id, kd.name, kd.device_type, kd.branch_id AS kiosk_branch, kd.status,
-                       kd.device_username, kd.card_reader_id,
-                       td.label AS reader_label, td.provider AS reader_provider,
-                       td.stripe_reader_id, td.sumup_reader_serial,
-                       td.branch_id AS reader_branch, td.status AS reader_status
-                FROM kiosk_devices kd
-                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
-                WHERE kd.name ILIKE '%FKKW%' OR kd.device_username ILIKE '%FKKW%'
-                ORDER BY kd.created_at DESC NULLS LAST LIMIT 3;
-              " 2>&1 | head -50
-
-            echo ""
-            echo "=== branches table — does 'Wembley Main' exist? ==="
+            echo "=== ALL branches ==="
             docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
               -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
               psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
-                SELECT id, branch_id, name, status, deleted_at
+                SELECT branch_id, name, city, is_active, created_at::date AS created
                 FROM branches
-                WHERE name ILIKE '%wembley%' OR branch_id ILIKE '%wembley%'
                 ORDER BY name;
+              " 2>&1 | head -30
+
+            echo ""
+            echo "=== duplicate stripe readers (honeydew-everyone-then) ==="
+            docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
+              -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
+              psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
+                SELECT id, label, stripe_reader_id, status, branch_id, created_at, updated_at
+                FROM terminal_devices
+                WHERE label = 'honeydew-everyone-then'
+                ORDER BY created_at;
               " 2>&1 | head -20
 
             echo ""
-            echo "=== If FKKW is fine, also dump kiosk_device_profile assigned (the fallback path that may force Stripe) ==="
+            echo "=== any kiosk_devices pointing at either honeydew row? ==="
             docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
               -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
               psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'kiosk_device_profiles'
-                ORDER BY ordinal_position;
-              " 2>&1 | head -30
+                SELECT kd.name AS kiosk_name, kd.branch_id, kd.card_reader_id, td.label
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                WHERE td.label = 'honeydew-everyone-then';
+              " 2>&1 | head -10
