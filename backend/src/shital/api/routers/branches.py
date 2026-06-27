@@ -276,6 +276,39 @@ async def branch_dashboard(branch_id: str, ctx: CurrentSpace) -> dict[str, Any]:
             WHERE b.branch_id = :bid AND u.deleted_at IS NULL
         """), {"bid": branch_id})).scalar() or 0
 
+        # 8. Operational activity — recent donation events (the live feed)
+        activity = [dict(r) for r in (await db.execute(text("""
+            SELECT id::text AS id,
+                   COALESCE(donor_name, 'Anonymous')        AS donor,
+                   amount,
+                   UPPER(COALESCE(status,''))               AS status,
+                   UPPER(COALESCE(payment_provider,''))     AS provider,
+                   COALESCE(purpose, '')                    AS purpose,
+                   created_at
+            FROM donations
+            WHERE branch_id = :bid AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 15
+        """), {"bid": branch_id})).mappings()]
+        for a in activity:
+            if a.get("created_at") is not None:
+                a["created_at"] = a["created_at"].isoformat()
+            a["amount"] = _safe(a.get("amount"))
+
+        # 9. Operations summary — at-a-glance "what's happening now"
+        ops = await _one(db, """
+            SELECT
+              MAX(created_at)                                                       AS last_donation_at,
+              COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 hour')       AS donations_last_hour,
+              COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours')     AS donations_last_24h,
+              COALESCE(SUM(amount) FILTER (WHERE UPPER(COALESCE(status,''))='COMPLETED'
+                       AND created_at >= NOW() - INTERVAL '24 hours'), 0)           AS amount_last_24h
+            FROM donations
+            WHERE branch_id = :bid AND deleted_at IS NULL
+        """, {"bid": branch_id})
+        if ops.get("last_donation_at") is not None:
+            ops["last_donation_at"] = ops["last_donation_at"].isoformat()
+
     # 8. Actionable alerts
     alerts: list[dict] = []
     offline_devices = [d for d in devices if d["presence"] == "OFFLINE"]
@@ -295,6 +328,12 @@ async def branch_dashboard(branch_id: str, ctx: CurrentSpace) -> dict[str, Any]:
         alerts.append({"severity": "warning", "kind": "no_readers",
                        "message": "No card readers registered to this branch"})
 
+    # Operational rollup: devices active right now + reader health
+    ops["devices_total"]   = len(devices)
+    ops["devices_online"]  = len([d for d in devices if d["presence"] == "ONLINE"])
+    ops["readers_total"]   = len(readers)
+    ops["readers_online"]  = len([r for r in readers if (r.get("status") or "").lower() == "online"])
+
     return {
         "branch": {k: _safe(v) for k, v in branch.items()},
         "donations": {k: _safe(v) for k, v in money.items()},
@@ -304,5 +343,7 @@ async def branch_dashboard(branch_id: str, ctx: CurrentSpace) -> dict[str, Any]:
         "recurring_giving": {k: _safe(v) for k, v in recurring.items()},
         "gift_aid": {k: _safe(v) for k, v in gift_aid.items()},
         "staff_count": int(staff_count),
+        "operations": {k: _safe(v) for k, v in ops.items()},
+        "activity": activity,
         "alerts": alerts,
     }

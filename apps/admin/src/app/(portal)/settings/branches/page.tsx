@@ -35,7 +35,18 @@ interface BranchDashboard {
   recurring_giving: { active_count: number; active_monthly: number; pending_count: number }
   gift_aid: { eligible_count: number; eligible_amount: number }
   staff_count: number
+  operations: { last_donation_at: string | null; donations_last_hour: number; donations_last_24h: number; amount_last_24h: number; devices_total: number; devices_online: number; readers_total: number; readers_online: number }
+  activity: { id: string; donor: string; amount: number; status: string; provider: string; purpose: string; created_at: string }[]
   alerts: { severity: string; kind: string; message: string; items?: string[] }[]
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return 'never'
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
+  if (s < 60) return `${Math.floor(s)}s ago`
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  return `${Math.floor(s / 86400)}d ago`
 }
 
 const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50'
@@ -374,6 +385,17 @@ export default function BranchesPage() {
                   </div>
                 )}
 
+                {/* Operations bar — what's happening now */}
+                <div className="glass rounded-2xl p-4 border border-cyan-500/20 bg-cyan-500/5">
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                    <span className="text-white/50">Last donation <span className="text-white font-bold">{timeAgo(dash.operations.last_donation_at)}</span></span>
+                    <span className="text-white/50">Last hour <span className="text-white font-bold">{dash.operations.donations_last_hour}</span></span>
+                    <span className="text-white/50">24h <span className="text-white font-bold">{dash.operations.donations_last_24h}</span> · <span className="text-white font-bold">£{Number(dash.operations.amount_last_24h).toFixed(2)}</span></span>
+                    <span className="text-white/50">Devices <span className={dash.operations.devices_online > 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>{dash.operations.devices_online}/{dash.operations.devices_total} online</span></span>
+                    <span className="text-white/50">Readers <span className={dash.operations.readers_online > 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>{dash.operations.readers_online}/{dash.operations.readers_total} online</span></span>
+                  </div>
+                </div>
+
                 {/* Money KPIs */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
@@ -464,6 +486,31 @@ export default function BranchesPage() {
                           (r.status || '').toLowerCase() === 'online' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
                           {r.status || 'unknown'}
                         </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Operational activity feed */}
+                <div>
+                  <h3 className="text-white/60 text-sm font-bold mb-2">Recent Activity</h3>
+                  <div className="space-y-1.5">
+                    {dash.activity.length === 0 && <p className="text-white/30 text-sm">No recent donations.</p>}
+                    {dash.activity.map(a => (
+                      <div key={a.id} className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-white/[0.03] border border-temple-border">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                            a.status === 'COMPLETED' ? 'bg-green-400' : a.status === 'FAILED' ? 'bg-red-400' : 'bg-amber-400'}`} />
+                          <span className="text-white text-sm font-semibold truncate">{a.donor}</span>
+                          <span className="text-white/30 text-xs truncate">{a.purpose || a.provider}</span>
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <span className="text-white font-mono font-bold text-sm">£{Number(a.amount).toFixed(2)}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            a.status === 'COMPLETED' ? 'bg-green-500/15 text-green-400' :
+                            a.status === 'FAILED' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}>{a.status || '—'}</span>
+                          <span className="text-white/30 text-xs w-16 text-right">{timeAgo(a.created_at)}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
