@@ -480,6 +480,14 @@ async def giving_quick_link(body: QuickLinkBody) -> dict[str, Any]:
                     "return_url": "https://service.shital.org.uk/?screen=monthly-giving&status=approved",
                     "cancel_url": "https://service.shital.org.uk/?screen=monthly-giving&status=cancelled",
                     "user_action": "SUBSCRIBE_NOW",
+                    # No address collection — keeps the approval page short and
+                    # surfaces the "Debit or Credit Card" option (when the
+                    # PayPal business account has "PayPal account optional" on).
+                    "shipping_preference": "NO_SHIPPING",
+                    "payment_method": {
+                        "payer_selected": "PAYPAL",
+                        "payee_preferred": "UNRESTRICTED",
+                    },
                 },
             })
             sub_r.raise_for_status()
