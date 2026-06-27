@@ -94,3 +94,5 @@ jobs:
             echo "=== prod still healthy after deployer restart? ==="
             curl -sk -o /dev/null -w '/health → %{http_code}\n' -m 8 https://shital.org.uk/health
             rm -rf /opt/shitaleco/__incoming 2>/dev/null
+
+# trigger 20260627T084745Z
