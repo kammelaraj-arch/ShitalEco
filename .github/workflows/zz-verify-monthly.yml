@@ -1,0 +1,39 @@
+# READ-ONLY — verify the monthly-giving quick-link works end-to-end on prod
+name: Verify monthly quick-link (READ-ONLY)
+on:
+  push:
+    branches:
+      - claude/branch-dashboard-ops
+    paths:
+      - .github/workflows/zz-verify-monthly.yml
+
+jobs:
+  v:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 60s
+          script: |
+            set +e
+            echo "=== prod health + new-code proof ==="
+            curl -sk -o /dev/null -w '/health -> %{http_code}\n' -m 8 https://shital.org.uk/health
+
+            echo ""
+            echo "=== quick-link end-to-end (expect 200 + approval_url) ==="
+            curl -sk -m 15 -X POST https://shital.org.uk/api/v1/service/giving/quick-link \
+              -H 'Content-Type: application/json' \
+              -d '{"amount":5,"branch_id":"wembley_main"}' \
+              -w '\nHTTP %{http_code}\n' 2>&1 | head -20
+
+            echo ""
+            echo "=== last 3 deploy-history entries ==="
+            tail -3 /opt/shitaleco/backups/deploy-history.jsonl 2>&1 | head -3
+
+            echo ""
+            echo "=== latest promote snapshot — real .sql.gz now? (pg_dump fix) ==="
+            ls -lt /opt/shitaleco/backups/promote-*.sql.gz 2>/dev/null | head -2
