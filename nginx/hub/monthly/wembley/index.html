@@ -56,17 +56,13 @@
     color: rgba(212,175,55,0.7); margin-bottom: 0.8rem; }
 
   .amounts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-bottom: 0.8rem; }
-  .amt { position: relative; text-align: left; cursor: pointer; border-radius: 18px; padding: 1.1rem;
-    background: rgba(255,255,255,0.04); border: 2px solid rgba(255,255,255,0.1); transition: all .15s; }
+  .amt { text-align: center; cursor: pointer; border-radius: 18px; padding: 1.5rem 1rem;
+    background: rgba(255,255,255,0.04); border: 2px solid rgba(255,255,255,0.1); transition: all .15s;
+    display: flex; align-items: center; justify-content: center; }
   .amt:hover { border-color: rgba(212,175,55,0.5); transform: translateY(-2px); }
   .amt.sel { border-color: var(--gold);
     background: linear-gradient(135deg,rgba(212,175,55,0.25),rgba(212,175,55,0.10)); }
-  .amt .v { font-size: 1.6rem; font-weight: 800; color: var(--gold); }
-  .amt .lab { font-size: 0.82rem; font-weight: 700; color: var(--text); margin-top: 0.1rem; }
-  .amt .desc { font-size: 0.72rem; color: var(--faint); margin-top: 0.25rem; line-height: 1.35; }
-  .badge { position: absolute; top: 0.7rem; right: 0.7rem; font-size: 0.56rem; font-weight: 900;
-    letter-spacing: 1px; text-transform: uppercase; color: var(--gold);
-    background: rgba(212,175,55,0.2); border-radius: 999px; padding: 0.15rem 0.5rem; }
+  .amt .v { font-size: 2.1rem; font-weight: 800; color: var(--gold); }
 
   .other { display: flex; align-items: center; gap: 0.8rem; border-radius: 18px; padding: 1rem 1.1rem;
     background: rgba(255,255,255,0.04); border: 2px dashed rgba(212,175,55,0.4); margin-bottom: 1.5rem; }
@@ -139,23 +135,10 @@
     <div id="pick-step">
       <p class="eyebrow">Choose your monthly amount</p>
       <div class="amounts" id="amounts">
-        <div class="amt" data-amt="5">
-          <div class="v">£5</div><div class="lab">Lamp Supporter</div>
-          <div class="desc">Supports daily lamp lighting at the temple</div>
-        </div>
-        <div class="amt sel" data-amt="11">
-          <span class="badge">Popular</span>
-          <div class="v">£11</div><div class="lab">Prasad Patron</div>
-          <div class="desc">Provides weekly prasad offering to devotees</div>
-        </div>
-        <div class="amt" data-amt="21">
-          <div class="v">£21</div><div class="lab">Puja Sponsor</div>
-          <div class="desc">Sponsors a monthly puja ceremony</div>
-        </div>
-        <div class="amt" data-amt="51">
-          <div class="v">£51</div><div class="lab">Festival Friend</div>
-          <div class="desc">Helps cover special festival and event costs</div>
-        </div>
+        <div class="amt" data-amt="5"><div class="v">£5</div></div>
+        <div class="amt sel" data-amt="11"><div class="v">£11</div></div>
+        <div class="amt" data-amt="21"><div class="v">£21</div></div>
+        <div class="amt" data-amt="51"><div class="v">£51</div></div>
       </div>
 
       <div class="other" id="other-card">
