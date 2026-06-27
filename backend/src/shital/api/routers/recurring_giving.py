@@ -428,9 +428,11 @@ async def giving_quick_link(body: QuickLinkBody) -> dict[str, Any]:
     """
     import uuid
     from datetime import datetime
+
     from sqlalchemy import text
-    from shital.core.fabrics.secrets import SecretsManager
+
     from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
 
     amount = float(body.amount)
     if amount < 1 or amount > 1000:

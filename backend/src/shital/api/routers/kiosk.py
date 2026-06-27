@@ -2284,6 +2284,18 @@ async def send_receipt(body: ReceiptInput):
     return {"sent": False, "method": "none", "error": f"Unsupported type '{body.type}' or service not configured"}
 
 
+# Seed data for the FIRST-RUN branch bootstrap in /quick-donation/seed-accounts.
+# NOT used by GET /branches (that reads the live branches table) — this is only
+# the initial set inserted ON CONFLICT DO NOTHING so a fresh DB has branches to
+# attach kiosk accounts to. Editing branches afterwards happens in admin.
+BRANCHES = [
+    {"id": "main",      "name": "Wembley",       "city": "Wembley, London",   "postcode": "HA9 0EW"},
+    {"id": "leicester", "name": "Leicester",     "city": "Leicester",          "postcode": "LE1"},
+    {"id": "reading",   "name": "Reading",       "city": "Reading, Berkshire", "postcode": "RG1"},
+    {"id": "mk",        "name": "Milton Keynes", "city": "Milton Keynes",      "postcode": "MK9"},
+]
+
+
 @router.get("/branches")
 async def list_branches():
     """List active branches from the DB for kiosk branch selection.
