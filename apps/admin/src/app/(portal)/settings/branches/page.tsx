@@ -35,6 +35,11 @@ interface BranchDashboard {
   recurring_giving: { active_count: number; active_monthly: number; pending_count: number }
   gift_aid: { eligible_count: number; eligible_amount: number }
   staff_count: number
+  hr: { active_employees: number; new_starters_month: number; leavers_month: number; on_leave_now: number; leave_days_month: number }
+  on_leave: { name: string; start_date: string; end_date: string; days: number }[]
+  tasks: { completed: number; outstanding: number; overdue: number; completed_month: number }
+  outstanding_tasks: { title: string; status: string; due_date: string | null; priority: string }[]
+  performance: { score: number; grade: string; components: { payment_success_rate: number; device_uptime: number; reader_uptime: number; task_completion_rate: number }; month_income: number }
   operations: { last_donation_at: string | null; donations_last_hour: number; donations_last_24h: number; amount_last_24h: number; devices_total: number; devices_online: number; readers_total: number; readers_online: number }
   activity: { id: string; donor: string; amount: number; status: string; provider: string; purpose: string; created_at: string }[]
   alerts: { severity: string; kind: string; message: string; items?: string[] }[]
@@ -385,6 +390,37 @@ export default function BranchesPage() {
                   </div>
                 )}
 
+                {/* Overall performance hero */}
+                <div className="glass rounded-2xl p-5 border border-temple-border flex items-center gap-5">
+                  <div className="flex flex-col items-center justify-center w-24 h-24 rounded-2xl flex-shrink-0"
+                    style={{ background: `conic-gradient(${dash.performance.score >= 75 ? '#22C55E' : dash.performance.score >= 60 ? '#F59E0B' : '#EF4444'} ${dash.performance.score * 3.6}deg, rgba(255,255,255,0.06) 0deg)` }}>
+                    <div className="w-[84px] h-[84px] rounded-2xl bg-temple-deep flex flex-col items-center justify-center">
+                      <span className="text-white font-black text-2xl">{dash.performance.score}</span>
+                      <span className="text-white/40 text-[10px]">/ 100</span>
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-white font-black text-lg">Overall Performance</h3>
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                        dash.performance.score >= 75 ? 'bg-green-500/20 text-green-400' :
+                        dash.performance.score >= 60 ? 'bg-amber-500/20 text-amber-400' : 'bg-red-500/20 text-red-400'}`}>
+                        {dash.performance.grade}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 mt-2 text-xs">
+                      {[
+                        { l: 'Payment success', v: dash.performance.components.payment_success_rate },
+                        { l: 'Device uptime', v: dash.performance.components.device_uptime },
+                        { l: 'Reader uptime', v: dash.performance.components.reader_uptime },
+                        { l: 'Task completion', v: dash.performance.components.task_completion_rate },
+                      ].map((c, i) => (
+                        <div key={i}><span className="text-white/40">{c.l}</span> <span className="text-white font-bold">{c.v}%</span></div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Operations bar — what's happening now */}
                 <div className="glass rounded-2xl p-4 border border-cyan-500/20 bg-cyan-500/5">
                   <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
@@ -432,6 +468,70 @@ export default function BranchesPage() {
                     <p className="text-white/40 text-xs uppercase">Staff</p>
                     <p className="text-white font-black text-lg mt-1">{dash.staff_count}</p>
                   </div>
+                </div>
+
+                {/* HR — staff worked this month + leave */}
+                <div>
+                  <h3 className="text-white/60 text-sm font-bold mb-2">Staff & Leave (this month)</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                    {[
+                      { l: 'Active staff', v: dash.hr.active_employees },
+                      { l: 'New starters', v: dash.hr.new_starters_month },
+                      { l: 'Leavers', v: dash.hr.leavers_month },
+                      { l: 'On leave now', v: dash.hr.on_leave_now },
+                      { l: 'Leave days', v: dash.hr.leave_days_month },
+                    ].map((k, i) => (
+                      <div key={i} className="glass rounded-xl p-3 border border-temple-border text-center">
+                        <p className="text-white font-black text-xl">{k.v}</p>
+                        <p className="text-white/40 text-[11px] mt-0.5">{k.l}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {dash.on_leave.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {dash.on_leave.map((p, i) => (
+                        <span key={i} className="text-xs px-3 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                          🌴 {p.name} · until {new Date(p.end_date).toLocaleDateString('en-GB')}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Tasks / activities */}
+                <div>
+                  <h3 className="text-white/60 text-sm font-bold mb-2">Activities & Tasks</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { l: 'Outstanding', v: dash.tasks.outstanding, c: 'text-amber-400' },
+                      { l: 'Overdue', v: dash.tasks.overdue, c: 'text-red-400' },
+                      { l: 'Completed (mo)', v: dash.tasks.completed_month, c: 'text-green-400' },
+                      { l: 'Completed (all)', v: dash.tasks.completed, c: 'text-white' },
+                    ].map((k, i) => (
+                      <div key={i} className="glass rounded-xl p-3 border border-temple-border text-center">
+                        <p className={`font-black text-xl ${k.c}`}>{k.v}</p>
+                        <p className="text-white/40 text-[11px] mt-0.5">{k.l}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {dash.outstanding_tasks.length > 0 && (
+                    <div className="space-y-1.5 mt-2">
+                      {dash.outstanding_tasks.map((t, i) => {
+                        const overdue = t.due_date && new Date(t.due_date) < new Date()
+                        return (
+                          <div key={i} className="flex items-center justify-between px-4 py-2 rounded-xl bg-white/[0.03] border border-temple-border">
+                            <span className="text-white text-sm truncate">{t.title}</span>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {t.priority && <span className="text-[10px] text-white/40 uppercase">{t.priority}</span>}
+                              <span className={`text-xs ${overdue ? 'text-red-400 font-bold' : 'text-white/40'}`}>
+                                {t.due_date ? (overdue ? 'overdue ' : 'due ') + new Date(t.due_date).toLocaleDateString('en-GB') : 'no due date'}
+                              </span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* By provider */}

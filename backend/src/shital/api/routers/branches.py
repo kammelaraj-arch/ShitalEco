@@ -276,6 +276,76 @@ async def branch_dashboard(branch_id: str, ctx: CurrentSpace) -> dict[str, Any]:
             WHERE b.branch_id = :bid AND u.deleted_at IS NULL
         """), {"bid": branch_id})).scalar() or 0
 
+        # 7b. HR — staff at branch, new starters / leavers this month, on-leave.
+        #     Wrapped: if the HR tables lag on prod, the dashboard still loads.
+        hr: dict = {"active_employees": 0, "new_starters_month": 0, "leavers_month": 0,
+                    "on_leave_now": 0, "leave_days_month": 0}
+        on_leave: list[dict] = []
+        try:
+            hr = await _one(db, """
+                SELECT
+                  COUNT(*) FILTER (WHERE is_active AND deleted_at IS NULL)                                   AS active_employees,
+                  COUNT(*) FILTER (WHERE start_date >= date_trunc('month', NOW()) AND deleted_at IS NULL)     AS new_starters_month,
+                  COUNT(*) FILTER (WHERE end_date  >= date_trunc('month', NOW()) AND end_date <= NOW())       AS leavers_month
+                FROM employees WHERE branch_id = :bid
+            """, {"bid": branch_id})
+            lv = await _one(db, """
+                SELECT
+                  COUNT(*) FILTER (WHERE lr.start_date <= NOW()::date AND lr.end_date >= NOW()::date
+                                   AND UPPER(COALESCE(lr.status,''))='APPROVED')                        AS on_leave_now,
+                  COALESCE(SUM(lr.days) FILTER (WHERE lr.start_date >= date_trunc('month', NOW())
+                                   AND UPPER(COALESCE(lr.status,''))='APPROVED'), 0)                    AS leave_days_month
+                FROM leave_requests lr
+                JOIN employees e ON e.id = lr.employee_id
+                WHERE e.branch_id = :bid
+            """, {"bid": branch_id})
+            hr.update(lv)
+            on_leave = [dict(r) for r in (await db.execute(text("""
+                SELECT e.full_name AS name, lr.start_date, lr.end_date, lr.days
+                FROM leave_requests lr JOIN employees e ON e.id = lr.employee_id
+                WHERE e.branch_id = :bid
+                  AND lr.start_date <= NOW()::date AND lr.end_date >= NOW()::date
+                  AND UPPER(COALESCE(lr.status,'')) = 'APPROVED'
+                ORDER BY lr.end_date
+            """), {"bid": branch_id})).mappings()]
+            for o in on_leave:
+                for k in ("start_date", "end_date"):
+                    if o.get(k) is not None:
+                        o[k] = o[k].isoformat()
+        except Exception:  # noqa: BLE001 — HR tables optional
+            pass
+
+        # 7c. Tasks / activities — completed vs outstanding for the branch's
+        #     projects (project_tasks → projects.branch_id). Wrapped likewise.
+        tasks: dict = {"completed": 0, "outstanding": 0, "overdue": 0, "completed_month": 0}
+        recent_tasks: list[dict] = []
+        try:
+            tasks = await _one(db, """
+                SELECT
+                  COUNT(*) FILTER (WHERE UPPER(COALESCE(pt.status,''))='DONE')                              AS completed,
+                  COUNT(*) FILTER (WHERE UPPER(COALESCE(pt.status,'')) NOT IN ('DONE','CANCELLED'))         AS outstanding,
+                  COUNT(*) FILTER (WHERE UPPER(COALESCE(pt.status,'')) NOT IN ('DONE','CANCELLED')
+                                   AND pt.due_date IS NOT NULL AND pt.due_date < NOW()::date)               AS overdue,
+                  COUNT(*) FILTER (WHERE UPPER(COALESCE(pt.status,''))='DONE'
+                                   AND pt.completed_at >= date_trunc('month', NOW()))                       AS completed_month
+                FROM project_tasks pt
+                JOIN projects p ON p.id = pt.project_id
+                WHERE p.branch_id = :bid AND pt.deleted_at IS NULL
+            """, {"bid": branch_id})
+            recent_tasks = [dict(r) for r in (await db.execute(text("""
+                SELECT pt.title, UPPER(COALESCE(pt.status,'')) AS status, pt.due_date,
+                       COALESCE(pt.priority,'') AS priority
+                FROM project_tasks pt JOIN projects p ON p.id = pt.project_id
+                WHERE p.branch_id = :bid AND pt.deleted_at IS NULL
+                  AND UPPER(COALESCE(pt.status,'')) NOT IN ('DONE','CANCELLED')
+                ORDER BY pt.due_date NULLS LAST LIMIT 8
+            """), {"bid": branch_id})).mappings()]
+            for t in recent_tasks:
+                if t.get("due_date") is not None:
+                    t["due_date"] = t["due_date"].isoformat()
+        except Exception:  # noqa: BLE001 — task tables optional
+            pass
+
         # 8. Operational activity — recent donation events (the live feed)
         activity = [dict(r) for r in (await db.execute(text("""
             SELECT id::text AS id,
@@ -334,6 +404,34 @@ async def branch_dashboard(branch_id: str, ctx: CurrentSpace) -> dict[str, Any]:
     ops["readers_total"]   = len(readers)
     ops["readers_online"]  = len([r for r in readers if (r.get("status") or "").lower() == "online"])
 
+    # ── Overall performance score ────────────────────────────────────────────
+    # A simple 0-100 health score from four equally-weighted signals, so staff
+    # get one number plus the components behind it:
+    #   • payment success rate  = completed / (completed + failed)
+    #   • device uptime         = online / total devices
+    #   • reader uptime         = online / total readers
+    #   • task completion rate  = done / (done + outstanding)
+    def _rate(num: float, den: float) -> float:
+        return round(100.0 * num / den, 1) if den else 100.0
+    comp   = float(money.get("completed_count") or 0)
+    failed = float(money.get("failed_count") or 0)
+    done   = float(tasks.get("completed") or 0)
+    outst  = float(tasks.get("outstanding") or 0)
+    perf_components = {
+        "payment_success_rate": _rate(comp, comp + failed),
+        "device_uptime":        _rate(ops["devices_online"], ops["devices_total"]),
+        "reader_uptime":        _rate(ops["readers_online"], ops["readers_total"]),
+        "task_completion_rate": _rate(done, done + outst),
+    }
+    perf_score = round(sum(perf_components.values()) / len(perf_components), 1)
+    performance = {
+        "score": perf_score,
+        "grade": "Excellent" if perf_score >= 90 else "Good" if perf_score >= 75
+                 else "Fair" if perf_score >= 60 else "Needs attention",
+        "components": perf_components,
+        "month_income": _safe(money.get("month_amount")),
+    }
+
     return {
         "branch": {k: _safe(v) for k, v in branch.items()},
         "donations": {k: _safe(v) for k, v in money.items()},
@@ -343,6 +441,11 @@ async def branch_dashboard(branch_id: str, ctx: CurrentSpace) -> dict[str, Any]:
         "recurring_giving": {k: _safe(v) for k, v in recurring.items()},
         "gift_aid": {k: _safe(v) for k, v in gift_aid.items()},
         "staff_count": int(staff_count),
+        "hr": {k: _safe(v) for k, v in hr.items()},
+        "on_leave": on_leave,
+        "tasks": {k: _safe(v) for k, v in tasks.items()},
+        "outstanding_tasks": recent_tasks,
+        "performance": performance,
         "operations": {k: _safe(v) for k, v in ops.items()},
         "activity": activity,
         "alerts": alerts,
