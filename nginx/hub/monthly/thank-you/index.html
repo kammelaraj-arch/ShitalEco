@@ -4,47 +4,52 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Thank You — Monthly Giving · SHITAL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --gold:#D4AF37; --saffron:#FF9933; --text:#FFF8DC; --muted:rgba(255,248,220,0.5); --faint:rgba(255,248,220,0.28); }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    background: radial-gradient(120% 90% at 50% 0%, #a8133a 0%, #8a0e2c 55%, #6f0a22 100%) fixed;
-    color: #1c0a00; min-height: 100vh;
+    background: radial-gradient(120% 80% at 50% 0%, #1a0604 0%, #0E0303 45%, #060100 100%) fixed;
+    color: var(--text); min-height: 100vh;
     display: flex; align-items: flex-start; justify-content: center; padding: 2.5rem 1rem 4rem;
   }
-  .card {
-    width: 100%; max-width: 460px; background: #fff; border: 1px solid #f0e6d6;
-    border-radius: 24px; padding: 2.2rem 1.6rem; box-shadow: 0 14px 50px rgba(0,0,0,0.25);
-    text-align: center;
-  }
-  .baba { width: 110px; height: 110px; border-radius: 50%; object-fit: cover;
-    border: 4px solid #FF9933; box-shadow: 0 6px 20px rgba(138,14,44,0.3);
+  .font-display { font-family: 'Cinzel', Georgia, serif; }
+  .card { width: 100%; max-width: 480px; text-align: center; }
+  .baba { width: 120px; height: 120px; border-radius: 50%; object-fit: cover;
+    border: 4px solid var(--saffron); box-shadow: 0 6px 24px rgba(0,0,0,0.5);
     margin: 0 auto 0.4rem; display: block; }
-  .tick { font-size: 2.6rem; }
-  .temple { color: #8a0e2c; font-weight: 800; font-size: 1rem; margin-top: 0.3rem; }
-  h1 { font-size: 1.5rem; font-weight: 800; margin-top: 0.1rem; color: #8a0e2c; }
-  p { color: #6f5436; font-size: 0.95rem; margin-top: 0.7rem; line-height: 1.5; }
-  .amt { color: #b85c00; font-weight: 800; }
-  .bless { background: linear-gradient(135deg,#fff5e6,#fff8ee); border: 1px solid #ffe2bf;
+  .tick { font-size: 2.4rem; }
+  .temple { color: var(--gold); font-weight: 800; font-size: 0.95rem; letter-spacing: 1px;
+    text-transform: uppercase; margin-top: 0.3rem; }
+  h1 { font-size: 1.7rem; font-weight: 800; margin-top: 0.2rem; letter-spacing: 1.5px;
+    text-transform: uppercase;
+    background: linear-gradient(90deg,#D4AF37,#FFD700,#C5A028); -webkit-background-clip: text;
+    background-clip: text; -webkit-text-fill-color: transparent; }
+  p { color: var(--muted); font-size: 0.95rem; margin-top: 0.7rem; line-height: 1.55; }
+  .amt { color: var(--gold); font-weight: 800; }
+  .bless { background: rgba(255,255,255,0.055); border: 1px solid rgba(212,175,55,0.3);
     border-radius: 18px; padding: 1.1rem 1.1rem; margin-top: 1.3rem; }
-  .bless .q { color: #7a4a00; font-size: 0.95rem; font-style: italic; line-height: 1.6; }
-  .bless .by { color: #b85c00; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.5px;
+  .bless .q { color: #f3e3b0; font-size: 0.95rem; font-style: italic; line-height: 1.6; }
+  .bless .by { color: var(--gold); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.6px;
     margin-top: 0.6rem; text-transform: uppercase; }
-  .ref { font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; color: #8a6a45;
-    background: #fff8ee; border: 1px solid #ffe2bf; border-radius: 12px;
+  .ref { font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; color: var(--gold);
+    background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.3); border-radius: 12px;
     padding: 0.6rem 0.8rem; margin-top: 1.2rem; word-break: break-all; }
-  .note { font-size: 0.82rem; color: #8a6a45; margin-top: 1.2rem; text-align: left;
-    background: #fbf6ee; border: 1px solid #f0e6d6; border-radius: 14px; padding: 0.9rem 1rem; }
-  .note a { color: #b85c00; }
+  .shr { color: var(--gold); font-weight: 800; font-size: 1rem; margin-top: 0.6rem; letter-spacing: 1px; }
+  .note { font-size: 0.82rem; color: var(--muted); margin-top: 1.2rem; text-align: left;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(212,175,55,0.2); border-radius: 14px; padding: 0.9rem 1rem; }
+  .note a { color: var(--gold); }
   .home { display: inline-block; margin-top: 1.4rem; text-decoration: none;
-    background: linear-gradient(135deg,#FF9933,#b85c00); color: #fff; font-weight: 800;
-    padding: 0.8rem 1.4rem; border-radius: 14px; }
-  .foot { color: #9a7e5c; font-size: 0.74rem; margin-top: 1.4rem;
-    border-top: 1px solid #f0e6d6; padding-top: 1rem; line-height: 1.55; }
+    background: linear-gradient(135deg,#D4AF37,#FFD700,#C5A028); color: #1A0606; font-weight: 800;
+    padding: 0.85rem 1.5rem; border-radius: 14px; }
+  .foot { color: var(--muted); font-size: 0.74rem; margin-top: 1.6rem;
+    border-top: 1px solid rgba(212,175,55,0.18); padding-top: 1.1rem; line-height: 1.6; }
   .foot p { margin: 0.15rem 0; }
-  .foot a { color: #b85c00; text-decoration: none; }
-  .foot a:hover { text-decoration: underline; }
-  .foot .charity { color: #8a0e2c; font-weight: 700; margin-top: 0.4rem; }
+  .foot a { color: var(--gold); text-decoration: none; }
+  .foot .charity { color: #f3e3b0; font-weight: 700; margin-top: 0.4rem; }
   .hide { display: none; }
 </style>
 </head>
@@ -54,7 +59,7 @@
          onerror="this.onerror=null;this.src='https://shirdisai.org.uk/Cnt/img/saibaba.jpg'" />
     <div class="tick">🙏</div>
     <p class="temple">Shirdi Saibaba Temple</p>
-    <h1>Baba's Blessings!</h1>
+    <h1 class="font-display">Baba's Blessings</h1>
     <p id="msg">Your monthly support is now active.</p>
     <div class="ref hide" id="refbox">Reference: <span id="ref"></span></div>
 
@@ -63,8 +68,8 @@
       <p class="by">— Shri Shirdi Sai Baba</p>
     </div>
 
-    <p style="margin-top:1.2rem">By giving every month you keep the lamp lit 🪔, the prasad flowing, and the temple doors open for every devotee. May Baba bless you and your family with health, peace and prosperity.</p>
-    <p style="color:#8a0e2c;font-weight:800;margin-top:0.6rem">Shraddha &amp; Saburi</p>
+    <p>By giving every month you keep the lamp lit 🪔, the prasad flowing, and the temple doors open for every devotee. May Baba bless you and your family with health, peace and prosperity.</p>
+    <p class="shr font-display">Shraddha &amp; Saburi</p>
 
     <div class="note">
       <strong>Cancel or change anytime</strong><br>
