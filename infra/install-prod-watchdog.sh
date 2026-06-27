@@ -19,7 +19,15 @@ set -euo pipefail
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEST=/opt/shitaleco/infra
 mkdir -p "$DEST"
-install -m 0755 "$SRC_DIR/watchdog-prod.sh" "$DEST/watchdog-prod.sh"
+# When invoked from /opt/shitaleco/infra itself (e.g. deploy-vultr after a
+# git reset), src and dest are the SAME file — `install` errors out
+# ("are the same file") and, under `set -e`, would abort before the systemd
+# units are written. Only copy when they differ; always ensure it's executable.
+SRC="$SRC_DIR/watchdog-prod.sh"; DST="$DEST/watchdog-prod.sh"
+if [ "$(readlink -f "$SRC" 2>/dev/null)" != "$(readlink -f "$DST" 2>/dev/null)" ]; then
+  install -m 0755 "$SRC" "$DST"
+fi
+chmod 0755 "$DST"
 
 # Drop the legacy */2 cron runner if present — the systemd timer replaces it,
 # and two concurrent runners would race.
