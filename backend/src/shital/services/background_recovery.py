@@ -797,6 +797,146 @@ async def _stripe_reconcile_once(days: int = 14) -> dict[str, Any]:
     return summary
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PayPal monthly-giving reconcile (production sync — PayPal is source of truth)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PAYPAL_SUB_STATUS_MAP = {
+    "ACTIVE": "ACTIVE",
+    "APPROVAL_PENDING": "PENDING_APPROVAL",
+    "APPROVED": "PENDING_APPROVAL",
+    "SUSPENDED": "SUSPENDED",
+    "CANCELLED": "CANCELLED",
+    "EXPIRED": "EXPIRED",
+}
+
+
+async def _paypal_token_and_base() -> tuple[str | None, str]:
+    """Return (access_token, api_base). token is None when unconfigured."""
+    from shital.core.fabrics.secrets import SecretsManager
+    client_id = await SecretsManager.get("PAYPAL_CLIENT_ID") or ""
+    secret    = await SecretsManager.get("PAYPAL_CLIENT_SECRET") or ""
+    env       = await SecretsManager.get("PAYPAL_ENV") or "live"
+    base = "https://api-m.paypal.com" if env == "live" else "https://api-m.sandbox.paypal.com"
+    if not client_id or not secret:
+        return None, base
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(f"{base}/v1/oauth2/token", auth=(client_id, secret),
+                             data={"grant_type": "client_credentials"})
+            r.raise_for_status()
+            return r.json()["access_token"], base
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("paypal_token_failed", error=str(exc))
+        return None, base
+
+
+async def _paypal_reconcile_once(days: int = 35) -> dict[str, Any]:
+    """Reconcile monthly-giving subscriptions against PayPal (source of truth).
+
+    Two passes, both idempotent:
+      1. STATUS — for every subscription row that is not in a terminal state,
+         GET the subscription from PayPal and map APPROVAL_PENDING/APPROVED →
+         PENDING_APPROVAL, ACTIVE → ACTIVE, CANCELLED/EXPIRED/SUSPENDED likewise.
+         This unsticks rows that never received the BILLING webhook.
+      2. PAYMENTS — for every ACTIVE subscription, pull its PayPal transactions
+         for the window and record any captured payment not already present in
+         `donations` (matched by payment_ref = the PayPal transaction id), so
+         the books + Gift Aid reflect money that actually moved.
+
+    Safe to run daily. Returns a summary dict.
+    """
+    token, base = await _paypal_token_and_base()
+    if not token:
+        return {"skipped": "paypal_not_configured"}
+
+    summary: dict[str, Any] = {
+        "scanned": 0, "status_updated": 0, "activated": 0, "cancelled": 0,
+        "payments_recorded": 0, "errors": 0, "days_window": days,
+    }
+    hdrs = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    now = datetime.now(UTC)
+    start = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # 1) Pull non-terminal subscriptions with a PayPal id.
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT id::text AS id, paypal_subscription_id AS sub_id,
+                   UPPER(COALESCE(status,'')) AS status, branch_id, amount,
+                   COALESCE(gift_aid_declared, false) AS ga
+            FROM recurring_giving_subscriptions
+            WHERE paypal_subscription_id IS NOT NULL
+              AND paypal_subscription_id <> ''
+              AND UPPER(COALESCE(status,'')) NOT IN ('CANCELLED','EXPIRED')
+              AND created_at >= NOW() - (:days || ' days')::interval
+        """), {"days": str(days)})).mappings().all()
+
+    async with httpx.AsyncClient(timeout=20) as c:
+        for r in rows:
+            summary["scanned"] += 1
+            sub_id = r["sub_id"]
+            try:
+                sub = await c.get(f"{base}/v1/billing/subscriptions/{sub_id}", headers=hdrs)
+                if sub.status_code == 404:
+                    continue
+                sub.raise_for_status()
+                pp_status = (sub.json().get("status") or "").upper()
+                mapped = _PAYPAL_SUB_STATUS_MAP.get(pp_status)
+                if mapped and mapped != r["status"]:
+                    async with SessionLocal() as db:
+                        await db.execute(text("""
+                            UPDATE recurring_giving_subscriptions
+                            SET status = :st, updated_at = NOW()
+                            WHERE id = CAST(:id AS UUID)
+                        """), {"st": mapped, "id": r["id"]})
+                        await db.commit()
+                    summary["status_updated"] += 1
+                    if mapped == "ACTIVE":
+                        summary["activated"] += 1
+                    elif mapped in ("CANCELLED", "EXPIRED"):
+                        summary["cancelled"] += 1
+
+                # 2) Payments — only for ACTIVE subs.
+                if (mapped or r["status"]) == "ACTIVE":
+                    txns = await c.get(
+                        f"{base}/v1/billing/subscriptions/{sub_id}/transactions"
+                        f"?start_time={start}&end_time={end}", headers=hdrs)
+                    if not txns.is_success:
+                        continue
+                    for t in (txns.json().get("transactions") or []):
+                        if (t.get("status") or "").upper() != "COMPLETED":
+                            continue
+                        txn_id = t.get("id") or ""
+                        amt = (t.get("amount_with_breakdown") or {}).get("gross_amount") or {}
+                        value = float(amt.get("value") or r["amount"] or 0)
+                        if not txn_id or value <= 0:
+                            continue
+                        async with SessionLocal() as db:
+                            exists = (await db.execute(text(
+                                "SELECT 1 FROM donations WHERE payment_ref = :ref LIMIT 1"
+                            ), {"ref": txn_id})).first()
+                            if exists:
+                                continue
+                            await db.execute(text("""
+                                INSERT INTO donations
+                                    (id, branch_id, amount, currency, purpose,
+                                     payment_provider, payment_ref, status, source,
+                                     gift_aid_eligible, created_at, updated_at)
+                                VALUES
+                                    (gen_random_uuid(), :bid, :amt, 'GBP', 'Monthly Giving',
+                                     'paypal', :ref, 'COMPLETED', 'monthly-giving',
+                                     :ga, NOW(), NOW())
+                            """), {"bid": r["branch_id"], "amt": value, "ref": txn_id, "ga": bool(r["ga"])})
+                            await db.commit()
+                        summary["payments_recorded"] += 1
+            except Exception as exc:  # noqa: BLE001
+                summary["errors"] += 1
+                logger.warning("paypal_reconcile_row_failed", sub_id=sub_id, error=str(exc))
+
+    return summary
+
+
 async def recovery_loop() -> None:
     """Forever-loop. Sleeps RECOVERY_INTERVAL_SECONDS between passes.
     Each pass runs the SumUp sweep, the Stripe reconcile, the Stripe account-health
@@ -820,6 +960,11 @@ async def recovery_loop() -> None:
             logger.info("recovery_stripe_health", result=stripe_health)
         except Exception as exc:  # noqa: BLE001
             logger.error("recovery_stripe_health_failed", error=str(exc))
+        try:
+            paypal = await _paypal_reconcile_once()
+            logger.info("recovery_paypal_reconcile", result=paypal)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("recovery_paypal_reconcile_failed", error=str(exc))
         try:
             digest = await _alert_digest_once()
             logger.info("recovery_alert_digest", result=digest)

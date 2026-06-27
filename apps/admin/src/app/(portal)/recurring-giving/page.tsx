@@ -33,6 +33,24 @@ export default function RecurringGivingPage() {
   const [linkAmount, setLinkAmount] = useState('11')
   const [linkBranch, setLinkBranch] = useState('')
   const [copied, setCopied]   = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [syncNote, setSyncNote] = useState('')
+
+  async function syncPayPal() {
+    setSyncing(true); setSyncNote('')
+    try {
+      const r = await fetch(`${API}/admin/giving/sync-paypal`, { method: 'POST', headers: authHeaders() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      const d = await r.json()
+      const x = d.result || {}
+      setSyncNote(x.skipped
+        ? `Skipped: ${x.skipped}`
+        : `Synced ${x.scanned ?? 0} subscriptions · ${x.status_updated ?? 0} status updates · ${x.activated ?? 0} activated · ${x.payments_recorded ?? 0} payments recorded`)
+      await loadSubs()
+    } catch (e) {
+      setSyncNote(e instanceof Error ? e.message : 'Sync failed')
+    } finally { setSyncing(false) }
+  }
 
   const SERVICE_BASE = 'https://service.shital.org.uk'
   const buildLink = (amount: string | number, branch = '') =>
@@ -192,6 +210,15 @@ export default function RecurringGivingPage() {
       {/* Subscriptions tab */}
       {tab === 'subs' && (
         <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-white/40 text-xs">PayPal is the source of truth — sync pulls live statuses + records any payments.</p>
+            <button onClick={syncPayPal} disabled={syncing}
+              className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
+              style={{ background: 'linear-gradient(135deg,#0070BA,#003087)' }}>
+              {syncing ? 'Syncing…' : '↻ Sync from PayPal'}
+            </button>
+          </div>
+          {syncNote && <p className="text-xs rounded-lg px-3 py-2 bg-cyan-500/10 text-cyan-200 border border-cyan-500/20">{syncNote}</p>}
           {subs.length === 0 && <p className="text-white/40 text-sm">No subscriptions yet.</p>}
           {subs.map(s => (
             <div key={s.id} className="rounded-xl p-4 flex items-center gap-4"

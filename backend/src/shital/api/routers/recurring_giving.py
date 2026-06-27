@@ -789,6 +789,19 @@ class TierBody(BaseModel):
     display_order: int = 0
 
 
+@router.post("/admin/giving/sync-paypal")
+async def admin_sync_paypal(space: CurrentSpace, days: int = 35) -> dict[str, Any]:
+    """Run the full PayPal monthly-giving reconcile on demand — the same daily
+    sweep the background loop runs: refresh every subscription's status from
+    PayPal and record any captured payments into donations. Works regardless
+    of whether the background loop is enabled. SUPER_ADMIN / ADMIN only."""
+    if space.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(403, detail="SUPER_ADMIN or ADMIN required")
+    from shital.services.background_recovery import _paypal_reconcile_once
+    result = await _paypal_reconcile_once(days=days)
+    return {"ok": True, "result": result}
+
+
 @router.post("/admin/giving/tiers")
 async def admin_create_tier(body: TierBody, space: CurrentSpace) -> dict[str, Any]:
     from sqlalchemy import text
