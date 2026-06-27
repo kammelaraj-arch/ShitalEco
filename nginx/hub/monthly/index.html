@@ -45,6 +45,16 @@
   .err { color: #c0392b; font-size: 0.85rem; text-align: center; margin-top: 0.8rem; min-height: 1rem; }
   .foot { text-align: center; color: #b59a78; font-size: 0.75rem; margin-top: 1.4rem; }
   .cards { text-align: center; margin-top: 0.6rem; font-size: 1.1rem; letter-spacing: 2px; }
+  /* PayPal buttons stage */
+  #pay-stage { margin-top: 0.4rem; }
+  .summary { display: flex; align-items: center; justify-content: space-between;
+    background: #fff8ee; border: 1px solid #ffe2bf; border-radius: 16px;
+    padding: 0.85rem 1rem; margin-bottom: 1rem; }
+  .summary b { color: #b85c00; font-size: 1.15rem; }
+  .summary .chg { color: #0070BA; font-size: 0.8rem; font-weight: 700; cursor: pointer;
+    background: none; border: none; }
+  .spin { text-align: center; color: #8a6a45; font-size: 0.9rem; padding: 0.6rem 0; }
+  .hide { display: none !important; }
 </style>
 </head>
 <body>
@@ -54,42 +64,61 @@
     <h1>Monthly Giving</h1>
     <p class="sub" id="sub">Shirdi Saibaba Temple · Support the temple every month 🙏</p>
 
-    <div class="amounts" id="amounts">
-      <div class="amt" data-amt="5">£5<small>Lamp Supporter</small></div>
-      <div class="amt sel" data-amt="11">£11<small>Prasad Patron</small></div>
-      <div class="amt" data-amt="21">£21<small>Puja Sponsor</small></div>
-      <div class="amt" data-amt="51">£51<small>Festival Friend</small></div>
+    <!-- STEP 1 — pick amount -->
+    <div id="pick-step">
+      <div class="amounts" id="amounts">
+        <div class="amt" data-amt="5">£5<small>Lamp Supporter</small></div>
+        <div class="amt sel" data-amt="11">£11<small>Prasad Patron</small></div>
+        <div class="amt" data-amt="21">£21<small>Puja Sponsor</small></div>
+        <div class="amt" data-amt="51">£51<small>Festival Friend</small></div>
+      </div>
+
+      <div class="custom">
+        <span>£</span>
+        <input id="custom" type="number" min="1" max="1000" placeholder="Other amount / month" />
+      </div>
+
+      <button class="go" id="go">Continue →</button>
+      <div class="cards">💳 🟦 mastercard · visa · amex</div>
+      <div class="pp">🔒 Secure · Pay by debit/credit card or PayPal</div>
     </div>
 
-    <div class="custom">
-      <span>£</span>
-      <input id="custom" type="number" min="1" max="1000" placeholder="Other amount / month" />
+    <!-- STEP 2 — PayPal / card buttons -->
+    <div id="pay-stage" class="hide">
+      <div class="summary">
+        <span>Monthly: <b id="pay-amt">£11/month</b></span>
+        <button class="chg" id="change">Change</button>
+      </div>
+      <div class="spin" id="pay-spin">Preparing secure payment…</div>
+      <div id="paypal-card-btn"></div>
+      <div id="paypal-btn" style="margin-top:0.5rem;"></div>
+      <div class="pp" style="margin-top:0.9rem;">🔒 Card payments need no PayPal account · Cancel anytime</div>
     </div>
 
-    <button class="go" id="go">Continue to PayPal →</button>
-    <div class="cards">💳 🟦 mastercard · visa · amex</div>
-    <div class="pp">🔒 Secure · Pay by PayPal or debit/credit card</div>
     <div class="err" id="err"></div>
-
     <p class="foot">SHITAL · UK Registered Charity · You can cancel anytime in PayPal.</p>
   </div>
 
 <script>
-  // Branch attribution: a per-branch page sets window.SHITAL_BRANCH /
-  // window.SHITAL_BRANCH_NAME; otherwise fall back to ?branch= in the URL.
+  // ---- Branch attribution (per-branch pages set window.SHITAL_BRANCH) ----
   var params = new URLSearchParams(location.search);
-  var branch = (window.SHITAL_BRANCH || params.get('branch') || '');
+  var branch = (window.SHITAL_BRANCH || params.get('branch') || 'main');
   if (window.SHITAL_BRANCH_NAME) {
     document.getElementById('sub').textContent =
       window.SHITAL_BRANCH_NAME + ' · Support the temple every month 🙏';
     document.title = 'Monthly Giving — ' + window.SHITAL_BRANCH_NAME;
   }
-  var selected = 11;
 
+  var selected = 11;
   var amtEls = document.querySelectorAll('.amt');
   var custom = document.getElementById('custom');
   var go = document.getElementById('go');
   var err = document.getElementById('err');
+  var pickStep = document.getElementById('pick-step');
+  var payStage = document.getElementById('pay-stage');
+  var paySpin = document.getElementById('pay-spin');
+  var paymentsRendered = false;
+  var sdkReady = null; // promise that resolves when the PayPal SDK is loaded
 
   amtEls.forEach(function (el) {
     el.addEventListener('click', function () {
@@ -104,36 +133,130 @@
     selected = parseFloat(custom.value) || 0;
   });
 
+  function currentAmount() {
+    return custom.value ? parseFloat(custom.value) : selected;
+  }
+
+  // ---- Load the PayPal JS SDK once (client-id comes from the live config) ----
+  function loadSdk() {
+    if (sdkReady) return sdkReady;
+    sdkReady = fetch('/api/v1/service/paypal/config')
+      .then(function (r) { return r.json(); })
+      .then(function (cfg) {
+        if (!cfg.client_id) throw new Error('Payment is not configured yet. Please try later.');
+        return new Promise(function (resolve, reject) {
+          var s = document.createElement('script');
+          s.src = 'https://www.paypal.com/sdk/js?client-id=' + encodeURIComponent(cfg.client_id) +
+                  '&vault=true&intent=subscription&currency=' + (cfg.currency || 'GBP') +
+                  '&components=buttons&enable-funding=card';
+          s.onload = function () { resolve(window.paypal); };
+          s.onerror = function () { reject(new Error('Could not load PayPal. Check your connection.')); };
+          document.head.appendChild(s);
+        });
+      });
+    return sdkReady;
+  }
+
+  // ---- createSubscription: get a plan for the chosen amount, then create it ----
+  function makeCreateSubscription() {
+    return function (data, actions) {
+      var amount = currentAmount();
+      return fetch('/api/v1/service/giving/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tier_id: 'custom',
+          custom_amount: amount,
+          custom_label: 'Monthly Giving',
+          branch_id: branch
+        })
+      })
+      .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); }); })
+      .then(function (d) {
+        if (!d.plan_id) throw new Error('Could not set up the monthly plan.');
+        return actions.subscription.create({
+          plan_id: d.plan_id,
+          application_context: {
+            brand_name: 'Shital Temple',
+            locale: 'en-GB',
+            shipping_preference: 'NO_SHIPPING',
+            user_action: 'SUBSCRIBE_NOW'
+          }
+        });
+      });
+    };
+  }
+
+  function onApprove(data) {
+    var amt = currentAmount();
+    window.location.href = '/monthly/thank-you/?sub=' +
+      encodeURIComponent(data.subscriptionID || '') + '&amount=' + encodeURIComponent(amt);
+  }
+
+  function onError() {
+    err.textContent = 'PayPal hit a problem. Please try again.';
+    paySpin.classList.remove('hide');
+    paySpin.textContent = 'Please try again, or go back and re-select an amount.';
+  }
+
+  function renderButtons(paypal) {
+    if (paymentsRendered) { paySpin.classList.add('hide'); return; }
+    var common = { createSubscription: makeCreateSubscription(), onApprove: onApprove, onError: onError };
+
+    // 1) Standalone "Debit or Credit Card" button — lands on the guest card
+    //    screen directly, no PayPal login required.
+    var cardOk = true;
+    try {
+      var cardBtn = paypal.Buttons(Object.assign({
+        fundingSource: paypal.FUNDING.CARD,
+        style: { layout: 'vertical', color: 'black', shape: 'rect', label: 'pay', height: 48 }
+      }, common));
+      if (cardBtn.isEligible && !cardBtn.isEligible()) cardOk = false;
+      else cardBtn.render('#paypal-card-btn');
+    } catch (e) { cardOk = false; }
+
+    // 2) Regular PayPal button for donors who prefer to log in.
+    try {
+      paypal.Buttons(Object.assign({
+        style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }
+      }, common)).render('#paypal-btn');
+    } catch (e) { /* non-fatal */ }
+
+    paymentsRendered = true;
+    paySpin.classList.add('hide');
+    if (!cardOk) {
+      // Card button not eligible — keep the PayPal button (donor taps the card
+      // option inside PayPal) and tell them plainly.
+      document.getElementById('paypal-card-btn').innerHTML =
+        '<p style="text-align:center;color:#8a6a45;font-size:0.82rem;margin:0.2rem 0 0.4rem">' +
+        'Tap the PayPal button below, then choose <b>Pay by Debit or Credit Card</b>.</p>';
+    }
+  }
+
   go.addEventListener('click', function () {
     err.textContent = '';
-    var amount = custom.value ? parseFloat(custom.value) : selected;
+    var amount = currentAmount();
     if (!amount || amount < 1 || amount > 1000) {
       err.textContent = 'Please choose an amount between £1 and £1,000.';
       return;
     }
-    go.disabled = true;
-    go.textContent = 'Connecting to PayPal…';
-    fetch('/api/v1/service/giving/quick-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amount, branch_id: branch || 'main' })
-    })
-    .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); }); })
-    .then(function (d) {
-      if (d.approval_url) {
-        // Surface PayPal's "Pay by Debit or Credit Card" path first (skips the
-        // login-first screen) by hinting the card funding source on the
-        // approval URL. If PayPal ignores it for a given account, the page
-        // still loads normally with the card option below the login.
-        var url = d.approval_url + (d.approval_url.indexOf('?') === -1 ? '?' : '&') + 'fundingSource=card';
-        window.location.href = url;
-      } else { throw new Error('No PayPal link returned'); }
-    })
-    .catch(function (e) {
-      err.textContent = (e && e.message) ? e.message : 'Could not reach PayPal. Please try again.';
-      go.disabled = false;
-      go.textContent = 'Continue to PayPal →';
-    });
+    document.getElementById('pay-amt').textContent = '£' + amount + '/month';
+    pickStep.classList.add('hide');
+    payStage.classList.remove('hide');
+    paySpin.classList.remove('hide');
+    paySpin.textContent = 'Preparing secure payment…';
+    loadSdk()
+      .then(renderButtons)
+      .catch(function (e) {
+        err.textContent = (e && e.message) ? e.message : 'Could not start payment. Please try again.';
+        paySpin.classList.add('hide');
+      });
+  });
+
+  document.getElementById('change').addEventListener('click', function () {
+    payStage.classList.add('hide');
+    pickStep.classList.remove('hide');
+    err.textContent = '';
   });
 </script>
 </body>
