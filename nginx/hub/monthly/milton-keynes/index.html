@@ -121,8 +121,14 @@
     })
     .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); }); })
     .then(function (d) {
-      if (d.approval_url) { window.location.href = d.approval_url; }
-      else { throw new Error('No PayPal link returned'); }
+      if (d.approval_url) {
+        // Surface PayPal's "Pay by Debit or Credit Card" path first (skips the
+        // login-first screen) by hinting the card funding source on the
+        // approval URL. If PayPal ignores it for a given account, the page
+        // still loads normally with the card option below the login.
+        var url = d.approval_url + (d.approval_url.indexOf('?') === -1 ? '?' : '&') + 'fundingSource=card';
+        window.location.href = url;
+      } else { throw new Error('No PayPal link returned'); }
     })
     .catch(function (e) {
       err.textContent = (e && e.message) ? e.message : 'Could not reach PayPal. Please try again.';
