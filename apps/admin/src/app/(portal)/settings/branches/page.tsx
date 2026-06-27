@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api'
 interface Branch {
   id: string
   branch_id: string
+  internal_ref: string
   name: string
   city: string
   postcode: string
@@ -20,8 +21,21 @@ interface Branch {
 }
 
 const EMPTY: Omit<Branch, 'id' | 'branch_id'> = {
+  internal_ref: '',
   name: '', city: '', postcode: '', address: '', phone: '', email: '',
   established: '', is_active: true, manager_name: '', manager_email: '', notes: '',
+}
+
+interface BranchDashboard {
+  branch: Branch
+  donations: { total_count: number; completed_count: number; pending_count: number; failed_count: number; total_amount: number; today_amount: number; week_amount: number; month_amount: number; today_count: number }
+  donations_by_provider: { provider: string; count: number; amount: number }[]
+  devices: { id: string; name: string; device_type: string; presence: string; reader_label: string | null; reader_provider: string | null; last_seen_at: string | null }[]
+  readers: { id: string; label: string; provider: string; status: string }[]
+  recurring_giving: { active_count: number; active_monthly: number; pending_count: number }
+  gift_aid: { eligible_count: number; eligible_amount: number }
+  staff_count: number
+  alerts: { severity: string; kind: string; message: string; items?: string[] }[]
 }
 
 const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50'
@@ -29,10 +43,10 @@ const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide m
 
 // Seed the 4 known branches if DB is empty
 const DEFAULT_BRANCHES = [
-  { name: 'Wembley Main', city: 'London', postcode: 'HA9 0AA', address: '1 Temple Road, Wembley', phone: '+44 20 0000 0000', email: 'wembley@shital.org', established: '1987', is_active: true, manager_name: '', manager_email: '', notes: '' },
-  { name: 'Leicester Branch', city: 'Leicester', postcode: 'LE1 1AA', address: '15 Temple Street, Leicester', phone: '+44 116 000 0000', email: 'leicester@shital.org', established: '2005', is_active: true, manager_name: '', manager_email: '', notes: '' },
-  { name: 'Reading Branch', city: 'Reading', postcode: 'RG1 1AA', address: '8 Temple Lane, Reading', phone: '+44 118 000 0000', email: 'reading@shital.org', established: '2012', is_active: true, manager_name: '', manager_email: '', notes: '' },
-  { name: 'Milton Keynes Branch', city: 'Milton Keynes', postcode: 'MK1 1AA', address: '3 Temple Way, Milton Keynes', phone: '+44 1908 000 000', email: 'mk@shital.org', established: '2018', is_active: true, manager_name: '', manager_email: '', notes: '' },
+  { internal_ref: 'WEM', name: 'Wembley Main', city: 'London', postcode: 'HA9 0AA', address: '1 Temple Road, Wembley', phone: '+44 20 0000 0000', email: 'wembley@shital.org', established: '1987', is_active: true, manager_name: '', manager_email: '', notes: '' },
+  { internal_ref: 'LEI', name: 'Leicester Branch', city: 'Leicester', postcode: 'LE1 1AA', address: '15 Temple Street, Leicester', phone: '+44 116 000 0000', email: 'leicester@shital.org', established: '2005', is_active: true, manager_name: '', manager_email: '', notes: '' },
+  { internal_ref: 'RDG', name: 'Reading Branch', city: 'Reading', postcode: 'RG1 1AA', address: '8 Temple Lane, Reading', phone: '+44 118 000 0000', email: 'reading@shital.org', established: '2012', is_active: true, manager_name: '', manager_email: '', notes: '' },
+  { internal_ref: 'MK', name: 'Milton Keynes Branch', city: 'Milton Keynes', postcode: 'MK1 1AA', address: '3 Temple Way, Milton Keynes', phone: '+44 1908 000 000', email: 'mk@shital.org', established: '2018', is_active: true, manager_name: '', manager_email: '', notes: '' },
 ]
 
 export default function BranchesPage() {
@@ -44,6 +58,18 @@ export default function BranchesPage() {
   const [form, setForm] = useState<Omit<Branch, 'id' | 'branch_id'>>(EMPTY)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [dash, setDash] = useState<BranchDashboard | null>(null)
+  const [dashLoading, setDashLoading] = useState<string | null>(null)
+
+  const openDashboard = async (b: Branch) => {
+    setDashLoading(b.branch_id)
+    try {
+      const d = await apiFetch<BranchDashboard>(`/branches/${b.branch_id}/dashboard`)
+      setDash(d)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to load dashboard')
+    } finally { setDashLoading(null) }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,7 +98,7 @@ export default function BranchesPage() {
   const openNew = () => { setEditing(null); setForm(EMPTY); setShowForm(true) }
   const openEdit = (b: Branch) => {
     setEditing(b)
-    setForm({ name: b.name, city: b.city, postcode: b.postcode, address: b.address,
+    setForm({ internal_ref: b.internal_ref || '', name: b.name, city: b.city, postcode: b.postcode, address: b.address,
       phone: b.phone, email: b.email, established: b.established, is_active: b.is_active,
       manager_name: b.manager_name, manager_email: b.manager_email, notes: b.notes })
     setShowForm(true)
@@ -148,7 +174,14 @@ export default function BranchesPage() {
                   </div>
                   <div>
                     <h3 className="text-white font-black text-lg leading-tight">{b.name}</h3>
-                    <p className="text-white/40 text-xs mt-0.5">{b.city}{b.established ? ` · Est. ${b.established}` : ''}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      {b.internal_ref && (
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-saffron-400/15 text-saffron-300 border border-saffron-400/20" title="Internal reference">
+                          {b.internal_ref}
+                        </span>
+                      )}
+                      <p className="text-white/40 text-xs">{b.city}{b.established ? ` · Est. ${b.established}` : ''}</p>
+                    </div>
                   </div>
                 </div>
                 <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
@@ -183,8 +216,13 @@ export default function BranchesPage() {
               </div>
 
               <div className="flex gap-2">
+                <button onClick={() => openDashboard(b)} disabled={dashLoading === b.branch_id}
+                  className="flex-1 py-2 rounded-xl text-white text-sm font-black transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg,#0891B2,#0E7490)' }}>
+                  {dashLoading === b.branch_id ? '…' : '📊 Dashboard'}
+                </button>
                 <button onClick={() => openEdit(b)}
-                  className="flex-1 py-2 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-all">
+                  className="px-4 py-2 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-all">
                   Edit
                 </button>
                 <button onClick={() => remove(b)} disabled={deleting === b.branch_id}
@@ -215,8 +253,17 @@ export default function BranchesPage() {
                 {error && <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>}
 
                 <div>
-                  <label className={lbl}>Branch Name *</label>
-                  <input value={form.name} onChange={e => f('name', e.target.value)} placeholder="e.g. Birmingham Branch" className={inp} />
+                  <label className={lbl}>Public Display Name *</label>
+                  <input value={form.name} onChange={e => f('name', e.target.value)} placeholder="e.g. Shirdi Saibaba Temple - Birmingham" className={inp} />
+                  <p className="text-white/30 text-[11px] mt-1">Shown to donors on the donation portal, receipts & kiosk.</p>
+                </div>
+
+                <div>
+                  <label className={lbl}>Internal Reference {!editing && '*'}</label>
+                  <input value={form.internal_ref}
+                    onChange={e => f('internal_ref', e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+                    placeholder="e.g. BHAM" className={inp + ' font-mono uppercase'} maxLength={30} />
+                  <p className="text-white/30 text-[11px] mt-1">Short code used everywhere internally (reports, devices, attribution). Letters/numbers only.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -286,6 +333,141 @@ export default function BranchesPage() {
                   style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
                   {saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Branch'}
                 </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Smart Dashboard modal */}
+      <AnimatePresence>
+        {dash && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setDash(null)} className="fixed inset-0 bg-black/70 z-40" />
+            <motion.div initial={{ opacity: 0, scale: 0.96, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }}
+              className="fixed inset-4 sm:inset-x-[8%] sm:inset-y-[6%] bg-temple-deep border border-temple-border rounded-2xl z-50 flex flex-col overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between flex-shrink-0">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-white font-black text-xl">{dash.branch.name}</h2>
+                    {dash.branch.internal_ref && (
+                      <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-saffron-400/15 text-saffron-300 border border-saffron-400/20">{dash.branch.internal_ref}</span>
+                    )}
+                  </div>
+                  <p className="text-white/40 text-xs mt-0.5">Smart Dashboard · {dash.branch.city}</p>
+                </div>
+                <button onClick={() => setDash(null)} className="text-white/40 hover:text-white text-2xl">✕</button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Alerts */}
+                {dash.alerts.length > 0 && (
+                  <div className="space-y-2">
+                    {dash.alerts.map((a, i) => (
+                      <div key={i} className={`px-4 py-2.5 rounded-xl text-sm border flex items-start gap-2 ${
+                        a.severity === 'warning' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' : 'bg-sky-500/10 text-sky-300 border-sky-500/20'}`}>
+                        <span>{a.severity === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                        <span>{a.message}{a.items && a.items.length ? ` — ${a.items.join(', ')}` : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Money KPIs */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Today', val: dash.donations.today_amount, sub: `${dash.donations.today_count} donations` },
+                    { label: 'This Week', val: dash.donations.week_amount },
+                    { label: 'This Month', val: dash.donations.month_amount },
+                    { label: 'All-time', val: dash.donations.total_amount, sub: `${dash.donations.completed_count} completed` },
+                  ].map((k, i) => (
+                    <div key={i} className="glass rounded-2xl p-4 border border-temple-border">
+                      <p className="text-white/40 text-xs font-semibold uppercase tracking-wide">{k.label}</p>
+                      <p className="text-white font-black text-2xl mt-1">£{Number(k.val).toFixed(2)}</p>
+                      {k.sub && <p className="text-white/30 text-[11px] mt-0.5">{k.sub}</p>}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Status + recurring + gift aid + staff */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="glass rounded-2xl p-4 border border-temple-border">
+                    <p className="text-white/40 text-xs uppercase">Pending / Failed</p>
+                    <p className="text-white font-black text-lg mt-1">
+                      <span className="text-amber-400">{dash.donations.pending_count}</span> / <span className="text-red-400">{dash.donations.failed_count}</span>
+                    </p>
+                  </div>
+                  <div className="glass rounded-2xl p-4 border border-temple-border">
+                    <p className="text-white/40 text-xs uppercase">Monthly Giving</p>
+                    <p className="text-white font-black text-lg mt-1">{dash.recurring_giving.active_count} <span className="text-white/40 text-sm">· £{Number(dash.recurring_giving.active_monthly).toFixed(0)}/mo</span></p>
+                  </div>
+                  <div className="glass rounded-2xl p-4 border border-temple-border">
+                    <p className="text-white/40 text-xs uppercase">Gift Aid Eligible</p>
+                    <p className="text-white font-black text-lg mt-1">{dash.gift_aid.eligible_count} <span className="text-white/40 text-sm">· £{Number(dash.gift_aid.eligible_amount).toFixed(0)}</span></p>
+                  </div>
+                  <div className="glass rounded-2xl p-4 border border-temple-border">
+                    <p className="text-white/40 text-xs uppercase">Staff</p>
+                    <p className="text-white font-black text-lg mt-1">{dash.staff_count}</p>
+                  </div>
+                </div>
+
+                {/* By provider */}
+                {dash.donations_by_provider.length > 0 && (
+                  <div>
+                    <h3 className="text-white/60 text-sm font-bold mb-2">This month by provider</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {dash.donations_by_provider.map((p, i) => (
+                        <div key={i} className="glass rounded-xl px-4 py-2 border border-temple-border">
+                          <span className="text-white/50 text-xs">{p.provider}</span>
+                          <span className="text-white font-bold ml-2">£{Number(p.amount).toFixed(2)}</span>
+                          <span className="text-white/30 text-xs ml-1">({p.count})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Devices */}
+                <div>
+                  <h3 className="text-white/60 text-sm font-bold mb-2">Devices ({dash.devices.length})</h3>
+                  <div className="space-y-2">
+                    {dash.devices.length === 0 && <p className="text-white/30 text-sm">No devices at this branch.</p>}
+                    {dash.devices.map(d => (
+                      <div key={d.id} className="glass rounded-xl px-4 py-3 border border-temple-border flex items-center justify-between">
+                        <div>
+                          <span className="text-white font-semibold text-sm">{d.name}</span>
+                          <span className="text-white/30 text-xs ml-2">{d.device_type}</span>
+                          {d.reader_label && <span className="text-white/40 text-xs ml-2">💳 {d.reader_label} ({d.reader_provider})</span>}
+                        </div>
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                          d.presence === 'ONLINE' ? 'bg-green-500/20 text-green-400' :
+                          d.presence === 'STALE'  ? 'bg-amber-500/20 text-amber-400' :
+                          'bg-red-500/20 text-red-400'}`}>{d.presence}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Readers */}
+                <div>
+                  <h3 className="text-white/60 text-sm font-bold mb-2">Card Readers ({dash.readers.length})</h3>
+                  <div className="space-y-2">
+                    {dash.readers.length === 0 && <p className="text-amber-400/70 text-sm">⚠️ No card readers registered to this branch.</p>}
+                    {dash.readers.map(r => (
+                      <div key={r.id} className="glass rounded-xl px-4 py-3 border border-temple-border flex items-center justify-between">
+                        <div>
+                          <span className="text-white font-semibold text-sm">{r.label}</span>
+                          <span className="text-white/30 text-xs ml-2">{r.provider}</span>
+                        </div>
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                          (r.status || '').toLowerCase() === 'online' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {r.status || 'unknown'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </motion.div>
           </>
