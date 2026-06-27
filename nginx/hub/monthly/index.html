@@ -120,6 +120,8 @@
   var paymentsRendered = false;
   var sdkReady = null;       // promise that resolves when the PayPal SDK is loaded
   var autoAdvance = false;   // deep link with ?amount= jumps straight to the buttons
+  var lastPlanId = '';       // plan created for the current subscription
+  var lastAmount = 0;        // amount used for the current subscription
 
   amtEls.forEach(function (el) {
     el.addEventListener('click', function () {
@@ -189,6 +191,8 @@
       .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); }); })
       .then(function (d) {
         if (!d.plan_id) throw new Error('Could not set up the monthly plan.');
+        lastPlanId = d.plan_id;
+        lastAmount = amount;
         return actions.subscription.create({
           plan_id: d.plan_id,
           application_context: {
@@ -203,9 +207,28 @@
   }
 
   function onApprove(data) {
-    var amt = currentAmount();
-    window.location.href = '/monthly/thank-you/?sub=' +
-      encodeURIComponent(data.subscriptionID || '') + '&amount=' + encodeURIComponent(amt);
+    var amt = lastAmount || currentAmount();
+    var sub = data.subscriptionID || '';
+    var done = function () {
+      window.location.href = '/monthly/thank-you/?sub=' +
+        encodeURIComponent(sub) + '&amount=' + encodeURIComponent(amt);
+    };
+    // Record the subscription server-side so it's linked to its branch (and
+    // amount/plan). Never block the donor's confirmation if this call fails —
+    // the PayPal webhook + daily reconcile also capture it.
+    fetch('/api/v1/service/giving/subscription/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subscription_id: sub,
+        plan_id: lastPlanId,
+        tier_id: 'custom',
+        amount: amt,
+        frequency: 'MONTH',
+        branch_id: branch,
+        tier_label: 'Monthly Giving'
+      })
+    }).then(done, done);
   }
 
   function onError() {
@@ -230,9 +253,11 @@
       else cardBtn.render('#paypal-card-btn');
     } catch (e) { cardOk = false; }
 
-    // 2) Regular PayPal button for donors who prefer to log in.
+    // 2) Regular PayPal button (PayPal funding only — the card path is the
+    //    dedicated button above, so don't let this one render a 2nd card button).
     try {
       paypal.Buttons(Object.assign({
+        fundingSource: paypal.FUNDING.PAYPAL,
         style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }
       }, common)).render('#paypal-btn');
     } catch (e) { /* non-fatal */ }
