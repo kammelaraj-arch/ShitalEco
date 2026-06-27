@@ -548,56 +548,38 @@ jobs:
             cd /opt/shitaleco
             docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/null || true
 
-            # ── Install / refresh prod-host watchdog ────────────────────────────
-            # */2 min cron that auto-restarts any stopped prod container and
-            # kicks the backend on a 502 from /health. Mirror of the dev
-            # watchdog installed by deploy-dev.yml. Idempotent — safe to re-run.
-            # This is what catches a 3am crash without anyone watching.
-            mkdir -p /opt/shitaleco/infra
-            cat > /opt/shitaleco/infra/watchdog-prod.sh << 'WDEOF'
-            #!/bin/bash
-            set -uo pipefail
-            COMPOSE_FILE=/opt/shitaleco/docker-compose.prod.yml
-            LOG=/var/log/shital-prod-watchdog.log
-            ts() { date -u +'%Y-%m-%dT%H:%M:%SZ'; }
-            log() { echo "[$(ts)] $*" >> "$LOG"; }
+            # ── Install / refresh prod-host watchdog (systemd, every 30s) ───────
+            # Use the repo's HARDENED watchdog (infra/watchdog-prod.sh) — it
+            # stands down while a deploy is running, requires two consecutive
+            # public-/health failures before acting, restarts nginx first, and
+            # is rate-limited. This block previously wrote a CRUDER inline
+            # watchdog that CLOBBERED the good one and ran on a slow */2 cron
+            # with no deploy stand-down (so it could fight a promote — a cause
+            # of the very outages it was meant to prevent). The repo copy is
+            # already current here (git reset --hard origin/main above), so we
+            # just run the idempotent installer, which registers a 30s systemd
+            # timer and removes any legacy cron runner.
+            bash /opt/shitaleco/infra/install-prod-watchdog.sh 2>&1 | sed 's/^/  /' \
+              || echo "  !!! watchdog install failed (non-fatal) — check manually"
 
-            # 1. Restart any prod container that isn't running
-            stopped=$(docker ps -a --filter "name=shitaleco-" --filter "status=exited" --format '{{.Names}}'; \
-                      docker ps -a --filter "name=shitaleco-" --filter "status=dead"   --format '{{.Names}}'; \
-                      docker ps -a --filter "name=shitaleco-" --filter "status=created" --format '{{.Names}}')
-            # Exclude dev containers (-dev- in name) which have their own watchdog
-            stopped=$(echo "$stopped" | grep -v 'shitaleco-dev-' || true)
-            if [ -n "${stopped}" ]; then
-              log "stopped prod containers: $(echo "$stopped" | tr '\n' ' ')"
-              cd /opt/shitaleco
-              docker compose -f "$COMPOSE_FILE" up -d >> "$LOG" 2>&1 || log "compose up failed"
-            fi
-
-            # 2. Backend health probe (502 from public nginx == backend wedged)
-            code=$(curl -s -o /dev/null -w "%{http_code}" -m 8 https://shital.org.uk/health 2>/dev/null || echo "000")
-            if [ "$code" != "200" ]; then
-              last_kick=$(stat -c %Y /tmp/.shital-prod-kicked 2>/dev/null || echo 0)
-              now=$(date +%s)
-              if [ $((now - last_kick)) -ge 300 ]; then
-                log "health=$code → restarting backend + nginx"
-                docker compose -f "$COMPOSE_FILE" restart backend nginx >> "$LOG" 2>&1 || true
-                touch /tmp/.shital-prod-kicked
-              else
-                log "health=$code rate-limited (last kick $((now-last_kick))s ago)"
-              fi
-            fi
-
-            # 3. Trim log
-            if [ -f "$LOG" ] && [ $(wc -l < "$LOG") -gt 2000 ]; then
-              tail -n 2000 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
-            fi
-            WDEOF
-            chmod +x /opt/shitaleco/infra/watchdog-prod.sh
-            (crontab -l 2>/dev/null | grep -v 'shital-prod-watchdog' ; \
-             echo "*/2 * * * * /opt/shitaleco/infra/watchdog-prod.sh # shital-prod-watchdog") | crontab -
-            echo "=== Watchdog cron installed (prod) ==="
-            crontab -l | grep shital-prod-watchdog || echo "WARN: cron entry not found after install"
+            # ── Final front-door verification ───────────────────────────────────
+            # nginx can be 'running' yet routing to a DEAD upstream (stale
+            # docker DNS after the backend recreate) → public 502 even though
+            # every container is "up". Probe the REAL public path through nginx
+            # and, if it isn't 200, restart nginx to flush the upstream and
+            # re-probe. The 30s watchdog is the longer-term backstop; this makes
+            # the deploy itself never hand back a dead front door.
+            echo "=== Final front-door check (public /health through nginx) ==="
+            FD_OK=0
+            for i in $(seq 1 6); do
+              code=$(curl -k -s -o /dev/null -w '%{http_code}' -m 5 -H 'Host: shital.org.uk' https://localhost/health 2>/dev/null || echo 000)
+              echo "  public /health → ${code}"
+              if [ "$code" = "200" ]; then FD_OK=1; break; fi
+              docker restart shitaleco-nginx-1 2>/dev/null \
+                || docker compose -f docker-compose.prod.yml up -d --no-deps nginx
+              sleep 4
+            done
+            [ "$FD_OK" = "1" ] || echo "  !!! front door still not 200 — 30s watchdog will keep retrying"
 
             echo ""
             echo "=== Deploy complete — all sites live ==="

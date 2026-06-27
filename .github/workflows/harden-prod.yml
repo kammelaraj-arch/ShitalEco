@@ -1,0 +1,54 @@
+name: Harden prod (watchdog + deploy.sh)
+
+# Applies the deployment-robustness fixes to the LIVE prod host WITHOUT a full
+# promote: refreshes the repo on the host (so the deployer's bind-mounted
+# deploy.sh + infra/ are current) and installs the hardened nginx self-heal
+# watchdog as a 30s systemd timer. Does NOT pull images, recreate containers,
+# or restart the backend — so it's safe to run anytime, including during an
+# incident. Idempotent + re-runnable.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH — refresh repo + install systemd watchdog
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          timeout: 120s
+          command_timeout: 8m
+          script: |
+            set -e
+            cd /opt/shitaleco
+
+            echo "=== Refreshing repo to origin/main (updates deployer/deploy.sh + infra/) ==="
+            git fetch origin
+            git reset --hard origin/main
+            git log -1 --format='  now at %h %s'
+
+            echo "=== Installing hardened nginx self-heal watchdog (systemd, 30s) ==="
+            bash /opt/shitaleco/infra/install-prod-watchdog.sh
+
+            echo "=== Verify: timer + one watchdog probe + public front door ==="
+            systemctl list-timers shital-nginx-watchdog.timer --no-pager | head -3 || true
+            # Run one probe by hand (no-op when healthy) to confirm the script is sane.
+            /opt/shitaleco/infra/watchdog-prod.sh || true
+            code=$(curl -k -s -o /dev/null -w '%{http_code}' -m 6 -H 'Host: shital.org.uk' https://localhost/health 2>/dev/null || echo 000)
+            echo "  public /health → ${code}"
+            if [ "$code" != "200" ]; then
+              echo "  front door not 200 — restarting nginx once to flush upstream"
+              docker restart shitaleco-nginx-1 || true
+              sleep 5
+              code=$(curl -k -s -o /dev/null -w '%{http_code}' -m 6 -H 'Host: shital.org.uk' https://localhost/health 2>/dev/null || echo 000)
+              echo "  public /health → ${code}"
+            fi
+            echo "=== Hardening applied ==="
