@@ -1,0 +1,29 @@
+name: Verify monthly quick-link v3 (READ-ONLY)
+on:
+  push:
+    branches: [claude/verify-monthly]
+    paths: [.github/workflows/zz-verify3.yml]
+jobs:
+  v:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 60s
+          script: |
+            set +e
+            echo "=== health ==="
+            curl -sk -o /dev/null -w '/health -> %{http_code}\n' -m 8 https://shital.org.uk/health
+            echo ""
+            echo "=== quick-link (expect 200 + approval_url) ==="
+            curl -sk -m 15 -X POST https://shital.org.uk/api/v1/service/giving/quick-link \
+              -H 'Content-Type: application/json' \
+              -d '{"amount":5,"branch_id":"wembley_main"}' \
+              -w '\nHTTP %{http_code}\n' 2>&1 | head -15
+            echo ""
+            echo "=== deploy-history tail ==="
+            tail -2 /opt/shitaleco/backups/deploy-history.jsonl 2>&1 | head -2
