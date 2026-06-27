@@ -118,7 +118,8 @@
   var payStage = document.getElementById('pay-stage');
   var paySpin = document.getElementById('pay-spin');
   var paymentsRendered = false;
-  var sdkReady = null; // promise that resolves when the PayPal SDK is loaded
+  var sdkReady = null;       // promise that resolves when the PayPal SDK is loaded
+  var autoAdvance = false;   // deep link with ?amount= jumps straight to the buttons
 
   amtEls.forEach(function (el) {
     el.addEventListener('click', function () {
@@ -136,6 +137,20 @@
   function currentAmount() {
     return custom.value ? parseFloat(custom.value) : selected;
   }
+
+  // ---- Pre-populate amount from ?amount= (deep links) ----
+  (function () {
+    var qAmt = parseFloat(params.get('amount'));
+    if (!qAmt || qAmt < 1 || qAmt > 1000) return;
+    var matched = false;
+    amtEls.forEach(function (e) {
+      e.classList.remove('sel');
+      if (parseFloat(e.getAttribute('data-amt')) === qAmt) { e.classList.add('sel'); matched = true; }
+    });
+    if (matched) { custom.value = ''; } else { custom.value = qAmt; }
+    selected = qAmt;
+    autoAdvance = true; // explicit amount → go straight to the card / PayPal buttons
+  })();
 
   // ---- Load the PayPal JS SDK once (client-id comes from the live config) ----
   function loadSdk() {
@@ -258,6 +273,9 @@
     pickStep.classList.remove('hide');
     err.textContent = '';
   });
+
+  // Deep link carried an amount → jump straight to the card / PayPal buttons.
+  if (autoAdvance) go.click();
 </script>
 </body>
 </html>
