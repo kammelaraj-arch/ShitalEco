@@ -29,7 +29,35 @@ const STATUS_COLOURS: Record<string, string> = {
 export default function RecurringGivingPage() {
   const [tiers, setTiers]     = useState<Tier[]>([])
   const [subs, setSubs]       = useState<Sub[]>([])
-  const [tab, setTab]         = useState<'tiers' | 'subs'>('tiers')
+  const [tab, setTab]         = useState<'tiers' | 'subs' | 'links'>('tiers')
+  const [linkAmount, setLinkAmount] = useState('11')
+  const [linkBranch, setLinkBranch] = useState('')
+  const [copied, setCopied]   = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [syncNote, setSyncNote] = useState('')
+
+  async function syncPayPal() {
+    setSyncing(true); setSyncNote('')
+    try {
+      const r = await fetch(`${API}/admin/giving/sync-paypal`, { method: 'POST', headers: authHeaders() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      const d = await r.json()
+      const x = d.result || {}
+      setSyncNote(x.skipped
+        ? `Skipped: ${x.skipped}`
+        : `Synced ${x.scanned ?? 0} subscriptions · ${x.status_updated ?? 0} status updates · ${x.activated ?? 0} activated · ${x.payments_recorded ?? 0} payments recorded`)
+      await loadSubs()
+    } catch (e) {
+      setSyncNote(e instanceof Error ? e.message : 'Sync failed')
+    } finally { setSyncing(false) }
+  }
+
+  const SERVICE_BASE = 'https://service.shital.org.uk'
+  const buildLink = (amount: string | number, branch = '') =>
+    `${SERVICE_BASE}/?amount=${encodeURIComponent(String(amount))}${branch ? `&branch=${encodeURIComponent(branch)}` : ''}`
+  const copyLink = async (url: string) => {
+    try { await navigator.clipboard.writeText(url); setCopied(url); setTimeout(() => setCopied(''), 1800) } catch { /* clipboard blocked */ }
+  }
   const [form, setForm]       = useState(EMPTY)
   const [editId, setEditId]   = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -140,10 +168,10 @@ export default function RecurringGivingPage() {
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-white/10">
-        {(['tiers', 'subs'] as const).map(t => (
+        {(['tiers', 'subs', 'links'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${tab === t ? 'border-saffron-400 text-saffron-400' : 'border-transparent text-white/50 hover:text-white/80'}`}>
-            {t === 'tiers' ? `Donation Tiers (${tiers.length})` : `Subscriptions (${subs.length})`}
+            {t === 'tiers' ? `Donation Tiers (${tiers.length})` : t === 'subs' ? `Subscriptions (${subs.length})` : '🔗 Share Links'}
           </button>
         ))}
       </div>
@@ -182,6 +210,15 @@ export default function RecurringGivingPage() {
       {/* Subscriptions tab */}
       {tab === 'subs' && (
         <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-white/40 text-xs">PayPal is the source of truth — sync pulls live statuses + records any payments.</p>
+            <button onClick={syncPayPal} disabled={syncing}
+              className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
+              style={{ background: 'linear-gradient(135deg,#0070BA,#003087)' }}>
+              {syncing ? 'Syncing…' : '↻ Sync from PayPal'}
+            </button>
+          </div>
+          {syncNote && <p className="text-xs rounded-lg px-3 py-2 bg-cyan-500/10 text-cyan-200 border border-cyan-500/20">{syncNote}</p>}
           {subs.length === 0 && <p className="text-white/40 text-sm">No subscriptions yet.</p>}
           {subs.map(s => (
             <div key={s.id} className="rounded-xl p-4 flex items-center gap-4"
@@ -210,6 +247,70 @@ export default function RecurringGivingPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Share Links tab */}
+      {tab === 'links' && (
+        <div className="space-y-5">
+          <div className="rounded-xl px-4 py-3 text-sm bg-cyan-500/10 border border-cyan-500/20 text-cyan-200">
+            Share these links (or print as QR) so donors can set up monthly giving and pay by
+            <strong> debit/credit card</strong>. The card option appears on PayPal when your business
+            account has <strong>“PayPal account optional”</strong> turned on
+            (PayPal → Account Settings → Website payments → Website preferences).
+          </div>
+
+          {/* Custom builder */}
+          <div className="glass rounded-2xl p-4 border border-temple-border space-y-3">
+            <p className="text-white/60 text-sm font-bold">Build a link</p>
+            <div className="flex flex-wrap gap-3 items-end">
+              <div>
+                <label className="block text-white/40 text-xs mb-1">Monthly amount (£)</label>
+                <input value={linkAmount} onChange={e => setLinkAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                  className="w-32 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm" placeholder="11" />
+              </div>
+              <div>
+                <label className="block text-white/40 text-xs mb-1">Branch (internal ref / code, optional)</label>
+                <input value={linkBranch} onChange={e => setLinkBranch(e.target.value)}
+                  className="w-48 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm" placeholder="wembley_main" />
+              </div>
+            </div>
+            {linkAmount && Number(linkAmount) >= 1 && (
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-xs text-white/70 bg-black/30 rounded-lg px-3 py-2 break-all">{buildLink(linkAmount, linkBranch)}</code>
+                <button onClick={() => copyLink(buildLink(linkAmount, linkBranch))}
+                  className="px-3 py-2 rounded-lg text-white text-xs font-bold whitespace-nowrap" style={{ background: 'linear-gradient(135deg,#0891B2,#0E7490)' }}>
+                  {copied === buildLink(linkAmount, linkBranch) ? '✓ Copied' : 'Copy'}
+                </button>
+                <a href={buildLink(linkAmount, linkBranch)} target="_blank" rel="noreferrer"
+                  className="px-3 py-2 rounded-lg border border-white/10 text-white/60 text-xs font-bold whitespace-nowrap">Test ↗</a>
+              </div>
+            )}
+          </div>
+
+          {/* Quick links from configured tiers */}
+          <div>
+            <p className="text-white/60 text-sm font-bold mb-2">Quick links from your tiers</p>
+            <div className="space-y-2">
+              {tiers.length === 0 && <p className="text-white/40 text-sm">No tiers configured — add tiers, or use the builder above.</p>}
+              {tiers.map(tier => {
+                const url = buildLink(tier.amount)
+                return (
+                  <div key={tier.id} className="glass rounded-xl px-4 py-3 border border-temple-border flex items-center gap-3">
+                    <span className="text-white font-bold w-20">£{Number(tier.amount).toFixed(2)}</span>
+                    <span className="text-white/40 text-sm flex-1 truncate">{tier.label}</span>
+                    <code className="hidden sm:block text-[11px] text-white/40 truncate max-w-[280px]">{url}</code>
+                    <button onClick={() => copyLink(url)}
+                      className="px-3 py-1.5 rounded-lg text-white text-xs font-bold" style={{ background: 'linear-gradient(135deg,#0891B2,#0E7490)' }}>
+                      {copied === url ? '✓' : 'Copy'}
+                    </button>
+                    <a href={url} target="_blank" rel="noreferrer"
+                      className="px-3 py-1.5 rounded-lg border border-white/10 text-white/60 text-xs font-bold">Test ↗</a>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         </div>
       )}
 

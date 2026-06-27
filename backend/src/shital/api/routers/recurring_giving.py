@@ -480,6 +480,14 @@ async def giving_quick_link(body: QuickLinkBody) -> dict[str, Any]:
                     "return_url": "https://service.shital.org.uk/?screen=monthly-giving&status=approved",
                     "cancel_url": "https://service.shital.org.uk/?screen=monthly-giving&status=cancelled",
                     "user_action": "SUBSCRIBE_NOW",
+                    # No address collection — keeps the approval page short and
+                    # surfaces the "Debit or Credit Card" option (when the
+                    # PayPal business account has "PayPal account optional" on).
+                    "shipping_preference": "NO_SHIPPING",
+                    "payment_method": {
+                        "payer_selected": "PAYPAL",
+                        "payee_preferred": "UNRESTRICTED",
+                    },
                 },
             })
             sub_r.raise_for_status()
@@ -496,23 +504,31 @@ async def giving_quick_link(body: QuickLinkBody) -> dict[str, Any]:
     if not approval_url or not sub_id:
         raise HTTPException(502, detail="PayPal returned no approval URL")
 
-    # Pre-create PENDING_CONTACT row — webhook later upgrades it with donor details.
+    # Pre-create a PENDING_CONTACT tracking row — BEST-EFFORT. We already hold
+    # the PayPal approval_url, which is all the donor needs; the BILLING
+    # webhook creates/updates the definitive row when PayPal activates the
+    # subscription. So a DB hiccup here (schema lag, column drift) must NOT
+    # 500 the request and strand the donor — wrap it and return the URL anyway.
+    # (first_source is NOT a column on this table — it lives on contacts — so
+    # it is intentionally omitted from the INSERT.)
     now = datetime.utcnow()
     signup_id = str(uuid.uuid4())
-    async with SessionLocal() as db:
-        await db.execute(text("""
-            INSERT INTO recurring_giving_subscriptions
-                (id, paypal_subscription_id, paypal_plan_id, amount, frequency, status, branch_id,
-                 donor_name, donor_email, donor_first_name, donor_surname,
-                 donor_postcode, donor_address, first_source, created_at, updated_at)
-            VALUES
-                (:id, :sub_id, :plan_id, :amt, 'MONTH', 'PENDING_CONTACT', :bid,
-                 '', '', '', '', '', '', 'quick-link', :now, :now)
-        """), {
-            "id": signup_id, "sub_id": sub_id, "plan_id": plan_id,
-            "amt": amount, "bid": body.branch_id, "now": now,
-        })
-        await db.commit()
+    try:
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                INSERT INTO recurring_giving_subscriptions
+                    (id, paypal_subscription_id, paypal_plan_id, amount, frequency,
+                     status, branch_id, donor_name, donor_email, created_at, updated_at)
+                VALUES
+                    (:id, :sub_id, :plan_id, :amt, 'MONTH',
+                     'PENDING_CONTACT', :bid, '', '', :now, :now)
+            """), {
+                "id": signup_id, "sub_id": sub_id, "plan_id": plan_id,
+                "amt": amount, "bid": body.branch_id, "now": now,
+            })
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001 — tracking row is non-critical
+        logger.warning("quick_link_row_insert_failed", error=str(exc), sub_id=sub_id)
 
     return {
         "ok": True,
@@ -771,6 +787,19 @@ class TierBody(BaseModel):
     is_active: bool = True
     is_default: bool = False
     display_order: int = 0
+
+
+@router.post("/admin/giving/sync-paypal")
+async def admin_sync_paypal(space: CurrentSpace, days: int = 35) -> dict[str, Any]:
+    """Run the full PayPal monthly-giving reconcile on demand — the same daily
+    sweep the background loop runs: refresh every subscription's status from
+    PayPal and record any captured payments into donations. Works regardless
+    of whether the background loop is enabled. SUPER_ADMIN / ADMIN only."""
+    if space.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(403, detail="SUPER_ADMIN or ADMIN required")
+    from shital.services.background_recovery import _paypal_reconcile_once
+    result = await _paypal_reconcile_once(days=days)
+    return {"ok": True, "result": result}
 
 
 @router.post("/admin/giving/tiers")

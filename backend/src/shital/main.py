@@ -590,6 +590,17 @@ async def _patch_schema() -> None:
             updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_branches_active ON branches(is_active)",
+        # ── Internal reference vs public display name ────────────────────────
+        # internal_ref: short, stable, human-assigned code (WEM, LEI, MK, RDG)
+        # used as the canonical reference across all INTERNAL systems. The
+        # public-facing `name` is the display name shown to donors (donation
+        # portal, receipts, kiosk). branch_id (slug) remains the DB FK.
+        "ALTER TABLE branches ADD COLUMN IF NOT EXISTS internal_ref VARCHAR(30) NOT NULL DEFAULT ''",
+        # Backfill internal_ref from branch_id for existing rows (uppercased,
+        # trimmed) so every branch has a non-empty internal reference.
+        "UPDATE branches SET internal_ref = UPPER(branch_id) WHERE COALESCE(internal_ref,'') = ''",
+        # Unique on non-empty internal_ref so two branches can't share a code.
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_internal_ref ON branches(internal_ref) WHERE internal_ref <> ''",
         # Fundraising projects — each project groups PROJECT_DONATION items
         """CREATE TABLE IF NOT EXISTS projects (
             id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

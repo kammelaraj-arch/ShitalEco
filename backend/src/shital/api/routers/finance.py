@@ -351,6 +351,118 @@ async def import_donations_csv(
     return {"imported": imported, "skipped": len(errors), "errors": errors[:20]}
 
 
+@router.get("/donations/{donation_id}/detail")
+async def donation_detail(donation_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """Full end-to-end detail for a single donation — everything captured
+    about it: amounts + fees, payment journey (provider, ref, failure
+    reason, card type), donor + Gift Aid, attribution (branch + kiosk
+    device + source), and timestamps. SUPER_ADMIN / ADMIN only."""
+    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(status_code=403, detail="admin only")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    # Tolerate older schemas: COALESCE optional columns so a missing column
+    # (fee/net/failure/card_type/device) never 500s the detail view.
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT
+                d.id::text, d.branch_id, d.amount, d.currency, d.purpose,
+                d.payment_provider, d.payment_ref, d.reference, d.status,
+                COALESCE(d.source, 'manual')                AS source,
+                d.gift_aid_eligible, d.gift_aid_amount::numeric AS gift_aid_amount,
+                d.contact_id::text, d.project_id::text,
+                d.created_at, d.updated_at,
+                d.deleted_at,
+                -- optional / may-not-exist columns, guarded by to_jsonb access
+                to_jsonb(d.*)                                AS raw,
+                c.full_name  AS contact_name,
+                c.email      AS contact_email,
+                c.phone      AS contact_phone,
+                b.name       AS branch_name,
+                b.internal_ref AS branch_ref,
+                pr.name      AS project_name
+            FROM donations d
+            LEFT JOIN contacts c  ON c.id  = d.contact_id
+            LEFT JOIN branches b  ON b.branch_id = d.branch_id
+            LEFT JOIN projects pr ON pr.id = d.project_id
+            WHERE d.id = CAST(:id AS UUID) AND d.deleted_at IS NULL
+        """), {"id": donation_id})).mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Donation not found")
+
+    raw = dict(row.get("raw") or {})
+
+    def _g(*keys: str) -> Any:
+        for k in keys:
+            if raw.get(k) not in (None, ""):
+                return raw[k]
+        return None
+
+    # Resolve the capturing kiosk device (if any) for attribution.
+    device = None
+    device_id = _g("kiosk_device_id")
+    if device_id:
+        async with SessionLocal() as db:
+            dr = (await db.execute(text("""
+                SELECT name, device_type, branch_id FROM kiosk_devices
+                WHERE id = CAST(:id AS UUID)
+            """), {"id": str(device_id)})).mappings().first()
+            if dr:
+                device = dict(dr)
+
+    return {
+        "id": row["id"],
+        "core": {
+            "amount":   _safe(row["amount"]),
+            "currency": row["currency"] or "GBP",
+            "status":   row["status"],
+            "purpose":  row["purpose"],
+            "reference": row["reference"],
+            "source":   row["source"],
+        },
+        "payment": {
+            "provider":        row["payment_provider"],
+            "payment_ref":     row["payment_ref"],
+            "fee_amount":      _safe(_g("fee_amount", "actual_fee_amount")),
+            "net_amount":      _safe(_g("net_amount", "actual_net_amount")),
+            "settled_at":      _safe(_g("settled_at")),
+            "payout_id":       _g("payout_id"),
+            "card_type":       _g("card_type"),
+            "failure_code":    _g("last_failure_code"),
+            "failure_message": _g("last_failure_message"),
+        },
+        "donor": {
+            "name":  row["contact_name"],
+            "email": row["contact_email"],
+            "phone": row["contact_phone"],
+            "contact_id": row["contact_id"],
+        },
+        "gift_aid": {
+            "eligible": bool(row["gift_aid_eligible"]),
+            "amount":   _safe(row["gift_aid_amount"]),
+            "first_name": _g("ga_first_name", "ga_full_name"),
+            "surname":    _g("ga_surname"),
+            "house_number": _g("ga_house_number", "ga_address"),
+            "postcode":   _g("ga_postcode"),
+            "declared":   bool(_g("gift_aid_eligible")),
+        },
+        "attribution": {
+            "branch_id":   row["branch_id"],
+            "branch_name": row["branch_name"],
+            "branch_ref":  row["branch_ref"],
+            "project_name": row["project_name"],
+            "kiosk_device": device,
+        },
+        "timestamps": {
+            "created_at": _safe(row["created_at"]),
+            "updated_at": _safe(row["updated_at"]),
+        },
+    }
+
+
 class DonationUpdate(BaseModel):
     amount: float | None = None
     purpose: str | None = None

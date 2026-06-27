@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monthly Giving — Shirdi Saibaba Temple (SHITAL)</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #fffdf8; color: #1c0a00; min-height: 100vh;
+    display: flex; align-items: flex-start; justify-content: center; padding: 2rem 1rem 4rem;
+  }
+  .card {
+    width: 100%; max-width: 460px; background: #fff; border: 1px solid #f0e6d6;
+    border-radius: 24px; padding: 2rem 1.6rem; box-shadow: 0 10px 40px rgba(180,92,0,0.08);
+  }
+  .logo { width: 84px; height: 84px; border-radius: 20px; margin: 0 auto 1rem; display: block;
+    object-fit: contain; box-shadow: 0 6px 20px rgba(180,92,0,0.12); background: #fff; padding: 6px; }
+  h1 { text-align: center; font-size: 1.6rem; font-weight: 800; }
+  .sub { text-align: center; color: #8a6a45; font-size: 0.92rem; margin: 0.3rem 0 1.6rem; }
+  .amounts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; margin-bottom: 1rem; }
+  .amt {
+    border: 2px solid #ffe2bf; background: #fff8ee; border-radius: 16px; padding: 1rem;
+    font-size: 1.25rem; font-weight: 800; color: #b85c00; cursor: pointer; transition: all .15s;
+    text-align: center;
+  }
+  .amt:hover { border-color: #FF9933; transform: translateY(-2px); }
+  .amt.sel { background: #FF9933; color: #fff; border-color: #FF9933; }
+  .amt small { display: block; font-size: 0.7rem; font-weight: 600; opacity: 0.8; margin-top: 2px; }
+  .custom { display: flex; align-items: center; gap: 0.5rem; border: 2px solid #ffe2bf;
+    border-radius: 16px; padding: 0.5rem 0.9rem; margin-bottom: 1.4rem; }
+  .custom span { font-size: 1.2rem; font-weight: 800; color: #b85c00; }
+  .custom input { border: none; outline: none; font-size: 1.2rem; font-weight: 700; width: 100%;
+    background: transparent; color: #1c0a00; }
+  .go {
+    width: 100%; border: none; border-radius: 16px; padding: 1rem; font-size: 1.05rem;
+    font-weight: 800; color: #fff; cursor: pointer; background: linear-gradient(135deg,#0070BA,#003087);
+    transition: all .15s;
+  }
+  .go:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,112,186,0.3); }
+  .go:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .pp { display: flex; align-items: center; justify-content: center; gap: 0.4rem; margin-top: 0.9rem;
+    color: #8a6a45; font-size: 0.8rem; }
+  .err { color: #c0392b; font-size: 0.85rem; text-align: center; margin-top: 0.8rem; min-height: 1rem; }
+  .foot { text-align: center; color: #b59a78; font-size: 0.75rem; margin-top: 1.4rem; }
+  .cards { text-align: center; margin-top: 0.6rem; font-size: 1.1rem; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <img class="logo" src="https://shirdisai.org.uk/Cnt/img/shital-logo-new.png" alt="SHITAL"
+         onerror="this.outerHTML='<div class=\'logo\' style=\'display:flex;align-items:center;justify-content:center;font-size:2.4rem\'>🛕</div>'" />
+    <h1>Monthly Giving</h1>
+    <p class="sub" id="sub">Shirdi Saibaba Temple · Support the temple every month 🙏</p>
+
+    <div class="amounts" id="amounts">
+      <div class="amt" data-amt="5">£5<small>Lamp Supporter</small></div>
+      <div class="amt sel" data-amt="11">£11<small>Prasad Patron</small></div>
+      <div class="amt" data-amt="21">£21<small>Puja Sponsor</small></div>
+      <div class="amt" data-amt="51">£51<small>Festival Friend</small></div>
+    </div>
+
+    <div class="custom">
+      <span>£</span>
+      <input id="custom" type="number" min="1" max="1000" placeholder="Other amount / month" />
+    </div>
+
+    <button class="go" id="go">Continue to PayPal →</button>
+    <div class="cards">💳 🟦 mastercard · visa · amex</div>
+    <div class="pp">🔒 Secure · Pay by PayPal or debit/credit card</div>
+    <div class="err" id="err"></div>
+
+    <p class="foot">SHITAL · UK Registered Charity · You can cancel anytime in PayPal.</p>
+  </div>
+
+<script>window.SHITAL_BRANCH='milton_keynes_branch';window.SHITAL_BRANCH_NAME='Milton Keynes';</script>
+  <script>
+  // Branch attribution: a per-branch page sets window.SHITAL_BRANCH /
+  // window.SHITAL_BRANCH_NAME; otherwise fall back to ?branch= in the URL.
+  var params = new URLSearchParams(location.search);
+  var branch = (window.SHITAL_BRANCH || params.get('branch') || '');
+  if (window.SHITAL_BRANCH_NAME) {
+    document.getElementById('sub').textContent =
+      window.SHITAL_BRANCH_NAME + ' · Support the temple every month 🙏';
+    document.title = 'Monthly Giving — ' + window.SHITAL_BRANCH_NAME;
+  }
+  var selected = 11;
+
+  var amtEls = document.querySelectorAll('.amt');
+  var custom = document.getElementById('custom');
+  var go = document.getElementById('go');
+  var err = document.getElementById('err');
+
+  amtEls.forEach(function (el) {
+    el.addEventListener('click', function () {
+      amtEls.forEach(function (e) { e.classList.remove('sel'); });
+      el.classList.add('sel');
+      selected = parseFloat(el.getAttribute('data-amt'));
+      custom.value = '';
+    });
+  });
+  custom.addEventListener('input', function () {
+    amtEls.forEach(function (e) { e.classList.remove('sel'); });
+    selected = parseFloat(custom.value) || 0;
+  });
+
+  go.addEventListener('click', function () {
+    err.textContent = '';
+    var amount = custom.value ? parseFloat(custom.value) : selected;
+    if (!amount || amount < 1 || amount > 1000) {
+      err.textContent = 'Please choose an amount between £1 and £1,000.';
+      return;
+    }
+    go.disabled = true;
+    go.textContent = 'Connecting to PayPal…';
+    fetch('/api/v1/service/giving/quick-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: amount, branch_id: branch || 'main' })
+    })
+    .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); }); })
+    .then(function (d) {
+      if (d.approval_url) { window.location.href = d.approval_url; }
+      else { throw new Error('No PayPal link returned'); }
+    })
+    .catch(function (e) {
+      err.textContent = (e && e.message) ? e.message : 'Could not reach PayPal. Please try again.';
+      go.disabled = false;
+      go.textContent = 'Continue to PayPal →';
+    });
+  });
+</script>
+</body>
+</html>

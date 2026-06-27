@@ -1,0 +1,57 @@
+# Sync static hub pages (nginx/hub/**) to the host — NO backend touch.
+#
+# The hub directory is bind-mounted read-only into the nginx container
+# (./nginx/hub:/usr/share/nginx/hub:ro), so copying the files to the host
+# makes them live immediately — nginx serves static files with no reload,
+# no container restart, and the backend/db are never touched.
+#
+# Pure file sync. Safe to run anytime, independent of any promote.
+name: Sync hub pages to host
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/branch-dashboard-ops
+    paths:
+      - nginx/hub/**
+      - .github/workflows/sync-hub.yml
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy nginx/hub to host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          source: "nginx/hub/**"
+          target: "/opt/shitaleco/__hub_incoming"
+          strip_components: 0
+      - name: Install hub files (no container action)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 90s
+          script: |
+            set +e
+            SRC=/opt/shitaleco/__hub_incoming/nginx/hub
+            DST=/opt/shitaleco/nginx/hub
+            if [ ! -d "$SRC" ]; then echo "!!! synced files not found at $SRC"; ls -la /opt/shitaleco/__hub_incoming 2>&1; exit 1; fi
+            mkdir -p "$DST"
+            cp -rf "$SRC/." "$DST/"
+            rm -rf /opt/shitaleco/__hub_incoming
+            echo "=== monthly pages now on host ==="
+            ls -1 "$DST/monthly" 2>&1
+            echo ""
+            echo "=== live checks (served by existing nginx, no restart) ==="
+            for p in / /monthly/ /monthly/wembley/ /monthly/leicester/ /monthly/reading/ /monthly/milton-keynes/; do
+              code=$(curl -sk -o /dev/null -w '%{http_code}' -m 8 "https://shital.org.uk${p}" 2>/dev/null || echo 000)
+              echo "  https://shital.org.uk${p} -> ${code}"
+            done
