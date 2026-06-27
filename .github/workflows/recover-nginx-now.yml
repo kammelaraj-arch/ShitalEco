@@ -1,4 +1,4 @@
-# P0 — recreate prod nginx that vanished after promote (round 2)
+# P0 URGENT — prod down, recover nginx + backend
 name: P0 — recover nginx now
 on:
   push:
@@ -17,50 +17,53 @@ jobs:
           username: root
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
-          command_timeout: 3m
+          command_timeout: 4m
           script: |
             set +e
             cd /opt/shitaleco
 
-            echo "=== nginx container state ==="
-            docker ps -a --filter 'name=shitaleco-nginx-1' --format 'table {{.Names}}\t{{.Status}}'
+            echo "=== current container states ==="
+            docker ps -a --filter 'name=shitaleco-' --format 'table {{.Names}}\t{{.Status}}' | head -15
 
             echo ""
-            echo "=== host systemd nginx hogging 80/443? ==="
+            echo "=== host nginx hogging 80/443? ==="
             systemctl is-active nginx 2>&1 | head -1
-            ss -tlnp 'sport = :80 or sport = :443' 2>&1 | head -6
+            systemctl stop nginx 2>/dev/null; systemctl disable nginx 2>/dev/null
 
             echo ""
-            echo "=== recreate nginx ==="
-            docker compose -p shitaleco -f docker-compose.prod.yml --env-file .env up -d nginx 2>&1 | tail -12
-            sleep 5
+            echo "=== bring up backend + nginx (no pull, no recreate of healthy ones) ==="
+            docker compose -p shitaleco -f docker-compose.prod.yml --env-file .env up -d backend nginx 2>&1 | tail -15
+
+            sleep 6
             docker restart shitaleco-nginx-1 2>&1 | tail -3
-            sleep 5
+            sleep 6
 
             echo ""
-            echo "=== probes after recovery ==="
-            for url in https://shital.org.uk/health https://kiosk.shital.org.uk/health https://admin.shital.org.uk/admin/ https://donate.shital.org.uk/donate/ https://service.shital.org.uk/; do
+            echo "=== probes ==="
+            for url in https://shital.org.uk/health https://admin.shital.org.uk/admin/ https://kiosk.shital.org.uk/health https://donate.shital.org.uk/donate/ https://service.shital.org.uk/; do
               code=$(curl -sk -o /dev/null -w '%{http_code}' -m 8 "$url" 2>/dev/null || echo 000)
               echo "  $url → $code"
             done
 
             echo ""
-            echo "=== if still down, force-recreate ==="
             code=$(curl -sk -o /dev/null -w '%{http_code}' -m 6 https://shital.org.uk/health 2>/dev/null || echo 000)
             if [ "$code" != "200" ]; then
-              echo ">>> still ${code}, force-recreate nginx"
-              docker compose -p shitaleco -f docker-compose.prod.yml --env-file .env up -d --force-recreate --no-deps nginx 2>&1 | tail -10
-              sleep 6
-              for url in https://shital.org.uk/health https://admin.shital.org.uk/admin/ https://kiosk.shital.org.uk/health; do
+              echo ">>> still ${code} — force-recreate backend + nginx"
+              docker compose -p shitaleco -f docker-compose.prod.yml --env-file .env up -d --force-recreate --no-deps backend nginx 2>&1 | tail -12
+              sleep 20
+              for url in https://shital.org.uk/health https://admin.shital.org.uk/admin/; do
                 code=$(curl -sk -o /dev/null -w '%{http_code}' -m 8 "$url" 2>/dev/null || echo 000)
-                echo "  POST-RECREATE $url → $code"
+                echo "  RETRY $url → $code"
               done
-              echo "--- nginx logs ---"
-              docker logs shitaleco-nginx-1 --tail 25 2>&1 | tail -25
+              echo "--- backend last 30 logs ---"
+              docker logs shitaleco-backend-1 --tail 30 2>&1 | tail -30
+              echo "--- nginx last 15 logs ---"
+              docker logs shitaleco-nginx-1 --tail 15 2>&1 | tail -15
             else
-              echo ">>> recovered"
+              echo ">>> RECOVERED — all serving"
             fi
 
             echo ""
-            echo "=== new-code proof via nginx now ==="
-            curl -sk -m 6 -X POST https://kiosk.shital.org.uk/api/v1/kiosk-devices/c5c4df64-beba-45d1-b8bb-ff31639bf3fd/heartbeat -w '\nHTTP %{http_code}\n' 2>&1 | tail -3
+            echo "=== backend state ==="
+            docker inspect shitaleco-backend-1 --format 'Status={{.State.Status}} Health={{.State.Health.Status}} Restarts={{.RestartCount}} OOM={{.State.OOMKilled}}' 2>&1
+            free -h | head -2
