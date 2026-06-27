@@ -1,0 +1,35 @@
+name: Restart nginx-dev to flush stale backend IP
+
+# Backend-dev is fully healthy + serving the new code, but nginx-dev cached
+# the OLD container IP from a previous recreate and keeps 502'ing. One-liner
+# fix — docker restart forces nginx to re-resolve the docker DNS on boot.
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/restart-nginx-dev-now.yml
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 2m
+          script: |
+            set +e
+            echo "=== before ==="
+            curl -sk -o /dev/null -w "/health → %{http_code}\n" -m 6 https://dev.shital.org.uk/health
+            echo "=== restart nginx-dev ==="
+            docker restart shitaleco-dev-nginx-dev-1 2>&1 | head -3
+            sleep 6
+            echo "=== after ==="
+            curl -sk -o /dev/null -w "/health → %{http_code}\n" -m 6 https://dev.shital.org.uk/health
+            n=$(curl -sk -m 12 https://dev.shital.org.uk/openapi.json 2>/dev/null | grep -c 'refresh-from-paypal' 2>/dev/null || echo 0)
+            echo "openapi refresh-from-paypal: $n"
+            if [ "$n" -gt 0 ]; then echo "✅ Dev is NOW ready on new code"; else echo "!!! still on old code"; fi

@@ -1,0 +1,49 @@
+name: Check what GHCR :dev actually contains
+
+# Pull GHCR's :dev with no local cache reuse, then read the file from INSIDE
+# the image WITHOUT running it. Tells us definitively whether GHCR has the
+# right code or not.
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/check-ghcr-dev-image.yml
+
+jobs:
+  c:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull :dev and read recurring_giving.py from inside
+        run: |
+          set +e
+          echo "=== Pull GHCR :dev fresh ==="
+          docker pull ghcr.io/kammelaraj-arch/shitaleco-backend:dev 2>&1 | tail -8
+
+          echo ""
+          echo "=== Image digest from GHCR ==="
+          docker images --digests ghcr.io/kammelaraj-arch/shitaleco-backend:dev --format 'ID={{.ID}}  Digest={{.Digest}}  Created={{.CreatedSince}}'
+
+          echo ""
+          echo "=== Find the file inside the image (no container start) ==="
+          docker run --rm --entrypoint sh ghcr.io/kammelaraj-arch/shitaleco-backend:dev -c '
+            p=$(find / -name "recurring_giving.py" -path "*shital*" 2>/dev/null | head -1)
+            echo "  path: $p"
+            if [ -n "$p" ]; then
+              echo "  refresh-from-paypal count: $(grep -c "refresh-from-paypal" "$p")"
+              echo "  --- last route decorators in the file ---"
+              grep -nE "@router\." "$p" | tail -8
+            fi
+          ' 2>&1
+
+          echo ""
+          echo "=== Latest commit ce22246 ALSO check (the PR #141 merge directly) ==="
+          docker pull ghcr.io/kammelaraj-arch/shitaleco-backend:latest 2>&1 | tail -3
+          docker images --digests ghcr.io/kammelaraj-arch/shitaleco-backend --format 'Tag={{.Tag}}  ID={{.ID}}  Digest={{.Digest}}  Created={{.CreatedSince}}' | head -10

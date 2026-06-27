@@ -1,0 +1,54 @@
+# READ-ONLY — list branches table + check duplicate readers
+name: Check branches + readers (READ-ONLY)
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/check-fkkw-reader.yml
+
+jobs:
+  r:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 60s
+          script: |
+            set +e
+            cd /opt/shitaleco
+            set -a; . .env; set +a
+            echo "=== ALL branches ==="
+            docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
+              -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
+              psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
+                SELECT branch_id, name, city, is_active, created_at::date AS created
+                FROM branches
+                ORDER BY name;
+              " 2>&1 | head -30
+
+            echo ""
+            echo "=== duplicate stripe readers (honeydew-everyone-then) ==="
+            docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
+              -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
+              psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
+                SELECT id, label, stripe_reader_id, status, branch_id, created_at, updated_at
+                FROM terminal_devices
+                WHERE label = 'honeydew-everyone-then'
+                ORDER BY created_at;
+              " 2>&1 | head -20
+
+            echo ""
+            echo "=== any kiosk_devices pointing at either honeydew row? ==="
+            docker compose -p shitaleco -f docker-compose.prod.yml exec -T \
+              -e PGPASSWORD="${POSTGRES_PASSWORD}" db \
+              psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "
+                SELECT kd.name AS kiosk_name, kd.branch_id, kd.card_reader_id, td.label
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                WHERE td.label = 'honeydew-everyone-then';
+              " 2>&1 | head -10

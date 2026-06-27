@@ -3,10 +3,21 @@ import { motion } from 'framer-motion'
 import { useKioskStore, THEMES, IDLE_BACKGROUNDS, IDLE_RING_COLORS } from '../store/kiosk.store'
 
 export function IdleScreen() {
-  const { setScreen, theme, orgName, orgLogoUrl } = useKioskStore()
+  const { setScreen, theme, orgName, orgLogoUrl, loggedInUser, cardProvider, stripeReaderLabel, sumupReaderLabel, cloverDeviceName, squareDeviceName } = useKioskStore()
   const th = THEMES[theme]
   const idleBg = IDLE_BACKGROUNDS[theme]
   const ringColor = IDLE_RING_COLORS[theme]
+
+  // Show staff at a glance which user is logged in + which reader is bound to
+  // this device. Top-right corner, small, doesn't distract donors. Tapping
+  // anywhere on the screen still triggers the start-donation flow.
+  const readerLabel =
+    cardProvider === 'stripe_terminal' ? stripeReaderLabel :
+    cardProvider === 'sumup'           ? sumupReaderLabel :
+    cardProvider === 'clover'          ? cloverDeviceName :
+    cardProvider === 'square'          ? squareDeviceName :
+    cardProvider === 'cash'            ? 'Cash only' :
+    ''
 
   return (
     <div
@@ -15,6 +26,26 @@ export function IdleScreen() {
       onClick={() => setScreen('home')}
       onTouchStart={() => setScreen('home')}
     >
+      {/* Staff-facing badge: logged-in user + active reader. Sits in top-right
+          on idle, low-key so it doesn't compete with the call-to-action. */}
+      {(loggedInUser || readerLabel) && (
+        <div
+          className="absolute top-3 right-3 z-20 text-right pointer-events-none"
+          style={{ color: ringColor, opacity: 0.75 }}
+        >
+          {loggedInUser && (
+            <div className="text-xs font-mono">
+              👤 {loggedInUser.name || loggedInUser.email}
+            </div>
+          )}
+          {readerLabel && (
+            <div className="text-xs font-mono mt-0.5">
+              💳 {readerLabel} <span className="opacity-60">({cardProvider.replace('_', ' ')})</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Subtle dot-grid background pattern */}
       <div
         className="absolute inset-0 pointer-events-none"
@@ -91,19 +122,32 @@ export function IdleScreen() {
         )}
       </motion.div>
 
-      {/* Org name */}
+      {/* Primary call-to-action — replaced the temple name here so donors
+          immediately understand the kiosk's purpose. Temple name moved to
+          a smaller line below so the branding is still visible. */}
       <motion.h1
-        className="text-5xl font-black mb-2 tracking-tight text-gold-gradient select-none relative z-10"
+        className="text-6xl font-black mb-2 tracking-tight text-gold-gradient select-none relative z-10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
       >
-        {orgName}
+        Donate Here
       </motion.h1>
 
+      {/* Temple name — small, still visible so devotees know which temple */}
       <motion.p
-        className="text-xl mb-2 font-light tracking-widest uppercase select-none relative z-10"
+        className="text-lg mb-1 font-semibold tracking-wide select-none relative z-10"
         style={{ color: th.headerSub }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+      >
+        {orgName}
+      </motion.p>
+
+      <motion.p
+        className="text-base mb-2 font-light tracking-widest uppercase select-none relative z-10"
+        style={{ color: `${th.headerSub}99` }}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.4 }}

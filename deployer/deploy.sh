@@ -99,8 +99,17 @@ take_snapshot() {
        pg_dump -U "${POSTGRES_USER:-shitaleco_db_user}" \
                -d "${POSTGRES_DB:-shitaleco_db}" \
        2>"$err_log" | gzip > "$out"
-  local pg_rc=${PIPESTATUS[0]}
-  local gz_rc=${PIPESTATUS[1]}
+  # CRITICAL: snapshot PIPESTATUS into a local array IN ONE STATEMENT.
+  # A bare `local pg_rc=${PIPESTATUS[0]}` is itself a simple-command that
+  # bash counts as a new pipeline of length 1 → PIPESTATUS gets reset to
+  # (0) before the next line reads PIPESTATUS[1]. That made gz_rc always
+  # empty, so the success test `[ "$gz_rc" -eq 0 ]` errored with "integer
+  # expected" and dropped into the fail branch — which rm'd the .sql.gz.
+  # Result: every promote since 14-Jun produced a 0-byte error log and no
+  # DB dump, even though pg_dump + gzip both ran successfully.
+  local pipe_rcs=("${PIPESTATUS[@]}")
+  local pg_rc=${pipe_rcs[0]}
+  local gz_rc=${pipe_rcs[1]}
   set -e
   if [ "$pg_rc" -eq 0 ] && [ "$gz_rc" -eq 0 ] && [ -s "$out" ]; then
     rm -f "$err_log"

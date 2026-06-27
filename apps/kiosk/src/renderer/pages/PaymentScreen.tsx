@@ -108,24 +108,37 @@ export function PaymentScreen() {
     if (provider !== 'SUMUP' || !sumupCheckoutId) return
     setReaderStatus('processing')
     setStatusMessage('Waiting for card on SumUp reader...')
+    // Accept every status string SumUp uses across its Checkouts API + Solo
+    // reader API + webhook payloads. Backend now normalizes to PAID/FAILED/
+    // EXPIRED/CANCELLED/PENDING, but we keep the union here too so an older
+    // cached backend response can't strand the kiosk on "Waiting for card…".
+    const SUCCESS = new Set(['PAID', 'SUCCESSFUL', 'SUCCESS', 'COMPLETED'])
+    const FAILED  = new Set(['FAILED', 'DECLINED', 'REJECTED', 'ERROR'])
+    const CANCELLED = new Set(['CANCELLED', 'CANCELED', 'VOIDED'])
+    const EXPIRED   = new Set(['EXPIRED'])
     const poll = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/kiosk/sumup/checkout/${sumupCheckoutId}`)
         const d = await res.json()
-        if (d.status === 'PAID') {
+        const s = String(d.status || '').toUpperCase()
+        if (SUCCESS.has(s)) {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
           await confirmOrder(orderRef, sumupCheckoutId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
-        } else if (d.status === 'FAILED') {
+        } else if (FAILED.has(s)) {
           clearInterval(poll)
           setReaderStatus('failed')
           setStatusMessage('Payment declined.')
-        } else if (d.status === 'EXPIRED') {
+        } else if (EXPIRED.has(s)) {
           clearInterval(poll)
           setReaderStatus('cancelled')
           setStatusMessage('Payment session expired.')
+        } else if (CANCELLED.has(s)) {
+          clearInterval(poll)
+          setReaderStatus('cancelled')
+          setStatusMessage('Payment was cancelled.')
         }
       } catch { }
     }, 2500)
@@ -133,6 +146,9 @@ export function PaymentScreen() {
   }, [provider, sumupCheckoutId])
 
   // Poll Clover Flex
+  // Backend normalizes to PAID|FAILED|CANCELLED|PENDING. We still accept the
+  // legacy COMPLETED token in case an older backend is rolling through prod
+  // mid-deploy (Clover used to return COMPLETED for success).
   useEffect(() => {
     if (provider !== 'CLOVER' || !cloverOrderId) return
     setReaderStatus('processing')
@@ -141,17 +157,18 @@ export function PaymentScreen() {
       try {
         const res = await fetch(`${API_BASE}/kiosk/clover/payment/${cloverOrderId}`)
         const d = await res.json()
-        if (d.status === 'COMPLETED') {
+        const s = String(d.status || '').toUpperCase()
+        if (s === 'PAID' || s === 'COMPLETED' || s === 'SUCCESS') {
           clearInterval(poll)
           setReaderStatus('succeeded')
           setStatusMessage('Payment successful!')
           await confirmOrder(orderRef, cloverOrderId || '', setReceiptSentByConfirm)
           setTimeout(() => setScreen('confirmation'), 1500)
-        } else if (d.status === 'FAILED') {
+        } else if (s === 'FAILED' || s === 'FAIL' || s === 'VOIDED') {
           clearInterval(poll)
           setReaderStatus('failed')
           setStatusMessage('Payment declined.')
-        } else if (d.status === 'CANCELLED') {
+        } else if (s === 'CANCELLED' || s === 'CANCELED') {
           clearInterval(poll)
           setReaderStatus('cancelled')
           setStatusMessage('Payment was cancelled.')
@@ -161,13 +178,85 @@ export function PaymentScreen() {
     return () => clearInterval(poll)
   }, [provider, cloverOrderId])
 
+  // Poll Square Terminal
+  // Backend normalizes Square's COMPLETED → PAID, CANCELED → CANCELLED, etc.
+  // Native Square statuses also accepted as fallback.
+  useEffect(() => {
+    if (provider !== 'SQUARE' || !checkoutId) return
+    setReaderStatus('processing')
+    setStatusMessage('Waiting for card on Square Terminal...')
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/kiosk/square/terminal-checkout/${checkoutId}`)
+        const d = await res.json()
+        const s = String(d.status || '').toUpperCase()
+        if (s === 'PAID' || s === 'COMPLETED') {
+          clearInterval(poll)
+          setReaderStatus('succeeded')
+          setStatusMessage('Payment successful!')
+          await confirmOrder(orderRef, checkoutId || '', setReceiptSentByConfirm)
+          setTimeout(() => setScreen('confirmation'), 1500)
+        } else if (s === 'CANCELLED' || s === 'CANCELED') {
+          clearInterval(poll)
+          setReaderStatus('cancelled')
+          setStatusMessage(d.cancel_reason
+            ? `Payment cancelled (${String(d.cancel_reason).toLowerCase().replace(/_/g, ' ')}).`
+            : 'Payment was cancelled.')
+        } else if (s === 'FAILED') {
+          clearInterval(poll)
+          setReaderStatus('failed')
+          setStatusMessage('Payment declined.')
+        }
+        // PENDING / IN_PROGRESS / CANCEL_REQUESTED → keep polling
+      } catch { }
+    }, 2500)
+    return () => clearInterval(poll)
+  }, [provider, checkoutId])
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Per-provider strategy — keep these in sync with the polling useEffects
+  // above + the backend status endpoints in kiosk.py:
+  //
+  //   PROVIDER         | POLL endpoint                            | CANCEL
+  //   ─────────────────|──────────────────────────────────────────|─────────
+  //   STRIPE_TERMINAL  | /terminal/payment-intent-status?id=…     | POST /terminal/cancel-action
+  //   SUMUP            | /sumup/checkout/{id}     (normalized)    | DELETE /sumup/checkout/{id}
+  //   CLOVER           | /clover/payment/{id}     (normalized)    | DELETE /clover/payment/{id}?cancel=true
+  //   SQUARE           | /square/terminal-checkout/{id} (norm.)   | DELETE /square/terminal-checkout/{id}
+  //   PAYPAL           | (none — donor completes on paypal.com)   | (donor closes PayPal window)
+  //   CASH             | (no reader — UI confirms manually)       | (back to basket, no API call)
+  //
+  // All non-Stripe backends normalize their native vocabulary to the same set:
+  //   PAID | FAILED | CANCELLED | EXPIRED | PENDING
+  // so the polling switches above stay uniform.
+  // ─────────────────────────────────────────────────────────────────────────
   const handleCancel = async () => {
+    // Tell the physical reader to abort BEFORE navigating away. Each provider
+    // has its own cancel endpoint. Fire-and-forget — if the API call fails
+    // we still navigate back (the reader will time out within ~30s on its own).
     if (provider === 'STRIPE_TERMINAL' && readerId) {
       await fetch(`${API_BASE}/kiosk/terminal/cancel-action`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reader_id: readerId, payment_intent_id: paymentIntentId }),
       }).catch(() => {})
+    } else if (provider === 'SUMUP' && sumupCheckoutId) {
+      await fetch(`${API_BASE}/kiosk/sumup/checkout/${sumupCheckoutId}`, {
+        method: 'DELETE',
+      }).catch(() => {})
+    } else if (provider === 'CLOVER' && cloverOrderId) {
+      // Clover: best-effort cancel hint; reader times out on its own.
+      await fetch(`${API_BASE}/kiosk/clover/payment/${cloverOrderId}?cancel=true`, {
+        method: 'DELETE',
+      }).catch(() => {})
+    } else if (provider === 'SQUARE' && checkoutId) {
+      // Square supports cancel via DELETE on the checkout id — Square then
+      // dismisses the prompt on the terminal within ~1s.
+      await fetch(`${API_BASE}/kiosk/square/terminal-checkout/${checkoutId}`, {
+        method: 'DELETE',
+      }).catch(() => {})
     }
+    // PAYPAL: donor cancels in PayPal's window — nothing to call here.
+    // CASH:   no reader, no API; navigate straight back.
     setScreen('basket')
   }
 

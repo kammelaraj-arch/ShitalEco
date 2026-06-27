@@ -1,0 +1,87 @@
+# PROD DOWN — recovery 22:10
+
+# Brings the prod stack back up after a promote-killed-the-deployer outage.
+# Auto-fires on push to this branch — no manual dispatch needed (the GitHub
+# integration in this session cannot dispatch workflows; auto-fire is the
+# only working path).
+#
+# Pure recovery: docker compose up -d. No pull, no force-recreate, no rebuild.
+# Reuses whatever :latest images are already on the host (the SAFE good ones
+# from before the failed promote — failed promotes don't change :latest).
+# Idempotent — safe to re-run.
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH in and bring the prod stack back up
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 5m
+          script: |
+            set +e
+            echo "=== Host state before ==="
+            free -h
+            uptime
+            echo ""
+            echo "=== Docker daemon + prod containers ==="
+            systemctl is-active docker || systemctl start docker
+            cd /opt/shitaleco
+            docker ps -a --filter 'name=shitaleco-' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | head -20
+            echo ""
+
+            echo "=== Bring the prod stack up (no pull, use existing :latest) ==="
+            docker compose -f docker-compose.prod.yml --env-file .env up -d 2>&1 | tail -25
+
+            echo ""
+            echo "=== Wait up to 3 min for backend /health = 200 ==="
+            OK=0
+            for i in $(seq 1 36); do
+              sleep 5
+              c=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost:8000/health 2>/dev/null || echo 000)
+              if [ "$c" = "200" ]; then
+                echo "OK — backend healthy after $((i*5))s"
+                OK=1; break
+              fi
+              [ $((i % 6)) -eq 0 ] && echo "  attempt $i/36 (${i}*5s) → $c"
+            done
+
+            echo ""
+            echo "=== Verify external (TLS through nginx) ==="
+            for u in https://shital.org.uk/ https://shital.org.uk/health https://admin.shital.org.uk/ https://service.shital.org.uk/; do
+              code=$(curl -sk -o /dev/null -w '%{http_code}' -m 8 "$u" 2>/dev/null || echo 000)
+              echo "  $u → $code"
+            done
+
+            echo ""
+            echo "=== Final docker ps ==="
+            docker ps --filter 'name=shitaleco-' --format 'table {{.Names}}\t{{.Status}}' | head -15
+
+            if [ "$OK" != "1" ]; then
+              echo ""
+              echo "!!! Backend still not healthy after 180s — dump logs"
+              docker logs --tail 60 shitaleco-backend-1 2>&1 | tail -60 || true
+              exit 4
+            fi
+
+            echo ""
+            echo "=== If nginx still not serving despite backend OK — flush stale upstream ==="
+            ext_code=$(curl -sk -o /dev/null -w '%{http_code}' -m 8 https://shital.org.uk/health 2>/dev/null || echo 000)
+            if [ "$ext_code" != "200" ]; then
+              echo "  external still $ext_code → restarting nginx to flush DNS"
+              docker restart shitaleco-nginx-1 2>&1 | tail -5
+              sleep 6
+              ext_code=$(curl -sk -o /dev/null -w '%{http_code}' -m 8 https://shital.org.uk/health 2>/dev/null || echo 000)
+              echo "  after nginx restart: external /health → $ext_code"
+            fi
+
+            echo ""
+            echo "=== Recovery complete ==="

@@ -12,6 +12,9 @@ interface LoginResponse {
   profile?: { theme?: string; idle_timeout_secs?: number; preset_amounts?: number[] } | null
   stripe_reader_id?: string | null
   reader_label?: string | null
+  reader_provider?: string | null
+  sumup_reader_serial?: string | null
+  clover_device_id?: string | null
   menu_codes?: string[]
 }
 
@@ -68,7 +71,24 @@ export function SetupScreen() {
     // the kiosk gear icon (test print, theme cycle, refresh, admin).
     const apiMenu = (data as { menu_options?: Record<string, boolean> }).menu_options
     if (apiMenu) setMenuOptions(apiMenu)
-    if (data.stripe_reader_id) setCardDevice('stripe_terminal', data.stripe_reader_id, data.reader_label || data.stripe_reader_id)
+    // Card reader: use the EXACT reader assigned to this device — no fallback,
+    // no Stripe default. Backend returns reader_provider verbatim from the
+    // device's terminal_devices row; respect it. If nothing is assigned, leave
+    // the previous device alone (user will be shown a clear error at pay time).
+    const prov = (data.reader_provider || '').toLowerCase()
+    if (prov === 'sumup' && data.sumup_reader_serial) {
+      setCardDevice('sumup', data.sumup_reader_serial, data.reader_label || data.sumup_reader_serial)
+    } else if (prov === 'clover' && data.clover_device_id) {
+      setCardDevice('clover', data.clover_device_id, data.reader_label || data.clover_device_id)
+    } else if (prov === 'stripe_terminal' && data.stripe_reader_id) {
+      setCardDevice('stripe_terminal', data.stripe_reader_id, data.reader_label || data.stripe_reader_id)
+    } else if (data.reader_label) {
+      setError(`Reader "${data.reader_label}" is assigned but missing credentials (provider=${prov || 'unknown'}). Ask admin to fix the device assignment.`)
+      return
+    } else {
+      setError('No card reader assigned to this device. Open admin → Kiosk Devices and assign a reader.')
+      return
+    }
     if (Array.isArray(data.menu_codes)) setMenuCodes(data.menu_codes)
     setKioskDevice(data.user.id || '', data.user.name || '')
     setLoggedInUser({ name: data.user.name, email: data.user.email, branch: data.branch.name })

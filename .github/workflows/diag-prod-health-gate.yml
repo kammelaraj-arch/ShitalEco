@@ -1,0 +1,54 @@
+# READ-ONLY — why does the new prod backend fail /health within 1200s?
+name: Diag prod health gate (READ-ONLY)
+on:
+  push:
+    branches:
+      - claude/recover-prod-now-Q40dj
+    paths:
+      - .github/workflows/diag-prod-health-gate.yml
+
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 192.248.147.205
+          username: root
+          password: ${{ secrets.VULTR_ROOT_PASSWORD }}
+          port: 22
+          command_timeout: 3m
+          script: |
+            set +e
+            cd /opt/shitaleco
+
+            echo "=== latest failed promote-backend startup logs ==="
+            ls -lt /opt/shitaleco/backups/promote-backend-*.log 2>/dev/null | head -5
+
+            echo ""
+            echo "=== TAIL of the most-recent failed backend startup log (the rollback cause) ==="
+            f=$(ls -t /opt/shitaleco/backups/promote-backend-*.log 2>/dev/null | head -1)
+            echo "file: $f"
+            [ -n "$f" ] && tail -80 "$f"
+
+            echo ""
+            echo "=== host memory (is the box starved during promote?) ==="
+            free -h
+
+            echo ""
+            echo "=== current running backend image + git sha ==="
+            docker inspect shitaleco-backend-1 --format 'Image={{.Image}} Started={{.State.StartedAt}} Restarts={{.RestartCount}} OOM={{.State.OOMKilled}}' 2>&1
+
+            echo ""
+            echo "=== what :latest backend image is on the host now (build date)? ==="
+            docker image inspect ghcr.io/kammelaraj-arch/shitaleco-backend:latest --format 'Created={{.Created}} Id={{.Id}}' 2>&1 | head -2
+
+            echo ""
+            echo "=== deploy.sh on host: does it have the PIPESTATUS pg_dump fix + nginx EXIT trap? ==="
+            grep -nE 'pipe_rcs|_deploy_exit_guard|ensure_nginx_up' /opt/shitaleco/deployer/deploy.sh 2>&1 | head -8
+            echo "deploy.sh health-gate timeout setting:"
+            grep -nE 'HEALTH.*=|for i in.*240|600s|1200s|health.*gate' /opt/shitaleco/deployer/deploy.sh 2>&1 | head -6
+
+            echo ""
+            echo "=== count alembic / patch_schema lines in last failed startup (slow migration?) ==="
+            [ -n "$f" ] && grep -cE 'alembic|patch_schema|CREATE|ALTER|seed' "$f" 2>&1

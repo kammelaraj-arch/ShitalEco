@@ -31,23 +31,43 @@ export function KioskApp() {
     if (!deviceConfigured) setScreen('setup')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Heartbeat — every 30 s while the app is open + has a kioskDeviceId.
-  // Bumps kiosk_devices.last_seen_at so the admin Kiosks panel reflects
-  // ONLINE/STALE/OFFLINE accurately. Strictly outside the card-reader
-  // logic (per CLAUDE.md): fire-and-forget POST, ignored on failure
-  // (next tick retries). The /heartbeat endpoint is public — no token
-  // plumbing required for an unauthenticated last-seen bump.
+  // Heartbeat — every 30 s. Two jobs in one round-trip:
+  //   (1) Bump kiosk_devices.last_seen_at (admin Kiosks panel ONLINE state)
+  //   (2) Pick up any remote command an admin queued (refresh / restart)
+  //       — the backend clears the command atomically on read, so each
+  //       admin click fires at most once.
+  // Returns 410 Gone if the device row has been deleted/rotated — kiosk
+  // resets to the setup screen instead of heartbeating into the void.
   useEffect(() => {
     if (!kioskDeviceId) return
-    const beat = () => {
-      fetch(`${API_BASE}/kiosk-devices/${kioskDeviceId}/heartbeat`, {
-        method: 'POST', cache: 'no-store',
-      }).catch(() => { /* offline — try next tick */ })
+    const beat = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/kiosk-devices/${kioskDeviceId}/heartbeat`, {
+          method: 'POST', cache: 'no-store',
+        })
+        if (res.status === 410) {
+          // Device no longer exists — force back to login
+          resetKiosk()
+          setScreen('setup')
+          return
+        }
+        if (!res.ok) return
+        const data = await res.json().catch(() => null)
+        const cmd = (data?.command || '').toLowerCase()
+        if (cmd === 'refresh' || cmd === 'restart') {
+          // Hard reload — picks up new bundles, re-runs login,
+          // re-reads card-reader config from /quick-donation/login.
+          window.location.reload()
+        } else if (cmd === 'logout' || cmd === 'reset') {
+          resetKiosk()
+          setScreen('setup')
+        }
+      } catch { /* offline — try next tick */ }
     }
     beat()
     const id = setInterval(beat, 30_000)
     return () => clearInterval(id)
-  }, [kioskDeviceId])
+  }, [kioskDeviceId, resetKiosk, setScreen])
 
   // Daily catalog cache invalidation at local midnight — even if no one
   // touches the kiosk overnight, the next morning's first read gets fresh data.

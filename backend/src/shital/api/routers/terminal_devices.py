@@ -483,7 +483,11 @@ async def refresh_device_status(device_id: str, ctx: RequiredSpace):
 
     async with SessionLocal() as db:
         result = await db.execute(
-            text("SELECT stripe_reader_id, provider FROM terminal_devices WHERE id = :id"),
+            text("""
+                SELECT stripe_reader_id, provider,
+                       COALESCE(sumup_reader_serial, '') AS sumup_reader_serial
+                FROM terminal_devices WHERE id = :id
+            """),
             {"id": device_id},
         )
         row = result.mappings().first()
@@ -491,14 +495,50 @@ async def refresh_device_status(device_id: str, ctx: RequiredSpace):
     if not row:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    if row["provider"] != "stripe_terminal" or not row["stripe_reader_id"]:
-        return {"device_id": device_id, "status": "unknown", "note": "Non-Stripe device"}
+    provider = (row["provider"] or "").lower()
 
-    try:
-        reader = stripe.terminal.Reader.retrieve(row["stripe_reader_id"])
-        status = reader.status or "offline"
-    except Exception as e:
-        return {"device_id": device_id, "status": "error", "error": str(e)}
+    # ── Stripe Terminal ──────────────────────────────────────────────────────
+    if provider == "stripe_terminal" and row["stripe_reader_id"]:
+        try:
+            reader = stripe.terminal.Reader.retrieve(row["stripe_reader_id"])
+            status = reader.status or "offline"
+        except Exception as e:
+            return {"device_id": device_id, "status": "error", "error": str(e)}
+
+    # ── SumUp ────────────────────────────────────────────────────────────────
+    # Without this branch, SumUp readers stayed stuck on whatever status was
+    # last written (typically 'offline' from creation), so admin Kiosks panel
+    # kept showing Wembley Solo 2 as offline even when physically paired.
+    elif provider == "sumup":
+        import httpx
+        access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+        merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+        if not access_token or not merchant_code:
+            return {"device_id": device_id, "status": "error",
+                    "error": "SumUp not configured (SUMUP_ACCESS_TOKEN / SUMUP_MERCHANT_CODE)"}
+        sumup_id = row["sumup_reader_serial"] or ""
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"https://api.sumup.com/v0.1/merchants/{merchant_code}/readers",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+            if not resp.is_success:
+                return {"device_id": device_id, "status": "error",
+                        "error": f"SumUp API {resp.status_code}: {resp.text[:200]}"}
+            data = resp.json()
+            items = data if isinstance(data, list) else data.get("items", data.get("readers", []))
+            match = next((r for r in items if r.get("id") == sumup_id), None) if sumup_id else None
+            raw = (match.get("status") if match else "unknown") or "unknown"
+            # SumUp returns 'paired' / 'processing' / 'unknown' — map to our
+            # online/offline scheme. Anything paired+ is online; rest offline.
+            status = "online" if raw.lower() in {"paired", "processing"} else "offline"
+        except Exception as e:
+            return {"device_id": device_id, "status": "error", "error": str(e)}
+
+    else:
+        return {"device_id": device_id, "status": "unknown",
+                "note": f"Status refresh not implemented for provider={provider!r}"}
 
     async with SessionLocal() as db:
         await db.execute(

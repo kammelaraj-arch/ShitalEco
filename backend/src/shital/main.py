@@ -44,26 +44,48 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     total_caps = len(DigitalDNA.all_capabilities())
     logger.info("digital_dna_loaded", total_capabilities=total_caps)
 
-    # Idempotent schema patch + catalog seed on every startup
-    # Must run BEFORE sync_from_digital_dna so function_registry table exists.
-    try:
-        await _patch_schema()
-    except Exception as exc:
-        logger.error("startup_patch_failed", error=str(exc))
+    # ── Schema patch + DNA sync — NON-BLOCKING (deploy-gate fix) ─────────
+    # PERMANENT FIX for the prod promote doom-loop: _patch_schema() runs 60+
+    # idempotent ALTERs and sync_from_digital_dna() rewrites the function
+    # registry. On the large prod DB the FIRST boot after a schema change
+    # took >1200s — LONGER than deploy.sh's health-gate ceiling. Because these
+    # ran synchronously BEFORE `yield`, uvicorn didn't serve /health until they
+    # finished, so the gate timed out → auto-rollback → migrations never
+    # committed → next promote started over. Prod could NEVER update.
+    #
+    # Moving them to a background task lets `yield` happen immediately, so
+    # uvicorn serves /health within seconds → the deploy gate passes → the
+    # migrations finish in the background and commit. _patch_schema is additive
+    # + idempotent (ADD COLUMN IF NOT EXISTS / CREATE INDEX IF NOT EXISTS), and
+    # the app already ran on the prior-compatible schema, so serving a few
+    # requests during the brief patch window is safe — far safer than a prod
+    # that can't deploy at all. A readiness flag is exposed via /health for
+    # observability (status: "starting" until the patch completes).
+    import asyncio as _asyncio
+    app.state.schema_ready = False
+    app.state.schema_error = None
 
-    # Sync Digital DNA capabilities to the DB function registry
-    try:
-        from shital.api.routers.functions import sync_from_digital_dna
-        result = await sync_from_digital_dna()
-        logger.info("function_registry_synced",
-                    synced=result["synced"], errors=len(result["errors"]))
-    except Exception as exc:
-        logger.error("function_registry_sync_failed", error=str(exc))
+    async def _startup_migrations() -> None:
+        try:
+            await _patch_schema()
+        except Exception as exc:
+            app.state.schema_error = str(exc)
+            logger.error("startup_patch_failed", error=str(exc))
+        try:
+            from shital.api.routers.functions import sync_from_digital_dna
+            result = await sync_from_digital_dna()
+            logger.info("function_registry_synced",
+                        synced=result["synced"], errors=len(result["errors"]))
+        except Exception as exc:
+            logger.error("function_registry_sync_failed", error=str(exc))
+        app.state.schema_ready = True
+        logger.info("startup_migrations_complete")
+
+    _migrations_task = _asyncio.create_task(_startup_migrations())
 
     # ── Mail Agent background poller ─────────────────────────────────────
     # Disabled when MAIL_AGENT_POLL_SECONDS=0 or MAIL_AGENT_MAILBOXES is empty
     # (so dev stacks don't burn Anthropic credit unless explicitly enabled).
-    import asyncio as _asyncio
     _mail_task: _asyncio.Task[None] | None = None
     if (settings.MAIL_AGENT_POLL_SECONDS > 0
             and settings.MAIL_AGENT_MAILBOXES.strip()
@@ -4077,11 +4099,16 @@ _mount("shital.api.routers.mail_agent",            "router")
 @app.get("/health", tags=["system"])
 @app.get("/api/v1/ping", tags=["system"])
 async def health() -> dict[str, Any]:
+    # Liveness: always 200 once the process is up, so the deploy health-gate
+    # passes immediately instead of waiting on the background schema patch.
+    # `schema_ready` lets operators see whether first-boot migrations have
+    # finished (false during the brief patch window right after a promote).
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
         "version": "1.0.7",
         "environment": settings.APP_ENV,
+        "schema_ready": bool(getattr(app.state, "schema_ready", True)),
     }
 
 

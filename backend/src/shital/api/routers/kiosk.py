@@ -764,8 +764,18 @@ async def list_square_devices():
 
 @router.get("/square/terminal-checkout/{checkout_id}")
 async def square_checkout_status(checkout_id: str):
-    """Poll Square Terminal checkout status."""
+    """Poll Square Terminal checkout status.
 
+    Normalizes Square's vocabulary to the same {PAID|FAILED|CANCELLED|
+    EXPIRED|PENDING} set as the other providers so the kiosk frontend has
+    one switch instead of four. Square's native statuses:
+        PENDING / IN_PROGRESS  →  PENDING (still waiting on donor)
+        COMPLETED              →  PAID
+        CANCEL_REQUESTED       →  PENDING (cancel in flight, not done yet)
+        CANCELED               →  CANCELLED
+        (Square doesn't have an explicit FAILED — declines come back as
+         CANCELED with a cancel_reason; we surface that in raw_status.)
+    """
     base = "https://connect.squareup.com" if settings.SQUARE_ENVIRONMENT == "production" else "https://connect.squareupsandbox.com"
     headers = {"Authorization": f"Bearer {settings.SQUARE_ACCESS_TOKEN}", "Square-Version": "2024-06-04"}
     try:
@@ -773,13 +783,24 @@ async def square_checkout_status(checkout_id: str):
             resp = await client.get(f"{base}/v2/terminals/checkouts/{checkout_id}", headers=headers, timeout=10)
         data = resp.json()
         checkout = data.get("checkout", {})
+        raw = (checkout.get("status") or "UNKNOWN").upper()
+        if raw == "COMPLETED":
+            normalized = "PAID"
+        elif raw == "CANCELED":
+            normalized = "CANCELLED"
+        elif raw in {"PENDING", "IN_PROGRESS", "CANCEL_REQUESTED"}:
+            normalized = "PENDING"
+        else:
+            normalized = "PENDING"  # UNKNOWN — keep polling
         return {
-            "status": checkout.get("status", "UNKNOWN"),
+            "status": normalized,
+            "raw_status": raw,
             "checkout_id": checkout_id,
+            "cancel_reason": checkout.get("cancel_reason", ""),
             "amount": checkout.get("amount_money", {}).get("amount", 0) / 100,
         }
     except Exception as e:
-        return {"status": "UNKNOWN", "error": str(e)}
+        return {"status": "error", "error": str(e)}
 
 
 # ─── Clover Flex / Cloud Pay Display ─────────────────────────────────────────
@@ -873,6 +894,11 @@ async def clover_payment_status(order_id: str):
     base = _clover_base(environment)
     headers = {"Authorization": f"Bearer {access_token}"}
 
+    # Normalizes Clover's order+payments shape to the standard
+    # {PAID|FAILED|CANCELLED|EXPIRED|PENDING} set the kiosk frontend uses
+    # across all providers. Clover doesn't expose a single status field —
+    # it's the latest payment.result on the order; CANCELLED comes from
+    # order.state=LOCKED when the donor backs out of the prompt.
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -883,12 +909,13 @@ async def clover_payment_status(order_id: str):
         payments = data.get("payments", {}).get("elements", [])
         for p in payments:
             if p.get("result") == "SUCCESS":
-                return {"status": "COMPLETED", "payment_id": p.get("id"), "amount": p.get("amount", 0) / 100}
+                return {"status": "PAID", "raw_status": "SUCCESS",
+                        "payment_id": p.get("id"), "amount": p.get("amount", 0) / 100}
             if p.get("result") in ("FAIL", "VOIDED"):
-                return {"status": "FAILED"}
+                return {"status": "FAILED", "raw_status": p.get("result")}
         if data.get("state") == "LOCKED":
-            return {"status": "CANCELLED"}
-        return {"status": "PENDING"}
+            return {"status": "CANCELLED", "raw_status": "LOCKED"}
+        return {"status": "PENDING", "raw_status": data.get("state", "OPEN")}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
@@ -1159,11 +1186,34 @@ async def sumup_checkout_status(checkout_id: str):
     """
 
 
+    # Normalize SumUp's various vocabularies to a single set:
+    #   PAID     — donor's card charged successfully
+    #   FAILED   — declined / rejected
+    #   EXPIRED  — donor walked away / session timeout
+    #   CANCELLED — donor or app cancelled before tap
+    #   PENDING  — still waiting
+    # Solo reader checkouts use SUCCESSFUL; Checkouts-API uses PAID; transactions
+    # array uses SUCCESSFUL/PAID interchangeably. Without normalization the
+    # kiosk frontend's `status === 'PAID'` check missed Solo reader successes
+    # and the app sat stuck on "Waiting for card..." after the card was tapped.
+    def _normalize_sumup_status(raw: str | None) -> str:
+        s = (raw or "PENDING").upper().strip()
+        if s in {"PAID", "SUCCESSFUL", "SUCCESS", "COMPLETED"}:
+            return "PAID"
+        if s in {"FAILED", "DECLINED", "REJECTED", "ERROR"}:
+            return "FAILED"
+        if s in {"CANCELLED", "CANCELED", "VOIDED"}:
+            return "CANCELLED"
+        if s == "EXPIRED":
+            return "EXPIRED"
+        return "PENDING"
+
     # Fast path: webhook already delivered the final status
     try:
         cached = await cache_get(f"sumup:checkout:{checkout_id}")
         if cached and cached.get("status") not in (None, "PENDING"):
-            return {"status": cached["status"], "source": "webhook"}
+            return {"status": _normalize_sumup_status(cached.get("status")),
+                    "raw_status": cached.get("status"), "source": "webhook"}
     except Exception:
         cached = None  # Redis unavailable — fall through to API poll
 
@@ -1178,13 +1228,24 @@ async def sumup_checkout_status(checkout_id: str):
                 headers={"Authorization": f"Bearer {access_token}"},
             )
         data = resp.json()
-        status = data.get("status", "PENDING")
-        if status and status != "PENDING":
+        # Solo reader: the checkout.status often stays PENDING while the
+        # transactions[] array carries the real outcome. Promote a
+        # transaction-level SUCCESSFUL/FAILED to the checkout status so
+        # polling sees the terminal state.
+        raw_status = data.get("status", "PENDING")
+        txns = data.get("transactions") or []
+        if txns:
+            t_status = (txns[-1] or {}).get("status")
+            if t_status and (raw_status == "PENDING" or not raw_status):
+                raw_status = t_status
+        normalized = _normalize_sumup_status(raw_status)
+        if normalized != "PENDING":
             try:
-                await cache_set(f"sumup:checkout:{checkout_id}", {"status": status.upper()}, ttl=3600)
+                await cache_set(f"sumup:checkout:{checkout_id}",
+                                {"status": normalized}, ttl=3600)
             except Exception:
                 pass
-        return {"status": status, "raw": data}
+        return {"status": normalized, "raw_status": raw_status, "raw": data}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
@@ -2223,18 +2284,39 @@ async def send_receipt(body: ReceiptInput):
     return {"sent": False, "method": "none", "error": f"Unsupported type '{body.type}' or service not configured"}
 
 
+# Seed data for the FIRST-RUN branch bootstrap in /quick-donation/seed-accounts.
+# NOT used by GET /branches (that reads the live branches table) — this is only
+# the initial set inserted ON CONFLICT DO NOTHING so a fresh DB has branches to
+# attach kiosk accounts to. Editing branches afterwards happens in admin.
 BRANCHES = [
-    {"id": "main",      "name": "Wembley",       "name_gu": "વેમ્બ્લી",    "name_hi": "वेम्बली",    "city": "Wembley, London",   "postcode": "HA9 0EW"},
-    {"id": "leicester", "name": "Leicester",     "name_gu": "લેસ્ટર",     "name_hi": "लेस्टर",     "city": "Leicester",          "postcode": "LE1"},
-    {"id": "reading",   "name": "Reading",       "name_gu": "રીડિંગ",     "name_hi": "रीडिंग",     "city": "Reading, Berkshire", "postcode": "RG1"},
-    {"id": "mk",        "name": "Milton Keynes", "name_gu": "મિલ્ટન કીન્સ", "name_hi": "मिल्टन कीन्स", "city": "Milton Keynes",      "postcode": "MK9"},
+    {"id": "main",      "name": "Wembley",       "city": "Wembley, London",   "postcode": "HA9 0EW"},
+    {"id": "leicester", "name": "Leicester",     "city": "Leicester",          "postcode": "LE1"},
+    {"id": "reading",   "name": "Reading",       "city": "Reading, Berkshire", "postcode": "RG1"},
+    {"id": "mk",        "name": "Milton Keynes", "city": "Milton Keynes",      "postcode": "MK9"},
 ]
 
 
 @router.get("/branches")
 async def list_branches():
-    """List all Shital Temple branches for kiosk branch selection."""
-    return {"branches": BRANCHES}
+    """List active branches from the DB for kiosk branch selection.
+
+    Previously returned a hardcoded 4-entry list whose IDs (main / mk /
+    reading / leicester) didn't match the DB rows (wembley_main /
+    milton_keynes_branch / reading_branch / leicester) — so any kiosk
+    that called this got phantom branches and couldn't see newly-added
+    ones. Now queries the same branches table the Service app uses.
+    """
+    async with SessionLocal() as db:
+        result = await db.execute(text("""
+            SELECT branch_id AS id, name,
+                   COALESCE(city, '') AS city,
+                   COALESCE(postcode, '') AS postcode
+            FROM   branches
+            WHERE  is_active = true
+            ORDER  BY name
+        """))
+        rows = [dict(r) for r in result.mappings()]
+    return {"branches": rows}
 
 
 # ─── Kiosk Print Receipt Template ─────────────────────────────────────────────
@@ -3024,24 +3106,23 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                 "org_name": dev_row["org_name"] or "",
             }
 
-    # Merge kiosk_devices reader (preferred) with kiosk_profiles reader (fallback)
-    profile_provider = (profile.get("device_provider") or "stripe_terminal") if profile else "stripe_terminal"
-    profile_sumup_serial = (profile.get("sumup_reader_serial") or "") if profile else ""
-    profile_stripe_id = (profile.get("stripe_reader_id") or "") if profile else ""
-
-    # If kiosk_devices had a configured reader, use it; otherwise fall back to kiosk_profiles
+    # Return the EXACT reader assigned to this kiosk device — NO FALLBACK.
+    # A previous version silently fell back to the user's kiosk_profiles reader
+    # (typically a Stripe terminal), so e.g. FKKW assigned to Wembley Solo 2
+    # (SumUp) would silently switch to a Stripe reader if anything looked off.
+    # That's a revenue/wrong-provider hazard — surface the misconfig instead.
     if device_reader_id or device_sumup_serial or device_clover_id:
         effective_reader_id = device_reader_id
-        effective_reader_label = device_reader_label or (profile.get("device_label") if profile else None)
+        effective_reader_label = device_reader_label
         effective_provider = device_reader_provider
         effective_sumup_serial = device_sumup_serial
         effective_clover_id = device_clover_id
     else:
-        effective_reader_id = profile_stripe_id or None
-        effective_reader_label = (profile.get("device_label") if profile else None)
-        effective_provider = profile_provider
-        effective_sumup_serial = profile_sumup_serial
-        effective_clover_id = ""  # kiosk_profiles has no clover field yet
+        effective_reader_id = None
+        effective_reader_label = None
+        effective_provider = None
+        effective_sumup_serial = ""
+        effective_clover_id = ""
 
     return {
         "authenticated": True,

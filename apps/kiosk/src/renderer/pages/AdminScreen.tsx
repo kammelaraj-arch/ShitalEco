@@ -6,7 +6,15 @@ import { clearKioskCache } from '../utils/cachedFetch'
 const ICON_PRESETS = ['🕉', '🙏', '🪔', '✨', '🌸', '☀️', '🌺', '🕊️']
 
 export function AdminScreen() {
-  const { setScreen, endScreenTemplate, setEndScreenTemplate, formTextConfig, setFormTextConfig, branchId, cardProvider, stripeReaderLabel, squareDeviceName } = useKioskStore()
+  const {
+    setScreen, endScreenTemplate, setEndScreenTemplate, formTextConfig, setFormTextConfig,
+    branchId, orgName,
+    cardProvider, stripeReaderLabel, squareDeviceName,
+    sumupReaderLabel, sumupReaderId,
+    cloverDeviceName, cloverDeviceId,
+    loggedInUser,
+    setDeviceConfigured, setLoggedInUser, setKioskDevice,
+  } = useKioskStore()
 
   const [tab, setTab] = useState<'endscreen' | 'formtext' | 'device'>('endscreen')
   const [draft, setDraft] = useState<EndScreenTemplate>({ ...endScreenTemplate })
@@ -156,11 +164,26 @@ export function AdminScreen() {
             <div className="bg-white border border-gray-200 rounded-2xl px-4 py-4">
               <p className="text-sm font-black text-gray-700 mb-3">Device Info</p>
               <div className="space-y-2 text-sm text-gray-600">
+                {loggedInUser && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Logged in</span>
+                      <span className="font-bold">{loggedInUser.name || loggedInUser.email || '—'}</span>
+                    </div>
+                    {loggedInUser.email && loggedInUser.name && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Email</span>
+                        <span className="font-mono text-xs">{loggedInUser.email}</span>
+                      </div>
+                    )}
+                  </>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-400">Branch</span>
-                  <span className="font-bold capitalize">
-                    {branchId === 'main' ? 'Wembley' : branchId === 'leicester' ? 'Leicester' : branchId === 'reading' ? 'Reading' : branchId === 'mk' ? 'Milton Keynes' : branchId}
-                  </span>
+                  {/* Use orgName (branch display name from DB via /login) — was a
+                      hardcoded ternary that didn't include wembley_main and would
+                      show the raw code for any new branch. */}
+                  <span className="font-bold">{orgName || branchId || '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Payment</span>
@@ -170,6 +193,18 @@ export function AdminScreen() {
                   <div className="flex justify-between">
                     <span className="text-gray-400">Terminal</span>
                     <span className="font-bold">{stripeReaderLabel}</span>
+                  </div>
+                )}
+                {cardProvider === 'sumup' && (sumupReaderLabel || sumupReaderId) && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">SumUp Reader</span>
+                    <span className="font-bold">{sumupReaderLabel || sumupReaderId}</span>
+                  </div>
+                )}
+                {cardProvider === 'clover' && (cloverDeviceName || cloverDeviceId) && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Clover Device</span>
+                    <span className="font-bold">{cloverDeviceName || cloverDeviceId}</span>
                   </div>
                 )}
                 {cardProvider === 'square' && squareDeviceName && (
@@ -182,8 +217,19 @@ export function AdminScreen() {
             </div>
             <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-sm text-amber-800">
               <p className="font-bold mb-1">ℹ️ Branch & Device Setup</p>
-              <p className="text-xs">Branch assignment and payment terminal configuration are set at device profile level and cannot be changed here.</p>
+              <p className="text-xs">Branch assignment and payment terminal configuration are set at device profile level. To pick up a changed reader, click <strong>Re-login</strong> below.</p>
             </div>
+            <button
+              onClick={() => {
+                setDeviceConfigured(false)
+                setLoggedInUser(null)
+                setKioskDevice('', '')
+                setScreen('setup')
+              }}
+              className="w-full bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold rounded-2xl px-4 py-3 text-sm transition"
+            >
+              ⎋ Logout / Re-login (refresh reader config)
+            </button>
             <ClearCacheButton />
           </div>
         )}
