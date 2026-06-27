@@ -161,7 +161,7 @@ export function MonthlyGivingPage() {
   // moment they finally click Subscribe. PR #77 stabilised the
   // callbacks but missed this object literal.
   const paypalScriptOptions = useMemo(() => ({
-    clientId, vault: true, intent: 'subscription', currency: 'GBP',
+    clientId, vault: true, intent: 'subscription', currency: 'GBP', enableFunding: 'card',
   }), [clientId])
 
   // Identity-stable PayPalButtons callbacks. Inline arrow functions =
@@ -174,6 +174,79 @@ export function MonthlyGivingPage() {
   }, [handleApprove])
   const handlePayPalError = useCallback(() => setError('PayPal encountered an error. Please try again.'), [])
   const handlePayPalCancel = useCallback(() => setStep('details'), [])
+
+  // Shared subscription builder for both the Card and PayPal buttons. Reads
+  // from approveRef so it stays identity-stable (the SDK remounts the buttons
+  // iframe if this changes identity mid-typing — same issue PR #77 fixed).
+  const handleCreateSubscription = useCallback<NonNullable<PayPalButtonsComponentProps['createSubscription']>>((_data, actions) => {
+    const s = approveRef.current
+    const trimmedAddr = s.selectedAddress.trim()
+    const parts = trimmedAddr.split(',').map(p => p.trim()).filter(Boolean)
+    const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
+    const nonPcParts = parts.filter(p => !ukPostRe.test(p))
+    const addressL1 = nonPcParts[0] || ''
+    const city      = nonPcParts.length >= 2 ? nonPcParts[nonPcParts.length - 1] : ''
+    const addressL2 = nonPcParts.length >= 3 ? nonPcParts[1] : ''
+
+    const givenName  = s.firstName.trim()
+    const familyName = s.surname.trim()
+    const haveName   = !!(givenName && familyName)
+    const havePostcode = !!s.postcode.trim()
+    const haveAddress  = !!(addressL1 && havePostcode)
+    const fullName     = haveName ? `${givenName} ${familyName}` : ''
+
+    const email = s.donorEmail.trim()
+    const haveEmail = !!email && email.includes('@') && email.split('@')[1].includes('.')
+
+    let phoneDigits = s.donorPhone.replace(/\D/g, '')
+    if (phoneDigits.startsWith('44') && phoneDigits.length >= 12) phoneDigits = phoneDigits.slice(2)
+    if (phoneDigits.startsWith('0')) phoneDigits = phoneDigits.slice(1)
+    const havePhone = phoneDigits.length >= 9 && phoneDigits.length <= 11
+
+    const addressBlock = haveAddress ? {
+      address_line_1: addressL1,
+      ...(addressL2 && addressL2 !== city && { address_line_2: addressL2 }),
+      ...(city && { admin_area_2: city }),
+      postal_code: s.postcode.trim(),
+      country_code: 'GB',
+    } : null
+
+    const subscriber: Record<string, unknown> = {
+      ...(haveName  && { name: { given_name: givenName, surname: familyName } }),
+      ...(haveEmail && { email_address: email }),
+      ...(addressBlock && {
+        shipping_address: {
+          ...(fullName && { name: { full_name: fullName } }),
+          address: addressBlock,
+        },
+      }),
+    }
+    const payer: Record<string, unknown> = {
+      ...(haveName  && { name: { given_name: givenName, surname: familyName } }),
+      ...(haveEmail && { email_address: email }),
+      ...(havePhone && {
+        phone: {
+          phone_type: 'MOBILE',
+          phone_number: { national_number: phoneDigits },
+        },
+      }),
+      ...(addressBlock && { address: addressBlock }),
+    }
+    return actions.subscription.create({
+      plan_id: s.planId,
+      subscriber,
+      payer,
+      application_context: {
+        brand_name:          'Shital Temple',
+        locale:              'en-GB',
+        shipping_preference: addressBlock ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
+        user_action:         'SUBSCRIBE_NOW',
+        landing_page:        'BILLING',
+        return_url: `${window.location.origin}/?screen=monthly-giving&status=approved`,
+        cancel_url: `${window.location.origin}/?screen=monthly-giving&status=cancelled`,
+      },
+    } as Parameters<typeof actions.subscription.create>[0])
+  }, [])
 
   if (loading) {
     return (
@@ -417,76 +490,21 @@ export function MonthlyGivingPage() {
           </div>
 
           <PayPalScriptProvider options={paypalScriptOptions}>
+            {/* Dedicated Debit/Credit Card button — opens PayPal's guest card
+                screen directly (no login-first). */}
             <PayPalButtons
+              fundingSource="card"
+              style={{ layout: 'vertical', color: 'black', shape: 'rect', label: 'pay', height: 48 }}
+              createSubscription={handleCreateSubscription}
+              onApprove={handleOnApprove}
+              onError={handlePayPalError}
+              onCancel={handlePayPalCancel}
+            />
+            {/* PayPal button for donors who prefer to log in. */}
+            <PayPalButtons
+              fundingSource="paypal"
               style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }}
-              createSubscription={(_data, actions) => {
-                const trimmedAddr = selectedAddress.trim()
-                const parts = trimmedAddr.split(',').map(p => p.trim()).filter(Boolean)
-                const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
-                const nonPcParts = parts.filter(p => !ukPostRe.test(p))
-                const addressL1 = nonPcParts[0] || ''
-                const city      = nonPcParts.length >= 2 ? nonPcParts[nonPcParts.length - 1] : ''
-                const addressL2 = nonPcParts.length >= 3 ? nonPcParts[1] : ''
-
-                const givenName  = firstName.trim()
-                const familyName = surname.trim()
-                const haveName   = !!(givenName && familyName)
-                const havePostcode = !!postcode.trim()
-                const haveAddress  = !!(addressL1 && havePostcode)
-                const fullName     = haveName ? `${givenName} ${familyName}` : ''
-
-                const email = donorEmail.trim()
-                const haveEmail = !!email && email.includes('@') && email.split('@')[1].includes('.')
-
-                let phoneDigits = donorPhone.replace(/\D/g, '')
-                if (phoneDigits.startsWith('44') && phoneDigits.length >= 12) phoneDigits = phoneDigits.slice(2)
-                if (phoneDigits.startsWith('0')) phoneDigits = phoneDigits.slice(1)
-                const havePhone = phoneDigits.length >= 9 && phoneDigits.length <= 11
-
-                const addressBlock = haveAddress ? {
-                  address_line_1: addressL1,
-                  ...(addressL2 && addressL2 !== city && { address_line_2: addressL2 }),
-                  ...(city && { admin_area_2: city }),
-                  postal_code: postcode.trim(),
-                  country_code: 'GB',
-                } : null
-
-                const subscriber: Record<string, unknown> = {
-                  ...(haveName  && { name: { given_name: givenName, surname: familyName } }),
-                  ...(haveEmail && { email_address: email }),
-                  ...(addressBlock && {
-                    shipping_address: {
-                      ...(fullName && { name: { full_name: fullName } }),
-                      address: addressBlock,
-                    },
-                  }),
-                }
-                const payer: Record<string, unknown> = {
-                  ...(haveName  && { name: { given_name: givenName, surname: familyName } }),
-                  ...(haveEmail && { email_address: email }),
-                  ...(havePhone && {
-                    phone: {
-                      phone_type: 'MOBILE',
-                      phone_number: { national_number: phoneDigits },
-                    },
-                  }),
-                  ...(addressBlock && { address: addressBlock }),
-                }
-                return actions.subscription.create({
-                  plan_id: planId,
-                  subscriber,
-                  payer,
-                  application_context: {
-                    brand_name:          'Shital Temple',
-                    locale:              'en-GB',
-                    shipping_preference: addressBlock ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
-                    user_action:         'SUBSCRIBE_NOW',
-                    landing_page:        'BILLING',
-                    return_url: `${window.location.origin}/?screen=monthly-giving&status=approved`,
-                    cancel_url: `${window.location.origin}/?screen=monthly-giving&status=cancelled`,
-                  },
-                } as Parameters<typeof actions.subscription.create>[0])
-              }}
+              createSubscription={handleCreateSubscription}
               onApprove={handleOnApprove}
               onError={handlePayPalError}
               onCancel={handlePayPalCancel}
