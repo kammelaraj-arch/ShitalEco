@@ -4,132 +4,392 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Monthly Giving — Shirdi Saibaba Temple (SHITAL)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #060100; --bg-deep: #0E0303; --card: rgba(255,255,255,0.055);
+    --gold: #D4AF37; --gold-glow: #FFD700; --gold-2: #C5A028; --saffron: #FF9933;
+    --text: #FFF8DC; --muted: rgba(255,248,220,0.5); --faint: rgba(255,248,220,0.28);
+    --btn-dark: #1A0606;
+  }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    background: #fffdf8; color: #1c0a00; min-height: 100vh;
-    display: flex; align-items: flex-start; justify-content: center; padding: 2rem 1rem 4rem;
+    background: radial-gradient(120% 80% at 50% 0%, #1a0604 0%, var(--bg-deep) 45%, var(--bg) 100%) fixed;
+    color: var(--text); min-height: 100vh; padding-bottom: 3rem;
   }
-  .card {
-    width: 100%; max-width: 460px; background: #fff; border: 1px solid #f0e6d6;
-    border-radius: 24px; padding: 2rem 1.6rem; box-shadow: 0 10px 40px rgba(180,92,0,0.08);
-  }
-  .logo { width: 84px; height: 84px; border-radius: 20px; margin: 0 auto 1rem; display: block;
-    object-fit: contain; box-shadow: 0 6px 20px rgba(180,92,0,0.12); background: #fff; padding: 6px; }
-  h1 { text-align: center; font-size: 1.6rem; font-weight: 800; }
-  .sub { text-align: center; color: #8a6a45; font-size: 0.92rem; margin: 0.3rem 0 1.6rem; }
-  .amounts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; margin-bottom: 1rem; }
-  .amt {
-    border: 2px solid #ffe2bf; background: #fff8ee; border-radius: 16px; padding: 1rem;
-    font-size: 1.25rem; font-weight: 800; color: #b85c00; cursor: pointer; transition: all .15s;
-    text-align: center;
-  }
-  .amt:hover { border-color: #FF9933; transform: translateY(-2px); }
-  .amt.sel { background: #FF9933; color: #fff; border-color: #FF9933; }
-  .amt small { display: block; font-size: 0.7rem; font-weight: 600; opacity: 0.8; margin-top: 2px; }
-  .custom { display: flex; align-items: center; gap: 0.5rem; border: 2px solid #ffe2bf;
-    border-radius: 16px; padding: 0.5rem 0.9rem; margin-bottom: 1.4rem; }
-  .custom span { font-size: 1.2rem; font-weight: 800; color: #b85c00; }
-  .custom input { border: none; outline: none; font-size: 1.2rem; font-weight: 700; width: 100%;
-    background: transparent; color: #1c0a00; }
-  .go {
-    width: 100%; border: none; border-radius: 16px; padding: 1rem; font-size: 1.05rem;
-    font-weight: 800; color: #fff; cursor: pointer; background: linear-gradient(135deg,#0070BA,#003087);
-    transition: all .15s;
-  }
-  .go:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,112,186,0.3); }
-  .go:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-  .pp { display: flex; align-items: center; justify-content: center; gap: 0.4rem; margin-top: 0.9rem;
-    color: #8a6a45; font-size: 0.8rem; }
-  .err { color: #c0392b; font-size: 0.85rem; text-align: center; margin-top: 0.8rem; min-height: 1rem; }
-  .foot { text-align: center; color: #b59a78; font-size: 0.75rem; margin-top: 1.4rem; }
-  .cards { text-align: center; margin-top: 0.6rem; font-size: 1.1rem; letter-spacing: 2px; }
+  .font-display { font-family: 'Cinzel', Georgia, serif; }
+
+  /* top bar */
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 0.8rem 1.1rem; background: rgba(6,1,0,0.94); border-bottom: 1px solid rgba(212,175,55,0.18);
+    position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px); }
+  .brand { display: flex; align-items: center; gap: 0.6rem; }
+  .brand img { width: 40px; height: 40px; border-radius: 10px; background: #fff; padding: 3px; object-fit: contain; }
+  .brand .nm { font-size: 0.8rem; font-weight: 800; letter-spacing: 0.5px; color: var(--gold); line-height: 1.1; }
+  .brand .sm { font-size: 0.6rem; color: var(--muted); letter-spacing: 0.3px; }
+  .branchpill { display: flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; font-weight: 700;
+    color: var(--gold); background: rgba(212,175,55,0.12); border: 1px solid rgba(212,175,55,0.35);
+    border-radius: 999px; padding: 0.4rem 0.8rem; max-width: 55vw; }
+  .branchpill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .wrap { max-width: 540px; margin: 0 auto; padding: 1.8rem 1.1rem 0; }
+  .om { text-align: center; font-size: 2.4rem; color: var(--gold); margin-bottom: 0.4rem; }
+  h1 { text-align: center; font-size: 1.7rem; font-weight: 800; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--gold);
+    background: linear-gradient(90deg,#D4AF37,#FFD700,#C5A028); -webkit-background-clip: text;
+    background-clip: text; -webkit-text-fill-color: transparent; }
+  .sub { text-align: center; color: var(--muted); font-size: 0.92rem; margin: 0.4rem 0 1.5rem; }
+
+  .bless { background: var(--card); border: 1px solid rgba(212,175,55,0.28);
+    border-radius: 18px; padding: 1.1rem 1rem 1rem; margin-bottom: 1.5rem; text-align: center; }
+  .bless img.baba { width: 84px; height: 84px; border-radius: 50%; object-fit: cover;
+    border: 3px solid var(--saffron); box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    margin: 0 auto 0.7rem; display: block; }
+  .bless .q { color: #f3e3b0; font-size: 0.9rem; font-style: italic; line-height: 1.55; }
+  .bless .by { color: var(--gold); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.6px;
+    margin-top: 0.55rem; text-transform: uppercase; }
+
+  .eyebrow { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px;
+    color: rgba(212,175,55,0.7); margin-bottom: 0.8rem; }
+
+  .amounts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-bottom: 0.8rem; }
+  .amt { text-align: center; cursor: pointer; border-radius: 18px; padding: 1.5rem 1rem;
+    background: rgba(255,255,255,0.04); border: 2px solid rgba(255,255,255,0.1); transition: all .15s;
+    display: flex; align-items: center; justify-content: center; }
+  .amt:hover { border-color: rgba(212,175,55,0.5); transform: translateY(-2px); }
+  .amt.sel { border-color: var(--gold);
+    background: linear-gradient(135deg,rgba(212,175,55,0.25),rgba(212,175,55,0.10)); }
+  .amt .v { font-size: 2.1rem; font-weight: 800; color: var(--gold); }
+
+  .other { display: flex; align-items: center; gap: 0.8rem; border-radius: 18px; padding: 1rem 1.1rem;
+    background: rgba(255,255,255,0.04); border: 2px dashed rgba(212,175,55,0.4); margin-bottom: 1.5rem; }
+  .other .ic { font-size: 1.4rem; }
+  .other .t { font-size: 0.85rem; font-weight: 700; color: var(--text); }
+  .other .h { font-size: 0.72rem; color: var(--faint); margin-top: 0.15rem; }
+  .other.sel { border-style: solid; border-color: var(--gold);
+    background: linear-gradient(135deg,rgba(212,175,55,0.22),rgba(212,175,55,0.08)); }
+  .other-input { display: none; margin: -0.6rem 0 1.5rem; }
+  .other-input.show { display: flex; align-items: center; gap: 0.6rem;
+    background: rgba(212,175,55,0.08); border: 1px solid rgba(212,175,55,0.3); border-radius: 16px; padding: 0.7rem 1rem; }
+  .other-input span { font-size: 1.4rem; font-weight: 800; color: var(--gold); }
+  .other-input input { flex: 1; background: transparent; border: none; outline: none;
+    font-size: 1.4rem; font-weight: 800; color: var(--gold); }
+
+  .go { width: 100%; border: none; border-radius: 16px; padding: 1.05rem; font-size: 1.05rem;
+    font-weight: 800; color: var(--btn-dark); cursor: pointer;
+    background: linear-gradient(135deg,#D4AF37,#FFD700,#C5A028); background-size: 200% 100%;
+    transition: all .15s; }
+  .go:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(212,175,55,0.3); }
+  .go:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+  .tagline { text-align: center; color: var(--faint); font-size: 0.78rem; margin-top: 0.9rem; }
+  .err { color: #ff8a80; font-size: 0.85rem; text-align: center; margin-top: 0.8rem; min-height: 1rem; }
+
+  /* pay stage */
+  .summary { display: flex; align-items: center; justify-content: space-between;
+    background: var(--card); border: 1px solid rgba(212,175,55,0.25); border-radius: 16px;
+    padding: 0.9rem 1.1rem; margin-bottom: 1.1rem; }
+  .summary b { color: var(--gold); font-size: 1.2rem; }
+  .summary .chg { color: var(--saffron); font-size: 0.78rem; font-weight: 700; cursor: pointer; background: none; border: none; }
+  .spin { text-align: center; color: var(--muted); font-size: 0.9rem; padding: 0.6rem 0; }
+  .paybox { background: #fff; border-radius: 14px; padding: 0.7rem; }
+
+  .foot { text-align: center; color: var(--muted); font-size: 0.74rem; margin-top: 2rem;
+    border-top: 1px solid rgba(212,175,55,0.18); padding-top: 1.1rem; line-height: 1.6; }
+  .foot p { margin: 0.15rem 0; }
+  .foot a { color: var(--gold); text-decoration: none; }
+  .foot a:hover { text-decoration: underline; }
+  .foot .charity { color: #f3e3b0; font-weight: 700; margin-top: 0.4rem; }
+  .hide { display: none !important; }
 </style>
 </head>
 <body>
-  <div class="card">
-    <img class="logo" src="https://shirdisai.org.uk/Cnt/img/shital-logo-new.png" alt="SHITAL"
-         onerror="this.outerHTML='<div class=\'logo\' style=\'display:flex;align-items:center;justify-content:center;font-size:2.4rem\'>🛕</div>'" />
-    <h1>Monthly Giving</h1>
-    <p class="sub" id="sub">Shirdi Saibaba Temple · Support the temple every month 🙏</p>
+  <div class="topbar">
+    <div class="brand">
+      <img src="https://shirdisai.org.uk/Cnt/img/shital-logo-new.png" alt="SHITAL"
+           onerror="this.style.display='none'" />
+      <div>
+        <div class="nm font-display">SHRI SHIRDI SAIBABA TEMPLE</div>
+        <div class="sm">SHITAL · UK Registered Charity</div>
+      </div>
+    </div>
+    <div class="branchpill">📍 <span id="branchpill">Shirdi Saibaba Temple</span></div>
+  </div>
 
-    <div class="amounts" id="amounts">
-      <div class="amt" data-amt="5">£5<small>Lamp Supporter</small></div>
-      <div class="amt sel" data-amt="11">£11<small>Prasad Patron</small></div>
-      <div class="amt" data-amt="21">£21<small>Puja Sponsor</small></div>
-      <div class="amt" data-amt="51">£51<small>Festival Friend</small></div>
+  <div class="wrap">
+    <div class="om font-display">🕉</div>
+    <h1 class="font-display">Monthly Temple Support</h1>
+    <p class="sub">Join our family of regular supporters. Cancel anytime.</p>
+
+    <!-- Baba's blessing -->
+    <div class="bless">
+      <img class="baba" src="/monthly/assets/baba.jpg" alt="Shri Shirdi Sai Baba"
+           onerror="this.onerror=null;this.src='https://shirdisai.org.uk/Cnt/img/saibaba.jpg'" />
+      <p class="q">"If you cast your burden on Me, I shall surely bear it. If you look to Me, I look to you. There shall be no want in the house of My devotee."</p>
+      <p class="by">— Shri Shirdi Sai Baba</p>
     </div>
 
-    <div class="custom">
-      <span>£</span>
-      <input id="custom" type="number" min="1" max="1000" placeholder="Other amount / month" />
+    <!-- STEP 1 — pick amount -->
+    <div id="pick-step">
+      <p class="eyebrow">Choose your monthly amount</p>
+      <div class="amounts" id="amounts">
+        <div class="amt" data-amt="5"><div class="v">£5</div></div>
+        <div class="amt sel" data-amt="11"><div class="v">£11</div></div>
+        <div class="amt" data-amt="21"><div class="v">£21</div></div>
+        <div class="amt" data-amt="51"><div class="v">£51</div></div>
+      </div>
+
+      <div class="other" id="other-card">
+        <div class="ic">✨</div>
+        <div>
+          <div class="t">Other amount</div>
+          <div class="h">Enter your own monthly gift — any amount from £1 to £1,000</div>
+        </div>
+      </div>
+      <div class="other-input" id="other-input">
+        <span>£</span>
+        <input id="custom" type="number" min="1" max="1000" step="0.01" placeholder="e.g. 30" />
+      </div>
+
+      <button class="go" id="go">Continue →</button>
+      <p class="tagline">🔒 Secure recurring payment via PayPal · Pay by debit/credit card · Cancel anytime</p>
     </div>
 
-    <button class="go" id="go">Continue to PayPal →</button>
-    <div class="cards">💳 🟦 mastercard · visa · amex</div>
-    <div class="pp">🔒 Secure · Pay by PayPal or debit/credit card</div>
+    <!-- STEP 2 — PayPal / card buttons -->
+    <div id="pay-stage" class="hide">
+      <div class="summary">
+        <span>Monthly donation: <b id="pay-amt">£11/month</b></span>
+        <button class="chg" id="change">Change</button>
+      </div>
+      <div class="spin" id="pay-spin">Preparing secure payment…</div>
+      <div class="paybox">
+        <div id="paypal-card-btn"></div>
+        <div id="paypal-btn" style="margin-top:0.5rem;"></div>
+      </div>
+      <p class="tagline">💳 Card payments need no PayPal account · Cancel anytime</p>
+    </div>
+
     <div class="err" id="err"></div>
 
-    <p class="foot">SHITAL · UK Registered Charity · You can cancel anytime in PayPal.</p>
+    <div class="foot">
+      <p>For more information, contact us:</p>
+      <p><a href="mailto:info@shirdisai.org.uk">info@shirdisai.org.uk</a></p>
+      <p>Wembley: <a href="tel:+442089022311">0208 902 2311</a> &bull;
+         Leicester: <a href="tel:+441163671833">0116 367 1833</a> &bull;
+         Reading: <a href="tel:+441189591084">0118 959 1084</a></p>
+      <p class="charity">SHITAL (Shirdi Sai Baba Temple Association) is a UK registered charity No. 1138530</p>
+      <p><a href="https://shirdisai.org.uk/" target="_blank" rel="noopener">shirdisai.org.uk</a> &bull; Cancel anytime in PayPal</p>
+    </div>
   </div>
 
 <script>window.SHITAL_BRANCH='leicester';window.SHITAL_BRANCH_NAME='Leicester';</script>
-  <script>
-  // Branch attribution: a per-branch page sets window.SHITAL_BRANCH /
-  // window.SHITAL_BRANCH_NAME; otherwise fall back to ?branch= in the URL.
+<script>
+  // ---- Branch attribution (per-branch pages set window.SHITAL_BRANCH) ----
   var params = new URLSearchParams(location.search);
-  var branch = (window.SHITAL_BRANCH || params.get('branch') || '');
+  var branch = (window.SHITAL_BRANCH || params.get('branch') || 'main');
   if (window.SHITAL_BRANCH_NAME) {
-    document.getElementById('sub').textContent =
-      window.SHITAL_BRANCH_NAME + ' · Support the temple every month 🙏';
+    document.getElementById('branchpill').textContent = 'Shirdi Saibaba Temple - ' + window.SHITAL_BRANCH_NAME;
     document.title = 'Monthly Giving — ' + window.SHITAL_BRANCH_NAME;
   }
-  var selected = 11;
 
+  var selected = 11;
   var amtEls = document.querySelectorAll('.amt');
   var custom = document.getElementById('custom');
+  var otherCard = document.getElementById('other-card');
+  var otherInput = document.getElementById('other-input');
   var go = document.getElementById('go');
   var err = document.getElementById('err');
+  var pickStep = document.getElementById('pick-step');
+  var payStage = document.getElementById('pay-stage');
+  var paySpin = document.getElementById('pay-spin');
+  var paymentsRendered = false;
+  var sdkReady = null;       // promise that resolves when the PayPal SDK is loaded
+  var autoAdvance = false;   // deep link with ?amount= jumps straight to the buttons
+  var lastPlanId = '';       // plan created for the current subscription
+  var lastAmount = 0;        // amount used for the current subscription
+
+  function clearTiles() { amtEls.forEach(function (e) { e.classList.remove('sel'); }); otherCard.classList.remove('sel'); }
 
   amtEls.forEach(function (el) {
     el.addEventListener('click', function () {
-      amtEls.forEach(function (e) { e.classList.remove('sel'); });
+      clearTiles();
       el.classList.add('sel');
       selected = parseFloat(el.getAttribute('data-amt'));
       custom.value = '';
+      otherInput.classList.remove('show');
     });
   });
+  otherCard.addEventListener('click', function () {
+    clearTiles();
+    otherCard.classList.add('sel');
+    otherInput.classList.add('show');
+    selected = parseFloat(custom.value) || 0;
+    custom.focus();
+  });
   custom.addEventListener('input', function () {
-    amtEls.forEach(function (e) { e.classList.remove('sel'); });
+    clearTiles();
+    otherCard.classList.add('sel');
     selected = parseFloat(custom.value) || 0;
   });
 
+  function currentAmount() {
+    return custom.value ? parseFloat(custom.value) : selected;
+  }
+
+  // ---- Pre-populate amount from ?amount= (deep links) ----
+  (function () {
+    var qAmt = parseFloat(params.get('amount'));
+    if (!qAmt || qAmt < 1 || qAmt > 1000) return;
+    var matched = false;
+    clearTiles();
+    amtEls.forEach(function (e) {
+      if (parseFloat(e.getAttribute('data-amt')) === qAmt) { e.classList.add('sel'); matched = true; }
+    });
+    if (!matched) { otherCard.classList.add('sel'); otherInput.classList.add('show'); custom.value = qAmt; }
+    selected = qAmt;
+    autoAdvance = true; // explicit amount → go straight to the card / PayPal buttons
+  })();
+
+  // ---- Load the PayPal JS SDK once (client-id comes from the live config) ----
+  function loadSdk() {
+    if (sdkReady) return sdkReady;
+    sdkReady = fetch('/api/v1/service/paypal/config')
+      .then(function (r) { return r.json(); })
+      .then(function (cfg) {
+        if (!cfg.client_id) throw new Error('Payment is not configured yet. Please try later.');
+        return new Promise(function (resolve, reject) {
+          var s = document.createElement('script');
+          s.src = 'https://www.paypal.com/sdk/js?client-id=' + encodeURIComponent(cfg.client_id) +
+                  '&vault=true&intent=subscription&currency=' + (cfg.currency || 'GBP') +
+                  '&components=buttons&enable-funding=card';
+          s.onload = function () { resolve(window.paypal); };
+          s.onerror = function () { reject(new Error('Could not load PayPal. Check your connection.')); };
+          document.head.appendChild(s);
+        });
+      });
+    return sdkReady;
+  }
+
+  // ---- createSubscription: get a plan for the chosen amount, then create it ----
+  function makeCreateSubscription() {
+    return function (data, actions) {
+      var amount = currentAmount();
+      return fetch('/api/v1/service/giving/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tier_id: 'custom',
+          custom_amount: amount,
+          custom_label: 'Monthly Giving',
+          branch_id: branch
+        })
+      })
+      .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); }); })
+      .then(function (d) {
+        if (!d.plan_id) throw new Error('Could not set up the monthly plan.');
+        lastPlanId = d.plan_id;
+        lastAmount = amount;
+        return actions.subscription.create({
+          plan_id: d.plan_id,
+          application_context: {
+            brand_name: 'Shital Temple',
+            locale: 'en-GB',
+            shipping_preference: 'NO_SHIPPING',
+            user_action: 'SUBSCRIBE_NOW'
+          }
+        });
+      });
+    };
+  }
+
+  function onApprove(data) {
+    var amt = lastAmount || currentAmount();
+    var sub = data.subscriptionID || '';
+    var done = function () {
+      window.location.href = '/monthly/thank-you/?sub=' +
+        encodeURIComponent(sub) + '&amount=' + encodeURIComponent(amt);
+    };
+    fetch('/api/v1/service/giving/subscription/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subscription_id: sub,
+        plan_id: lastPlanId,
+        tier_id: 'custom',
+        amount: amt,
+        frequency: 'MONTH',
+        branch_id: branch,
+        tier_label: 'Monthly Giving'
+      })
+    }).then(done, done);
+  }
+
+  function onError() {
+    err.textContent = 'PayPal hit a problem. Please try again.';
+    paySpin.classList.remove('hide');
+    paySpin.textContent = 'Please try again, or go back and re-select an amount.';
+  }
+
+  function renderButtons(paypal) {
+    if (paymentsRendered) { paySpin.classList.add('hide'); return; }
+    var common = { createSubscription: makeCreateSubscription(), onApprove: onApprove, onError: onError };
+
+    var cardOk = true;
+    try {
+      var cardBtn = paypal.Buttons(Object.assign({
+        fundingSource: paypal.FUNDING.CARD,
+        style: { layout: 'vertical', color: 'black', shape: 'rect', label: 'pay', height: 48 }
+      }, common));
+      if (cardBtn.isEligible && !cardBtn.isEligible()) cardOk = false;
+      else cardBtn.render('#paypal-card-btn');
+    } catch (e) { cardOk = false; }
+
+    try {
+      paypal.Buttons(Object.assign({
+        fundingSource: paypal.FUNDING.PAYPAL,
+        style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }
+      }, common)).render('#paypal-btn');
+    } catch (e) { /* non-fatal */ }
+
+    paymentsRendered = true;
+    paySpin.classList.add('hide');
+    if (!cardOk) {
+      document.getElementById('paypal-card-btn').innerHTML =
+        '<p style="text-align:center;color:#8a6a45;font-size:0.82rem;margin:0.2rem 0 0.4rem">' +
+        'Tap the PayPal button below, then choose <b>Pay by Debit or Credit Card</b>.</p>';
+    }
+  }
+
   go.addEventListener('click', function () {
     err.textContent = '';
-    var amount = custom.value ? parseFloat(custom.value) : selected;
+    var amount = currentAmount();
     if (!amount || amount < 1 || amount > 1000) {
       err.textContent = 'Please choose an amount between £1 and £1,000.';
       return;
     }
-    go.disabled = true;
-    go.textContent = 'Connecting to PayPal…';
-    fetch('/api/v1/service/giving/quick-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amount, branch_id: branch || 'main' })
-    })
-    .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); }); })
-    .then(function (d) {
-      if (d.approval_url) { window.location.href = d.approval_url; }
-      else { throw new Error('No PayPal link returned'); }
-    })
-    .catch(function (e) {
-      err.textContent = (e && e.message) ? e.message : 'Could not reach PayPal. Please try again.';
-      go.disabled = false;
-      go.textContent = 'Continue to PayPal →';
-    });
+    document.getElementById('pay-amt').textContent = '£' + amount + '/month';
+    pickStep.classList.add('hide');
+    payStage.classList.remove('hide');
+    paySpin.classList.remove('hide');
+    paySpin.textContent = 'Preparing secure payment…';
+    loadSdk()
+      .then(renderButtons)
+      .catch(function (e) {
+        err.textContent = (e && e.message) ? e.message : 'Could not start payment. Please try again.';
+        paySpin.classList.add('hide');
+      });
   });
+
+  document.getElementById('change').addEventListener('click', function () {
+    payStage.classList.add('hide');
+    pickStep.classList.remove('hide');
+    err.textContent = '';
+  });
+
+  // Deep link carried an amount → jump straight to the card / PayPal buttons.
+  if (autoAdvance) go.click();
 </script>
 </body>
 </html>

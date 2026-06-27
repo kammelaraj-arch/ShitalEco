@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Thank You — Monthly Giving · SHITAL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --gold:#D4AF37; --saffron:#FF9933; --text:#FFF8DC; --muted:rgba(255,248,220,0.5); --faint:rgba(255,248,220,0.28); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: radial-gradient(120% 80% at 50% 0%, #1a0604 0%, #0E0303 45%, #060100 100%) fixed;
+    color: var(--text); min-height: 100vh;
+    display: flex; align-items: flex-start; justify-content: center; padding: 2.5rem 1rem 4rem;
+  }
+  .font-display { font-family: 'Cinzel', Georgia, serif; }
+  .card { width: 100%; max-width: 480px; text-align: center; }
+  .baba { width: 120px; height: 120px; border-radius: 50%; object-fit: cover;
+    border: 4px solid var(--saffron); box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+    margin: 0 auto 0.4rem; display: block; }
+  .tick { font-size: 2.4rem; }
+  .temple { color: var(--gold); font-weight: 800; font-size: 0.95rem; letter-spacing: 1px;
+    text-transform: uppercase; margin-top: 0.3rem; }
+  h1 { font-size: 1.7rem; font-weight: 800; margin-top: 0.2rem; letter-spacing: 1.5px;
+    text-transform: uppercase;
+    background: linear-gradient(90deg,#D4AF37,#FFD700,#C5A028); -webkit-background-clip: text;
+    background-clip: text; -webkit-text-fill-color: transparent; }
+  p { color: var(--muted); font-size: 0.95rem; margin-top: 0.7rem; line-height: 1.55; }
+  .amt { color: var(--gold); font-weight: 800; }
+  .bless { background: rgba(255,255,255,0.055); border: 1px solid rgba(212,175,55,0.3);
+    border-radius: 18px; padding: 1.1rem 1.1rem; margin-top: 1.3rem; }
+  .bless .q { color: #f3e3b0; font-size: 0.95rem; font-style: italic; line-height: 1.6; }
+  .bless .by { color: var(--gold); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.6px;
+    margin-top: 0.6rem; text-transform: uppercase; }
+  .ref { font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; color: var(--gold);
+    background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.3); border-radius: 12px;
+    padding: 0.6rem 0.8rem; margin-top: 1.2rem; word-break: break-all; }
+  .shr { color: var(--gold); font-weight: 800; font-size: 1rem; margin-top: 0.6rem; letter-spacing: 1px; }
+  .note { font-size: 0.82rem; color: var(--muted); margin-top: 1.2rem; text-align: left;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(212,175,55,0.2); border-radius: 14px; padding: 0.9rem 1rem; }
+  .note a { color: var(--gold); }
+  .home { display: inline-block; margin-top: 1.4rem; text-decoration: none;
+    background: linear-gradient(135deg,#D4AF37,#FFD700,#C5A028); color: #1A0606; font-weight: 800;
+    padding: 0.85rem 1.5rem; border-radius: 14px; }
+  .foot { color: var(--muted); font-size: 0.74rem; margin-top: 1.6rem;
+    border-top: 1px solid rgba(212,175,55,0.18); padding-top: 1.1rem; line-height: 1.6; }
+  .foot p { margin: 0.15rem 0; }
+  .foot a { color: var(--gold); text-decoration: none; }
+  .foot .charity { color: #f3e3b0; font-weight: 700; margin-top: 0.4rem; }
+  .hide { display: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <img class="baba" src="/monthly/assets/baba.jpg" alt="Shri Shirdi Sai Baba"
+         onerror="this.onerror=null;this.src='https://shirdisai.org.uk/Cnt/img/saibaba.jpg'" />
+    <div class="tick">🙏</div>
+    <p class="temple">Shirdi Saibaba Temple</p>
+    <h1 class="font-display">Baba's Blessings</h1>
+    <p id="msg">Your monthly support is now active.</p>
+    <div class="ref hide" id="refbox">Reference: <span id="ref"></span></div>
+
+    <div class="bless">
+      <p class="q">"If you look to Me, I look to you. If you cast your burden on Me, I shall surely bear it. Trust in Me, and your prayers shall be answered. There shall be no want in the house of My devotee."</p>
+      <p class="by">— Shri Shirdi Sai Baba</p>
+    </div>
+
+    <p>By giving every month you keep the lamp lit 🪔, the prasad flowing, and the temple doors open for every devotee. May Baba bless you and your family with health, peace and prosperity.</p>
+    <p class="shr font-display">Shraddha &amp; Saburi</p>
+
+    <div class="note">
+      <strong>Cancel or change anytime</strong><br>
+      Sign in at <a href="https://www.paypal.com/myaccount/autopay" target="_blank" rel="noopener">paypal.com/myaccount/autopay</a>,
+      find <strong>SHITAL</strong> in your automatic payments, and tap Cancel.
+      Need help? Email <a href="mailto:info@shital.org.uk">info@shital.org.uk</a>.
+    </div>
+
+    <a class="home" href="/monthly/">Make another donation</a>
+
+    <div class="foot">
+      <p>For more information, contact us:</p>
+      <p><a href="mailto:info@shirdisai.org.uk">info@shirdisai.org.uk</a></p>
+      <p>Wembley: <a href="tel:+442089022311">0208 902 2311</a> &bull;
+         Leicester: <a href="tel:+441163671833">0116 367 1833</a> &bull;
+         Reading: <a href="tel:+441189591084">0118 959 1084</a></p>
+      <p class="charity">SHITAL (Shirdi Sai Baba Temple Association) is a UK registered charity No. 1138530</p>
+      <p><a href="https://shirdisai.org.uk/" target="_blank" rel="noopener">shirdisai.org.uk</a></p>
+    </div>
+  </div>
+
+<script>
+  var p = new URLSearchParams(location.search);
+  var sub = p.get('sub'), amount = p.get('amount');
+  if (amount) {
+    document.getElementById('msg').innerHTML =
+      'Your monthly support of <span class="amt">£' + amount + '/month</span> is now active.';
+  }
+  if (sub) {
+    document.getElementById('ref').textContent = sub;
+    document.getElementById('refbox').classList.remove('hide');
+  }
+</script>
+</body>
+</html>

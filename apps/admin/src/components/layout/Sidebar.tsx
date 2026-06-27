@@ -60,6 +60,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/key-register',      icon: '🔐', label: 'Key Register' },
       { href: '/bookings',          icon: '📅', label: 'Bookings' },
       { href: '/documents',         icon: '📁', label: 'Documents' },
+      { href: '/media',             icon: '🖼️', label: 'Image Library' },
       { href: '/broadcast',         icon: '📺', label: 'TV Channel' },
     ],
   },
