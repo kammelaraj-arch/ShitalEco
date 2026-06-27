@@ -22,7 +22,6 @@
   }
   .font-display { font-family: 'Cinzel', Georgia, serif; }
 
-  /* top bar */
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
     padding: 0.8rem 1.1rem; background: rgba(6,1,0,0.94); border-bottom: 1px solid rgba(212,175,55,0.18);
     position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px); }
@@ -65,36 +64,25 @@
   .amt .v { font-size: 2.1rem; font-weight: 800; color: var(--gold); }
 
   .other { display: flex; align-items: center; gap: 0.8rem; border-radius: 18px; padding: 1rem 1.1rem;
-    background: rgba(255,255,255,0.04); border: 2px dashed rgba(212,175,55,0.4); margin-bottom: 1.5rem; }
+    background: rgba(255,255,255,0.04); border: 2px dashed rgba(212,175,55,0.4); margin-bottom: 0.8rem; }
   .other .ic { font-size: 1.4rem; }
   .other .t { font-size: 0.85rem; font-weight: 700; color: var(--text); }
   .other .h { font-size: 0.72rem; color: var(--faint); margin-top: 0.15rem; }
   .other.sel { border-style: solid; border-color: var(--gold);
     background: linear-gradient(135deg,rgba(212,175,55,0.22),rgba(212,175,55,0.08)); }
-  .other-input { display: none; margin: -0.6rem 0 1.5rem; }
+  .other-input { display: none; margin-bottom: 1.2rem; }
   .other-input.show { display: flex; align-items: center; gap: 0.6rem;
     background: rgba(212,175,55,0.08); border: 1px solid rgba(212,175,55,0.3); border-radius: 16px; padding: 0.7rem 1rem; }
   .other-input span { font-size: 1.4rem; font-weight: 800; color: var(--gold); }
   .other-input input { flex: 1; background: transparent; border: none; outline: none;
     font-size: 1.4rem; font-weight: 800; color: var(--gold); }
 
-  .go { width: 100%; border: none; border-radius: 16px; padding: 1.05rem; font-size: 1.05rem;
-    font-weight: 800; color: var(--btn-dark); cursor: pointer;
-    background: linear-gradient(135deg,#D4AF37,#FFD700,#C5A028); background-size: 200% 100%;
-    transition: all .15s; }
-  .go:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(212,175,55,0.3); }
-  .go:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
-  .tagline { text-align: center; color: var(--faint); font-size: 0.78rem; margin-top: 0.9rem; }
-  .err { color: #ff8a80; font-size: 0.85rem; text-align: center; margin-top: 0.8rem; min-height: 1rem; }
-
-  /* pay stage */
-  .summary { display: flex; align-items: center; justify-content: space-between;
-    background: var(--card); border: 1px solid rgba(212,175,55,0.25); border-radius: 16px;
-    padding: 0.9rem 1.1rem; margin-bottom: 1.1rem; }
-  .summary b { color: var(--gold); font-size: 1.2rem; }
-  .summary .chg { color: var(--saffron); font-size: 0.78rem; font-weight: 700; cursor: pointer; background: none; border: none; }
+  .pay-head { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px;
+    color: rgba(212,175,55,0.7); margin: 1.3rem 0 0.7rem; }
   .spin { text-align: center; color: var(--muted); font-size: 0.9rem; padding: 0.6rem 0; }
   .paybox { background: #fff; border-radius: 14px; padding: 0.7rem; }
+  .tagline { text-align: center; color: var(--faint); font-size: 0.78rem; margin-top: 0.9rem; }
+  .err { color: #ff8a80; font-size: 0.85rem; text-align: center; margin-top: 0.8rem; min-height: 1rem; }
 
   .foot { text-align: center; color: var(--muted); font-size: 0.74rem; margin-top: 2rem;
     border-top: 1px solid rgba(212,175,55,0.18); padding-top: 1.1rem; line-height: 1.6; }
@@ -131,45 +119,35 @@
       <p class="by">— Shri Shirdi Sai Baba</p>
     </div>
 
-    <!-- STEP 1 — pick amount -->
-    <div id="pick-step">
-      <p class="eyebrow">Choose your monthly amount</p>
-      <div class="amounts" id="amounts">
-        <div class="amt" data-amt="5"><div class="v">£5</div></div>
-        <div class="amt sel" data-amt="11"><div class="v">£11</div></div>
-        <div class="amt" data-amt="21"><div class="v">£21</div></div>
-        <div class="amt" data-amt="51"><div class="v">£51</div></div>
-      </div>
-
-      <div class="other" id="other-card">
-        <div class="ic">✨</div>
-        <div>
-          <div class="t">Other amount</div>
-          <div class="h">Enter your own monthly gift — any amount from £1 to £1,000</div>
-        </div>
-      </div>
-      <div class="other-input" id="other-input">
-        <span>£</span>
-        <input id="custom" type="number" min="1" max="1000" step="0.01" placeholder="e.g. 30" />
-      </div>
-
-      <button class="go" id="go">Continue →</button>
-      <p class="tagline">🔒 Secure recurring payment via PayPal · Pay by debit/credit card · Cancel anytime</p>
+    <!-- Amount -->
+    <p class="eyebrow">Choose your monthly amount</p>
+    <div class="amounts" id="amounts">
+      <div class="amt" data-amt="5"><div class="v">£5</div></div>
+      <div class="amt sel" data-amt="11"><div class="v">£11</div></div>
+      <div class="amt" data-amt="21"><div class="v">£21</div></div>
+      <div class="amt" data-amt="51"><div class="v">£51</div></div>
     </div>
 
-    <!-- STEP 2 — PayPal / card buttons -->
-    <div id="pay-stage" class="hide">
-      <div class="summary">
-        <span>Monthly donation: <b id="pay-amt">£11/month</b></span>
-        <button class="chg" id="change">Change</button>
+    <div class="other" id="other-card">
+      <div class="ic">✨</div>
+      <div>
+        <div class="t">Other amount</div>
+        <div class="h">Enter your own monthly gift — any amount from £1 to £1,000</div>
       </div>
-      <div class="spin" id="pay-spin">Preparing secure payment…</div>
-      <div class="paybox">
-        <div id="paypal-card-btn"></div>
-        <div id="paypal-btn" style="margin-top:0.5rem;"></div>
-      </div>
-      <p class="tagline">💳 Card payments need no PayPal account · Cancel anytime</p>
     </div>
+    <div class="other-input" id="other-input">
+      <span>£</span>
+      <input id="custom" type="number" min="1" max="1000" step="0.01" placeholder="e.g. 30" />
+    </div>
+
+    <!-- Pay — both buttons on the same page -->
+    <p class="pay-head">Pay securely</p>
+    <div class="spin" id="pay-spin">Preparing secure payment…</div>
+    <div class="paybox">
+      <div id="paypal-card-btn"></div>
+      <div id="paypal-btn" style="margin-top:0.5rem;"></div>
+    </div>
+    <p class="tagline">💳 Card payments need no PayPal account · Cancel anytime</p>
 
     <div class="err" id="err"></div>
 
@@ -199,16 +177,10 @@
   var custom = document.getElementById('custom');
   var otherCard = document.getElementById('other-card');
   var otherInput = document.getElementById('other-input');
-  var go = document.getElementById('go');
   var err = document.getElementById('err');
-  var pickStep = document.getElementById('pick-step');
-  var payStage = document.getElementById('pay-stage');
   var paySpin = document.getElementById('pay-spin');
-  var paymentsRendered = false;
-  var sdkReady = null;       // promise that resolves when the PayPal SDK is loaded
-  var autoAdvance = false;   // deep link with ?amount= jumps straight to the buttons
-  var lastPlanId = '';       // plan created for the current subscription
-  var lastAmount = 0;        // amount used for the current subscription
+  var lastPlanId = '';
+  var lastAmount = 0;
 
   function clearTiles() { amtEls.forEach(function (e) { e.classList.remove('sel'); }); otherCard.classList.remove('sel'); }
 
@@ -219,6 +191,7 @@
       selected = parseFloat(el.getAttribute('data-amt'));
       custom.value = '';
       otherInput.classList.remove('show');
+      err.textContent = '';
     });
   });
   otherCard.addEventListener('click', function () {
@@ -232,6 +205,7 @@
     clearTiles();
     otherCard.classList.add('sel');
     selected = parseFloat(custom.value) || 0;
+    err.textContent = '';
   });
 
   function currentAmount() {
@@ -249,13 +223,11 @@
     });
     if (!matched) { otherCard.classList.add('sel'); otherInput.classList.add('show'); custom.value = qAmt; }
     selected = qAmt;
-    autoAdvance = true; // explicit amount → go straight to the card / PayPal buttons
   })();
 
-  // ---- Load the PayPal JS SDK once (client-id comes from the live config) ----
+  // ---- Load the PayPal JS SDK (client-id from the live config) ----
   function loadSdk() {
-    if (sdkReady) return sdkReady;
-    sdkReady = fetch('/api/v1/service/paypal/config')
+    return fetch('/api/v1/service/paypal/config')
       .then(function (r) { return r.json(); })
       .then(function (cfg) {
         if (!cfg.client_id) throw new Error('Payment is not configured yet. Please try later.');
@@ -269,21 +241,23 @@
           document.head.appendChild(s);
         });
       });
-    return sdkReady;
   }
 
-  // ---- createSubscription: get a plan for the chosen amount, then create it ----
+  // ---- createSubscription: get a plan for the CURRENT amount, then create it ----
   function makeCreateSubscription() {
     return function (data, actions) {
       var amount = currentAmount();
+      if (!amount || amount < 1 || amount > 1000) {
+        err.textContent = 'Please choose an amount between £1 and £1,000 first.';
+        return Promise.reject(new Error('invalid amount'));
+      }
+      err.textContent = '';
       return fetch('/api/v1/service/giving/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tier_id: 'custom',
-          custom_amount: amount,
-          custom_label: 'Monthly Giving',
-          branch_id: branch
+          tier_id: 'custom', custom_amount: amount,
+          custom_label: 'Monthly Giving', branch_id: branch
         })
       })
       .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); }); })
@@ -294,10 +268,8 @@
         return actions.subscription.create({
           plan_id: d.plan_id,
           application_context: {
-            brand_name: 'Shital Temple',
-            locale: 'en-GB',
-            shipping_preference: 'NO_SHIPPING',
-            user_action: 'SUBSCRIBE_NOW'
+            brand_name: 'Shital Temple', locale: 'en-GB',
+            shipping_preference: 'NO_SHIPPING', user_action: 'SUBSCRIBE_NOW'
           }
         });
       });
@@ -315,25 +287,15 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        subscription_id: sub,
-        plan_id: lastPlanId,
-        tier_id: 'custom',
-        amount: amt,
-        frequency: 'MONTH',
-        branch_id: branch,
-        tier_label: 'Monthly Giving'
+        subscription_id: sub, plan_id: lastPlanId, tier_id: 'custom',
+        amount: amt, frequency: 'MONTH', branch_id: branch, tier_label: 'Monthly Giving'
       })
     }).then(done, done);
   }
 
-  function onError() {
-    err.textContent = 'PayPal hit a problem. Please try again.';
-    paySpin.classList.remove('hide');
-    paySpin.textContent = 'Please try again, or go back and re-select an amount.';
-  }
+  function onError() { err.textContent = 'PayPal hit a problem. Please try again.'; }
 
   function renderButtons(paypal) {
-    if (paymentsRendered) { paySpin.classList.add('hide'); return; }
     var common = { createSubscription: makeCreateSubscription(), onApprove: onApprove, onError: onError };
 
     var cardOk = true;
@@ -353,7 +315,6 @@
       }, common)).render('#paypal-btn');
     } catch (e) { /* non-fatal */ }
 
-    paymentsRendered = true;
     paySpin.classList.add('hide');
     if (!cardOk) {
       document.getElementById('paypal-card-btn').innerHTML =
@@ -362,34 +323,13 @@
     }
   }
 
-  go.addEventListener('click', function () {
-    err.textContent = '';
-    var amount = currentAmount();
-    if (!amount || amount < 1 || amount > 1000) {
-      err.textContent = 'Please choose an amount between £1 and £1,000.';
-      return;
-    }
-    document.getElementById('pay-amt').textContent = '£' + amount + '/month';
-    pickStep.classList.add('hide');
-    payStage.classList.remove('hide');
-    paySpin.classList.remove('hide');
-    paySpin.textContent = 'Preparing secure payment…';
-    loadSdk()
-      .then(renderButtons)
-      .catch(function (e) {
-        err.textContent = (e && e.message) ? e.message : 'Could not start payment. Please try again.';
-        paySpin.classList.add('hide');
-      });
-  });
-
-  document.getElementById('change').addEventListener('click', function () {
-    payStage.classList.add('hide');
-    pickStep.classList.remove('hide');
-    err.textContent = '';
-  });
-
-  // Deep link carried an amount → jump straight to the card / PayPal buttons.
-  if (autoAdvance) go.click();
+  // Both buttons render on this same page as soon as the SDK loads.
+  loadSdk()
+    .then(renderButtons)
+    .catch(function (e) {
+      paySpin.classList.add('hide');
+      err.textContent = (e && e.message) ? e.message : 'Could not start payment. Please try again.';
+    });
 </script>
 </body>
 </html>
