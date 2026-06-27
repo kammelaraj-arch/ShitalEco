@@ -42,6 +42,16 @@ interface Donation {
   project_name?: string | null
 }
 
+interface DonationDetail {
+  id: string
+  core: { amount: number; currency: string; status: string; purpose: string; reference: string; source: string }
+  payment: { provider: string; payment_ref: string | null; fee_amount: number | null; net_amount: number | null; settled_at: string | null; payout_id: string | null; card_type: string | null; failure_code: string | null; failure_message: string | null }
+  donor: { name: string | null; email: string | null; phone: string | null; contact_id: string | null }
+  gift_aid: { eligible: boolean; amount: number | null; first_name: string | null; surname: string | null; house_number: string | null; postcode: string | null }
+  attribution: { branch_id: string; branch_name: string | null; branch_ref: string | null; project_name: string | null; kiosk_device: { name: string; device_type: string } | null }
+  timestamps: { created_at: string | null; updated_at: string | null }
+}
+
 // Master column list — drives the column-toggle menu + the table render.
 // `default` = visible on first load (mirrors what the old grid showed plus
 // Gift Aid + Contact, which are the most commonly-requested additions).
@@ -213,6 +223,18 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Donation | null>(null)
   const [taggingDonation, setTaggingDonation] = useState<Donation | null>(null)
+  const [detail, setDetail] = useState<DonationDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState<string | null>(null)
+
+  async function openDetail(d: Donation) {
+    setDetailLoading(d.id)
+    try {
+      const data = await apiFetch<DonationDetail>(`/finance/donations/${d.id}/detail`)
+      setDetail(data)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to load donation detail')
+    } finally { setDetailLoading(null) }
+  }
 
   async function tagDonationToProject(donation: Donation, projectId: string | null) {
     try {
@@ -719,9 +741,10 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                 {sortedDonations.map((d, i) => (
                   <motion.tr key={d.id}
                     initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.01 }}
-                    className={`border-b border-white/5 hover:bg-white/3 transition-colors ${
+                    onClick={() => openDetail(d)}
+                    className={`border-b border-white/5 hover:bg-white/[0.06] transition-colors cursor-pointer ${
                       d.gift_aid_eligible ? 'bg-blue-500/[0.04]' : ''
-                    }`}
+                    } ${detailLoading === d.id ? 'opacity-50' : ''}`}
                     style={d.gift_aid_eligible ? { borderLeft: '3px solid #3B82F6' } : { borderLeft: '3px solid transparent' }}
                   >
                     {isVisible('gift_aid') && (
@@ -809,11 +832,11 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                     )}
                     {canEdit && (
                       <td className="px-4 py-3 text-right whitespace-nowrap">
-                        <button onClick={() => setTaggingDonation(d)}
+                        <button onClick={(e) => { e.stopPropagation(); setTaggingDonation(d) }}
                           className="text-white/40 hover:text-saffron-400 text-sm font-medium px-2 py-1" title="Tag to project">
                           {d.project_name ? <span className="text-saffron-300 text-xs">🏗️ {d.project_name.slice(0,16)}</span> : '🏗️ Tag'}
                         </button>
-                        <button onClick={() => openEdit(d)}
+                        <button onClick={(e) => { e.stopPropagation(); openEdit(d) }}
                           className="text-white/40 hover:text-saffron-400 text-sm font-medium px-2 py-1">Edit</button>
                       </td>
                     )}
@@ -943,6 +966,90 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                   style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
                   {saving ? 'Saving…' : editing ? 'Save Changes' : 'Record Donation'}
                 </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Full end-to-end donation detail */}
+      <AnimatePresence>
+        {detail && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setDetail(null)} className="fixed inset-0 bg-black/70 z-40" />
+            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+              className="fixed right-0 top-0 h-full w-full sm:max-w-[540px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between flex-shrink-0">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-white font-black text-2xl">£{Number(detail.core.amount).toFixed(2)}</h2>
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                      detail.core.status === 'COMPLETED' ? 'bg-green-500/20 text-green-400' :
+                      detail.core.status === 'FAILED' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                      {detail.core.status}
+                    </span>
+                  </div>
+                  <p className="text-white/40 text-xs mt-0.5">{detail.core.purpose} · {detail.core.source}</p>
+                </div>
+                <button onClick={() => setDetail(null)} className="text-white/40 hover:text-white text-2xl">✕</button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 text-sm">
+                {/* helper row renderer via inline map */}
+                {[
+                  { title: '💳 Payment', rows: [
+                    ['Provider', detail.payment.provider],
+                    ['Payment ref', detail.payment.payment_ref],
+                    ['Card type', detail.payment.card_type],
+                    ['Fee', detail.payment.fee_amount != null ? `£${Number(detail.payment.fee_amount).toFixed(2)}` : null],
+                    ['Net received', detail.payment.net_amount != null ? `£${Number(detail.payment.net_amount).toFixed(2)}` : null],
+                    ['Settled at', detail.payment.settled_at ? new Date(detail.payment.settled_at).toLocaleString('en-GB') : null],
+                    ['Payout id', detail.payment.payout_id],
+                    ['Failure code', detail.payment.failure_code],
+                    ['Failure reason', detail.payment.failure_message],
+                  ] as [string, string | null][] },
+                  { title: '👤 Donor', rows: [
+                    ['Name', detail.donor.name],
+                    ['Email', detail.donor.email],
+                    ['Phone', detail.donor.phone],
+                  ] as [string, string | null][] },
+                  { title: '🇬🇧 Gift Aid', rows: [
+                    ['Eligible', detail.gift_aid.eligible ? 'Yes' : 'No'],
+                    ['GA amount', detail.gift_aid.amount != null ? `£${Number(detail.gift_aid.amount).toFixed(2)}` : null],
+                    ['First name', detail.gift_aid.first_name],
+                    ['Surname', detail.gift_aid.surname],
+                    ['House/Address', detail.gift_aid.house_number],
+                    ['Postcode', detail.gift_aid.postcode],
+                  ] as [string, string | null][] },
+                  { title: '📍 Attribution', rows: [
+                    ['Branch', detail.attribution.branch_name],
+                    ['Branch ref', detail.attribution.branch_ref],
+                    ['Project', detail.attribution.project_name],
+                    ['Captured by', detail.attribution.kiosk_device ? `${detail.attribution.kiosk_device.name} (${detail.attribution.kiosk_device.device_type})` : null],
+                    ['Reference', detail.core.reference],
+                  ] as [string, string | null][] },
+                  { title: '🕒 Timeline', rows: [
+                    ['Created', detail.timestamps.created_at ? new Date(detail.timestamps.created_at).toLocaleString('en-GB') : null],
+                    ['Updated', detail.timestamps.updated_at ? new Date(detail.timestamps.updated_at).toLocaleString('en-GB') : null],
+                  ] as [string, string | null][] },
+                ].map((section, si) => (
+                  <div key={si}>
+                    <h3 className="text-white/60 text-xs font-black uppercase tracking-wide mb-2">{section.title}</h3>
+                    <div className="glass rounded-2xl border border-temple-border divide-y divide-white/5">
+                      {section.rows.filter(([, v]) => v != null && v !== '').map(([k, v], ri) => (
+                        <div key={ri} className="flex items-start justify-between gap-4 px-4 py-2.5">
+                          <span className="text-white/40">{k}</span>
+                          <span className="text-white text-right font-medium break-all">{v}</span>
+                        </div>
+                      ))}
+                      {section.rows.filter(([, v]) => v != null && v !== '').length === 0 && (
+                        <div className="px-4 py-2.5 text-white/30">—</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </motion.div>
           </>
