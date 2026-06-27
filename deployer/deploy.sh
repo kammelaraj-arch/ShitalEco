@@ -943,12 +943,25 @@ JSON
   exit 3
 fi
 
+# ── Front-door verification on the SUCCESS path ─────────────────────────────
+# FINAL AUDIT above proves every container is RUNNING, but nginx can be running
+# yet routing to a dead upstream IP (stale docker DNS after the backend
+# recreate) → public 502 while everything looks "up". Verify the REAL public
+# path returns 200 before we record success; ensure_nginx_up restarts nginx to
+# flush the upstream and re-probes. (Previously success only relied on the
+# container-running audit, not a public probe.)
+if [ "$TARGET" = "prod" ]; then
+  echo "=== Front-door check (public /health through nginx) ==="
+  ensure_nginx_up || echo "  !!! front door not 200 after self-heal — 30s host watchdog will keep retrying"
+fi
+
 # ── Install / refresh the prod self-heal watchdog ───────────────────────────
-# Host cron (every 2 min), EXTERNAL to this deployer, that restarts nginx (and
-# if needed the backend) when the public /health stays down. This is the net
-# that catches a promote where the deployer itself dies mid-run and leaves
-# nginx pointing at a stale backend IP (the 17-Jun 40-min outage). Best-effort:
-# never fail a healthy deploy just because the cron install hiccuped.
+# Fast systemd timer (every 30s), EXTERNAL to this deployer, that restarts
+# nginx (and if needed the backend) when the public /health stays down. This is
+# the net that catches a promote where the deployer itself is OOM-killed
+# mid-run (a SIGKILL skips the bash exit-guard) and leaves nginx pointing at a
+# stale backend IP (the 17-Jun 40-min outage). Best-effort: never fail a
+# healthy deploy just because the install hiccuped.
 if [ "$TARGET" = "prod" ] && [ -f /workspace/infra/install-prod-watchdog.sh ]; then
   echo "=== Installing/refreshing prod self-heal watchdog ==="
   bash /workspace/infra/install-prod-watchdog.sh 2>&1 | sed 's/^/  /' \
