@@ -167,7 +167,7 @@
   var params = new URLSearchParams(location.search);
   var branch = (window.SHITAL_BRANCH || params.get('branch') || 'main');
   if (window.SHITAL_BRANCH_NAME) {
-    document.getElementById('branchpill').textContent = 'Shirdi Saibaba Temple - ' + window.SHITAL_BRANCH_NAME;
+    document.getElementById('branchpill').textContent = window.SHITAL_BRANCH_NAME;
     document.title = 'Monthly Giving — ' + window.SHITAL_BRANCH_NAME;
   }
 
