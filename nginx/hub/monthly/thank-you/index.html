@@ -38,14 +38,19 @@
   .home { display: inline-block; margin-top: 1.4rem; text-decoration: none;
     background: linear-gradient(135deg,#FF9933,#b85c00); color: #fff; font-weight: 800;
     padding: 0.8rem 1.4rem; border-radius: 14px; }
-  .foot { color: #b59a78; font-size: 0.74rem; margin-top: 1.4rem; }
+  .foot { color: #9a7e5c; font-size: 0.74rem; margin-top: 1.4rem;
+    border-top: 1px solid #f0e6d6; padding-top: 1rem; line-height: 1.55; }
+  .foot p { margin: 0.15rem 0; }
+  .foot a { color: #b85c00; text-decoration: none; }
+  .foot a:hover { text-decoration: underline; }
+  .foot .charity { color: #8a0e2c; font-weight: 700; margin-top: 0.4rem; }
   .hide { display: none; }
 </style>
 </head>
 <body>
   <div class="card">
-    <img class="baba" src="https://shirdisai.org.uk/Cnt/img/saibaba.jpg" alt="Shri Shirdi Sai Baba"
-         onerror="this.style.display='none'" />
+    <img class="baba" src="/monthly/assets/baba.jpg" alt="Shri Shirdi Sai Baba"
+         onerror="this.onerror=null;this.src='https://shirdisai.org.uk/Cnt/img/saibaba.jpg'" />
     <div class="tick">🙏</div>
     <h1>Baba's Blessings!</h1>
     <p id="msg">Your monthly support is now active.</p>
@@ -67,7 +72,16 @@
     </div>
 
     <a class="home" href="/monthly/">Make another donation</a>
-    <p class="foot">SHITAL · UK Registered Charity · Thank you for supporting the temple.</p>
+
+    <div class="foot">
+      <p>For more information, contact us:</p>
+      <p><a href="mailto:info@shirdisai.org.uk">info@shirdisai.org.uk</a></p>
+      <p>Wembley: <a href="tel:+442089022311">0208 902 2311</a> &bull;
+         Leicester: <a href="tel:+441163671833">0116 367 1833</a> &bull;
+         Reading: <a href="tel:+441189591084">0118 959 1084</a></p>
+      <p class="charity">SHITAL (Shirdi Sai Baba Temple Association) is a UK registered charity No. 1138530</p>
+      <p><a href="https://shirdisai.org.uk/" target="_blank" rel="noopener">shirdisai.org.uk</a></p>
+    </div>
   </div>
 
 <script>

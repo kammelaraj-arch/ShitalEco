@@ -44,7 +44,12 @@
   .pp { display: flex; align-items: center; justify-content: center; gap: 0.4rem; margin-top: 0.9rem;
     color: #8a6a45; font-size: 0.8rem; }
   .err { color: #c0392b; font-size: 0.85rem; text-align: center; margin-top: 0.8rem; min-height: 1rem; }
-  .foot { text-align: center; color: #b59a78; font-size: 0.75rem; margin-top: 1.4rem; }
+  .foot { text-align: center; color: #9a7e5c; font-size: 0.74rem; margin-top: 1.4rem;
+    border-top: 1px solid #f0e6d6; padding-top: 1rem; line-height: 1.55; }
+  .foot p { margin: 0.15rem 0; }
+  .foot a { color: #b85c00; text-decoration: none; }
+  .foot a:hover { text-decoration: underline; }
+  .foot .charity { color: #8a0e2c; font-weight: 700; margin-top: 0.4rem; }
   .cards { text-align: center; margin-top: 0.6rem; font-size: 1.1rem; letter-spacing: 2px; }
   .bless { background: linear-gradient(135deg,#fff5e6,#fff8ee); border: 1px solid #ffe2bf;
     border-radius: 18px; padding: 1.1rem 1rem 1rem; margin-bottom: 1.3rem; text-align: center; }
@@ -75,8 +80,8 @@
 
     <!-- Baba's blessing -->
     <div class="bless">
-      <img class="baba" src="https://shirdisai.org.uk/Cnt/img/saibaba.jpg" alt="Shri Shirdi Sai Baba"
-           onerror="this.style.display='none'" />
+      <img class="baba" src="/monthly/assets/baba.jpg" alt="Shri Shirdi Sai Baba"
+           onerror="this.onerror=null;this.src='https://shirdisai.org.uk/Cnt/img/saibaba.jpg'" />
       <p class="q">"If you cast your burden on Me, I shall surely bear it. If you look to Me, I look to you. There shall be no want in the house of My devotee."</p>
       <p class="by">— Shri Shirdi Sai Baba</p>
     </div>
@@ -113,7 +118,16 @@
     </div>
 
     <div class="err" id="err"></div>
-    <p class="foot">SHITAL · UK Registered Charity · You can cancel anytime in PayPal.</p>
+
+    <div class="foot">
+      <p>For more information, contact us:</p>
+      <p><a href="mailto:info@shirdisai.org.uk">info@shirdisai.org.uk</a></p>
+      <p>Wembley: <a href="tel:+442089022311">0208 902 2311</a> &bull;
+         Leicester: <a href="tel:+441163671833">0116 367 1833</a> &bull;
+         Reading: <a href="tel:+441189591084">0118 959 1084</a></p>
+      <p class="charity">SHITAL (Shirdi Sai Baba Temple Association) is a UK registered charity No. 1138530</p>
+      <p><a href="https://shirdisai.org.uk/" target="_blank" rel="noopener">shirdisai.org.uk</a> &bull; Cancel anytime in PayPal</p>
+    </div>
   </div>
 
 <script>window.SHITAL_BRANCH='milton_keynes_branch';window.SHITAL_BRANCH_NAME='Milton Keynes';</script>
