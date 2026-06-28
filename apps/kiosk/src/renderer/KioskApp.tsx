@@ -2,6 +2,7 @@ import React, { useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useKioskStore } from './store/kiosk.store'
 import { scheduleDailyCatalogRefresh } from './utils/cachedFetch'
+import { unlockVoiceOnFirstGesture } from './utils/voice'
 import { SetupScreen } from './pages/SetupScreen'
 import { IdleScreen } from './pages/IdleScreen'
 import { HomeScreen } from './pages/HomeScreen'
@@ -30,6 +31,11 @@ export function KioskApp() {
   useEffect(() => {
     if (!deviceConfigured) setScreen('setup')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Unlock the speech engine on the first user touch so the "Sairam" /
+  // decline announcements (fired from screen mounts / async poll callbacks)
+  // are allowed by the Android WebView's gesture policy.
+  useEffect(() => { unlockVoiceOnFirstGesture() }, [])
 
   // Heartbeat — every 30 s. Two jobs in one round-trip:
   //   (1) Bump kiosk_devices.last_seen_at (admin Kiosks panel ONLINE state)

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore } from '../store/kiosk.store'
 import { KioskKeyboard } from '../components/KioskKeyboard'
+import { speak } from '../utils/voice'
 
 const AUTO_RESET_SECONDS = 60
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
@@ -28,6 +29,9 @@ export function ConfirmationScreen() {
     : branchId === 'reading' ? 'Reading' : branchId === 'mk' ? 'Milton Keynes' : 'Shital'
 
   const hasContact = contactInfo && !contactInfo.anonymous && (contactInfo.email || contactInfo.phone)
+
+  // This screen only mounts after a successful payment — announce "Sairam".
+  useEffect(() => { speak('Sairam') }, [])
 
   // Pre-fill from contact info; mark as sent if backend already sent via confirm endpoint
   useEffect(() => {
