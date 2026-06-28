@@ -6,6 +6,7 @@ import { ProcessingScreen } from './pages/ProcessingScreen'
 import { TapScreen } from './pages/TapScreen'
 import { ConfirmationScreen } from './pages/ConfirmationScreen'
 import { AdminScreen } from './pages/AdminScreen'
+import { unlockVoiceOnFirstGesture } from './lib/voice'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api/v1'
 
@@ -25,6 +26,11 @@ export function QuickDonationApp() {
   // Without this guard, staff land on the tile screen, tap an amount, and
   // only THEN see the "no card reader configured" dead-end on Processing.
   const hasAnyReader = !!(stripeReaderId.trim() || sumupReaderId.trim() || cloverDeviceId.trim())
+
+  // Unlock the Web Speech engine on the first user touch so the later "Sairam"
+  // / decline / timeout announcements (fired from async poll callbacks on the
+  // Tap screen) are allowed by the Android WebView's gesture policy.
+  useEffect(() => { unlockVoiceOnFirstGesture() }, [])
 
   // Heartbeat — every 30s while the app is open and a kioskDeviceId is set.
   // Mirrors apps/kiosk/src/renderer/KioskApp.tsx. Without this the device
