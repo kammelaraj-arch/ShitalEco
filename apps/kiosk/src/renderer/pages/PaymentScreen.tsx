@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useKioskStore, THEMES } from '../store/kiosk.store'
 import { QRCodeSVG } from 'qrcode.react'
+import { speak } from '../utils/voice'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -48,6 +49,17 @@ export function PaymentScreen() {
     }, 1000)
     return () => clearInterval(timer)
   }, [])
+
+  // Spoken feedback on a declined / cancelled payment. This only OBSERVES the
+  // readerStatus the polling already sets — it does not change any reader
+  // logic. (Success is announced on the Confirmation screen.)
+  useEffect(() => {
+    if (readerStatus === 'failed') {
+      speak('Sairam ji, your card was declined. Please try again.')
+    } else if (readerStatus === 'cancelled') {
+      speak('Sairam ji, the payment did not complete. Please try again.')
+    }
+  }, [readerStatus])
 
   // Poll reader status for Stripe Terminal
   useEffect(() => {
