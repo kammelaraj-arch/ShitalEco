@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDonationStore } from '../store/donation.store'
+import { speak } from '../lib/voice'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 const SESSION_SECONDS = 120
@@ -22,25 +23,9 @@ export function TapScreen() {
   // Keep ref in sync so the timer closure can read latest status without a dep
   useEffect(() => { readerStatusRef.current = readerStatus }, [readerStatus])
 
-  // Voice feedback so donors aren't standing confused at a silent screen when
-  // the tap doesn't go through. Web Speech API ships in every modern browser
-  // and works inside Capacitor's Android WebView. We dedupe by text so a
-  // poll loop that keeps reporting the same state doesn't repeat-speak.
-  const lastSpokenRef = useRef<string>('')
-  const speak = (text: string) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
-    if (lastSpokenRef.current === text) return
-    lastSpokenRef.current = text
-    try {
-      window.speechSynthesis.cancel()  // stop any in-flight utterance
-      const u = new SpeechSynthesisUtterance(text)
-      u.rate = 0.95
-      u.pitch = 1.0
-      u.volume = 1.0
-      u.lang = 'en-GB'
-      window.speechSynthesis.speak(u)
-    } catch { /* speech unavailable — silent fallback */ }
-  }
+  // Voice feedback ("Sairam", decline/timeout prompts) comes from the shared
+  // ../lib/voice helper, which unlocks the Android WebView speech engine on the
+  // first user gesture and works around the cancel()-before-speak() race.
 
   // Speak the initial prompt the moment the customer lands on this screen so
   // they know to tap; useful when the visual prompt isn't being read.
