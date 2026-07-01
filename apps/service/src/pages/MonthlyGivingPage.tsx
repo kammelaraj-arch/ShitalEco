@@ -26,6 +26,8 @@ export function MonthlyGivingPage() {
   const [clientId, setClientId]     = useState('')
   const [loading, setLoading]       = useState(true)
   const [planId, setPlanId]         = useState('')
+  const [stripeEnabled, setStripeEnabled] = useState(false)
+  const [stripeBusy, setStripeBusy] = useState(false)
 
   const [firstName, setFirstName]   = useState('')
   const [surname, setSurname]       = useState('')
@@ -77,8 +79,34 @@ export function MonthlyGivingPage() {
         if (def) setSelected(def)
       }),
       api.paypalConfig().then(cfg => setClientId(cfg.client_id)),
+      // Is Stripe recurring available? (enabled only once the webhook secret is set)
+      fetch(`${import.meta.env.VITE_API_URL ?? '/api/v1'}/service/stripe/config`)
+        .then(r => r.json()).then(c => setStripeEnabled(!!c?.enabled)).catch(() => {}),
     ]).finally(() => setLoading(false))
   }, [])
+
+  // Stripe card: go STRAIGHT to Stripe Checkout from the amount step — no
+  // on-site details form. Stripe collects name/email/address on its hosted page.
+  async function payByStripe() {
+    if (!selected) return
+    setStripeBusy(true)
+    setError('')
+    try {
+      const r = await fetch(`${import.meta.env.VITE_API_URL ?? '/api/v1'}/service/giving/stripe/create-checkout`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: Number(selected.amount), branch_id: branchId,
+          tier_label: selected.label || 'Monthly Giving', return_origin: window.location.origin,
+        }),
+      })
+      const d = await r.json()
+      if (r.ok && d.url) { window.location.href = d.url; return }
+      throw new Error(d.detail || 'Could not start card checkout.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start card checkout. Please try again.')
+      setStripeBusy(false)
+    }
+  }
 
   async function lookupPostcode() {
     setAddressError('')
@@ -352,15 +380,38 @@ export function MonthlyGivingPage() {
             </div>
           )}
 
+          {/* Stripe card — primary: straight to Stripe's hosted card page, no
+              on-site form (Stripe captures name/email/address). */}
+          {stripeEnabled && (
+            <button onClick={payByStripe}
+              disabled={!selected || (customMode && !customAmountValid) || stripeBusy}
+              className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.99] flex items-center justify-center gap-2"
+              style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#3B0000' }}>
+              {stripeBusy ? 'Connecting to secure card checkout…'
+                : `💳 Pay by Card — £${selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month`}
+            </button>
+          )}
+
           <button onClick={() => setStep('details')}
             disabled={!selected || (customMode && !customAmountValid)}
             className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.99]"
-            style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-            Continue — £{selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month →
+            style={ stripeEnabled
+              ? { background: 'rgba(255,255,255,0.06)', color: '#FFF8DC', border: '1px solid rgba(255,255,255,0.15)', marginTop: '0.7rem' }
+              : { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' } }>
+            {stripeEnabled
+              ? 'Or pay with PayPal →'
+              : `Continue — £${selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month →`}
           </button>
 
+          {error && (
+            <p className="text-sm font-medium rounded-xl px-4 py-3 mt-3"
+              style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.3)' }}>
+              {error}
+            </p>
+          )}
+
           <p className="text-center text-xs mt-3" style={{ color: 'rgba(255,248,220,0.3)' }}>
-            Secure recurring payment via PayPal · Cancel anytime
+            Secure recurring payment · Cancel anytime
           </p>
         </motion.div>
       )}
