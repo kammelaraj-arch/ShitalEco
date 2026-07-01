@@ -2327,6 +2327,15 @@ async def _patch_schema() -> None:
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_payment_amount  NUMERIC(10,2)",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS next_billing_date    DATE",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS total_payments       INTEGER NOT NULL DEFAULT 0",
+        # Stripe Billing (recurring card) — a second recurring provider alongside
+        # PayPal. payment_provider distinguishes the two; the stripe_* columns
+        # mirror the paypal_* ones so one table + admin list serves both.
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS payment_provider       VARCHAR(20) NOT NULL DEFAULT 'paypal'",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS stripe_customer_id     VARCHAR(255)",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(255)",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS stripe_price_id        VARCHAR(255)",
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS stripe_checkout_id     VARCHAR(255)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_rgs_stripe_sub ON recurring_giving_subscriptions(stripe_subscription_id) WHERE stripe_subscription_id IS NOT NULL",
         # Per-device donation attribution. Nullable: server-portal / PayPal /
         # manual entries have no originating kiosk, and rows pre-dating this
         # column are left NULL (the Incoming Funds dashboard surfaces them
@@ -4091,6 +4100,7 @@ _mount("shital.api.routers.system_alerts",        "router")
 _mount("shital.api.routers.kiosk_devices",        "router")
 _mount("shital.api.routers.paypal",               "router")
 _mount("shital.api.routers.recurring_giving",     "router")
+_mount("shital.api.routers.stripe_giving",        "router")
 _mount("shital.api.routers.sava_volunteers",      "router")
 _mount("shital.api.routers.bank_accounts",         "router")
 _mount("shital.api.routers.bank_imports",          "router")

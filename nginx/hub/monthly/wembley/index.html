@@ -140,9 +140,10 @@
       <input id="custom" type="number" min="1" max="1000" step="0.01" placeholder="e.g. 30" />
     </div>
 
-    <!-- Pay — both buttons on the same page -->
+    <!-- Pay — Stripe card (primary, when enabled) + PayPal -->
     <p class="pay-head">Pay securely</p>
     <div class="spin" id="pay-spin">Preparing secure payment…</div>
+    <button class="go hide" id="stripe-card-btn" style="margin-bottom:0.7rem">💳 Pay by Debit / Credit Card</button>
     <div class="paybox">
       <div id="paypal-card-btn"></div>
       <div id="paypal-btn" style="margin-top:0.5rem;"></div>
@@ -298,15 +299,19 @@
   function renderButtons(paypal) {
     var common = { createSubscription: makeCreateSubscription(), onApprove: onApprove, onError: onError };
 
-    var cardOk = true;
-    try {
-      var cardBtn = paypal.Buttons(Object.assign({
-        fundingSource: paypal.FUNDING.CARD,
-        style: { layout: 'vertical', color: 'black', shape: 'rect', label: 'pay', height: 48 }
-      }, common));
-      if (cardBtn.isEligible && !cardBtn.isEligible()) cardOk = false;
-      else cardBtn.render('#paypal-card-btn');
-    } catch (e) { cardOk = false; }
+    // When Stripe card is available it's the primary card option, so skip
+    // PayPal's own card button (avoids two "pay by card" buttons).
+    var cardOk = stripeEnabled;
+    if (!stripeEnabled) {
+      try {
+        var cardBtn = paypal.Buttons(Object.assign({
+          fundingSource: paypal.FUNDING.CARD,
+          style: { layout: 'vertical', color: 'black', shape: 'rect', label: 'pay', height: 48 }
+        }, common));
+        if (cardBtn.isEligible && !cardBtn.isEligible()) cardOk = false;
+        else cardBtn.render('#paypal-card-btn');
+      } catch (e) { cardOk = false; }
+    }
 
     try {
       paypal.Buttons(Object.assign({
@@ -323,12 +328,53 @@
     }
   }
 
-  // Both buttons render on this same page as soon as the SDK loads.
-  loadSdk()
-    .then(renderButtons)
+  // ---- Stripe card (recurring) — the better card experience when configured.
+  //      Hosted Checkout redirect: no account needed, captures name/email for
+  //      Gift Aid. The button only appears when Stripe is enabled server-side.
+  var stripeEnabled = false;
+  var stripeBtn = document.getElementById('stripe-card-btn');
+  stripeBtn.addEventListener('click', function () {
+    var amount = currentAmount();
+    if (!amount || amount < 1 || amount > 1000) {
+      err.textContent = 'Please choose an amount between £1 and £1,000 first.';
+      return;
+    }
+    err.textContent = '';
+    stripeBtn.disabled = true;
+    var label = stripeBtn.textContent;
+    stripeBtn.textContent = 'Connecting to secure card checkout…';
+    fetch('/api/v1/service/giving/stripe/create-checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount: amount, branch_id: branch,
+        tier_label: 'Monthly Giving', return_origin: location.origin
+      })
+    })
+    .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); }); })
+    .then(function (d) {
+      if (d.url) { window.location.href = d.url; }
+      else { throw new Error('Could not start card checkout.'); }
+    })
     .catch(function (e) {
-      paySpin.classList.add('hide');
-      err.textContent = (e && e.message) ? e.message : 'Could not start payment. Please try again.';
+      err.textContent = (e && e.message) ? e.message : 'Could not start card checkout. Please try again.';
+      stripeBtn.disabled = false;
+      stripeBtn.textContent = label;
+    });
+  });
+
+  // Decide card provider first (so we don't briefly show two card buttons),
+  // then load PayPal + render its buttons.
+  fetch('/api/v1/service/stripe/config')
+    .then(function (r) { return r.json(); })
+    .then(function (cfg) { if (cfg && cfg.enabled) { stripeEnabled = true; stripeBtn.classList.remove('hide'); } })
+    .catch(function () { /* Stripe optional — fall back to PayPal */ })
+    .then(function () {
+      loadSdk()
+        .then(renderButtons)
+        .catch(function (e) {
+          paySpin.classList.add('hide');
+          err.textContent = (e && e.message) ? e.message : 'Could not start payment. Please try again.';
+        });
     });
 </script>
 </body>
