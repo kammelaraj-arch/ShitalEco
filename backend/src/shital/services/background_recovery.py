@@ -853,18 +853,36 @@ async def _paypal_reconcile_once(days: int = 35) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "scanned": 0, "status_updated": 0, "activated": 0, "cancelled": 0,
         "payments_recorded": 0, "errors": 0, "days_window": days,
+        "orphans_expired": 0, "donor_backfilled": 0,
     }
     hdrs = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     now = datetime.now(UTC)
     start = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # 0) Reap orphaned audit rows — PENDING_APPROVAL rows with NO PayPal id are
+    #    the stranded halves of the old /monthly/ approve-duplicates-the-row bug.
+    #    They can never activate (no id to check), so mark old ones EXPIRED so the
+    #    admin list stops showing phantom "pending" donors. Recent ones are left
+    #    alone in case an approve is still in flight.
+    async with SessionLocal() as db:
+        reaped = await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET status = 'EXPIRED', updated_at = NOW()
+            WHERE status = 'PENDING_APPROVAL'
+              AND (paypal_subscription_id IS NULL OR paypal_subscription_id = '')
+              AND created_at < NOW() - INTERVAL '2 days'
+        """))
+        await db.commit()
+        summary["orphans_expired"] = reaped.rowcount or 0
+
     # 1) Pull non-terminal subscriptions with a PayPal id.
     async with SessionLocal() as db:
         rows = (await db.execute(text("""
             SELECT id::text AS id, paypal_subscription_id AS sub_id,
                    UPPER(COALESCE(status,'')) AS status, branch_id, amount,
-                   COALESCE(gift_aid_declared, false) AS ga
+                   COALESCE(gift_aid_declared, false) AS ga,
+                   COALESCE(donor_name,'') AS donor_name
             FROM recurring_giving_subscriptions
             WHERE paypal_subscription_id IS NOT NULL
               AND paypal_subscription_id <> ''
@@ -879,10 +897,47 @@ async def _paypal_reconcile_once(days: int = 35) -> dict[str, Any]:
             try:
                 sub = await c.get(f"{base}/v1/billing/subscriptions/{sub_id}", headers=hdrs)
                 if sub.status_code == 404:
+                    # PayPal doesn't know this id — abandoned before it was really
+                    # created, or an unverified client id was stored. Reap old ones
+                    # so they stop showing as "pending" forever.
+                    async with SessionLocal() as db:
+                        await db.execute(text("""
+                            UPDATE recurring_giving_subscriptions
+                            SET status = 'EXPIRED', updated_at = NOW()
+                            WHERE id = CAST(:id AS UUID)
+                              AND UPPER(COALESCE(status,'')) NOT IN ('ACTIVE','CANCELLED','EXPIRED')
+                              AND created_at < NOW() - INTERVAL '1 day'
+                        """), {"id": r["id"]})
+                        await db.commit()
                     continue
                 sub.raise_for_status()
-                pp_status = (sub.json().get("status") or "").upper()
+                sub_json = sub.json()
+                pp_status = (sub_json.get("status") or "").upper()
                 mapped = _PAYPAL_SUB_STATUS_MAP.get(pp_status)
+
+                # Backfill donor name/email from PayPal's subscriber block when we
+                # don't have them (the simple /monthly/ page collects only amount).
+                if not (r.get("donor_name") or "").strip():
+                    _subr = sub_json.get("subscriber") or {}
+                    _nm = _subr.get("name") or {}
+                    _first = (_nm.get("given_name") or "").strip()
+                    _surname = (_nm.get("surname") or "").strip()
+                    _email = (_subr.get("email_address") or "").strip()
+                    _full = f"{_first} {_surname}".strip()
+                    if _full or _email:
+                        async with SessionLocal() as db:
+                            await db.execute(text("""
+                                UPDATE recurring_giving_subscriptions
+                                SET donor_name       = COALESCE(NULLIF(:name,''), donor_name),
+                                    donor_first_name = COALESCE(NULLIF(:first,''), donor_first_name),
+                                    donor_surname    = COALESCE(NULLIF(:surname,''), donor_surname),
+                                    donor_email      = COALESCE(NULLIF(:email,''), donor_email),
+                                    updated_at       = NOW()
+                                WHERE id = CAST(:id AS UUID)
+                            """), {"name": _full, "first": _first, "surname": _surname,
+                                   "email": _email, "id": r["id"]})
+                            await db.commit()
+                        summary["donor_backfilled"] += 1
                 if mapped and mapped != r["status"]:
                     async with SessionLocal() as db:
                         await db.execute(text("""
