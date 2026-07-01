@@ -80,6 +80,12 @@
   .pay-head { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px;
     color: rgba(212,175,55,0.7); margin: 1.3rem 0 0.7rem; }
   .spin { text-align: center; color: var(--muted); font-size: 0.9rem; padding: 0.6rem 0; }
+  .go { width: 100%; border: none; border-radius: 16px; padding: 1.05rem 1rem; font-size: 1.1rem;
+    font-weight: 800; color: var(--btn-dark); cursor: pointer; display: flex; align-items: center;
+    justify-content: center; gap: 0.5rem;
+    background: linear-gradient(135deg,#D4AF37,#FFD700,#C5A028); transition: all .15s; }
+  .go:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(212,175,55,0.35); }
+  .go:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   .paybox { background: #fff; border-radius: 14px; padding: 0.7rem; }
   .tagline { text-align: center; color: var(--faint); font-size: 0.78rem; margin-top: 0.9rem; }
   .err { color: #ff8a80; font-size: 0.85rem; text-align: center; margin-top: 0.8rem; min-height: 1rem; }
