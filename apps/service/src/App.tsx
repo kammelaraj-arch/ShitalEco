@@ -11,6 +11,8 @@ import { GiftAidPage } from './pages/GiftAidPage'
 import { PaymentPage } from './pages/PaymentPage'
 import { ConfirmationPage } from './pages/ConfirmationPage'
 import { MonthlyGivingPage } from './pages/MonthlyGivingPage'
+import { DonorLoginPage } from './pages/DonorLoginPage'
+import { MyGivingPage } from './pages/MyGivingPage'
 import { VolunteerRegistrationPage } from './pages/VolunteerRegistrationPage'
 import { ReferenceResponsePage } from './pages/ReferenceResponsePage'
 import { scheduleDailyCatalogRefresh, clearServiceCache } from './utils/cachedFetch'
@@ -69,6 +71,27 @@ export default function App() {
   useEffect(() => {
     applyTheme(getTheme(themeId))
   }, [themeId])
+
+  // Donor login returns with #donor_token=… (or #donor_error=…) in the URL
+  // fragment. Capture it, store the session, land on My Giving, and clean the URL.
+  useEffect(() => {
+    const hash = window.location.hash || ''
+    if (hash.includes('donor_token=')) {
+      const tok = new URLSearchParams(hash.slice(1)).get('donor_token') || ''
+      if (tok) {
+        useStore.getState().setDonor(tok)
+        fetch(`${API}/auth/donor/me`, { headers: { Authorization: `Bearer ${tok}` } })
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d) useStore.getState().setDonor(tok, d.name || '', d.email || '') })
+          .catch(() => {})
+        setScreen('my-giving')
+      }
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    } else if (hash.includes('donor_error=')) {
+      setScreen('donor-login')
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Daily catalog cache invalidation at local midnight. Also bust the cache
   // immediately if the server-side catalog version is newer than what we've
@@ -171,6 +194,8 @@ export default function App() {
       case 'payment':      return <PaymentPage />
       case 'confirmation':   return <ConfirmationPage />
       case 'monthly-giving': return <MonthlyGivingPage />
+      case 'donor-login':    return <DonorLoginPage />
+      case 'my-giving':      return <MyGivingPage />
       case 'volunteer': return <VolunteerRegistrationPage />
       case 'reference': return <ReferenceResponsePage />
       default:               return <BrowsePage />

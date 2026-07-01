@@ -8,6 +8,7 @@ export const SHITAL_LOGO_URL = 'https://shirdisai.org.uk/Cnt/img/shital-logo-new
 
 export type Screen =
   | 'browse' | 'basket' | 'contact' | 'gift-aid' | 'payment' | 'confirmation' | 'monthly-giving' | 'volunteer' | 'reference'
+  | 'donor-login' | 'my-giving'
 
 export type Language = 'en' | 'gu' | 'hi' | 'te' | 'ta' | 'pa' | 'mr' | 'bn' | 'kn'
 
@@ -133,8 +134,12 @@ interface ServiceStore {
   giftAidDeclaration: GiftAidDeclaration | null
   contactInfo: ContactInfo | null
   orderResult: OrderResult | null
+  donorToken: string | null   // donor (public) session — separate from staff/admin
+  donorName: string
+  donorEmail: string
 
   setScreen: (s: Screen) => void
+  setDonor: (token: string | null, name?: string, email?: string) => void
   setLanguage: (l: Language) => void
   setTheme: (id: ThemeId) => void
   setBranchId: (id: string) => void
@@ -167,8 +172,12 @@ export const useStore = create<ServiceStore>()(
       giftAidDeclaration: null,
       contactInfo: null,
       orderResult: null,
+      donorToken: null,
+      donorName: '',
+      donorEmail: '',
 
       setScreen: (screen) => set({ screen }),
+      setDonor: (donorToken, donorName = '', donorEmail = '') => set({ donorToken, donorName, donorEmail }),
       setLanguage: (language) => set({ language }),
       setTheme: (themeId) => { applyTheme(getTheme(themeId)); set({ themeId }) },
       setBranchId: (branchId) => set({ branchId }),
@@ -224,6 +233,10 @@ export const useStore = create<ServiceStore>()(
         language: s.language,
         themeId: s.themeId,
         deviceToken: s.deviceToken,
+        // persist the donor session so they stay signed in across visits
+        donorToken: s.donorToken,
+        donorName: s.donorName,
+        donorEmail: s.donorEmail,
         // persist branch when device is locked (token login or subdomain)
         ...(s.deviceToken ? { branchId: s.branchId, branchName: s.branchName, branchLocked: s.branchLocked } : {}),
       }),
