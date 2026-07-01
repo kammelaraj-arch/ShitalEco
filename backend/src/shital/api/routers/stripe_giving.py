@@ -52,7 +52,13 @@ async def stripe_config() -> dict[str, Any]:
     from shital.core.fabrics.secrets import SecretsManager
     sk = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY) or ""
     pk = await SecretsManager.get("STRIPE_PUBLISHABLE_KEY", settings.STRIPE_PUBLISHABLE_KEY) or ""
-    return {"publishable_key": pk, "currency": "GBP", "enabled": bool(sk)}
+    whsec = await SecretsManager.get("STRIPE_WEBHOOK_SECRET", settings.STRIPE_WEBHOOK_SECRET) or ""
+    # Only advertise Stripe recurring once it's FULLY configured — the webhook
+    # secret is required so ongoing monthly charges (months 2+) are recorded.
+    # The kiosk already sets STRIPE_SECRET_KEY, so gating on that alone would
+    # surface the button before the webhook is ready. The button self-activates
+    # the moment STRIPE_WEBHOOK_SECRET is added.
+    return {"publishable_key": pk, "currency": "GBP", "enabled": bool(sk and whsec)}
 
 
 # ── Create Checkout Session ─────────────────────────────────────────────────────
