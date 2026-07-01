@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
@@ -184,6 +184,32 @@ async def _get_subscription_status(sub_id: str) -> tuple[str | None, bool]:
             return (r.json().get("status", ""), True)
     except Exception as exc:
         print(f"[giving/approve] PayPal subscription lookup failed (non-fatal): {exc}")
+        return (None, False)
+
+
+async def _get_subscription_details(sub_id: str) -> tuple[dict[str, Any] | None, bool]:
+    """Fetch the full PayPal subscription resource (status + subscriber block).
+
+    Returns (detail_json, verified). A 404 returns ({"status": "NOT_FOUND"}, True)
+    so the caller can reject a forged/abandoned id. (None, False) means the
+    PayPal call itself failed — caller falls back to optimistic handling. The
+    ``subscriber`` block lets us backfill the donor's name + email (the simple
+    /monthly/ page collects only an amount).
+    """
+    try:
+        token = await _token()
+        base = await _base()
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(
+                f"{base}/v1/billing/subscriptions/{sub_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code == 404:
+                return ({"status": "NOT_FOUND"}, True)
+            r.raise_for_status()
+            return (r.json(), True)
+    except Exception as exc:
+        print(f"[giving/approve] PayPal subscription detail lookup failed (non-fatal): {exc}")
         return (None, False)
 
 
@@ -555,8 +581,9 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
 
     from shital.core.fabrics.database import SessionLocal
 
-    # ── Verify subscription with PayPal ─────────────────────────────────────
-    paypal_status, verified = await _get_subscription_status(body.subscription_id)
+    # ── Verify subscription with PayPal (and pull the subscriber block) ─────
+    paypal_detail, verified = await _get_subscription_details(body.subscription_id)
+    paypal_status = (paypal_detail or {}).get("status") if verified else None
     if verified and paypal_status == "NOT_FOUND":
         raise HTTPException(404, detail="Subscription not found at PayPal")
     if verified and paypal_status in ("CANCELLED", "EXPIRED"):
@@ -573,8 +600,17 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
     # (i.e. now, regardless of whether PayPal has activated the subscription
     # yet). Status reflects PayPal's billing state separately.
     approved_at = now
-    full_name = f"{body.donor_first_name} {body.donor_surname}".strip()
-    email_key = body.donor_email.strip().lower() if body.donor_email.strip() else None
+    # Backfill donor identity from PayPal's subscriber block when the page
+    # didn't collect it — the simple /monthly/ page sends only an amount, so
+    # without this every donor is recorded as "Anonymous". Body values (from
+    # the fuller Service-app form) always take precedence.
+    _subr = (paypal_detail or {}).get("subscriber") or {}
+    _nm = _subr.get("name") or {}
+    donor_first = (body.donor_first_name or "").strip() or (_nm.get("given_name") or "").strip()
+    donor_surname = (body.donor_surname or "").strip() or (_nm.get("surname") or "").strip()
+    donor_email = (body.donor_email or "").strip() or (_subr.get("email_address") or "").strip()
+    full_name = f"{donor_first} {donor_surname}".strip()
+    email_key = donor_email.lower() if donor_email else None
 
     async with SessionLocal() as db:
         # ── Upsert CRM contact ──────────────────────────────────────────────
@@ -603,7 +639,7 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                 RETURNING id
             """), {
                 "id": contact_uuid, "email": email_key,
-                "first": body.donor_first_name or "", "surname": body.donor_surname or "",
+                "first": donor_first or "", "surname": donor_surname or "",
                 "name": full_name, "phone": body.donor_phone or "",
                 "branch": body.branch_id, "now": now,
             })
@@ -669,8 +705,8 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                 "cid": contact_id, "plan_id": body.plan_id,
                 "sub_id": body.subscription_id, "now": now,
                 "db_status": db_status, "approved_at": approved_at,
-                "name": full_name, "email": body.donor_email,
-                "first_name": body.donor_first_name, "surname": body.donor_surname,
+                "name": full_name, "email": donor_email,
+                "first_name": donor_first, "surname": donor_surname,
                 "postcode": body.donor_postcode, "address": body.donor_address,
                 "amount": body.amount, "freq": body.frequency,
                 "tier_id": tier_id_param,
@@ -679,6 +715,60 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
             })
             updated_row = upd.mappings().first()
             updated_id = str(updated_row["id"]) if updated_row else None
+
+        # ── Fallback claim for the emailless /monthly/ page ─────────────────
+        # That flow inserts the /subscribe audit row with a NULL contact_id and
+        # NULL paypal_subscription_id, so the contact-keyed claim above can never
+        # match it — the old code then INSERTed a *second* row and stranded the
+        # first at PENDING_APPROVAL forever (invisible to sync, since it has no
+        # PayPal id). Claim the most recent unclaimed pending row for this plan +
+        # amount instead, so we UPDATE it in place rather than duplicate.
+        if not updated_id:
+            upd2 = await db.execute(text("""
+                WITH candidate AS (
+                    SELECT id FROM recurring_giving_subscriptions
+                    WHERE paypal_plan_id = :plan_id
+                      AND status = 'PENDING_APPROVAL'
+                      AND (paypal_subscription_id IS NULL OR paypal_subscription_id = '')
+                      AND amount = :amount
+                      AND created_at > :recent
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
+                UPDATE recurring_giving_subscriptions s
+                SET paypal_subscription_id = :sub_id,
+                    status                 = :db_status,
+                    approved_at            = :approved_at,
+                    updated_at             = :now,
+                    donor_name             = :name,
+                    donor_email            = :email,
+                    donor_first_name       = :first_name,
+                    donor_surname          = :surname,
+                    donor_postcode         = :postcode,
+                    donor_address          = :address,
+                    amount                 = :amount,
+                    frequency              = :freq,
+                    tier_id                = COALESCE(s.tier_id, :tier_id::uuid),
+                    contact_id             = COALESCE(s.contact_id, CAST(:cid_uuid AS uuid)),
+                    gift_aid_declared      = :ga,
+                    gift_aid_declared_at   = COALESCE(s.gift_aid_declared_at, :ga_at)
+                FROM candidate
+                WHERE s.id = candidate.id
+                RETURNING s.id
+            """), {
+                "plan_id": body.plan_id, "sub_id": body.subscription_id, "now": now,
+                "db_status": db_status, "approved_at": approved_at,
+                "name": full_name, "email": donor_email,
+                "first_name": donor_first, "surname": donor_surname,
+                "postcode": body.donor_postcode, "address": body.donor_address,
+                "amount": body.amount, "freq": body.frequency,
+                "tier_id": tier_id_param, "cid_uuid": contact_id,
+                "ga": body.gift_aid_declared,
+                "ga_at": now if body.gift_aid_declared else None,
+                "recent": now - timedelta(hours=6),
+            })
+            updated_row2 = upd2.mappings().first()
+            updated_id = str(updated_row2["id"]) if updated_row2 else None
 
         if updated_id:
             sub_uuid = updated_id
@@ -712,8 +802,8 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                 "plan_id": body.plan_id, "tier_id": tier_id_param,
                 "amount": body.amount, "freq": body.frequency,
                 "db_status": db_status, "approved_at": approved_at,
-                "branch": body.branch_id, "name": full_name, "email": body.donor_email,
-                "first_name": body.donor_first_name, "surname": body.donor_surname,
+                "branch": body.branch_id, "name": full_name, "email": donor_email,
+                "first_name": donor_first, "surname": donor_surname,
                 "postcode": body.donor_postcode, "address": body.donor_address,
                 "cid": contact_id, "now": now,
                 "ga": body.gift_aid_declared,
@@ -726,15 +816,15 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
     # Failure is non-fatal — the subscription is set up regardless. The
     # send is recorded in sent_emails so admins can resend from
     # Admin → Settings → Sent Emails if needed.
-    if body.donor_email and "@" in body.donor_email:
+    if donor_email and "@" in donor_email:
         try:
             from shital.api.routers.email_templates import send_template
             from shital.core.fabrics.config import settings
             await send_template(
                 "recurring_giving_confirmation",
-                body.donor_email,
+                donor_email,
                 {
-                    "donor_first_name": body.donor_first_name or full_name or "Friend",
+                    "donor_first_name": donor_first or full_name or "Friend",
                     "amount": f"{float(body.amount):.2f}",
                     "frequency": body.frequency.lower(),
                     "tier_label": body.tier_label or "Monthly Gift",
