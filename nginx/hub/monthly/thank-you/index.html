@@ -102,6 +102,22 @@
     document.getElementById('ref').textContent = sub;
     document.getElementById('refbox').classList.remove('hide');
   }
+
+  // Stripe return: record the subscription immediately (idempotent with the
+  // webhook) so it doesn't depend on webhook timing/config.
+  if (p.get('provider') === 'stripe' && p.get('session_id')) {
+    var refbox = document.getElementById('refbox');
+    var refEl = document.getElementById('ref');
+    if (refEl) { refEl.textContent = 'confirming…'; refbox.classList.remove('hide'); }
+    fetch('/api/v1/service/giving/stripe/confirm', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: p.get('session_id') })
+    }).then(function () {
+      if (refEl) { refEl.textContent = p.get('session_id'); }
+    }).catch(function () {
+      if (refEl) { refEl.textContent = p.get('session_id'); }
+    });
+  }
 </script>
 </body>
 </html>
