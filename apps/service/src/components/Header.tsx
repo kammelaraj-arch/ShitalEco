@@ -6,6 +6,7 @@ import { THEMES } from '../themes'
 
 export function Header() {
   const { language, setLanguage, setScreen, screen } = useStore()
+  const donorToken = useStore((s) => s.donorToken)
   const branchName   = useStore((s) => s.branchName)
   const branchLocked = useStore((s) => s.branchLocked)
   const setBranch    = useStore((s) => s.setBranch)
@@ -212,6 +213,14 @@ export function Header() {
             </AnimatePresence>
             {showLang && <div className="fixed inset-0 z-40" onClick={() => setShowLang(false)} />}
           </div>
+
+          {/* Donor account — public login, separate from staff/admin */}
+          <button onClick={() => setScreen(donorToken ? 'my-giving' : 'donor-login')}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold text-sm transition-all active:scale-95"
+            style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text)', border: '1px solid rgba(255,255,255,0.12)' }}>
+            <span>{donorToken ? '🙏' : '👤'}</span>
+            <span className="hidden sm:inline">{donorToken ? 'My Giving' : 'Sign in'}</span>
+          </button>
 
           {/* Basket */}
           {screen !== 'confirmation' && (

@@ -4053,6 +4053,7 @@ def _mount(module: str, attr: str, prefix: str = "/api/v1") -> None:
 
 _mount("shital.api.routers.auth",             "router")
 _mount("shital.api.routers.auth_azure",       "router")
+_mount("shital.api.routers.donor_auth",       "router")
 _mount("shital.api.routers.kiosk",            "router")
 _mount("shital.api.routers.terminal_devices", "router")
 _mount("shital.api.routers.users",            "router")
