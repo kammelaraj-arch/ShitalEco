@@ -14,6 +14,7 @@ interface Sub {
   id: string; paypal_subscription_id: string; amount: number; frequency: string
   status: string; donor_name: string; donor_email: string; branch_id: string
   approved_at: string; tier_label: string; created_at: string
+  payment_provider?: string; stripe_subscription_id?: string
 }
 
 const EMPTY: Omit<Tier, 'id' | 'paypal_plan_id' | 'active_subscribers'> = {
@@ -227,23 +228,32 @@ export default function RecurringGivingPage() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-bold text-white">£{Number(s.amount).toFixed(0)}/{s.frequency.toLowerCase()}</span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: `${STATUS_COLOURS[s.status] || '#94a3b8'}20`, color: STATUS_COLOURS[s.status] || '#94a3b8' }}>{s.status}</span>
+                  {(s.payment_provider === 'stripe')
+                    ? <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#635bff20', color: '#a5a1ff' }}>💳 Stripe</span>
+                    : <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#0070ba20', color: '#4aa3e0' }}>PayPal</span>}
                   {s.tier_label && <span className="text-xs text-white/50">{s.tier_label}</span>}
                 </div>
                 <p className="text-sm text-white/70 mt-0.5">{s.donor_name || 'Anonymous'}{s.donor_email && ` · ${s.donor_email}`}</p>
-                <p className="text-xs text-white/40 mt-0.5">PayPal: {s.paypal_subscription_id} · {s.branch_id}</p>
+                <p className="text-xs text-white/40 mt-0.5">
+                  {(s.payment_provider === 'stripe')
+                    ? `Stripe: ${s.stripe_subscription_id || '—'}`
+                    : `PayPal: ${s.paypal_subscription_id || '—'}`} · {s.branch_id}
+                </p>
                 {refreshNote[s.id] && (
                   <p className="text-xs text-saffron-400 mt-1">↻ {refreshNote[s.id]}</p>
                 )}
               </div>
               <div className="text-right text-xs text-white/40 flex-shrink-0 flex flex-col items-end gap-2">
                 <p>{s.approved_at ? new Date(s.approved_at).toLocaleDateString('en-GB') : 'Pending'}</p>
-                <button
-                  onClick={() => refreshFromPayPal(s.id)}
-                  disabled={refreshingId === s.id || !s.paypal_subscription_id}
-                  title="Ask PayPal what the real status is — use when a sub is stuck on PENDING_APPROVAL but the donor says they signed up"
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/8 text-white/70 hover:bg-white/15 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">
-                  {refreshingId === s.id ? '↻ Checking…' : '↻ Refresh from PayPal'}
-                </button>
+                {s.payment_provider !== 'stripe' && (
+                  <button
+                    onClick={() => refreshFromPayPal(s.id)}
+                    disabled={refreshingId === s.id || !s.paypal_subscription_id}
+                    title="Ask PayPal what the real status is — use when a sub is stuck on PENDING_APPROVAL but the donor says they signed up"
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/8 text-white/70 hover:bg-white/15 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">
+                    {refreshingId === s.id ? '↻ Checking…' : '↻ Refresh from PayPal'}
+                  </button>
+                )}
               </div>
             </div>
           ))}

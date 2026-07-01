@@ -958,7 +958,10 @@ async def admin_list_subscriptions(space: CurrentSpace) -> dict[str, Any]:
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         rows = await db.execute(text("""
-            SELECT s.id, s.paypal_subscription_id, s.amount, s.frequency, s.status,
+            SELECT s.id, s.paypal_subscription_id,
+                   COALESCE(s.payment_provider, 'paypal') AS payment_provider,
+                   s.stripe_subscription_id,
+                   s.amount, s.frequency, s.status,
                    s.donor_name, s.donor_email, s.branch_id, s.approved_at, s.created_at,
                    s.last_payment_at, s.total_payments, s.next_billing_date,
                    t.label AS tier_label
