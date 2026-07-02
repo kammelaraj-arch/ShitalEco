@@ -110,16 +110,23 @@ class SecretsManager:
             _cache_ts = time.monotonic() - _TTL + 10  # retry in 10 s
 
     @classmethod
-    async def get(cls, key_name: str, fallback: str = "") -> str:
-        """Return decrypted value from DB, falling back to env, then default."""
+    async def get(cls, key_name: str, fallback: str = "", env_fallback: bool = True) -> str:
+        """Return decrypted value from DB, falling back to env, then default.
+
+        Pass env_fallback=False to read STRICTLY from the Admin → API Keys
+        store (no environment-variable fallback). Used for donor-login OAuth
+        credentials, which must only ever come from the API Keys section.
+        """
         if _cache_expired():
             await cls._load_all()
         db_val = _cache.get(key_name)
         if db_val:
             return db_val
-        # Fall back to environment variable
-        env_val = os.environ.get(key_name, "")
-        return env_val if env_val else fallback
+        if env_fallback:
+            env_val = os.environ.get(key_name, "")
+            if env_val:
+                return env_val
+        return fallback
 
     @classmethod
     async def set(cls, key_name: str, value: str, updated_by: str = "admin") -> None:
