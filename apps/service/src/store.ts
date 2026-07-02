@@ -137,9 +137,14 @@ interface ServiceStore {
   donorToken: string | null   // donor (public) session — separate from staff/admin
   donorName: string
   donorEmail: string
+  // Transient prefill for the donor register form, seeded from the contact
+  // info a guest already gave at checkout (see the post-donation soft prompt
+  // on ConfirmationPage). Never persisted — cleared once the form reads it.
+  donorPrefill: { email: string; firstName: string; surname: string } | null
 
   setScreen: (s: Screen) => void
   setDonor: (token: string | null, name?: string, email?: string) => void
+  setDonorPrefill: (p: { email: string; firstName: string; surname: string } | null) => void
   setLanguage: (l: Language) => void
   setTheme: (id: ThemeId) => void
   setBranchId: (id: string) => void
@@ -175,9 +180,11 @@ export const useStore = create<ServiceStore>()(
       donorToken: null,
       donorName: '',
       donorEmail: '',
+      donorPrefill: null,
 
       setScreen: (screen) => set({ screen }),
       setDonor: (donorToken, donorName = '', donorEmail = '') => set({ donorToken, donorName, donorEmail }),
+      setDonorPrefill: (donorPrefill) => set({ donorPrefill }),
       setLanguage: (language) => set({ language }),
       setTheme: (themeId) => { applyTheme(getTheme(themeId)); set({ themeId }) },
       setBranchId: (branchId) => set({ branchId }),

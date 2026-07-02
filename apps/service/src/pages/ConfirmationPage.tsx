@@ -3,8 +3,24 @@ import { motion } from 'framer-motion'
 import { useStore } from '../store'
 
 export function ConfirmationPage() {
-  const { orderResult, contactInfo, reset } = useStore()
+  const { orderResult, contactInfo, reset, donorToken, deviceToken, setScreen, setDonorPrefill } = useStore()
   const [countdown, setCountdown] = useState(60)
+  const [promptDismissed, setPromptDismissed] = useState(false)
+
+  // Guest-first: donating never requires an account. But a public web donor who
+  // just gave us their name + email is a perfect moment for an OPTIONAL nudge to
+  // save their details and track their giving. Never shown on kiosk devices
+  // (deviceToken), to anonymous donors, or to someone already signed in.
+  const firstName = contactInfo?.firstName || contactInfo?.name?.split(' ')[0] || ''
+  const surname   = contactInfo?.surname || contactInfo?.name?.split(' ').slice(1).join(' ') || ''
+  const showAccountPrompt =
+    !donorToken && !deviceToken && !promptDismissed &&
+    !!contactInfo?.email && !contactInfo?.anonymous
+
+  function createAccount() {
+    setDonorPrefill({ email: contactInfo?.email || '', firstName, surname })
+    setScreen('donor-login')
+  }
 
   // Read from the orderResult snapshot captured at /capture-success time,
   // not from the live store — PaymentPage now calls clearBasket() right
@@ -20,10 +36,13 @@ export function ConfirmationPage() {
   const templeReceives = total + (giftAidAgreed ? boost : 0)
 
   useEffect(() => {
+    // Hold the auto-reset while the account nudge is on screen, so a public
+    // donor isn't yanked back to Browse mid-decision.
+    if (showAccountPrompt) return
     if (countdown <= 0) { reset(); return }
     const t = setTimeout(() => setCountdown((c) => c - 1), 1000)
     return () => clearTimeout(t)
-  }, [countdown])
+  }, [countdown, showAccountPrompt])
 
   return (
     <div className="max-w-lg mx-auto px-4 py-10 text-center">
@@ -121,6 +140,34 @@ export function ConfirmationPage() {
         </motion.div>
       )}
 
+      {showAccountPrompt && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.75 }}
+          className="rounded-2xl p-5 mb-5 text-left"
+          style={{ background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.25)' }}
+        >
+          <p className="text-sm font-bold mb-1" style={{ color: '#D4AF37' }}>🙏 Track your giving</p>
+          <p className="text-xs mb-4" style={{ color: 'rgba(255,248,220,0.6)' }}>
+            Save your details to see all your donations, Gift Aid and monthly
+            support in one place. Optional — takes a moment.
+          </p>
+          <div className="flex gap-2">
+            <button onClick={createAccount}
+              className="flex-1 py-2.5 rounded-xl font-black text-sm active:scale-[0.99]"
+              style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+              Create free account
+            </button>
+            <button onClick={() => setPromptDismissed(true)}
+              className="px-4 py-2.5 rounded-xl font-bold text-sm"
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.6)', border: '1px solid rgba(255,255,255,0.12)' }}>
+              No thanks
+            </button>
+          </div>
+        </motion.div>
+      )}
+
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -131,9 +178,11 @@ export function ConfirmationPage() {
           Make Another Offering
         </button>
 
-        <p className="text-xs" style={{ color: 'rgba(255,248,220,0.25)' }}>
-          This page will refresh automatically in {countdown}s
-        </p>
+        {!showAccountPrompt && (
+          <p className="text-xs" style={{ color: 'rgba(255,248,220,0.25)' }}>
+            This page will refresh automatically in {countdown}s
+          </p>
+        )}
       </motion.div>
 
       <motion.div
