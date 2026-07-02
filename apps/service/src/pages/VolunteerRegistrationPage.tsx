@@ -1,15 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useStore } from '../store'
 import { api, type VolunteerRegistrationPayload, type VolunteerAdvancePayload } from '../api'
 
 const TITLES = ['', 'Dr', 'Mr', 'Mrs', 'Ms', 'Master', 'Other']
 const AGE_RANGES = ['18-25', '26-35', '36-45', '46-55', '55+']
-const INTEREST_AREAS = [
-  'Seva (general help)', 'Langar / kitchen', 'Events & festivals',
-  'Cleaning & upkeep', 'Admin & reception', 'Music / bhajans',
-  'Fundraising', 'Teaching / classes',
-]
 
 const inp = 'w-full px-4 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 focus:border-saffron-400/50 outline-none text-ivory-100 placeholder-white/30'
 const lbl = 'block text-xs font-bold uppercase tracking-widest mb-1.5'
@@ -103,13 +98,7 @@ export function VolunteerRegistrationPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  const [branches, setBranches] = useState<Array<{ branch_id: string; name: string; city: string }>>([])
-  useEffect(() => {
-    api.getBranches().then(list => setBranches(list.filter(b => b.is_active))).catch(() => setBranches([]))
-  }, [])
-
   const set = <K extends keyof Stage0>(k: K, v: Stage0[K]) => setF(p => ({ ...p, [k]: v }))
-  const toggle = (list: string[], v: string) => list.includes(v) ? list.filter(x => x !== v) : [...list, v]
 
   async function register() {
     setError('')
@@ -117,7 +106,6 @@ export function VolunteerRegistrationPage() {
     if (!f.email.includes('@')) return setError('Please enter a valid email.')
     if (!f.mobile.trim() && !f.phone.trim()) return setError('Please give a contact number.')
     if (!f.age_range) return setError('Please confirm your age range (18+).')
-    if (f.preferred_branches.length === 0) return setError('Pick at least one branch (or Remote).')
     if (!f.consent) return setError('Please tick the consent box.')
     setBusy(true)
     try {
@@ -132,10 +120,10 @@ export function VolunteerRegistrationPage() {
         ref1_mobile: '', ref1_phone: '', ref1_email: '',
         ref2_title: '', ref2_first_names: '', ref2_last_name: '', ref2_address: '', ref2_postcode: '',
         ref2_mobile: '', ref2_phone: '', ref2_email: '',
-        skills: f.areas.length ? { areas: f.areas } : {}, skills_other_text: f.interest_note.trim(),
+        skills: {}, skills_other_text: '',
         availability: { days: [], times: [], notes: '' }, availability_pattern: '',
         declaration_agreed: f.consent, confidentiality_agreed: false, marketing_consent: false,
-        branch_id: branchId, preferred_branches: f.preferred_branches,
+        branch_id: branchId, preferred_branches: [branchId || 'main'],
       }
       const res = await api.registerVolunteer(payload)
       setReference(res.reference_number)
@@ -190,41 +178,6 @@ export function VolunteerRegistrationPage() {
               ))}
             </div>
           </div>
-        </div>
-
-        <div className="temple-card p-5 mb-5 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-widest" style={lblGold}>Where would you like to help?*</p>
-          <div className="flex flex-wrap gap-2">
-            {[...branches.map(b => ({ code: b.branch_id, name: b.name })), { code: 'remote', name: 'Remote / online' }].map(b => {
-              const on = f.preferred_branches.includes(b.code)
-              return (
-                <button key={b.code} onClick={() => set('preferred_branches', toggle(f.preferred_branches, b.code))}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold transition"
-                  style={on
-                    ? { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }
-                    : { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.7)', border: '1px solid rgba(255,255,255,0.12)' }}>
-                  {b.name}
-                </button>
-              )
-            })}
-          </div>
-          <p className="text-xs font-bold uppercase tracking-widest pt-1" style={lblGold}>What would you like to help with?</p>
-          <div className="flex flex-wrap gap-2">
-            {INTEREST_AREAS.map(a => {
-              const on = f.areas.includes(a)
-              return (
-                <button key={a} onClick={() => set('areas', toggle(f.areas, a))}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition"
-                  style={on
-                    ? { background: 'rgba(212,175,55,0.22)', color: '#F3E3B0', border: '1px solid rgba(212,175,55,0.5)' }
-                    : { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.65)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  {a}
-                </button>
-              )
-            })}
-          </div>
-          <input className={inp} placeholder="Anything else you'd like to help with? (optional)"
-            value={f.interest_note} onChange={e => set('interest_note', e.target.value)} />
         </div>
 
         <label className="flex items-start gap-3 mb-4 cursor-pointer">
