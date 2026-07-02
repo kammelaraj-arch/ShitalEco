@@ -75,7 +75,7 @@ export function BrowsePage() {
   }
 
   return (
-    <div className="min-h-screen pb-32" style={{ background: 'var(--bg)' }}>
+    <div className="min-h-screen pb-32" style={{ background: 'transparent' }}>
 
       {/* Hero Banner — travertine stone */}
       <div className="relative overflow-hidden px-4 py-8"
