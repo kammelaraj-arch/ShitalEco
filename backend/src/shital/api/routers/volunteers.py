@@ -167,9 +167,37 @@ class VolunteerRegistration(BaseModel):
     preferred_branches: list[str] = Field(default_factory=list)
 
 
+def _ref_ok(first: str, last: str, email: str, mobile: str, phone: str) -> bool:
+    return bool(first.strip() and last.strip() and (email.strip() or mobile.strip() or phone.strip()))
+
+
+def _ec_ok(v: VolunteerRegistration) -> bool:
+    return bool(v.ec_full_name.strip() and (v.ec_mobile.strip() or v.ec_phone.strip()))
+
+
+def _compute_stage(v: VolunteerRegistration) -> int:
+    """Volunteer progression ladder:
+      0 · Registered      — basics only (expression of interest)
+      1 · One-Day Seva    — + emergency contact (can help at a supervised seva)
+      2 · Full Volunteer  — + two references + confidentiality undertaking (DBS)
+    Cumulative: stage 2 implies stage 1 (emergency contact) is also complete."""
+    full = (
+        _ref_ok(v.ref1_first_names, v.ref1_last_name, v.ref1_email, v.ref1_mobile, v.ref1_phone)
+        and _ref_ok(v.ref2_first_names, v.ref2_last_name, v.ref2_email, v.ref2_mobile, v.ref2_phone)
+        and v.confidentiality_agreed
+    )
+    if _ec_ok(v) and full:
+        return 2
+    if _ec_ok(v):
+        return 1
+    return 0
+
+
 def _validate(v: VolunteerRegistration) -> list[str]:
-    """Required-field validation matching the paper-form * markers + handbook
-    age policy. Return list of error messages (empty = ok)."""
+    """Stage-0 (express sign-up) validation only — the volunteer ladder collects
+    the heavier safeguarding data (emergency contact → Stage 1; references + DBS →
+    Stage 2) progressively, so those are NOT required to register. Return list of
+    error messages (empty = ok)."""
     errs: list[str] = []
     if not v.first_names.strip():
         errs.append("First name is required")
@@ -177,42 +205,20 @@ def _validate(v: VolunteerRegistration) -> list[str]:
         errs.append("Last name is required")
     if not v.email.strip() or "@" not in v.email:
         errs.append("A valid email is required")
-    if not v.address.strip():
-        errs.append("Address is required")
-    if not v.postcode.strip():
-        errs.append("Postcode is required")
     if not (v.mobile.strip() or v.phone.strip()):
         errs.append("At least one contact number (mobile or phone) is required")
     if v.age_range not in {"18-25", "26-35", "36-45", "46-55", "55+"}:
         errs.append("Age range is required (minimum age for volunteers is 18)")
-    if not v.ec_full_name.strip():
-        errs.append("Emergency contact full name is required")
-    if not (v.ec_mobile.strip() or v.ec_phone.strip()):
-        errs.append("Emergency contact phone is required")
-    # Referees — paper form requires "two independent" non-family referees
-    if not (v.ref1_first_names.strip() and v.ref1_last_name.strip()):
-        errs.append("Referee 1 name is required")
-    if not (v.ref2_first_names.strip() and v.ref2_last_name.strip()):
-        errs.append("Referee 2 name is required")
-    if not (v.ref1_email.strip() or v.ref1_mobile.strip() or v.ref1_phone.strip()):
-        errs.append("Referee 1 contact (email or phone) is required")
-    if not (v.ref2_email.strip() or v.ref2_mobile.strip() or v.ref2_phone.strip()):
-        errs.append("Referee 2 contact (email or phone) is required")
-    # Health declaration: if they ticked yes, we need to know what
-    if v.has_health_restrictions and not v.health_notes.strip():
-        errs.append("Please describe how we can help with your health restrictions")
-    # Criminal-record declaration: if yes, details are required
-    if v.has_criminal_record and not v.criminal_record_details.strip():
-        errs.append("Please provide the criminal-record details requested")
-    # Two declarations the paper form requires you to sign (the activity
-    # declaration in section 1, and the confidentiality NDA in section 4).
-    # The criminal-record declaration is implicit in answering the question.
-    if not v.declaration_agreed:
-        errs.append("You must agree to the volunteer activity declaration")
-    if not v.confidentiality_agreed:
-        errs.append("You must agree to the confidentiality undertaking")
     if not v.preferred_branches:
         errs.append("Please tell us where you'd like to volunteer (at least one branch or remote)")
+    if not v.declaration_agreed:
+        errs.append("Please agree to be contacted about volunteering")
+    # If the applicant DID start the heavier sections, keep their internal
+    # consistency (but never block the express Stage-0 path).
+    if v.has_health_restrictions and not v.health_notes.strip():
+        errs.append("Please describe how we can help with your health restrictions")
+    if v.has_criminal_record and not v.criminal_record_details.strip():
+        errs.append("Please provide the criminal-record details requested")
     return errs
 
 
@@ -231,6 +237,37 @@ def _gen_draft_token() -> str:
     stashes it in their URL hash; we use it as a primary lookup key."""
     import secrets
     return secrets.token_urlsafe(32)
+
+
+_stage_col_ready = False
+
+
+async def _ensure_stage_column() -> None:
+    """Idempotent: add the volunteer-ladder `stage` column if it's missing.
+    Cached after first success so we don't ALTER on every request."""
+    global _stage_col_ready
+    if _stage_col_ready:
+        return
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        await db.execute(text(
+            "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS stage SMALLINT NOT NULL DEFAULT 0"))
+        # Backfill existing rows (submitted before the ladder) so trustees see
+        # the right stage. Emergency contact → 1; + both references + NDA → 2.
+        await db.execute(text("""
+            UPDATE volunteers SET stage = CASE
+                WHEN ec_full_name <> '' AND (ec_mobile <> '' OR ec_phone <> '')
+                     AND ref1_first_names <> '' AND ref1_last_name <> ''
+                     AND ref2_first_names <> '' AND ref2_last_name <> ''
+                     AND confidentiality_agreed THEN 2
+                WHEN ec_full_name <> '' AND (ec_mobile <> '' OR ec_phone <> '') THEN 1
+                ELSE 0 END
+            WHERE stage = 0
+        """))
+        await db.commit()
+    _stage_col_ready = True
 
 
 def _require_admin(ctx: CurrentSpace) -> None:
@@ -259,6 +296,7 @@ async def register_volunteer(
         # form (and the public form) can surface each error individually.
         raise HTTPException(status_code=400, detail={"errors": errs})
 
+    await _ensure_stage_column()
     reference = _gen_reference()
     now = datetime.now(UTC)
     submitted_ip = (request.client.host if request.client else "")[:45]
@@ -339,7 +377,7 @@ async def register_volunteer(
                 ref2_address, ref2_postcode, ref2_mobile, ref2_phone, ref2_email,
                 skills, skills_other_text, availability, availability_pattern,
                 declaration_signed_at, confidentiality_agreed, marketing_consent,
-                status, branch_id, preferred_branches,
+                status, stage, branch_id, preferred_branches,
                 submitted_ip, user_agent,
                 created_at, updated_at
             ) VALUES (
@@ -357,11 +395,12 @@ async def register_volunteer(
                 CAST(:skills AS jsonb), :skills_other_text,
                 CAST(:availability AS jsonb), :availability_pattern,
                 :declaration_signed_at, :confidentiality_agreed, :marketing_consent,
-                'PENDING', :branch_id, CAST(:preferred_branches AS jsonb),
+                'PENDING', :stage, :branch_id, CAST(:preferred_branches AS jsonb),
                 :submitted_ip, :user_agent,
                 :now, :now
             )
         """), {
+            "stage": _compute_stage(body),
             "id": str(uuid.uuid4()), "reference": reference,
             "contact_id": contact_id,
             "title": body.title, "first_names": body.first_names.strip(),
@@ -411,12 +450,157 @@ async def register_volunteer(
     return {
         "success": True,
         "reference_number": reference,
+        "stage": _compute_stage(body),
         "message": (
-            "Thank you. Your application has been received. "
+            "Thank you. You're registered. "
             "We've sent a confirmation to your email. "
-            "A trustee will review it and contact you within 14 days."
+            "Complete the next steps whenever you're ready to unlock more seva."
         ),
     }
+
+
+class AdvanceBody(BaseModel):
+    """Progressive-enrichment payload for the volunteer ladder. The applicant
+    proves ownership with reference_number + email, then adds the heavier
+    safeguarding fields to climb from Stage 0 → 1 (emergency contact) → 2
+    (two references + confidentiality undertaking). Only non-empty fields
+    overwrite what's already stored, so partial saves accumulate."""
+    reference_number: str = ""
+    email: str = ""
+    ec_title: str = ""
+    ec_full_name: str = ""
+    ec_email: str = ""
+    ec_mobile: str = ""
+    ec_phone: str = ""
+    ec_address: str = ""
+    ec_postcode: str = ""
+    has_health_restrictions: bool = False
+    health_notes: str = ""
+    has_criminal_record: bool = False
+    criminal_record_details: str = ""
+    ref1_title: str = ""
+    ref1_first_names: str = ""
+    ref1_last_name: str = ""
+    ref1_address: str = ""
+    ref1_postcode: str = ""
+    ref1_mobile: str = ""
+    ref1_phone: str = ""
+    ref1_email: str = ""
+    ref2_title: str = ""
+    ref2_first_names: str = ""
+    ref2_last_name: str = ""
+    ref2_address: str = ""
+    ref2_postcode: str = ""
+    ref2_mobile: str = ""
+    ref2_phone: str = ""
+    ref2_email: str = ""
+    confidentiality_agreed: bool = False
+
+
+@router.post("/service/volunteers/advance")
+async def advance_volunteer(body: AdvanceBody) -> dict[str, Any]:
+    """Add emergency-contact / references to an existing application to climb
+    the volunteer ladder. Ownership = reference_number + email match."""
+    import types
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    ref = body.reference_number.strip()
+    email_key = body.email.strip().lower()
+    if not ref or not email_key:
+        raise HTTPException(status_code=400, detail={"errors": ["Reference and email are required"]})
+
+    await _ensure_stage_column()
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT ec_full_name, ec_mobile, ec_phone,
+                   ref1_first_names, ref1_last_name, ref1_email, ref1_mobile, ref1_phone,
+                   ref2_first_names, ref2_last_name, ref2_email, ref2_mobile, ref2_phone,
+                   confidentiality_agreed
+            FROM volunteers
+            WHERE reference_number = :ref AND LOWER(email) = :email
+        """), {"ref": ref, "email": email_key})).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail={"errors": [
+                "No application found for that reference and email"]})
+
+        # Merge: provided non-empty value wins, else keep what's stored.
+        def pick(new: str, old: str | None) -> str:
+            return new.strip() or (old or "")
+        merged = types.SimpleNamespace(
+            ec_full_name=pick(body.ec_full_name, row["ec_full_name"]),
+            ec_mobile=pick(body.ec_mobile, row["ec_mobile"]),
+            ec_phone=pick(body.ec_phone, row["ec_phone"]),
+            ref1_first_names=pick(body.ref1_first_names, row["ref1_first_names"]),
+            ref1_last_name=pick(body.ref1_last_name, row["ref1_last_name"]),
+            ref1_email=pick(body.ref1_email, row["ref1_email"]),
+            ref1_mobile=pick(body.ref1_mobile, row["ref1_mobile"]),
+            ref1_phone=pick(body.ref1_phone, row["ref1_phone"]),
+            ref2_first_names=pick(body.ref2_first_names, row["ref2_first_names"]),
+            ref2_last_name=pick(body.ref2_last_name, row["ref2_last_name"]),
+            ref2_email=pick(body.ref2_email, row["ref2_email"]),
+            ref2_mobile=pick(body.ref2_mobile, row["ref2_mobile"]),
+            ref2_phone=pick(body.ref2_phone, row["ref2_phone"]),
+            confidentiality_agreed=bool(row["confidentiality_agreed"]) or body.confidentiality_agreed,
+        )
+        stage = _compute_stage(merged)  # type: ignore[arg-type]
+
+        await db.execute(text("""
+            UPDATE volunteers SET
+                ec_title = COALESCE(NULLIF(:ec_title,''), ec_title),
+                ec_full_name = COALESCE(NULLIF(:ec_full_name,''), ec_full_name),
+                ec_email = COALESCE(NULLIF(:ec_email,''), ec_email),
+                ec_mobile = COALESCE(NULLIF(:ec_mobile,''), ec_mobile),
+                ec_phone = COALESCE(NULLIF(:ec_phone,''), ec_phone),
+                ec_address = COALESCE(NULLIF(:ec_address,''), ec_address),
+                ec_postcode = COALESCE(NULLIF(:ec_postcode,''), ec_postcode),
+                has_health_restrictions = :has_health_restrictions,
+                health_notes = COALESCE(NULLIF(:health_notes,''), health_notes),
+                has_criminal_record = :has_criminal_record,
+                criminal_record_details = COALESCE(NULLIF(:criminal_record_details,''), criminal_record_details),
+                ref1_title = COALESCE(NULLIF(:ref1_title,''), ref1_title),
+                ref1_first_names = COALESCE(NULLIF(:ref1_first_names,''), ref1_first_names),
+                ref1_last_name = COALESCE(NULLIF(:ref1_last_name,''), ref1_last_name),
+                ref1_address = COALESCE(NULLIF(:ref1_address,''), ref1_address),
+                ref1_postcode = COALESCE(NULLIF(:ref1_postcode,''), ref1_postcode),
+                ref1_mobile = COALESCE(NULLIF(:ref1_mobile,''), ref1_mobile),
+                ref1_phone = COALESCE(NULLIF(:ref1_phone,''), ref1_phone),
+                ref1_email = COALESCE(NULLIF(:ref1_email,''), ref1_email),
+                ref2_title = COALESCE(NULLIF(:ref2_title,''), ref2_title),
+                ref2_first_names = COALESCE(NULLIF(:ref2_first_names,''), ref2_first_names),
+                ref2_last_name = COALESCE(NULLIF(:ref2_last_name,''), ref2_last_name),
+                ref2_address = COALESCE(NULLIF(:ref2_address,''), ref2_address),
+                ref2_postcode = COALESCE(NULLIF(:ref2_postcode,''), ref2_postcode),
+                ref2_mobile = COALESCE(NULLIF(:ref2_mobile,''), ref2_mobile),
+                ref2_phone = COALESCE(NULLIF(:ref2_phone,''), ref2_phone),
+                ref2_email = COALESCE(NULLIF(:ref2_email,''), ref2_email),
+                confidentiality_agreed = (confidentiality_agreed OR :confidentiality_agreed),
+                stage = :stage,
+                updated_at = NOW()
+            WHERE reference_number = :ref AND LOWER(email) = :email
+        """), {
+            "ec_title": body.ec_title, "ec_full_name": body.ec_full_name,
+            "ec_email": body.ec_email, "ec_mobile": body.ec_mobile, "ec_phone": body.ec_phone,
+            "ec_address": body.ec_address, "ec_postcode": body.ec_postcode,
+            "has_health_restrictions": body.has_health_restrictions, "health_notes": body.health_notes,
+            "has_criminal_record": body.has_criminal_record,
+            "criminal_record_details": body.criminal_record_details,
+            "ref1_title": body.ref1_title, "ref1_first_names": body.ref1_first_names,
+            "ref1_last_name": body.ref1_last_name, "ref1_address": body.ref1_address,
+            "ref1_postcode": body.ref1_postcode, "ref1_mobile": body.ref1_mobile,
+            "ref1_phone": body.ref1_phone, "ref1_email": body.ref1_email,
+            "ref2_title": body.ref2_title, "ref2_first_names": body.ref2_first_names,
+            "ref2_last_name": body.ref2_last_name, "ref2_address": body.ref2_address,
+            "ref2_postcode": body.ref2_postcode, "ref2_mobile": body.ref2_mobile,
+            "ref2_phone": body.ref2_phone, "ref2_email": body.ref2_email,
+            "confidentiality_agreed": body.confidentiality_agreed,
+            "stage": stage, "ref": ref, "email": email_key,
+        })
+        await db.commit()
+
+    return {"success": True, "reference_number": ref, "stage": stage}
 
 
 def _jsonify(obj: Any) -> str:

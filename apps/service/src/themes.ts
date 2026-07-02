@@ -162,7 +162,9 @@ export const THEMES: Theme[] = [
   },
 ]
 
-export const DEFAULT_THEME: ThemeId = 'crimson'
+// Old colours are the default; the crimson paisley is opt-in via the theme
+// picker (Temple Crimson). Users can switch anytime.
+export const DEFAULT_THEME: ThemeId = 'dark'
 
 export function applyTheme(theme: Theme) {
   const root = document.documentElement
