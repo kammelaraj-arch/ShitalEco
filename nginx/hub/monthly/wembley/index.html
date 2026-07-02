@@ -17,12 +17,13 @@
   }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    /* Crimson paisley temple backdrop (served from repo, same origin) under a
-       dark gradient overlay so the gold/ivory text stays fully legible. */
+    /* Crimson paisley temple backdrop (served from repo, same origin). Only a
+       light crimson-tinted overlay so the vivid red shows through, while the
+       gold/ivory text stays legible. */
     background:
-      linear-gradient(180deg, rgba(8,1,0,0.66) 0%, rgba(8,1,0,0.80) 60%, rgba(6,1,0,0.90) 100%),
-      url('/monthly/assets/bg-temple.png') center center / cover no-repeat fixed,
-      var(--bg-deep);
+      linear-gradient(180deg, rgba(120,15,30,0.20) 0%, rgba(80,8,18,0.34) 55%, rgba(55,5,12,0.48) 100%),
+      url('/monthly/assets/bg-temple.png') center top / cover no-repeat fixed,
+      #7d1122;
     color: var(--text); min-height: 100vh; padding-bottom: 3rem;
   }
   .font-display { font-family: 'Cinzel', Georgia, serif; }
