@@ -15,9 +15,16 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     min-height: 100vh;
+    /* --bg-image carries the crimson paisley (crimson theme) or 'none' (others),
+       layered over the two ambient radial glows. cover/fixed keeps it full-bleed. */
     background-image:
+      var(--bg-image, none),
       radial-gradient(ellipse 80% 50% at 50% -10%, rgba(212,175,55,0.10) 0%, transparent 60%),
       radial-gradient(ellipse 60% 40% at 80% 110%, rgba(0,0,0,0.15) 0%, transparent 55%);
+    background-size: cover, auto, auto;
+    background-position: center top, center, center;
+    background-repeat: no-repeat;
+    background-attachment: fixed, scroll, scroll;
     transition: background-color 0.4s ease, color 0.3s ease;
   }
 

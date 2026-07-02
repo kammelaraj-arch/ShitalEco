@@ -207,7 +207,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
+    <div className="min-h-screen flex flex-col" style={{ background: 'transparent' }}>
       <Header />
       <ProgressBar screen={screen} />
 
