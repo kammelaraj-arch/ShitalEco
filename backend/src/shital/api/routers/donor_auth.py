@@ -61,6 +61,17 @@ _PROVIDERS: dict[str, dict[str, Any]] = {
         "id_env": "FACEBOOK_CLIENT_ID",
         "secret_env": "FACEBOOK_CLIENT_SECRET",
     },
+    "microsoft": {
+        "label": "Microsoft",
+        # 'common' tenant → personal + work/school accounts. This is a SEPARATE
+        # consumer OAuth app for public donors, NOT the admin MS_* tenant login.
+        "authorize": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "token": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        "userinfo": "https://graph.microsoft.com/oidc/userinfo",
+        "scope": "openid email profile",
+        "id_env": "DONOR_MS_CLIENT_ID",
+        "secret_env": "DONOR_MS_CLIENT_SECRET",
+    },
     "apple": {
         "label": "Apple",
         "authorize": "https://appleid.apple.com/auth/authorize",
@@ -75,7 +86,9 @@ _PROVIDERS: dict[str, dict[str, Any]] = {
 
 async def _secret(name: str) -> str:
     from shital.core.fabrics.secrets import SecretsManager
-    return await SecretsManager.get(name) or ""
+    # Donor-login config + OAuth credentials come STRICTLY from Admin → API
+    # Keys — never from environment variables (env_fallback=False).
+    return await SecretsManager.get(name, env_fallback=False) or ""
 
 
 async def _provider_creds(provider: str) -> tuple[str, str]:
