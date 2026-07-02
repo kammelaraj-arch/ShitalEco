@@ -217,7 +217,7 @@ export const api = {
   },
 
   async registerVolunteer(payload: VolunteerRegistrationPayload): Promise<{
-    success: boolean; reference_number: string; message: string
+    success: boolean; reference_number: string; message: string; stage: number
   }> {
     const r = await fetch(`${API}/service/volunteers/register`, {
       method: 'POST',
@@ -229,6 +229,25 @@ export const api = {
       // Surface backend error envelope { detail: { errors: [...] } }
       const detail = (data as { detail?: { errors?: string[] } })?.detail
       const msg = detail?.errors?.length ? detail.errors.join(' · ') : `Registration failed: ${r.status}`
+      throw new Error(msg)
+    }
+    return data
+  },
+
+  // Volunteer ladder: add emergency contact / references to an existing
+  // application (proven by reference_number + email) to climb the stages.
+  async advanceVolunteer(payload: VolunteerAdvancePayload): Promise<{
+    success: boolean; reference_number: string; stage: number
+  }> {
+    const r = await fetch(`${API}/service/volunteers/advance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      const detail = (data as { detail?: { errors?: string[] } })?.detail
+      const msg = detail?.errors?.length ? detail.errors.join(' · ') : `Update failed: ${r.status}`
       throw new Error(msg)
     }
     return data
@@ -319,6 +338,22 @@ export interface VolunteerRegistrationPayload {
   // Where the volunteer wants to help: array of branch codes, with the
   // literal "remote" as a sentinel for online/remote-only volunteering.
   preferred_branches: string[]
+}
+
+export interface VolunteerAdvancePayload {
+  reference_number: string
+  email: string
+  ec_title?: string; ec_full_name?: string; ec_email?: string
+  ec_mobile?: string; ec_phone?: string; ec_address?: string; ec_postcode?: string
+  has_health_restrictions?: boolean; health_notes?: string
+  has_criminal_record?: boolean; criminal_record_details?: string
+  ref1_title?: string; ref1_first_names?: string; ref1_last_name?: string
+  ref1_address?: string; ref1_postcode?: string
+  ref1_mobile?: string; ref1_phone?: string; ref1_email?: string
+  ref2_title?: string; ref2_first_names?: string; ref2_last_name?: string
+  ref2_address?: string; ref2_postcode?: string
+  ref2_mobile?: string; ref2_phone?: string; ref2_email?: string
+  confidentiality_agreed?: boolean
 }
 
 export interface GivingTier {
