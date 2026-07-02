@@ -11,20 +11,24 @@ const PROVIDER_ICON: Record<string, string> = {
 }
 
 export function DonorLoginPage() {
-  const { setScreen, setDonor } = useStore()
+  const { setScreen, setDonor, donorPrefill, setDonorPrefill } = useStore()
   const [providers, setProviders] = useState<Provider[]>([])
-  const [mode, setMode] = useState<'login' | 'register'>('login')
-  const [email, setEmail] = useState('')
+  // If the donor arrived from the post-donation "save my details" prompt, we
+  // already know their name + email — seed the form and start in register mode.
+  const [mode, setMode] = useState<'login' | 'register'>(donorPrefill ? 'register' : 'login')
+  const [email, setEmail] = useState(donorPrefill?.email || '')
   const [password, setPassword] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [surname, setSurname] = useState('')
+  const [firstName, setFirstName] = useState(donorPrefill?.firstName || '')
+  const [surname, setSurname] = useState(donorPrefill?.surname || '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     fetch(`${API}/auth/donor/providers`).then(r => r.json())
       .then(d => setProviders(d.providers || [])).catch(() => {})
-  }, [])
+    // Consume the prefill once so it doesn't linger for a later visit.
+    if (donorPrefill) setDonorPrefill(null)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function social(p: string) {
     const back = encodeURIComponent(window.location.origin + window.location.pathname)
