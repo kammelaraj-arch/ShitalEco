@@ -343,7 +343,7 @@ export interface VolunteerRegistrationPayload {
 export interface VolunteerAdvancePayload {
   reference_number: string
   email: string
-  ec_title?: string; ec_full_name?: string; ec_email?: string
+  ec_title?: string; ec_full_name?: string; ec_relationship?: string; ec_email?: string
   ec_mobile?: string; ec_phone?: string; ec_address?: string; ec_postcode?: string
   has_health_restrictions?: boolean; health_notes?: string
   has_criminal_record?: boolean; criminal_record_details?: string

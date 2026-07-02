@@ -254,6 +254,8 @@ async def _ensure_stage_column() -> None:
     async with SessionLocal() as db:
         await db.execute(text(
             "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS stage SMALLINT NOT NULL DEFAULT 0"))
+        await db.execute(text(
+            "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ec_relationship VARCHAR(80) NOT NULL DEFAULT ''"))
         # Backfill existing rows (submitted before the ladder) so trustees see
         # the right stage. Emergency contact → 1; + both references + NDA → 2.
         await db.execute(text("""
@@ -469,6 +471,7 @@ class AdvanceBody(BaseModel):
     email: str = ""
     ec_title: str = ""
     ec_full_name: str = ""
+    ec_relationship: str = ""
     ec_email: str = ""
     ec_mobile: str = ""
     ec_phone: str = ""
@@ -551,6 +554,7 @@ async def advance_volunteer(body: AdvanceBody) -> dict[str, Any]:
             UPDATE volunteers SET
                 ec_title = COALESCE(NULLIF(:ec_title,''), ec_title),
                 ec_full_name = COALESCE(NULLIF(:ec_full_name,''), ec_full_name),
+                ec_relationship = COALESCE(NULLIF(:ec_relationship,''), ec_relationship),
                 ec_email = COALESCE(NULLIF(:ec_email,''), ec_email),
                 ec_mobile = COALESCE(NULLIF(:ec_mobile,''), ec_mobile),
                 ec_phone = COALESCE(NULLIF(:ec_phone,''), ec_phone),
@@ -582,6 +586,7 @@ async def advance_volunteer(body: AdvanceBody) -> dict[str, Any]:
             WHERE reference_number = :ref AND LOWER(email) = :email
         """), {
             "ec_title": body.ec_title, "ec_full_name": body.ec_full_name,
+            "ec_relationship": body.ec_relationship,
             "ec_email": body.ec_email, "ec_mobile": body.ec_mobile, "ec_phone": body.ec_phone,
             "ec_address": body.ec_address, "ec_postcode": body.ec_postcode,
             "has_health_restrictions": body.has_health_restrictions, "health_notes": body.health_notes,

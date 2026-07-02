@@ -71,7 +71,7 @@ const EMPTY0: Stage0 = {
 }
 
 interface EnrichForm {
-  ec_full_name: string; ec_mobile: string; ec_phone: string
+  ec_full_name: string; ec_relationship: string; ec_mobile: string; ec_email: string
   has_health_restrictions: boolean; health_notes: string
   has_criminal_record: boolean; criminal_record_details: string
   ref1_first_names: string; ref1_last_name: string; ref1_email: string; ref1_phone: string
@@ -79,7 +79,7 @@ interface EnrichForm {
   confidentiality_agreed: boolean
 }
 const EMPTY_ENRICH: EnrichForm = {
-  ec_full_name: '', ec_mobile: '', ec_phone: '',
+  ec_full_name: '', ec_relationship: '', ec_mobile: '', ec_email: '',
   has_health_restrictions: false, health_notes: '',
   has_criminal_record: false, criminal_record_details: '',
   ref1_first_names: '', ref1_last_name: '', ref1_email: '', ref1_phone: '',
@@ -221,8 +221,8 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
 
   async function save(which: 1 | 2) {
     setErr(''); setMsg('')
-    if (which === 1 && (!e.ec_full_name.trim() || (!e.ec_mobile.trim() && !e.ec_phone.trim())))
-      return setErr('Please give an emergency contact name and phone.')
+    if (which === 1 && (!e.ec_full_name.trim() || !e.ec_mobile.trim()))
+      return setErr('Please give an emergency contact name and mobile number.')
     if (which === 2) {
       const r1 = e.ref1_first_names.trim() && e.ref1_last_name.trim() && (e.ref1_email.trim() || e.ref1_phone.trim())
       const r2 = e.ref2_first_names.trim() && e.ref2_last_name.trim() && (e.ref2_email.trim() || e.ref2_phone.trim())
@@ -264,10 +264,13 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
           {open === 1 && (
             <div className="space-y-3 mt-4">
               <p className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>Just an emergency contact — so you can safely help at a supervised one-day seva.</p>
-              <input className={inp} placeholder="Emergency contact name*" value={e.ec_full_name} onChange={ev => upd('ec_full_name', ev.target.value)} />
+              <div className="flex gap-2">
+                <input className={inp} placeholder="Emergency contact name*" value={e.ec_full_name} onChange={ev => upd('ec_full_name', ev.target.value)} />
+                <input className={inp} placeholder="Relationship to you" value={e.ec_relationship} onChange={ev => upd('ec_relationship', ev.target.value)} />
+              </div>
               <div className="flex gap-2">
                 <input className={inp} placeholder="Their mobile*" value={e.ec_mobile} onChange={ev => upd('ec_mobile', ev.target.value)} />
-                <input className={inp} placeholder="Their phone" value={e.ec_phone} onChange={ev => upd('ec_phone', ev.target.value)} />
+                <input className={inp} type="email" placeholder="Their email" value={e.ec_email} onChange={ev => upd('ec_email', ev.target.value)} />
               </div>
               <button onClick={() => save(1)} disabled={busy}
                 className="w-full py-3 rounded-xl font-black text-sm disabled:opacity-50"
