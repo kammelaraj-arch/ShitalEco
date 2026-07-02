@@ -2,6 +2,7 @@ export type ThemeId = 'dark' | 'crimson' | 'travertine' | 'rose' | 'mehndi'
 
 export interface ThemeVars {
   '--bg': string
+  '--bg-image': string   // full-page background image layer (crimson paisley) or 'none'
   '--bg-deep': string
   '--bg-header': string
   '--bg-sticky': string
@@ -36,6 +37,7 @@ export const THEMES: Theme[] = [
     light: false,
     vars: {
       '--bg':             '#8BA020',
+      '--bg-image':       'none',
       '--bg-deep':        '#6B7A10',
       '--bg-header':      'rgba(100,115,15,0.96)',
       '--bg-sticky':      'rgba(95,110,14,0.99)',
@@ -61,6 +63,7 @@ export const THEMES: Theme[] = [
     light: false,
     vars: {
       '--bg':             '#060100',
+      '--bg-image':       'none',
       '--bg-deep':        '#0E0303',
       '--bg-header':      'rgba(6,1,0,0.94)',
       '--bg-sticky':      'rgba(6,1,0,0.99)',
@@ -86,6 +89,7 @@ export const THEMES: Theme[] = [
     light: false,
     vars: {
       '--bg':             '#B80000',
+      '--bg-image':       "url('/bg-temple.png')",
       '--bg-deep':        '#8B0000',
       '--bg-header':      'rgba(140,0,0,0.94)',
       '--bg-sticky':      'rgba(140,0,0,0.99)',
@@ -111,6 +115,7 @@ export const THEMES: Theme[] = [
     light: true,
     vars: {
       '--bg':             '#C8A870',
+      '--bg-image':       'none',
       '--bg-deep':        '#A8845A',
       '--bg-header':      'rgba(180,140,90,0.96)',
       '--bg-sticky':      'rgba(175,135,88,0.99)',
@@ -136,6 +141,7 @@ export const THEMES: Theme[] = [
     light: true,
     vars: {
       '--bg':             '#F0B5C0',
+      '--bg-image':       'none',
       '--bg-deep':        '#D890A0',
       '--bg-header':      'rgba(220,160,178,0.96)',
       '--bg-sticky':      'rgba(215,155,173,0.99)',
@@ -156,7 +162,7 @@ export const THEMES: Theme[] = [
   },
 ]
 
-export const DEFAULT_THEME: ThemeId = 'dark'
+export const DEFAULT_THEME: ThemeId = 'crimson'
 
 export function applyTheme(theme: Theme) {
   const root = document.documentElement
