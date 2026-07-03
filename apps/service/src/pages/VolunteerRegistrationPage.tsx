@@ -219,22 +219,19 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
 
   const upd = <K extends keyof EnrichForm>(k: K, v: EnrichForm[K]) => setE(p => ({ ...p, [k]: v }))
 
-  async function save(which: 1 | 2) {
+  // Contact details are optional for now — we always save what's provided and
+  // confirm success. If enough was filled to climb a stage, we celebrate that;
+  // otherwise we still thank them and keep their details.
+  async function save(_which: 1 | 2) {
     setErr(''); setMsg('')
-    if (which === 1 && (!e.ec_full_name.trim() || !e.ec_mobile.trim()))
-      return setErr('Please give an emergency contact name and mobile number.')
-    if (which === 2) {
-      const r1 = e.ref1_first_names.trim() && e.ref1_last_name.trim() && (e.ref1_email.trim() || e.ref1_phone.trim())
-      const r2 = e.ref2_first_names.trim() && e.ref2_last_name.trim() && (e.ref2_email.trim() || e.ref2_phone.trim())
-      if (!r1 || !r2) return setErr('Please give two referees, each with a name and a contact.')
-      if (!e.confidentiality_agreed) return setErr('Please agree to the volunteer declaration.')
-    }
     setBusy(true)
     try {
       const payload: VolunteerAdvancePayload = { reference_number: reference, email, ...e }
       const res = await api.advanceVolunteer(payload)
       setStage(res.stage)
-      setMsg(which === 1 ? '🪔 You can now help at a one-day seva!' : '⭐ You\'re now a full volunteer — thank you!')
+      setMsg(res.stage >= 2 ? '⭐ Saved — thank you! You\'re a full volunteer.'
+        : res.stage >= 1 ? '🪔 Saved — thank you! You can now help at a one-day seva.'
+        : '✓ Saved — thank you! Your details have been recorded.')
       setOpen(res.stage < 1 ? 1 : res.stage < 2 ? 2 : null)
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'Could not save. Please try again.')
@@ -263,19 +260,19 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
           </button>
           {open === 1 && (
             <div className="space-y-3 mt-4">
-              <p className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>Just an emergency contact — so you can safely help at a supervised one-day seva.</p>
+              <p className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>An emergency contact so you can safely help at a supervised one-day seva. <b>All optional for now</b> — add what you can.</p>
               <div className="flex gap-2">
-                <input className={inp} placeholder="Emergency contact name*" value={e.ec_full_name} onChange={ev => upd('ec_full_name', ev.target.value)} />
+                <input className={inp} placeholder="Emergency contact name" value={e.ec_full_name} onChange={ev => upd('ec_full_name', ev.target.value)} />
                 <input className={inp} placeholder="Relationship to you" value={e.ec_relationship} onChange={ev => upd('ec_relationship', ev.target.value)} />
               </div>
               <div className="flex gap-2">
-                <input className={inp} placeholder="Their mobile*" value={e.ec_mobile} onChange={ev => upd('ec_mobile', ev.target.value)} />
+                <input className={inp} placeholder="Their mobile" value={e.ec_mobile} onChange={ev => upd('ec_mobile', ev.target.value)} />
                 <input className={inp} type="email" placeholder="Their email" value={e.ec_email} onChange={ev => upd('ec_email', ev.target.value)} />
               </div>
               <button onClick={() => save(1)} disabled={busy}
                 className="w-full py-3 rounded-xl font-black text-sm disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-                {busy ? 'Saving…' : 'Save & unlock one-day seva'}
+                {busy ? 'Saving…' : 'Save my details →'}
               </button>
             </div>
           )}
@@ -291,7 +288,7 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
           </button>
           {open === 2 && (
             <div className="space-y-3 mt-4">
-              <p className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>Two references + a short declaration unlock long-term roles and more responsibility. {stage < 1 && 'Complete the emergency contact above first.'}</p>
+              <p className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>Two references + a short declaration unlock long-term roles and more responsibility. <b>Optional for now</b> — you can add these later.</p>
               <p className="text-xs font-bold uppercase tracking-widest" style={lblGold}>Referee 1</p>
               <div className="flex gap-2">
                 <input className={inp} placeholder="First name" value={e.ref1_first_names} onChange={ev => upd('ref1_first_names', ev.target.value)} />
@@ -317,7 +314,7 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
               <button onClick={() => save(2)} disabled={busy}
                 className="w-full py-3 rounded-xl font-black text-sm disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-                {busy ? 'Saving…' : 'Save & become a full volunteer'}
+                {busy ? 'Saving…' : 'Save my details →'}
               </button>
             </div>
           )}
