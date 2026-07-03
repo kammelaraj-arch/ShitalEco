@@ -239,6 +239,13 @@ export default function App() {
             <p className="text-xs" style={{ color: 'rgba(255,248,220,0.2)' }}>
               Secure payments powered by PayPal · All donations subject to our charity terms
             </p>
+            <p className="text-xs pt-1">
+              <a href="https://shirdisai.org.uk" target="_blank" rel="noopener noreferrer"
+                style={{ color: 'rgba(212,175,55,0.7)', textDecoration: 'underline' }}>shirdisai.org.uk</a>
+              <span style={{ color: 'rgba(255,248,220,0.25)' }}> · </span>
+              <a href="https://service.shital.uk" target="_blank" rel="noopener noreferrer"
+                style={{ color: 'rgba(212,175,55,0.7)', textDecoration: 'underline' }}>service.shital.uk</a>
+            </p>
           </div>
         </footer>
       )}
