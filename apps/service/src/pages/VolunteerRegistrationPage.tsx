@@ -23,16 +23,22 @@ const SEVAS = [
   '📖 Reception & admin', '🎵 Music / bhajans', '🚗 Setup & logistics',
 ]
 
+// Field validation. Email: standard shape. Phone: digits with optional +,
+// spaces, brackets and dashes, 7–20 chars (covers UK mobile/landline formats).
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_RE = /^\+?[0-9\s().-]{7,20}$/
+
 interface Stage0 {
   title: string; first_names: string; last_name: string
   email: string; mobile: string; phone: string; age_range: string
   areas: string[]; interest_note: string
   preferred_branches: string[]
   consent: boolean
+  gdpr: boolean
 }
 const EMPTY0: Stage0 = {
   title: '', first_names: '', last_name: '', email: '', mobile: '', phone: '',
-  age_range: '', areas: [], interest_note: '', preferred_branches: [], consent: false,
+  age_range: '', areas: [], interest_note: '', preferred_branches: [], consent: false, gdpr: false,
 }
 
 interface EnrichForm {
@@ -67,11 +73,14 @@ export function VolunteerRegistrationPage() {
 
   async function register() {
     setError('')
-    if (!f.first_names.trim() || !f.last_name.trim()) return setError('Please enter your name.')
-    if (!f.email.includes('@')) return setError('Please enter a valid email.')
-    if (!f.mobile.trim() && !f.phone.trim()) return setError('Please give a contact number.')
+    if (!f.first_names.trim() || !f.last_name.trim()) return setError('Please enter your first and last name.')
+    if (!EMAIL_RE.test(f.email.trim())) return setError('Please enter a valid email address (e.g. name@example.com).')
+    if (!f.mobile.trim() && !f.phone.trim()) return setError('Please give a mobile or phone number.')
+    if (f.mobile.trim() && !PHONE_RE.test(f.mobile.trim())) return setError('Please enter a valid mobile number.')
+    if (f.phone.trim() && !PHONE_RE.test(f.phone.trim())) return setError('Please enter a valid phone number.')
     if (!f.age_range) return setError('Please confirm your age range (18+).')
-    if (!f.consent) return setError('Please tick the consent box.')
+    if (!f.consent) return setError('Please confirm you are 18 or over.')
+    if (!f.gdpr) return setError('Please give consent for us to contact you (data protection).')
     setBusy(true)
     try {
       const payload: VolunteerRegistrationPayload = {
@@ -87,7 +96,7 @@ export function VolunteerRegistrationPage() {
         ref2_mobile: '', ref2_phone: '', ref2_email: '',
         skills: {}, skills_other_text: '',
         availability: { days: [], times: [], notes: '' }, availability_pattern: '',
-        declaration_agreed: f.consent, confidentiality_agreed: false, marketing_consent: false,
+        declaration_agreed: f.gdpr, confidentiality_agreed: false, marketing_consent: f.gdpr,
         branch_id: branchId, preferred_branches: [branchId || 'main'],
       }
       const res = await api.registerVolunteer(payload)
@@ -143,10 +152,18 @@ export function VolunteerRegistrationPage() {
           </div>
         </div>
 
-        <label className="flex items-start gap-3 mb-4 cursor-pointer">
+        <label className="flex items-start gap-3 mb-3 cursor-pointer">
           <input type="checkbox" checked={f.consent} onChange={e => set('consent', e.target.checked)} className="mt-1 accent-gold-500" />
           <span className="text-xs" style={{ color: 'rgba(255,248,220,0.7)' }}>
-            I'm 18 or over and happy for SHITAL to contact me about volunteering. I can withdraw anytime.
+            I confirm I am <b>18 or over</b>.
+          </span>
+        </label>
+        <label className="flex items-start gap-3 mb-4 cursor-pointer">
+          <input type="checkbox" checked={f.gdpr} onChange={e => set('gdpr', e.target.checked)} className="mt-1 accent-gold-500" />
+          <span className="text-xs" style={{ color: 'rgba(255,248,220,0.7)' }}>
+            I consent to SHITAL storing my details and contacting me about volunteering, in line with the{' '}
+            <a href="https://shital.org.uk/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#D4AF37', textDecoration: 'underline' }}>Privacy Policy</a>.
+            I can withdraw my consent at any time.
           </span>
         </label>
 
