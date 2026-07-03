@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useStore } from '../store'
 import { api, type VolunteerRegistrationPayload, type VolunteerAdvancePayload } from '../api'
@@ -31,6 +31,7 @@ const PHONE_RE = /^\+?[0-9\s().-]{7,20}$/
 interface Stage0 {
   title: string; first_names: string; last_name: string
   email: string; mobile: string; phone: string; age_range: string
+  branch: string
   areas: string[]; interest_note: string
   preferred_branches: string[]
   consent: boolean
@@ -38,7 +39,7 @@ interface Stage0 {
 }
 const EMPTY0: Stage0 = {
   title: '', first_names: '', last_name: '', email: '', mobile: '', phone: '',
-  age_range: '', areas: [], interest_note: '', preferred_branches: [], consent: false, gdpr: false,
+  age_range: '', branch: '', areas: [], interest_note: '', preferred_branches: [], consent: false, gdpr: false,
 }
 
 interface EnrichForm {
@@ -61,6 +62,14 @@ const EMPTY_ENRICH: EnrichForm = {
 export function VolunteerRegistrationPage() {
   const setScreen = useStore(s => s.setScreen)
   const branchId = useStore(s => s.branchId)
+  const branchName = useStore(s => s.branchName)
+
+  const [branches, setBranches] = useState<Array<{ branch_id: string; name: string }>>([])
+  useEffect(() => {
+    api.getBranches()
+      .then(list => setBranches(list.filter(b => b.is_active).map(b => ({ branch_id: b.branch_id, name: b.name }))))
+      .catch(() => setBranches([]))
+  }, [])
 
   const [phase, setPhase] = useState<'signup' | 'ladder'>('signup')
   const [f, setF] = useState<Stage0>(EMPTY0)
@@ -79,6 +88,10 @@ export function VolunteerRegistrationPage() {
     if (f.mobile.trim() && !PHONE_RE.test(f.mobile.trim())) return setError('Please enter a valid mobile number.')
     if (f.phone.trim() && !PHONE_RE.test(f.phone.trim())) return setError('Please enter a valid phone number.')
     if (!f.age_range) return setError('Please confirm your age range (18+).')
+    // Capture the branch the volunteer is registering with. Use their explicit
+    // pick; else the branch already selected in the portal; require a real one.
+    const chosenBranch = f.branch || (branchId && branchId !== 'main' ? branchId : '')
+    if (!chosenBranch) return setError('Please choose which temple you are registering with.')
     if (!f.consent) return setError('Please confirm you are 18 or over.')
     if (!f.gdpr) return setError('Please give consent for us to contact you (data protection).')
     setBusy(true)
@@ -97,7 +110,7 @@ export function VolunteerRegistrationPage() {
         skills: {}, skills_other_text: '',
         availability: { days: [], times: [], notes: '' }, availability_pattern: '',
         declaration_agreed: f.gdpr, confidentiality_agreed: false, marketing_consent: f.gdpr,
-        branch_id: branchId, preferred_branches: [branchId || 'main'],
+        branch_id: chosenBranch, preferred_branches: [chosenBranch],
       }
       const res = await api.registerVolunteer(payload)
       setReference(res.reference_number)
@@ -149,6 +162,17 @@ export function VolunteerRegistrationPage() {
                 </button>
               ))}
             </div>
+          </div>
+          <div>
+            <label className={lbl} style={lblGold}>Which temple are you registering with?*</label>
+            <select className={inp} value={f.branch || (branchId !== 'main' ? branchId : '')}
+              onChange={e => set('branch', e.target.value)}>
+              <option value="">Choose a temple…</option>
+              {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
+              {branches.length === 0 && branchName && (
+                <option value={branchId}>{branchName}</option>
+              )}
+            </select>
           </div>
         </div>
 
