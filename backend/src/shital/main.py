@@ -3766,6 +3766,44 @@ _{{ branch_name }} — Registered UK Charity_"""
             ),
             "variables": '["holder_name","key_name","key_type_label","set_number","sign_url","custom_message","custom_message_html"]',
         },
+        {
+            "key": "volunteer_confirmation",
+            "name": "Volunteer — registration welcome",
+            "subject": "Sairam — welcome to the SHITAL seva family ({{ reference }})",
+            "html_body": (
+                "<!DOCTYPE html><html><body style=\"margin:0;padding:0;background:#F5F0E6;"
+                "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;\">"
+                "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#F5F0E6;padding:24px 0;\"><tr><td align=\"center\">"
+                "<table width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);\">"
+                "<tr><td style=\"background:linear-gradient(135deg,#FF9933,#B5121B);padding:34px 40px;text-align:center;\">"
+                "<div style=\"font-size:40px;line-height:1;margin-bottom:8px;\">🙏</div>"
+                "<div style=\"color:#fff;font-size:24px;font-weight:800;\">Welcome to the seva family</div>"
+                "<div style=\"color:rgba(255,255,255,0.9);font-size:13px;margin-top:6px;\">Shri Shirdi Saibaba Temple · SHITAL</div></td></tr>"
+                "<tr><td style=\"padding:34px 40px;color:#3a2a1a;font-size:15px;line-height:1.7;\">"
+                "<p style=\"margin:0 0 14px;font-size:18px;font-weight:700;\">Dear {{ name }},</p>"
+                "<p style=\"margin:0 0 14px;\">Sairam, and welcome! Thank you for offering to volunteer with us. 🕉</p>"
+                "<p style=\"margin:0 0 14px;\">Your reference is "
+                "<strong style=\"color:#B5121B;\">{{ reference }}</strong> — please quote it if you contact us.</p>"
+                "<p style=\"margin:0 0 14px;\">A trustee will be in touch to match you with seva that suits you. "
+                "When you're ready for longer-term roles you can add two references and a short declaration from your "
+                "account — but there's nothing more you need to do right now.</p>"
+                "<p style=\"margin:22px 0 0;color:#7a5a3a;\">With gratitude,<br/>The SHITAL Volunteer Team</p></td></tr>"
+                "<tr><td style=\"background:#4A0A0A;padding:16px 40px;text-align:center;color:rgba(255,240,220,0.7);font-size:12px;\">"
+                "SHITAL · UK Registered Charity No. 1138530</td></tr>"
+                "</table></td></tr></table></body></html>"
+            ),
+            "text_body": (
+                "Dear {{ name }},\n\n"
+                "Sairam, and welcome to our seva family! Thank you for offering to volunteer with the "
+                "Shri Shirdi Saibaba Temple.\n\n"
+                "Your reference is {{ reference }}.\n"
+                "A trustee will be in touch to match you with seva. You can add references later for "
+                "longer-term roles.\n\n"
+                "With gratitude,\nThe SHITAL Volunteer Team\n"
+                "UK Registered Charity No. 1138530"
+            ),
+            "variables": '["name","reference","branch_name"]',
+        },
     ]
 
     async with SessionLocal() as db:
