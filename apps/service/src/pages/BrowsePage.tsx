@@ -189,12 +189,12 @@ export function BrowsePage() {
         </div>
       </div>
 
-      {/* Category Tabs */}
-      <div className="sticky top-16 z-30"
-        style={{ background: 'var(--bg-sticky)', borderBottom: '1px solid rgba(212,175,55,0.18)' }}>
+      {/* Category Tabs — centered floating strip (not a full-width bar) */}
+      <div className="sticky top-16 z-30 px-3 py-2">
         <div
           ref={tabsRef}
-          className="max-w-5xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1.5 py-2.5"
+          className="max-w-5xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1.5 py-2 rounded-2xl"
+          style={{ background: 'var(--bg-sticky)', border: '1px solid rgba(212,175,55,0.22)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', boxShadow: '0 6px 20px rgba(0,0,0,0.25)' }}
         >
           {TABS.map((tab) => (
             <button

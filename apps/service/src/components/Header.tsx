@@ -49,10 +49,10 @@ export function Header() {
             "tap me to change branch". */}
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <button onClick={() => setScreen('browse')} className="flex-shrink-0">
-            <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center animate-diya-pulse"
-              style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)' }}>
+            <div className="w-14 h-14 rounded-xl overflow-hidden flex items-center justify-center"
+              style={{ background: '#fff' }}>
               <img src={SHITAL_LOGO_URL} alt="SHITAL"
-                className="w-full h-full object-contain p-1"
+                className="w-full h-full object-contain p-0.5"
                 onError={e => {
                   // Network blip / DNS issue — fall back to the temple emoji so
                   // the header never renders a broken-image icon.
