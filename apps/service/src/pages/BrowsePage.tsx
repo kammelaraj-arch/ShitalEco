@@ -91,16 +91,22 @@ export function BrowsePage() {
         {/* Gold shimmer bottom edge */}
         <div className="absolute bottom-0 left-0 right-0 h-px"
           style={{ background: 'linear-gradient(90deg, transparent, #D4AF37, #FFD700, #D4AF37, transparent)' }} />
-        <div className="max-w-5xl mx-auto relative z-10">
-          <p className="text-xs font-semibold tracking-widest uppercase mb-1"
-            style={{ color: 'rgba(100,60,10,0.7)' }}>🕉 Jai Sai Baba</p>
-          <h1 className="font-display font-bold text-2xl tracking-wide mb-1"
-            style={{ color: '#3D1A00', textShadow: '0 1px 0 rgba(255,240,180,0.6)' }}>
-            Donate &amp; Support
-          </h1>
-          <p className="text-sm" style={{ color: 'rgba(80,40,5,0.65)' }}>
-            Make a donation, book services &amp; support our temple
-          </p>
+        <div className="max-w-5xl mx-auto relative z-10 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold tracking-widest uppercase mb-1"
+              style={{ color: 'rgba(100,60,10,0.7)' }}>🕉 Jai Sai Baba</p>
+            <h1 className="font-display font-bold text-2xl tracking-wide mb-1"
+              style={{ color: '#3D1A00', textShadow: '0 1px 0 rgba(255,240,180,0.6)' }}>
+              Donate &amp; Support
+            </h1>
+            <p className="text-sm" style={{ color: 'rgba(80,40,5,0.65)' }}>
+              Make a donation, book services &amp; support our temple
+            </p>
+          </div>
+          <img src="/baba.jpg" alt="Shri Shirdi Sai Baba"
+            onError={(e) => { e.currentTarget.style.display = 'none' }}
+            className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover flex-shrink-0"
+            style={{ border: '3px solid rgba(212,175,55,0.8)', boxShadow: '0 6px 18px rgba(0,0,0,0.35)' }} />
         </div>
       </div>
 

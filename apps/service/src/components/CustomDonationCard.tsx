@@ -76,9 +76,9 @@ export function CustomDonationCard() {
               color: '#6B0000',
               boxShadow: '0 4px 12px rgba(212,175,55,0.4)',
             } : {
-              background: 'rgba(255,255,255,0.05)',
-              color: '#D4AF37',
-              border: '1.5px solid rgba(212,175,55,0.30)',
+              background: 'rgba(0,0,0,0.30)',
+              color: '#FFD980',
+              border: '1.5px solid rgba(212,175,55,0.55)',
             }}
           >
             £{a}
@@ -109,12 +109,13 @@ export function CustomDonationCard() {
       <button
         onClick={handleDonate}
         disabled={!valid}
-        className="w-full mt-auto py-3 rounded-xl font-black text-sm transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="w-full mt-auto py-3 rounded-xl font-black text-sm transition-all active:scale-95 disabled:cursor-not-allowed"
         style={{
           background: valid
             ? 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)'
-            : 'rgba(212,175,55,0.30)',
-          color: valid ? '#6B0000' : 'rgba(107,0,0,0.6)',
+            : 'rgba(0,0,0,0.32)',
+          color: valid ? '#6B0000' : '#FFD980',
+          border: valid ? 'none' : '1.5px solid rgba(212,175,55,0.45)',
           boxShadow: valid ? '0 4px 12px rgba(212,175,55,0.35)' : 'none',
         }}
       >
