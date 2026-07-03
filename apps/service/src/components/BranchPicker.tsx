@@ -43,11 +43,11 @@ export function BranchPicker() {
           <motion.div
             animate={{ boxShadow: ['0 0 20px rgba(212,175,55,0.2)', '0 0 50px rgba(212,175,55,0.5)', '0 0 20px rgba(212,175,55,0.2)'] }}
             transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-            className="w-20 h-20 rounded-2xl overflow-hidden flex items-center justify-center mx-auto mb-6"
-            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)' }}
+            className="w-28 h-28 rounded-2xl overflow-hidden flex items-center justify-center mx-auto mb-6"
+            style={{ background: '#fff' }}
           >
             <img src={SHITAL_LOGO_URL} alt="SHITAL"
-              className="w-full h-full object-contain p-2"
+              className="w-full h-full object-contain p-1"
               onError={e => {
                 const el = e.currentTarget
                 el.style.display = 'none'
