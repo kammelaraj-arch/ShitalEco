@@ -10,53 +10,18 @@ const inp = 'w-full px-4 py-2.5 rounded-xl text-sm bg-white/5 border border-whit
 const lbl = 'block text-xs font-bold uppercase tracking-widest mb-1.5'
 const lblGold = { color: 'rgba(212,175,55,0.6)' }
 
-// ── The progression ladder — 3 rungs, each unlocks more ─────────────────────
-const RUNGS = [
-  { stage: 0, icon: '🌱', name: 'Registered',    unlock: "You're on the list — a trustee can reach you." },
-  { stage: 1, icon: '🪔', name: 'One-Day Seva',  unlock: 'Add an emergency contact to help at a supervised one-day seva.' },
-  { stage: 2, icon: '⭐', name: 'Full Volunteer', unlock: 'Add 2 references + declaration for long-term roles & more responsibility.' },
+// Temple noticeboard + the seva a new volunteer can help with. Static for now;
+// can later be driven by the events/announcements admin.
+const EVENTS = [
+  { icon: '🔥', title: 'Guru Pournima — special pooja', when: 'This Thursday · all centres' },
+  { icon: '🎵', title: 'Weekly bhajans', when: 'Thursdays & Saturdays, evening' },
+  { icon: '🍲', title: 'Annadanam (food seva)', when: 'Sundays, after aarti' },
+  { icon: '🌺', title: 'Ramnavami celebration', when: 'Coming soon' },
 ]
-
-function Ladder({ stage }: { stage: number }) {
-  return (
-    <div className="temple-card p-5 mb-6">
-      <p className="text-xs font-bold uppercase tracking-widest mb-4" style={lblGold}>Your volunteer journey</p>
-      <div className="space-y-3">
-        {RUNGS.map((r, i) => {
-          const done = stage >= r.stage
-          const current = stage === r.stage
-          return (
-            <div key={r.stage} className="flex items-start gap-3">
-              <div className="flex flex-col items-center">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-base flex-shrink-0"
-                  style={{
-                    background: done ? 'linear-gradient(135deg,#D4AF37,#C5A028)' : 'rgba(255,255,255,0.06)',
-                    border: done ? 'none' : '1px solid rgba(255,255,255,0.15)',
-                    filter: done ? 'none' : 'grayscale(0.6) opacity(0.7)',
-                  }}>{done ? '✓' : r.icon}</div>
-                {i < RUNGS.length - 1 && (
-                  <div className="w-0.5 h-6 my-0.5" style={{ background: stage > r.stage ? '#C5A028' : 'rgba(255,255,255,0.1)' }} />
-                )}
-              </div>
-              <div className="flex-1 pb-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm" style={{ color: done ? '#D4AF37' : 'rgba(255,248,220,0.75)' }}>
-                    {r.icon} {r.name}
-                  </span>
-                  {current && stage > 0 && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                      style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80' }}>You're here</span>
-                  )}
-                </div>
-                <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.5)' }}>{r.unlock}</p>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
+const SEVAS = [
+  '🍲 Langar / kitchen', '🎉 Events & festivals', '🧹 Cleaning & upkeep',
+  '📖 Reception & admin', '🎵 Music / bhajans', '🚗 Setup & logistics',
+]
 
 interface Stage0 {
   title: string; first_names: string; last_name: string
@@ -148,8 +113,6 @@ export function VolunteerRegistrationPage() {
           </p>
         </div>
 
-        <Ladder stage={-1} />
-
         <div className="temple-card p-5 mb-5 space-y-3">
           <p className="text-xs font-bold uppercase tracking-widest" style={lblGold}>Get started</p>
           <div className="flex gap-2">
@@ -240,14 +203,18 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
 
   return (
     <div className="max-w-lg mx-auto px-4 py-8 pb-28">
-      <div className="text-center mb-5">
+      <div className="text-center mb-6">
         <div className="text-5xl mb-3">🙏</div>
-        <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">You're registered{name ? `, ${name}` : ''}!</h1>
-        <p className="text-sm" style={{ color: 'rgba(255,248,220,0.55)' }}>Your reference</p>
-        <p className="font-mono font-bold text-gold-400">{reference}</p>
+        <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">Sairam! Welcome to the family{name ? `, ${name}` : ''} 🌸</h1>
+        <p className="text-sm" style={{ color: 'rgba(255,248,220,0.6)' }}>
+          {stage >= 1 ? 'You can now help at a one-day seva. 🪔' : 'Thank you for joining our seva family.'}
+        </p>
+        <div className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 rounded-full"
+          style={{ background: 'rgba(212,175,55,0.12)', border: '1px solid rgba(212,175,55,0.3)' }}>
+          <span className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>Your reference</span>
+          <span className="font-mono font-bold text-gold-400 text-sm">{reference}</span>
+        </div>
       </div>
-
-      <Ladder stage={stage} />
 
       {msg && <p className="text-sm text-center mb-4" style={{ color: '#4ade80' }}>{msg}</p>}
 
@@ -283,12 +250,12 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
       {stage < 2 && (
         <div className="temple-card p-5 mb-4">
           <button onClick={() => setOpen(open === 2 ? null : 2)} className="w-full flex items-center justify-between">
-            <span className="font-bold text-sm text-gold-400">⭐ Become a Full Volunteer</span>
+            <span className="font-bold text-sm text-gold-400">⭐ {stage >= 1 ? 'One last step — full volunteering seva' : 'Become a Full Volunteer'}</span>
             <span style={{ color: 'rgba(255,248,220,0.4)' }}>{open === 2 ? '−' : '+'}</span>
           </button>
           {open === 2 && (
             <div className="space-y-3 mt-4">
-              <p className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>Two references + a short declaration unlock long-term roles and more responsibility. <b>Optional for now</b> — you can add these later.</p>
+              <p className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>Provide two references + a short declaration and you're a full volunteer — long-term roles and more responsibility. <b>Optional for now</b> — you can add these later.</p>
               <p className="text-xs font-bold uppercase tracking-widest" style={lblGold}>Referee 1</p>
               <div className="flex gap-2">
                 <input className={inp} placeholder="First name" value={e.ref1_first_names} onChange={ev => upd('ref1_first_names', ev.target.value)} />
@@ -329,8 +296,36 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
 
       {err && <p className="text-sm mb-3" style={{ color: '#f87171' }}>{err}</p>}
 
+      {/* Temple noticeboard */}
+      <div className="temple-card p-5 mb-4">
+        <p className="text-xs font-bold uppercase tracking-widest mb-3" style={lblGold}>📅 Upcoming at the temple</p>
+        <div className="space-y-2.5">
+          {EVENTS.map(ev => (
+            <div key={ev.title} className="flex items-start gap-3">
+              <span className="text-lg leading-none mt-0.5">{ev.icon}</span>
+              <div>
+                <p className="text-sm font-bold" style={{ color: 'rgba(255,248,220,0.85)' }}>{ev.title}</p>
+                <p className="text-xs" style={{ color: 'rgba(255,248,220,0.45)' }}>{ev.when}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Seva available */}
+      <div className="temple-card p-5 mb-5">
+        <p className="text-xs font-bold uppercase tracking-widest mb-3" style={lblGold}>🤝 Seva you can help with</p>
+        <div className="flex flex-wrap gap-2">
+          {SEVAS.map(s => (
+            <span key={s} className="px-3 py-1.5 rounded-lg text-xs font-medium"
+              style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.7)', border: '1px solid rgba(212,175,55,0.2)' }}>{s}</span>
+          ))}
+        </div>
+        <p className="text-xs mt-3" style={{ color: 'rgba(255,248,220,0.4)' }}>A trustee will be in touch to match you with seva that suits you. 🙏</p>
+      </div>
+
       <button onClick={() => setScreen('browse')}
-        className="w-full py-3 rounded-2xl font-bold text-sm mt-2"
+        className="w-full py-3 rounded-2xl font-bold text-sm mt-1"
         style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.7)', border: '1px solid rgba(255,255,255,0.12)' }}>
         Done for now — back to Home
       </button>
