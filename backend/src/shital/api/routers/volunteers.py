@@ -34,7 +34,9 @@ async def _send_registration_emails(
     import structlog
 
     from shital.api.routers.email_templates import (
-        RELATED_VOLUNTEER, send_raw_email, send_template,
+        RELATED_VOLUNTEER,
+        send_raw_email,
+        send_template,
     )
     from shital.core.fabrics.config import settings
 
