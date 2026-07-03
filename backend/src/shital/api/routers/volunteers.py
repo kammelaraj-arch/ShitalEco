@@ -46,22 +46,28 @@ async def _send_registration_emails(
     notify_to = settings.VOLUNTEER_NOTIFY_EMAIL.strip() or from_email
     name = applicant_name.strip() or "there"
 
-    # Applicant confirmation
-    a_subject = f"We've received your volunteer application ({reference})"
+    # Applicant confirmation — warm welcome matching the new express flow.
+    a_subject = f"Sairam — welcome to the SHITAL seva family ({reference})"
     a_html = f"""
         <p>Dear {name},</p>
-        <p>Thank you for applying to volunteer with us. Your application
-        reference is <strong>{reference}</strong> — please quote this if you
-        contact us about your application.</p>
-        <p>A trustee will review your application and your two referees, and
-        get back to you by email. This usually takes up to 14 days.</p>
-        <p>Warm regards,<br/>Shital Volunteer Team</p>
+        <p>🙏 Sairam, and welcome to our seva family! Thank you for offering to
+        volunteer with the Shri Shirdi Saibaba Temple.</p>
+        <p>Your reference is <strong>{reference}</strong> — please quote it if you
+        contact us.</p>
+        <p>A trustee will be in touch to match you with seva that suits you. When
+        you're ready to take on longer-term roles, you can add two references and
+        a short declaration from your account — but there's nothing more you need
+        to do right now.</p>
+        <p>With gratitude,<br/>The SHITAL Volunteer Team 🕉</p>
     """.strip()
     a_text = (
         f"Dear {name},\n\n"
-        f"Thank you for applying to volunteer with us. Your reference is {reference}.\n"
-        f"A trustee will review your application and contact you within 14 days.\n\n"
-        f"Shital Volunteer Team"
+        f"Sairam, and welcome to our seva family! Thank you for offering to "
+        f"volunteer with the Shri Shirdi Saibaba Temple.\n\n"
+        f"Your reference is {reference}.\n"
+        f"A trustee will be in touch to match you with seva. You can add "
+        f"references later for longer-term roles.\n\n"
+        f"With gratitude,\nThe SHITAL Volunteer Team"
     )
 
     # Safeguarding / trustee notification
