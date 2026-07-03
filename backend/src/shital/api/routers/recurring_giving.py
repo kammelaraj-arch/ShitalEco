@@ -892,6 +892,19 @@ async def admin_sync_paypal(space: CurrentSpace, days: int = 35) -> dict[str, An
     return {"ok": True, "result": result}
 
 
+@router.post("/admin/giving/sync-stripe")
+async def admin_sync_stripe(space: CurrentSpace, days: int = 90) -> dict[str, Any]:
+    """Reconcile Stripe monthly-giving subscriptions on demand — the mirror of
+    the PayPal sync. Refreshes each subscription's status from Stripe, links
+    orphaned PENDING checkouts by their rgs_id, and records paid invoices into
+    donations. SUPER_ADMIN / ADMIN only."""
+    if space.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(403, detail="SUPER_ADMIN or ADMIN required")
+    from shital.api.routers.stripe_giving import _stripe_giving_reconcile_once
+    result = await _stripe_giving_reconcile_once(days=days)
+    return {"ok": True, "result": result}
+
+
 @router.post("/admin/giving/tiers")
 async def admin_create_tier(body: TierBody, space: CurrentSpace) -> dict[str, Any]:
     from sqlalchemy import text

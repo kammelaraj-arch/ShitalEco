@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
@@ -340,6 +340,163 @@ async def _handle_subscription_cancelled(sub: dict[str, Any]) -> None:
             WHERE stripe_subscription_id = :sub
         """), {"sub": sub_id})
         await db.commit()
+
+
+# ── Admin reconcile (mirror of the PayPal monthly-giving sync) ──────────────────
+
+_STRIPE_SUB_STATUS_MAP = {
+    "active": "ACTIVE", "trialing": "ACTIVE", "past_due": "ACTIVE",
+    "canceled": "CANCELLED", "unpaid": "CANCELLED",
+    "incomplete": "PENDING_APPROVAL", "incomplete_expired": "EXPIRED",
+}
+
+
+async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
+    """Reconcile Stripe monthly-giving subscriptions against Stripe (source of
+    truth) — the mirror of ``_paypal_reconcile_once``. Idempotent, safe to run
+    on demand:
+      Pass A · rows that already carry a ``stripe_subscription_id`` → retrieve
+        the subscription, map its status onto our row, and record any paid
+        invoices as COMPLETED donations (deduped by payment_ref).
+      Pass B · orphan PENDING_APPROVAL rows with no subscription id (the donor
+        left checkout, or the webhook never landed) → find their subscription by
+        the ``rgs_id`` metadata we stamped at checkout, link + activate it. Any
+        still-unmatched orphan older than 2 days is marked EXPIRED so it stops
+        showing as a phantom "pending".
+    """
+    stripe = await _stripe()
+    if not stripe.api_key:
+        return {"skipped": "stripe_not_configured"}
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    summary: dict[str, Any] = {
+        "scanned": 0, "status_updated": 0, "activated": 0, "cancelled": 0,
+        "payments_recorded": 0, "linked_orphans": 0, "orphans_expired": 0,
+        "errors": 0, "days_window": days,
+    }
+    now = datetime.utcnow()
+    since = int((now - timedelta(days=days)).timestamp())
+
+    async def _record_paid_invoices(sub_id: str) -> None:
+        try:
+            invs = stripe.Invoice.list(subscription=sub_id, status="paid", limit=100)
+        except Exception:  # noqa: BLE001
+            return
+        for inv in invs.auto_paging_iter():
+            ref = str(inv.get("charge") or inv.get("payment_intent") or inv.get("id") or "")
+            if not ref:
+                continue
+            async with SessionLocal() as db:
+                seen = (await db.execute(text(
+                    "SELECT 1 FROM donations WHERE payment_ref = :r LIMIT 1"), {"r": ref})).first()
+            await _record_invoice_donation(inv)
+            if not seen:
+                summary["payments_recorded"] += 1
+
+    # ── Pass A · rows with a subscription id ──────────────────────────────────
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT id::text AS id, stripe_subscription_id AS sub_id,
+                   UPPER(COALESCE(status,'')) AS status
+            FROM recurring_giving_subscriptions
+            WHERE payment_provider = 'stripe'
+              AND stripe_subscription_id IS NOT NULL AND stripe_subscription_id <> ''
+              AND UPPER(COALESCE(status,'')) NOT IN ('CANCELLED','EXPIRED')
+              AND created_at >= NOW() - (:days || ' days')::interval
+        """), {"days": str(days)})).mappings().all()
+
+    for r in rows:
+        summary["scanned"] += 1
+        try:
+            sub = stripe.Subscription.retrieve(r["sub_id"])
+        except Exception as exc:  # noqa: BLE001
+            # resource_missing → Stripe never really created it; reap old rows.
+            if "resource_missing" in str(exc).lower() or "no such subscription" in str(exc).lower():
+                async with SessionLocal() as db:
+                    await db.execute(text("""
+                        UPDATE recurring_giving_subscriptions SET status='EXPIRED', updated_at=NOW()
+                        WHERE id = CAST(:id AS uuid)
+                          AND UPPER(COALESCE(status,'')) NOT IN ('ACTIVE','CANCELLED','EXPIRED')
+                          AND created_at < NOW() - INTERVAL '1 day'
+                    """), {"id": r["id"]})
+                    await db.commit()
+            else:
+                summary["errors"] += 1
+            continue
+        mapped = _STRIPE_SUB_STATUS_MAP.get((sub.get("status") or "").lower())
+        if mapped and mapped != r["status"]:
+            async with SessionLocal() as db:
+                await db.execute(text("""
+                    UPDATE recurring_giving_subscriptions
+                    SET status = :st,
+                        cancelled_at = CASE WHEN :st='CANCELLED' THEN COALESCE(cancelled_at, NOW()) ELSE cancelled_at END,
+                        updated_at = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                """), {"st": mapped, "id": r["id"]})
+                await db.commit()
+            summary["status_updated"] += 1
+            if mapped == "ACTIVE":
+                summary["activated"] += 1
+            elif mapped in ("CANCELLED", "EXPIRED"):
+                summary["cancelled"] += 1
+        if (mapped or r["status"]) == "ACTIVE":
+            await _record_paid_invoices(r["sub_id"])
+
+    # ── Pass B · orphan PENDING rows (no subscription id) ─────────────────────
+    async with SessionLocal() as db:
+        orphans = (await db.execute(text("""
+            SELECT id::text AS id FROM recurring_giving_subscriptions
+            WHERE payment_provider = 'stripe'
+              AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')
+              AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'
+              AND created_at >= NOW() - (:days || ' days')::interval
+        """), {"days": str(days)})).mappings().all()
+    want = {o["id"] for o in orphans}
+
+    if want:
+        try:
+            sub_iter = stripe.Subscription.list(
+                created={"gte": since}, status="all", limit=100).auto_paging_iter()
+        except Exception:  # noqa: BLE001
+            sub_iter = iter(())
+        for sub in sub_iter:
+            rgs = ((sub.get("metadata") or {}).get("rgs_id")) or ""
+            if rgs not in want:
+                continue
+            want.discard(rgs)
+            st = _STRIPE_SUB_STATUS_MAP.get((sub.get("status") or "").lower(), "PENDING_APPROVAL")
+            cust = sub.get("customer")
+            async with SessionLocal() as db:
+                await db.execute(text("""
+                    UPDATE recurring_giving_subscriptions
+                    SET stripe_subscription_id = :sub, stripe_customer_id = :cust, status = :st,
+                        approved_at = CASE WHEN :st='ACTIVE' THEN COALESCE(approved_at, NOW()) ELSE approved_at END,
+                        updated_at = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                """), {"sub": sub.get("id"), "cust": (str(cust) if cust else None),
+                       "st": st, "id": rgs})
+                await db.commit()
+            summary["linked_orphans"] += 1
+            if st == "ACTIVE":
+                summary["activated"] += 1
+                await _record_paid_invoices(str(sub.get("id")))
+
+        # Anything still unmatched and old → reap so it stops showing as pending.
+        if want:
+            async with SessionLocal() as db:
+                reaped = await db.execute(text("""
+                    UPDATE recurring_giving_subscriptions
+                    SET status = 'EXPIRED', updated_at = NOW()
+                    WHERE id = ANY(CAST(:ids AS uuid[]))
+                      AND created_at < NOW() - INTERVAL '2 days'
+                      AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'
+                """), {"ids": list(want)})
+                await db.commit()
+                summary["orphans_expired"] = reaped.rowcount or 0
+
+    return summary
 
 
 # ── Webhook ─────────────────────────────────────────────────────────────────────
