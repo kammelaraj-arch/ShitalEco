@@ -33,72 +33,52 @@ async def _send_registration_emails(
     the applicant."""
     import structlog
 
-    from shital.api.routers.email_templates import _smtp_send
+    from shital.api.routers.email_templates import (
+        RELATED_VOLUNTEER, send_raw_email, send_template,
+    )
     from shital.core.fabrics.config import settings
 
     log = structlog.get_logger()
-    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
-    password   = settings.OFFICE365_PASSWORD
-    if not password:
-        log.info("volunteer_email_skipped_no_smtp", reference=reference)
-        return
-
-    notify_to = settings.VOLUNTEER_NOTIFY_EMAIL.strip() or from_email
     name = applicant_name.strip() or "there"
 
-    # Applicant confirmation — warm welcome matching the new express flow.
-    a_subject = f"Sairam — welcome to the SHITAL seva family ({reference})"
-    a_html = f"""
-        <p>Dear {name},</p>
-        <p>🙏 Sairam, and welcome to our seva family! Thank you for offering to
-        volunteer with the Shri Shirdi Saibaba Temple.</p>
-        <p>Your reference is <strong>{reference}</strong> — please quote it if you
-        contact us.</p>
-        <p>A trustee will be in touch to match you with seva that suits you. When
-        you're ready to take on longer-term roles, you can add two references and
-        a short declaration from your account — but there's nothing more you need
-        to do right now.</p>
-        <p>With gratitude,<br/>The SHITAL Volunteer Team 🕉</p>
-    """.strip()
-    a_text = (
-        f"Dear {name},\n\n"
-        f"Sairam, and welcome to our seva family! Thank you for offering to "
-        f"volunteer with the Shri Shirdi Saibaba Temple.\n\n"
-        f"Your reference is {reference}.\n"
-        f"A trustee will be in touch to match you with seva. You can add "
-        f"references later for longer-term roles.\n\n"
-        f"With gratitude,\nThe SHITAL Volunteer Team"
-    )
-
-    # Safeguarding / trustee notification
-    s_subject = f"New volunteer application — {reference} ({applicant_name})"
-    s_html = f"""
-        <p>A new volunteer application has been submitted.</p>
-        <ul>
-          <li><strong>Reference:</strong> {reference}</li>
-          <li><strong>Name:</strong> {applicant_name}</li>
-          <li><strong>Email:</strong> {applicant_email}</li>
-          <li><strong>Branch:</strong> {branch_id or '—'}</li>
-        </ul>
-        <p>Review in Admin → Volunteers and trigger reference requests once
-        you've sanity-checked the form.</p>
-    """.strip()
-    s_text = (
-        f"New volunteer application {reference}\n"
-        f"Name:   {applicant_name}\n"
-        f"Email:  {applicant_email}\n"
-        f"Branch: {branch_id or '—'}\n"
-    )
-
-    for to, subject, html, text_body, kind in [
-        (applicant_email, a_subject, a_html, a_text, "applicant"),
-        (notify_to,       s_subject, s_html, s_text, "safeguarding"),
-    ]:
+    # Applicant confirmation — rendered from the `volunteer_confirmation`
+    # email template so trustees can edit the wording in Admin → Email
+    # Templates without a deploy. Logged to sent_emails (audit + resend).
+    if applicant_email and "@" in applicant_email:
         try:
-            await _smtp_send(from_email, password, to, subject, html, text_body)
-            log.info("volunteer_email_sent", kind=kind, reference=reference, to=to)
-        except Exception as exc:
-            log.warning("volunteer_email_failed", kind=kind, reference=reference, error=str(exc))
+            await send_template(
+                "volunteer_confirmation", applicant_email,
+                {"name": name, "reference": reference, "branch_name": branch_id or "SHITAL"},
+                related_type=RELATED_VOLUNTEER, related_id=reference,
+                triggered_by="volunteer-registration",
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("volunteer_confirm_email_failed", reference=reference, error=str(exc))
+
+    # Safeguarding / trustee notification — audited via the same path.
+    notify_to = (settings.VOLUNTEER_NOTIFY_EMAIL or settings.OFFICE365_EMAIL or "").strip()
+    if notify_to and "@" in notify_to:
+        s_subject = f"New volunteer application — {reference} ({applicant_name})"
+        s_html = (
+            "<p>A new volunteer application has been submitted.</p><ul>"
+            f"<li><strong>Reference:</strong> {reference}</li>"
+            f"<li><strong>Name:</strong> {applicant_name}</li>"
+            f"<li><strong>Email:</strong> {applicant_email}</li>"
+            f"<li><strong>Branch:</strong> {branch_id or '—'}</li></ul>"
+            "<p>Review in Admin → Volunteers.</p>"
+        )
+        s_text = (
+            f"New volunteer application {reference}\n"
+            f"Name:   {applicant_name}\nEmail:  {applicant_email}\nBranch: {branch_id or '—'}\n"
+        )
+        try:
+            await send_raw_email(
+                to_email=notify_to, subject=s_subject, html_body=s_html, text_body=s_text,
+                related_type=RELATED_VOLUNTEER, related_id=reference,
+                triggered_by="volunteer-registration",
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("volunteer_notify_email_failed", reference=reference, error=str(exc))
 
 
 # ─── Models ───────────────────────────────────────────────────────────────────
