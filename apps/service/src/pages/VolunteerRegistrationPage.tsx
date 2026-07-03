@@ -66,8 +66,20 @@ export function VolunteerRegistrationPage() {
 
   const [branches, setBranches] = useState<Array<{ branch_id: string; name: string }>>([])
   useEffect(() => {
+    // Fixed display order: Wembley, Leicester, Reading, Milton Keynes; any
+    // other active branch falls in after these.
+    const order = ['wembley', 'leicester', 'reading', 'milton']
+    const rank = (x: { branch_id: string; name: string }) => {
+      const s = `${x.branch_id} ${x.name}`.toLowerCase()
+      const i = order.findIndex(k => s.includes(k))
+      return i < 0 ? 99 : i
+    }
     api.getBranches()
-      .then(list => setBranches(list.filter(b => b.is_active).map(b => ({ branch_id: b.branch_id, name: b.name }))))
+      .then(list => setBranches(
+        list.filter(b => b.is_active)
+          .map(b => ({ branch_id: b.branch_id, name: b.name }))
+          .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)),
+      ))
       .catch(() => setBranches([]))
   }, [])
 
