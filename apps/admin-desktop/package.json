@@ -1,0 +1,47 @@
+{
+  "name": "shital-admin-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Windows/Linux desktop wrapper that live-loads the Shital Admin panel (admin.shital.org.uk).",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.0"
+  },
+  "build": {
+    "appId": "org.shital.admin.desktop",
+    "productName": "Shital Admin",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "src/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Shital Admin"
+    }
+  }
+}

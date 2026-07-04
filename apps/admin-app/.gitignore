@@ -1,0 +1,5 @@
+# Capacitor generates the native Android project at build time (npx cap add
+# android in CI) — never commit it.
+android/
+node_modules/
+*.apk
