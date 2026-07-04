@@ -30,6 +30,11 @@ export function SevaPage() {
   const [error, setError] = useState('')
   const [availNote, setAvailNote] = useState('')
   const [availMsg, setAvailMsg] = useState('')
+  const [pinMsg, setPinMsg] = useState('')       // "your cancellation PIN is …"
+  const [cancelId, setCancelId] = useState('')   // booking id being withdrawn
+  const [cancelPin, setCancelPin] = useState('')
+  const [cancelErr, setCancelErr] = useState('')
+  const [cancelBusy, setCancelBusy] = useState(false)
 
   // Show ALL open seva across the temples — volunteers can help at any branch,
   // and branch codes vary across the system, so we never hide slots behind an
@@ -67,16 +72,33 @@ export function SevaPage() {
   }
 
   async function book(s: SevaShift) {
-    setError('')
+    setError(''); setPinMsg('')
     if (!ensureIdentity()) return
     setBusyId(s.id)
     try {
-      await api.bookSeva(s.id, { name: name.trim(), email: email.trim() }, donorToken || undefined)
+      const r = await api.bookSeva(s.id, { name: name.trim(), email: email.trim() }, donorToken || undefined)
       setBooked(prev => new Set(prev).add(s.id))
+      if (r.cancel_pin) setPinMsg(`✓ Booked! Your cancellation PIN is ${r.cancel_pin} — keep it if you might need to withdraw.`)
       await loadMine(email.trim())
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Booking failed. Please try again.')
     } finally { setBusyId('') }
+  }
+
+  function startCancel(b: SevaBooking) {
+    setCancelErr(''); setCancelPin(b.cancel_pin || ''); setCancelId(b.id)
+  }
+  async function confirmCancel() {
+    setCancelErr('')
+    if (!cancelPin.trim()) { setCancelErr('Enter your PIN.'); return }
+    setCancelBusy(true)
+    try {
+      await api.cancelSevaBooking(cancelId, cancelPin.trim(), donorToken || undefined)
+      setCancelId(''); setCancelPin(''); setBooked(new Set())
+      await loadMine(email.trim())
+    } catch (e) {
+      setCancelErr(e instanceof Error ? e.message : 'Could not cancel.')
+    } finally { setCancelBusy(false) }
   }
 
   async function offer() {
@@ -117,6 +139,10 @@ export function SevaPage() {
       </div>
 
       {error && <p className="text-sm mb-3" style={{ color: '#f87171' }}>{error}</p>}
+      {pinMsg && (
+        <p className="text-sm mb-3 px-3 py-2 rounded-lg"
+          style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)', color: '#86efac' }}>{pinMsg}</p>
+      )}
 
       {/* My booked seva */}
       {myBookings.length > 0 && (
@@ -124,16 +150,45 @@ export function SevaPage() {
           <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>My booked seva</p>
           <div className="space-y-2">
             {myBookings.map(b => (
-              <div key={b.id} className="temple-card p-4 flex items-start justify-between gap-3"
-                style={{ borderColor: 'rgba(34,197,94,0.25)' }}>
-                <div className="min-w-0">
-                  <p className="font-bold text-gold-400">{b.kind === 'festival' && '🌺 '}{b.title}</p>
-                  <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.5)' }}>
-                    🕒 {whenLabel(b.starts_at)} · 📍 {branchLabel(b.branch_id)}
-                  </p>
+              <div key={b.id} className="temple-card p-4" style={{ borderColor: 'rgba(34,197,94,0.25)' }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-bold text-gold-400">{b.kind === 'festival' && '🌺 '}{b.title}</p>
+                    <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.5)' }}>
+                      🕒 {whenLabel(b.starts_at)} · 📍 {branchLabel(b.branch_id)}
+                    </p>
+                    {b.cancel_pin && (
+                      <p className="text-[11px] mt-1" style={{ color: 'rgba(212,175,55,0.6)' }}>🔑 Cancellation PIN: <b>{b.cancel_pin}</b></p>
+                    )}
+                  </div>
+                  <span className="text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0"
+                    style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80' }}>✓ Booked</span>
                 </div>
-                <span className="text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0"
-                  style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80' }}>✓ Booked</span>
+
+                {cancelId === b.id ? (
+                  <div className="mt-3 pt-3 space-y-2" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                    <p className="text-xs" style={{ color: 'rgba(255,248,220,0.6)' }}>Enter your PIN to withdraw this booking:</p>
+                    <div className="flex gap-2">
+                      <input className={inp} inputMode="numeric" maxLength={8} placeholder="PIN"
+                        value={cancelPin} onChange={e => setCancelPin(e.target.value.replace(/\D/g, ''))} />
+                      <button onClick={confirmCancel} disabled={cancelBusy}
+                        className="text-xs font-black px-4 py-2 rounded-lg flex-shrink-0 disabled:opacity-50"
+                        style={{ background: 'rgba(239,68,68,0.15)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.3)' }}>
+                        {cancelBusy ? '…' : 'Withdraw'}
+                      </button>
+                      <button onClick={() => { setCancelId(''); setCancelErr('') }}
+                        className="text-xs font-bold px-3 py-2 rounded-lg flex-shrink-0"
+                        style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.6)' }}>Keep</button>
+                    </div>
+                    {cancelErr && <p className="text-xs" style={{ color: '#f87171' }}>{cancelErr}</p>}
+                  </div>
+                ) : (
+                  <button onClick={() => startCancel(b)}
+                    className="mt-3 text-xs font-bold px-3 py-1.5 rounded-lg"
+                    style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.6)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                    I can't make it →
+                  </button>
+                )}
               </div>
             ))}
           </div>
