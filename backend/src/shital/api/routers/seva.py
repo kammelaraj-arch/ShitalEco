@@ -213,18 +213,29 @@ async def my_seva_bookings(request: Request, email: str = "") -> dict[str, Any]:
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+
+    # Build the identity match conditionally — only bind :cid (and its uuid
+    # cast) when we actually have a contact id. Casting a NULL param to uuid
+    # errors on asyncpg, which was 500ing the email-only path.
+    ident: list[str] = []
+    params: dict[str, Any] = {}
+    if em:
+        ident.append("lower(b.email) = :em")
+        params["em"] = em
+    if cid:
+        ident.append("b.contact_id = CAST(:cid AS uuid)")
+        params["cid"] = cid
     async with SessionLocal() as db:
-        rows = (await db.execute(text("""
+        rows = (await db.execute(text(f"""
             SELECT b.id::text AS id, s.id::text AS shift_id, s.title, s.description,
                    s.branch_id, s.starts_at, s.kind, b.status, b.booked_at
             FROM seva_bookings b JOIN seva_shifts s ON s.id = b.shift_id
             WHERE b.status = 'BOOKED'
-              AND (( :em <> '' AND lower(b.email) = :em)
-                   OR ( :cid IS NOT NULL AND b.contact_id = CAST(:cid AS uuid)))
+              AND ({" OR ".join(ident)})
               AND s.starts_at >= NOW() - INTERVAL '1 day'
             ORDER BY s.starts_at ASC
             LIMIT 100
-        """), {"em": em, "cid": cid})).mappings().all()
+        """), params)).mappings().all()
     return {"bookings": [dict(r) for r in rows]}
 
 
