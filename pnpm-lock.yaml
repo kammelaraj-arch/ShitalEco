@@ -98,6 +98,15 @@ importers:
         specifier: ^6.0.0
         version: 6.2.1
 
+  apps/admin-desktop:
+    devDependencies:
+      electron:
+        specifier: ^31.0.0
+        version: 31.7.7
+      electron-builder:
+        specifier: ^24.13.0
+        version: 24.13.3(electron-builder-squirrel-windows@24.13.3(dmg-builder@24.13.3))
+
   apps/kiosk:
     dependencies:
       '@capacitor/android':

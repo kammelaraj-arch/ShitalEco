@@ -265,6 +265,28 @@ jobs:
           path: apps/admin-app/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
+  build-admin-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install pnpm
+        run: npm install -g pnpm@9.4.0
+      - name: Install dependencies
+        working-directory: apps/admin-desktop
+        run: pnpm install --no-frozen-lockfile
+      - name: Build Windows installer
+        working-directory: apps/admin-desktop
+        run: pnpm run build:win
+      - name: Upload Admin Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-windows
+          path: apps/admin-desktop/dist-electron/*.exe
+          if-no-files-found: error
+
   # ─── Publish ALL installers to a stable GitHub Release ─────────────────────
   # Maintains a rolling `kiosk-latest` tag/release with consistent filenames:
   #   shital-kiosk-windows-setup.exe       (Windows x64 NSIS installer)
@@ -278,8 +300,8 @@ jobs:
   #
   # The admin Software Downloads page links directly to these.
   publish-installers:
-    needs: [build-windows, build-linux-x64, build-linux-arm64, build-android, build-quick-donation-android, build-admin-android]
-    if: ${{ always() && (needs.build-android.result == 'success' || needs.build-windows.result == 'success' || needs.build-linux-x64.result == 'success' || needs.build-linux-arm64.result == 'success' || needs.build-quick-donation-android.result == 'success' || needs.build-admin-android.result == 'success') }}
+    needs: [build-windows, build-linux-x64, build-linux-arm64, build-android, build-quick-donation-android, build-admin-android, build-admin-windows]
+    if: ${{ always() && (needs.build-android.result == 'success' || needs.build-windows.result == 'success' || needs.build-linux-x64.result == 'success' || needs.build-linux-arm64.result == 'success' || needs.build-quick-donation-android.result == 'success' || needs.build-admin-android.result == 'success' || needs.build-admin-windows.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -326,6 +348,10 @@ jobs:
             cp artifacts/admin-android/app-debug.apk release/shital-admin-latest.apk
             cp artifacts/admin-android/app-debug.apk "release/shital-admin-${GITHUB_SHA::7}.apk"
             echo "✓ Admin Android APK"
+          fi
+          if compgen -G "artifacts/admin-windows/*.exe" > /dev/null; then
+            cp "$(ls artifacts/admin-windows/*.exe | head -1)" release/shital-admin-windows-setup.exe
+            echo "✓ Admin Windows installer"
           fi
           ls -lh release/
       - name: Move kiosk-latest tag and upload assets
