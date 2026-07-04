@@ -26,6 +26,19 @@ export default function LoginPage() {
   const [slowLoad, setSlowLoad] = useState(false)
   const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Surface an error passed back by the redirect sign-in flow (mobile):
+  // /admin/auth-callback bounces here with ?error=… when the id_token
+  // exchange fails, so the user sees why instead of a silent bounce.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const e = new URLSearchParams(window.location.search).get('error')
+    if (e) {
+      setError(e)
+      const url = window.location.pathname + window.location.hash
+      window.history.replaceState(null, '', url)
+    }
+  }, [])
+
   // Check Azure AD availability on mount
   useEffect(() => {
     async function checkAzure() {
@@ -85,6 +98,18 @@ export default function LoginPage() {
     setMsLoading(true)
     slowTimer.current = setTimeout(() => setSlowLoad(true), 6000)
     try {
+      // Mobile browsers don't support the popup + window.opener flow (the auth
+      // window opens as a separate tab and can't post back), so use a full-page
+      // redirect there — /auth-callback completes the sign-in in the same tab.
+      const isMobile = typeof window !== 'undefined' && (
+        window.matchMedia?.('(pointer: coarse)').matches ||
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+      )
+      if (isMobile) {
+        const { beginMicrosoftRedirect } = await import('@/lib/msal')
+        await beginMicrosoftRedirect() // navigates away; nothing after runs
+        return
+      }
       const { signInWithMicrosoft } = await import('@/lib/msal')
       const data = await signInWithMicrosoft()
       saveSession(data)
