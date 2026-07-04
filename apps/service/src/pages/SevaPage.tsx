@@ -5,6 +5,12 @@ import { api, type SevaShift } from '../api'
 
 const inp = 'w-full px-4 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 focus:border-saffron-400/50 outline-none text-ivory-100 placeholder-white/30'
 
+const BRANCH_LABELS: Record<string, string> = {
+  wembley: 'Wembley', wembley_main: 'Wembley', leicester: 'Leicester',
+  reading: 'Reading', milton_keynes: 'Milton Keynes', main: 'Temple',
+}
+const branchLabel = (id: string) => BRANCH_LABELS[id] || (id ? id.replace(/_/g, ' ') : 'Temple')
+
 function whenLabel(iso: string): string {
   try {
     const d = new Date(iso)
@@ -24,12 +30,15 @@ export function SevaPage() {
   const [availNote, setAvailNote] = useState('')
   const [availMsg, setAvailMsg] = useState('')
 
+  // Show ALL open seva across the temples — volunteers can help at any branch,
+  // and branch codes vary across the system, so we never hide slots behind an
+  // exact branch match. Each card shows which temple it's for.
   useEffect(() => {
-    api.getSevaShifts(branchId)
+    api.getSevaShifts()
       .then(d => setShifts(d.shifts || []))
       .catch(() => setError('Could not load seva right now.'))
       .finally(() => setLoading(false))
-  }, [branchId])
+  }, [])
 
   function ensureIdentity(): boolean {
     if (!name.trim() || !email.includes('@')) {
@@ -102,7 +111,7 @@ export function SevaPage() {
                     <p className="font-bold text-gold-400">{s.title}</p>
                     {s.description && <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.55)' }}>{s.description}</p>}
                     <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.45)' }}>
-                      🕒 {whenLabel(s.starts_at)} · {s.booked}/{s.needed} booked
+                      🕒 {whenLabel(s.starts_at)} · 📍 {branchLabel(s.branch_id)} · {s.booked}/{s.needed} booked
                     </p>
                   </div>
                   {isBooked ? (
