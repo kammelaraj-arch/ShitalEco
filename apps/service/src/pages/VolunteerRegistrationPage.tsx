@@ -223,7 +223,7 @@ export function VolunteerRegistrationPage() {
 // ── Post-registration: show the ladder + enrichment sections ────────────────
 function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
   reference: string; email: string; name: string; stage: number
-  setStage: (n: number) => void; setScreen: (s: 'browse') => void
+  setStage: (n: number) => void; setScreen: (s: 'browse' | 'seva') => void
 }) {
   const [e, setE] = useState<EnrichForm>(EMPTY_ENRICH)
   const [open, setOpen] = useState<1 | 2 | null>(stage < 1 ? 1 : stage < 2 ? 2 : null)
@@ -373,6 +373,10 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
           ))}
         </div>
         <p className="text-xs mt-3" style={{ color: 'rgba(255,248,220,0.4)' }}>A trustee will be in touch to match you with seva that suits you. 🙏</p>
+        <button onClick={() => setScreen('seva')} className="w-full mt-3 py-2.5 rounded-xl font-black text-sm"
+          style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+          See &amp; book open seva →
+        </button>
       </div>
 
       <button onClick={() => setScreen('browse')}

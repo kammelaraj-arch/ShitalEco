@@ -8,7 +8,7 @@ export const SHITAL_LOGO_URL = '/logo.png'
 
 export type Screen =
   | 'browse' | 'basket' | 'contact' | 'gift-aid' | 'payment' | 'confirmation' | 'monthly-giving' | 'volunteer' | 'reference'
-  | 'donor-login' | 'my-giving'
+  | 'donor-login' | 'my-giving' | 'seva'
 
 export type Language = 'en' | 'gu' | 'hi' | 'te' | 'ta' | 'pa' | 'mr' | 'bn' | 'kn'
 
