@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useStore } from '../store'
-import { api, type SevaShift } from '../api'
+import { api, type SevaShift, type SevaBooking } from '../api'
 
 const inp = 'w-full px-4 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 focus:border-saffron-400/50 outline-none text-ivory-100 placeholder-white/30'
 
@@ -26,6 +26,7 @@ export function SevaPage() {
   const [email, setEmail] = useState(donorEmail || '')
   const [busyId, setBusyId] = useState('')
   const [booked, setBooked] = useState<Set<string>>(new Set())
+  const [myBookings, setMyBookings] = useState<SevaBooking[]>([])
   const [error, setError] = useState('')
   const [availNote, setAvailNote] = useState('')
   const [availMsg, setAvailMsg] = useState('')
@@ -39,6 +40,23 @@ export function SevaPage() {
       .catch(() => setError('Could not load seva right now.'))
       .finally(() => setLoading(false))
   }, [])
+
+  // Load the caller's own booked seva (by donor token if signed in, else by
+  // the email in the form). Refreshed after each booking.
+  async function loadMine(byEmail = email) {
+    if (!donorToken && !byEmail.includes('@')) { setMyBookings([]); return }
+    try {
+      const d = await api.getMySevaBookings(byEmail.trim(), donorToken || undefined)
+      setMyBookings(d.bookings || [])
+    } catch { /* ignore */ }
+  }
+  useEffect(() => { loadMine() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Shift ids the caller has already booked — server truth + this session's.
+  const bookedIds = new Set<string>([...booked, ...myBookings.map(b => b.shift_id)])
+  // Hide slots the caller already booked from "Open seva needs" so they can't
+  // book the same slot twice — those appear in the "My booked seva" section.
+  const openShifts = shifts.filter(s => !bookedIds.has(s.id))
 
   function ensureIdentity(): boolean {
     if (!name.trim() || !email.includes('@')) {
@@ -55,6 +73,7 @@ export function SevaPage() {
     try {
       await api.bookSeva(s.id, { name: name.trim(), email: email.trim() }, donorToken || undefined)
       setBooked(prev => new Set(prev).add(s.id))
+      await loadMine(email.trim())
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Booking failed. Please try again.')
     } finally { setBusyId('') }
@@ -79,6 +98,12 @@ export function SevaPage() {
         <div className="text-4xl mb-2">🤝</div>
         <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">Seva at the temple</h1>
         <p className="text-sm" style={{ color: 'rgba(255,248,220,0.55)' }}>Book a slot to help — every hand is a blessing.</p>
+        <a href="https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-seva-latest.apk"
+          target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 mt-3 text-xs font-bold px-3 py-1.5 rounded-lg"
+          style={{ background: 'rgba(212,175,55,0.15)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.3)' }}>
+          📲 Get the Seva app (Android)
+        </a>
       </div>
 
       {/* Identity */}
@@ -86,23 +111,49 @@ export function SevaPage() {
         <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.6)' }}>You</p>
         <div className="flex gap-2">
           <input className={inp} placeholder="Your name" value={name} onChange={e => setName(e.target.value)} />
-          <input className={inp} type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+          <input className={inp} type="email" placeholder="Email" value={email}
+            onChange={e => setEmail(e.target.value)} onBlur={() => loadMine(email)} />
         </div>
       </div>
 
       {error && <p className="text-sm mb-3" style={{ color: '#f87171' }}>{error}</p>}
 
+      {/* My booked seva */}
+      {myBookings.length > 0 && (
+        <div className="mb-6">
+          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>My booked seva</p>
+          <div className="space-y-2">
+            {myBookings.map(b => (
+              <div key={b.id} className="temple-card p-4 flex items-start justify-between gap-3"
+                style={{ borderColor: 'rgba(34,197,94,0.25)' }}>
+                <div className="min-w-0">
+                  <p className="font-bold text-gold-400">{b.kind === 'festival' && '🌺 '}{b.title}</p>
+                  <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.5)' }}>
+                    🕒 {whenLabel(b.starts_at)} · 📍 {branchLabel(b.branch_id)}
+                  </p>
+                </div>
+                <span className="text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0"
+                  style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80' }}>✓ Booked</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Open seva needs</p>
       {loading ? (
         <p className="text-center py-10 text-sm" style={{ color: 'rgba(255,248,220,0.4)' }}>Loading…</p>
-      ) : shifts.length === 0 ? (
+      ) : openShifts.length === 0 ? (
         <div className="temple-card p-5 text-center mb-6">
-          <p className="text-sm" style={{ color: 'rgba(255,248,220,0.6)' }}>No open seva right now. Offer your availability below and we'll call on you. 🙏</p>
+          <p className="text-sm" style={{ color: 'rgba(255,248,220,0.6)' }}>
+            {myBookings.length > 0
+              ? 'You\'ve booked all the open seva — thank you! 🙏 Offer more availability below.'
+              : 'No open seva right now. Offer your availability below and we\'ll call on you. 🙏'}
+          </p>
         </div>
       ) : (
         <div className="space-y-2 mb-6">
-          {shifts.map(s => {
-            const isBooked = booked.has(s.id)
+          {openShifts.map(s => {
             const full = s.spots_left <= 0
             return (
               <motion.div key={s.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="temple-card p-4">
@@ -114,16 +165,12 @@ export function SevaPage() {
                       🕒 {whenLabel(s.starts_at)} · 📍 {branchLabel(s.branch_id)} · {s.booked}/{s.needed} booked
                     </p>
                   </div>
-                  {isBooked ? (
-                    <span className="text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0" style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80' }}>✓ Booked</span>
-                  ) : (
-                    <button onClick={() => book(s)} disabled={busyId === s.id || full}
-                      className="text-xs font-black px-3 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-50"
-                      style={full ? { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }
-                                  : { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-                      {busyId === s.id ? '…' : full ? 'Full' : `Book · ${s.spots_left} left`}
-                    </button>
-                  )}
+                  <button onClick={() => book(s)} disabled={busyId === s.id || full}
+                    className="text-xs font-black px-3 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-50"
+                    style={full ? { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }
+                                : { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+                    {busyId === s.id ? '…' : full ? 'Full' : `Book · ${s.spots_left} left`}
+                  </button>
                 </div>
               </motion.div>
             )

@@ -200,6 +200,34 @@ async def book_shift(shift_id: str, body: BookBody, request: Request) -> dict[st
     return {"ok": True}
 
 
+@router.get("/seva/my-bookings")
+async def my_seva_bookings(request: Request, email: str = "") -> dict[str, Any]:
+    """The caller's own seva bookings (upcoming + recent). Matched by the donor
+    token if present, otherwise by the email query param. Never raises."""
+    await _ensure_schema()
+    who = _donor(request)
+    em = (who.get("email") or email or "").strip().lower()
+    cid = who.get("contact_id") or None
+    if not em and not cid:
+        return {"bookings": []}
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT b.id::text AS id, s.id::text AS shift_id, s.title, s.description,
+                   s.branch_id, s.starts_at, s.kind, b.status, b.booked_at
+            FROM seva_bookings b JOIN seva_shifts s ON s.id = b.shift_id
+            WHERE b.status = 'BOOKED'
+              AND (( :em <> '' AND lower(b.email) = :em)
+                   OR ( :cid IS NOT NULL AND b.contact_id = CAST(:cid AS uuid)))
+              AND s.starts_at >= NOW() - INTERVAL '1 day'
+            ORDER BY s.starts_at ASC
+            LIMIT 100
+        """), {"em": em, "cid": cid})).mappings().all()
+    return {"bookings": [dict(r) for r in rows]}
+
+
 class AvailabilityBody(BaseModel):
     name: str = ""
     email: str = ""
