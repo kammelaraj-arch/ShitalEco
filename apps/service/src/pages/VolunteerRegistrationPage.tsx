@@ -59,10 +59,31 @@ const EMPTY_ENRICH: EnrichForm = {
   confidentiality_agreed: false,
 }
 
+const API = (import.meta.env.VITE_API_URL as string) || '/api/v1'
+
 export function VolunteerRegistrationPage() {
   const setScreen = useStore(s => s.setScreen)
   const branchId = useStore(s => s.branchId)
   const branchName = useStore(s => s.branchName)
+  const donorToken = useStore(s => s.donorToken)
+  const donorName = useStore(s => s.donorName)
+  const donorEmail = useStore(s => s.donorEmail)
+  const setDonor = useStore(s => s.setDonor)
+
+  // Volunteering requires a Shital account. If not signed in, the volunteer
+  // creates one inline (email + password) or via social login.
+  const [password, setPassword] = useState('')
+  const [password2, setPassword2] = useState('')
+  const [providers, setProviders] = useState<Array<{ provider: string; label: string }>>([])
+  useEffect(() => {
+    fetch(`${API}/auth/donor/providers`).then(r => r.ok ? r.json() : { providers: [] })
+      .then(d => setProviders(d.providers || [])).catch(() => {})
+  }, [])
+  function socialLogin(p: string) {
+    // Come back to the volunteer page after OAuth (App.tsx captures the token).
+    const back = encodeURIComponent(`${window.location.origin}${window.location.pathname}?screen=volunteer`)
+    window.location.href = `${API}/auth/donor/${p}/login?redirect=${back}`
+  }
 
   const [branches, setBranches] = useState<Array<{ branch_id: string; name: string }>>([])
   useEffect(() => {
@@ -94,11 +115,18 @@ export function VolunteerRegistrationPage() {
 
   async function register() {
     setError('')
+    // When signed in, the account email is authoritative; else use the form.
+    const acctEmail = (donorToken ? donorEmail : f.email).trim().toLowerCase()
     if (!f.first_names.trim() || !f.last_name.trim()) return setError('Please enter your first and last name.')
-    if (!EMAIL_RE.test(f.email.trim())) return setError('Please enter a valid email address (e.g. name@example.com).')
+    if (!EMAIL_RE.test(acctEmail)) return setError('Please enter a valid email address (e.g. name@example.com).')
     if (!f.mobile.trim()) return setError('Please give a mobile number.')
     if (!PHONE_RE.test(f.mobile.trim())) return setError('Please enter a valid mobile number.')
     if (!f.age_range) return setError('Please confirm your age range (18+).')
+    // A Shital account is required — create one now if not signed in.
+    if (!donorToken) {
+      if (password.length < 8) return setError('Create a password of at least 8 characters for your volunteer account (or sign in with Google/Microsoft above).')
+      if (password !== password2) return setError('The two passwords do not match.')
+    }
     // Capture the branch the volunteer is registering with. Use their explicit
     // pick; else the branch already selected in the portal; require a real one.
     const chosenBranch = f.branch || (branchId && branchId !== 'main' ? branchId : '')
@@ -107,10 +135,26 @@ export function VolunteerRegistrationPage() {
     if (!f.gdpr) return setError('Please give consent for us to contact you (data protection).')
     setBusy(true)
     try {
+      // Step 1 — ensure the volunteer has a Shital account (mandatory).
+      if (!donorToken) {
+        const r = await fetch(`${API}/auth/donor/register`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: acctEmail, password, first_name: f.first_names.trim(), surname: f.last_name.trim() }),
+        })
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok) {
+          const detail = typeof d?.detail === 'string' ? d.detail : ''
+          throw new Error(/exist/i.test(detail)
+            ? 'An account with this email already exists — please “Sign in” above first.'
+            : (detail || 'Could not create your account. Please try again.'))
+        }
+        setDonor(d.token, `${f.first_names.trim()} ${f.last_name.trim()}`.trim(), d.email)
+      }
+      // Step 2 — register the volunteer.
       const payload: VolunteerRegistrationPayload = {
         title: f.title, first_names: f.first_names.trim(), last_name: f.last_name.trim(),
         address: '', postcode: '', mobile: f.mobile.trim(), phone: f.phone.trim(),
-        email: f.email.trim(), age_range: f.age_range,
+        email: acctEmail, age_range: f.age_range,
         ec_title: '', ec_full_name: '', ec_email: '', ec_mobile: '', ec_phone: '', ec_address: '', ec_postcode: '',
         has_health_restrictions: false, health_notes: '',
         has_criminal_record: false, criminal_record_details: '',
@@ -155,10 +199,41 @@ export function VolunteerRegistrationPage() {
             <input className={inp} placeholder="First name*" value={f.first_names} onChange={e => set('first_names', e.target.value)} />
           </div>
           <input className={inp} placeholder="Last name*" value={f.last_name} onChange={e => set('last_name', e.target.value)} />
-          <input className={inp} type="email" placeholder="Email*" value={f.email} onChange={e => set('email', e.target.value)} />
+          <input className={inp} type="email" placeholder="Email*"
+            value={donorToken ? donorEmail : f.email} onChange={e => set('email', e.target.value)}
+            readOnly={!!donorToken} style={donorToken ? { opacity: 0.7 } : undefined} />
           <div className="flex gap-2">
             <input className={inp} placeholder="Mobile*" value={f.mobile} onChange={e => set('mobile', e.target.value)} />
           </div>
+
+          {/* Mandatory account — sign in / create so volunteers can log in later */}
+          {donorToken ? (
+            <p className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)', color: '#86efac' }}>
+              ✓ Signed in as <b>{donorName || donorEmail}</b> — your volunteer profile links to this account.
+            </p>
+          ) : (
+            <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(212,175,55,0.06)', border: '1px solid rgba(212,175,55,0.2)' }}>
+              <p className="text-xs font-bold uppercase tracking-widest" style={lblGold}>Create your account*</p>
+              <p className="text-[11px]" style={{ color: 'rgba(255,248,220,0.5)' }}>You'll sign in with this to see your seva, bookings and profile.</p>
+              {providers.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {providers.map(p => (
+                    <button key={p.provider} type="button" onClick={() => socialLogin(p.provider)}
+                      className="flex-1 min-w-[130px] py-2 rounded-lg text-xs font-bold"
+                      style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.85)', border: '1px solid rgba(255,255,255,0.15)' }}>
+                      Continue with {p.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <input className={inp} type="password" placeholder="Create a password (min 8)*" value={password} onChange={e => setPassword(e.target.value)} />
+              <input className={inp} type="password" placeholder="Confirm password*" value={password2} onChange={e => setPassword2(e.target.value)} />
+              <p className="text-[11px]" style={{ color: 'rgba(255,248,220,0.4)' }}>
+                Already have an account?{' '}
+                <button type="button" onClick={() => setScreen('donor-login')} style={{ color: '#D4AF37', textDecoration: 'underline' }}>Sign in</button>
+              </p>
+            </div>
+          )}
           <div>
             <label className={lbl} style={lblGold}>Age range (must be 18+)*</label>
             <div className="flex flex-wrap gap-2">
