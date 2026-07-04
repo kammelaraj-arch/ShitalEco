@@ -9,6 +9,7 @@ email per shift).
 """
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
@@ -100,6 +101,10 @@ async def _ensure_schema() -> None:
                 UNIQUE (group_id, email)
             )
         """))
+        # Self-service cancellation PIN — the volunteer must supply it to
+        # withdraw ("I can't make it"), so no-one who merely knows your email
+        # can cancel your booking.
+        await db.execute(text("ALTER TABLE seva_bookings ADD COLUMN IF NOT EXISTS cancel_pin VARCHAR(8) NOT NULL DEFAULT ''"))
         # Recurrence + festival tagging (added after the first release).
         await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS series_id UUID"))
         await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS recurrence VARCHAR(20) NOT NULL DEFAULT 'ONCE'"))
@@ -181,23 +186,31 @@ async def book_shift(shift_id: str, body: BookBody, request: Request) -> dict[st
         """), {"id": shift_id})).mappings().first()
         if not shift or shift["status"] != "OPEN":
             raise HTTPException(404, detail="That seva is no longer open.")
-        # Already booked by this email? Treat as success (idempotent).
+        # Already booked by this email? Treat as success (idempotent) and hand
+        # back the existing cancellation PIN.
         already = (await db.execute(text(
-            "SELECT 1 FROM seva_bookings WHERE shift_id = CAST(:id AS uuid) AND lower(email) = :em AND status='BOOKED'"
-        ), {"id": shift_id, "em": email})).first()
+            "SELECT cancel_pin FROM seva_bookings WHERE shift_id = CAST(:id AS uuid) AND lower(email) = :em AND status='BOOKED'"
+        ), {"id": shift_id, "em": email})).mappings().first()
         if already:
-            return {"ok": True, "already_booked": True}
+            return {"ok": True, "already_booked": True, "cancel_pin": already["cancel_pin"]}
         if int(shift["booked"]) >= int(shift["needed"]):
             raise HTTPException(409, detail="This seva is now full — thank you!")
         cid = who.get("contact_id") or None
+        pin = f"{secrets.randbelow(10000):04d}"
         await db.execute(text("""
-            INSERT INTO seva_bookings (id, shift_id, contact_id, name, email, phone)
-            VALUES (:id, CAST(:sid AS uuid), CAST(:cid AS uuid), :name, :em, :ph)
-            ON CONFLICT (shift_id, email) DO UPDATE SET status='BOOKED', name=EXCLUDED.name
+            INSERT INTO seva_bookings (id, shift_id, contact_id, name, email, phone, cancel_pin)
+            VALUES (:id, CAST(:sid AS uuid), CAST(:cid AS uuid), :name, :em, :ph, :pin)
+            ON CONFLICT (shift_id, email) DO UPDATE
+              SET status='BOOKED', name=EXCLUDED.name,
+                  cancel_pin = CASE WHEN seva_bookings.cancel_pin = '' THEN EXCLUDED.cancel_pin ELSE seva_bookings.cancel_pin END
         """), {"id": str(uuid.uuid4()), "sid": shift_id, "cid": cid,
-               "name": name, "em": email, "ph": body.phone.strip()})
+               "name": name, "em": email, "ph": body.phone.strip(), "pin": pin})
+        # Return whatever pin the row ended up with (existing wins on re-book).
+        final = (await db.execute(text(
+            "SELECT cancel_pin FROM seva_bookings WHERE shift_id = CAST(:id AS uuid) AND lower(email) = :em"
+        ), {"id": shift_id, "em": email})).mappings().first()
         await db.commit()
-    return {"ok": True}
+    return {"ok": True, "cancel_pin": (final or {}).get("cancel_pin", pin)}
 
 
 @router.get("/seva/my-bookings")
@@ -228,7 +241,7 @@ async def my_seva_bookings(request: Request, email: str = "") -> dict[str, Any]:
     async with SessionLocal() as db:
         rows = (await db.execute(text(f"""
             SELECT b.id::text AS id, s.id::text AS shift_id, s.title, s.description,
-                   s.branch_id, s.starts_at, s.kind, b.status, b.booked_at
+                   s.branch_id, s.starts_at, s.kind, b.status, b.booked_at, b.cancel_pin
             FROM seva_bookings b JOIN seva_shifts s ON s.id = b.shift_id
             WHERE b.status = 'BOOKED'
               AND ({" OR ".join(ident)})
@@ -236,7 +249,56 @@ async def my_seva_bookings(request: Request, email: str = "") -> dict[str, Any]:
             ORDER BY s.starts_at ASC
             LIMIT 100
         """), params)).mappings().all()
-    return {"bookings": [dict(r) for r in rows]}
+    # Only reveal the cancellation PIN to a token-authenticated owner — never on
+    # an email-only lookup (else knowing an email would leak the PIN and defeat
+    # the point). Guests keep the PIN they were shown when they booked.
+    is_owner = bool(who.get("contact_id") or who.get("email"))
+    out = []
+    for r in rows:
+        d = dict(r)
+        if not is_owner:
+            d.pop("cancel_pin", None)
+        out.append(d)
+    return {"bookings": out}
+
+
+class CancelBody(BaseModel):
+    pin: str = ""
+
+
+@router.post("/seva/bookings/{booking_id}/cancel")
+async def cancel_seva_booking(booking_id: str, body: CancelBody, request: Request) -> dict[str, Any]:
+    """Withdraw a booking ("I can't make it"). Allowed when the caller supplies
+    the booking's cancellation PIN, OR is the signed-in owner of a legacy
+    booking that never got a PIN. Frees the slot for someone else."""
+    await _ensure_schema()
+    who = _donor(request)
+    pin = (body.pin or "").strip()
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        b = (await db.execute(text("""
+            SELECT id::text AS id, email, contact_id::text AS contact_id, cancel_pin, status
+            FROM seva_bookings WHERE id = CAST(:id AS uuid)
+        """), {"id": booking_id})).mappings().first()
+        if not b or b["status"] != "BOOKED":
+            raise HTTPException(404, detail="Booking not found.")
+
+        owns = bool(
+            (who.get("email") and who["email"].lower() == (b["email"] or "").lower())
+            or (who.get("contact_id") and b["contact_id"] and who["contact_id"] == b["contact_id"])
+        )
+        stored = b["cancel_pin"] or ""
+        allowed = (stored != "" and pin == stored) or (stored == "" and owns)
+        if not allowed:
+            raise HTTPException(403, detail="Incorrect PIN — enter the PIN from when you booked.")
+
+        await db.execute(text(
+            "UPDATE seva_bookings SET status='CANCELLED' WHERE id = CAST(:id AS uuid)"
+        ), {"id": booking_id})
+        await db.commit()
+    return {"ok": True}
 
 
 class AvailabilityBody(BaseModel):

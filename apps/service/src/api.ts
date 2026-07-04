@@ -269,7 +269,7 @@ export const api = {
     return r.json()
   },
   async bookSeva(shiftId: string, body: { name: string; email: string; phone?: string }, token?: string):
-      Promise<{ ok: boolean; already_booked?: boolean }> {
+      Promise<{ ok: boolean; already_booked?: boolean; cancel_pin?: string }> {
     const r = await fetch(`${API}/seva/shifts/${encodeURIComponent(shiftId)}/book`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -277,6 +277,17 @@ export const api = {
     })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error((d as { detail?: string }).detail || `Booking failed (HTTP ${r.status})`)
+    return d
+  },
+  // Withdraw a booking ("I can't make it") — requires the booking's PIN.
+  async cancelSevaBooking(bookingId: string, pin: string, token?: string): Promise<{ ok: boolean }> {
+    const r = await fetch(`${API}/seva/bookings/${encodeURIComponent(bookingId)}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ pin }),
+    })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error((d as { detail?: string }).detail || `Could not cancel (HTTP ${r.status})`)
     return d
   },
   async offerSevaAvailability(body: { name: string; email: string; branch_id: string; note: string }, token?: string):
@@ -386,6 +397,7 @@ export interface SevaShift {
 export interface SevaBooking {
   id: string; shift_id: string; title: string; description: string
   branch_id: string; starts_at: string; kind: string; status: string; booked_at: string
+  cancel_pin?: string
 }
 
 export interface VolunteerAdvancePayload {
