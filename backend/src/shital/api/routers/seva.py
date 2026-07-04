@@ -73,6 +73,33 @@ async def _ensure_schema() -> None:
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Groups (Palki group, cooking help, …) with staff + volunteer members.
+        await db.execute(text("""
+            CREATE TABLE IF NOT EXISTS seva_groups (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                branch_id   VARCHAR(64)  NOT NULL DEFAULT 'main',
+                name        VARCHAR(160) NOT NULL,
+                description TEXT         NOT NULL DEFAULT '',
+                status      VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+                created_by  VARCHAR(120) NOT NULL DEFAULT '',
+                created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+            )
+        """))
+        await db.execute(text("""
+            CREATE TABLE IF NOT EXISTS seva_group_members (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                group_id    UUID NOT NULL REFERENCES seva_groups(id) ON DELETE CASCADE,
+                member_type VARCHAR(20)  NOT NULL DEFAULT 'volunteer',
+                name        VARCHAR(200) NOT NULL DEFAULT '',
+                email       VARCHAR(255) NOT NULL DEFAULT '',
+                phone       VARCHAR(40)  NOT NULL DEFAULT '',
+                contact_id  UUID,
+                added_by    VARCHAR(120) NOT NULL DEFAULT '',
+                added_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                UNIQUE (group_id, email)
+            )
+        """))
         # Recurrence + festival tagging (added after the first release).
         await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS series_id UUID"))
         await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS recurrence VARCHAR(20) NOT NULL DEFAULT 'ONCE'"))
@@ -81,6 +108,8 @@ async def _ensure_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_seva_shifts_open ON seva_shifts(status, starts_at)"))
         await db.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_seva_shifts_series ON seva_shifts(series_id)"))
+        await db.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_seva_group_members_group ON seva_group_members(group_id)"))
         await db.commit()
     _schema_ready = True
 
@@ -358,3 +387,154 @@ async def admin_list_availability(space: CurrentSpace) -> dict[str, Any]:
             FROM volunteer_availability ORDER BY created_at DESC LIMIT 200
         """))).mappings().all()
     return {"availability": [dict(r) for r in rows]}
+
+
+# ── Admin: groups (Palki group, cooking help, …) ─────────────────────────────────
+
+class GroupBody(BaseModel):
+    name: str
+    description: str = ""
+    branch_id: str = "main"
+
+
+class GroupUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    status: str | None = None       # ACTIVE | ARCHIVED
+
+
+class MemberBody(BaseModel):
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    member_type: str = "volunteer"  # staff | volunteer
+
+
+@router.post("/admin/seva/groups")
+async def admin_create_group(body: GroupBody, space: CurrentSpace) -> dict[str, Any]:
+    _require_admin(space)
+    await _ensure_schema()
+    if not body.name.strip():
+        raise HTTPException(400, detail="Group name is required.")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    gid = str(uuid.uuid4())
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO seva_groups (id, branch_id, name, description, created_by)
+            VALUES (:id, :branch, :name, :desc, :by)
+        """), {"id": gid, "branch": body.branch_id, "name": body.name.strip(),
+               "desc": body.description.strip(), "by": space.user_email})
+        await db.commit()
+    return {"ok": True, "id": gid}
+
+
+@router.get("/admin/seva/groups")
+async def admin_list_groups(space: CurrentSpace, branch_id: str = "") -> dict[str, Any]:
+    _require_admin(space)
+    await _ensure_schema()
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT g.id::text AS id, g.branch_id, g.name, g.description, g.status, g.created_at,
+                   COUNT(m.id) AS members,
+                   COUNT(m.id) FILTER (WHERE m.member_type = 'staff') AS staff,
+                   COUNT(m.id) FILTER (WHERE m.member_type = 'volunteer') AS volunteers
+            FROM seva_groups g LEFT JOIN seva_group_members m ON m.group_id = g.id
+            WHERE (:branch = '' OR g.branch_id = :branch)
+            GROUP BY g.id ORDER BY g.status ASC, g.name ASC
+        """), {"branch": branch_id})).mappings().all()
+    return {"groups": [dict(r) for r in rows]}
+
+
+@router.patch("/admin/seva/groups/{group_id}")
+async def admin_update_group(group_id: str, body: GroupUpdate, space: CurrentSpace) -> dict[str, Any]:
+    _require_admin(space)
+    await _ensure_schema()
+    sets: list[str] = []
+    params: dict[str, Any] = {"id": group_id}
+    if body.name is not None and body.name.strip():
+        sets.append("name = :name")
+        params["name"] = body.name.strip()
+    if body.description is not None:
+        sets.append("description = :desc")
+        params["desc"] = body.description.strip()
+    if body.status is not None:
+        st = body.status.upper()
+        if st not in ("ACTIVE", "ARCHIVED"):
+            raise HTTPException(400, detail="status must be ACTIVE or ARCHIVED")
+        sets.append("status = :st")
+        params["st"] = st
+    if not sets:
+        return {"ok": True, "unchanged": True}
+    sets.append("updated_at = NOW()")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        await db.execute(
+            text(f"UPDATE seva_groups SET {', '.join(sets)} WHERE id = CAST(:id AS uuid)"), params)
+        await db.commit()
+    return {"ok": True}
+
+
+@router.get("/admin/seva/groups/{group_id}/members")
+async def admin_list_members(group_id: str, space: CurrentSpace) -> dict[str, Any]:
+    _require_admin(space)
+    await _ensure_schema()
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT id::text AS id, member_type, name, email, phone, added_at
+            FROM seva_group_members WHERE group_id = CAST(:id AS uuid)
+            ORDER BY member_type ASC, name ASC
+        """), {"id": group_id})).mappings().all()
+    return {"members": [dict(r) for r in rows]}
+
+
+@router.post("/admin/seva/groups/{group_id}/members")
+async def admin_add_member(group_id: str, body: MemberBody, space: CurrentSpace) -> dict[str, Any]:
+    _require_admin(space)
+    await _ensure_schema()
+    name = body.name.strip()
+    email = body.email.strip().lower()
+    if not name or "@" not in email:
+        raise HTTPException(400, detail="Member name and a valid email are required.")
+    mtype = "staff" if body.member_type == "staff" else "volunteer"
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        exists = (await db.execute(text(
+            "SELECT 1 FROM seva_groups WHERE id = CAST(:id AS uuid)"), {"id": group_id})).first()
+        if not exists:
+            raise HTTPException(404, detail="Group not found.")
+        await db.execute(text("""
+            INSERT INTO seva_group_members (id, group_id, member_type, name, email, phone, added_by)
+            VALUES (:id, CAST(:gid AS uuid), :mt, :name, :em, :ph, :by)
+            ON CONFLICT (group_id, email) DO UPDATE
+              SET member_type = EXCLUDED.member_type, name = EXCLUDED.name, phone = EXCLUDED.phone
+        """), {"id": str(uuid.uuid4()), "gid": group_id, "mt": mtype, "name": name,
+               "em": email, "ph": body.phone.strip(), "by": space.user_email})
+        await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/admin/seva/groups/{group_id}/members/{member_id}")
+async def admin_remove_member(group_id: str, member_id: str, space: CurrentSpace) -> dict[str, Any]:
+    _require_admin(space)
+    await _ensure_schema()
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        await db.execute(text(
+            "DELETE FROM seva_group_members WHERE id = CAST(:mid AS uuid) AND group_id = CAST(:gid AS uuid)"
+        ), {"mid": member_id, "gid": group_id})
+        await db.commit()
+    return {"ok": True}
