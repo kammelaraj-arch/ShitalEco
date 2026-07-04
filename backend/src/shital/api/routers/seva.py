@@ -10,11 +10,12 @@ email per shift).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as dtime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from shital.api.deps import CurrentSpace
 
@@ -72,8 +73,14 @@ async def _ensure_schema() -> None:
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Recurrence + festival tagging (added after the first release).
+        await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS series_id UUID"))
+        await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS recurrence VARCHAR(20) NOT NULL DEFAULT 'ONCE'"))
+        await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'regular'"))
         await db.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_seva_shifts_open ON seva_shifts(status, starts_at)"))
+        await db.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_seva_shifts_series ON seva_shifts(series_id)"))
         await db.commit()
     _schema_ready = True
 
@@ -105,7 +112,7 @@ async def list_open_shifts(branch_id: str = "") -> dict[str, Any]:
     async with SessionLocal() as db:
         rows = (await db.execute(text("""
             SELECT s.id::text AS id, s.branch_id, s.title, s.description,
-                   s.starts_at, s.ends_at, s.needed, s.status,
+                   s.starts_at, s.ends_at, s.needed, s.status, s.kind,
                    COUNT(b.id) FILTER (WHERE b.status = 'BOOKED') AS booked
             FROM seva_shifts s
             LEFT JOIN seva_bookings b ON b.shift_id = s.id
@@ -203,29 +210,85 @@ class ShiftBody(BaseModel):
     branch_id: str = "main"
     title: str
     description: str = ""
-    starts_at: datetime
-    ends_at: datetime | None = None
     needed: int = 1
+    kind: str = "regular"                 # regular | festival
+    recurrence: str = "once"              # once | daily | weekly
+    starts_at: datetime | None = None     # for 'once'
+    time: str = ""                        # 'HH:MM' for daily / weekly
+    weekdays: list[int] = Field(default_factory=list)  # 0=Mon..6=Sun (weekly)
+    weeks: int = 8                        # horizon for weekly
+    days: int = 30                        # horizon for daily
+    start_date: str = ""                  # 'YYYY-MM-DD' start for recurring
+
+
+def _occurrences(body: ShiftBody) -> list[datetime]:
+    """Expand a recurrence spec into concrete dated start times (cap 60)."""
+    rec = (body.recurrence or "once").lower()
+    if rec == "once":
+        return [body.starts_at] if body.starts_at else []
+    try:
+        hh, mm = (body.time or "09:00").split(":")[:2]
+        tod = dtime(int(hh), int(mm))
+    except Exception:  # noqa: BLE001
+        tod = dtime(9, 0)
+    base = date.fromisoformat(body.start_date) if body.start_date else datetime.now(UTC).date()
+    out: list[datetime] = []
+    if rec == "daily":
+        for d in range(min(max(1, body.days), 60)):
+            out.append(datetime.combine(base + timedelta(days=d), tod))
+    elif rec == "weekly":
+        wds = {int(w) for w in (body.weekdays or [])}
+        for d in range(min(max(1, body.weeks), 12) * 7):
+            day = base + timedelta(days=d)
+            if day.weekday() in wds:
+                out.append(datetime.combine(day, tod))
+    return out[:60]
 
 
 @router.post("/admin/seva/shifts")
 async def admin_create_shift(body: ShiftBody, space: CurrentSpace) -> dict[str, Any]:
     _require_admin(space)
     await _ensure_schema()
+    occ = _occurrences(body)
+    if not occ:
+        raise HTTPException(400, detail="Pick a date (one-off) or day(s) + time for a repeating seva.")
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    sid = str(uuid.uuid4())
+    series_id = str(uuid.uuid4()) if (body.recurrence or "once").lower() != "once" else None
+    kind = "festival" if body.kind == "festival" else "regular"
+    rec = (body.recurrence or "once").upper()
     async with SessionLocal() as db:
-        await db.execute(text("""
-            INSERT INTO seva_shifts (id, branch_id, title, description, starts_at, ends_at, needed, created_by)
-            VALUES (:id, :branch, :title, :desc, :starts, :ends, :needed, :by)
-        """), {"id": sid, "branch": body.branch_id, "title": body.title.strip(),
-               "desc": body.description.strip(), "starts": body.starts_at,
-               "ends": body.ends_at, "needed": max(1, body.needed),
-               "by": space.user_email})
+        for starts in occ:
+            await db.execute(text("""
+                INSERT INTO seva_shifts
+                    (id, branch_id, title, description, starts_at, needed, kind, recurrence, series_id, created_by)
+                VALUES (:id, :branch, :title, :desc, :starts, :needed, :kind, :rec,
+                        CAST(:series AS uuid), :by)
+            """), {"id": str(uuid.uuid4()), "branch": body.branch_id, "title": body.title.strip(),
+                   "desc": body.description.strip(), "starts": starts, "needed": max(1, body.needed),
+                   "kind": kind, "rec": rec, "series": series_id, "by": space.user_email})
         await db.commit()
-    return {"ok": True, "id": sid}
+    return {"ok": True, "created": len(occ), "series_id": series_id}
+
+
+@router.patch("/admin/seva/series/{series_id}")
+async def admin_update_series(series_id: str, space: CurrentSpace, status: str = "CLOSED") -> dict[str, Any]:
+    """Close/reopen/cancel every upcoming shift in a recurring series at once."""
+    _require_admin(space)
+    await _ensure_schema()
+    if status.upper() not in ("OPEN", "CLOSED", "CANCELLED"):
+        raise HTTPException(400, detail="status must be OPEN, CLOSED or CANCELLED")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        r = await db.execute(text("""
+            UPDATE seva_shifts SET status=:st, updated_at=NOW()
+            WHERE series_id = CAST(:sid AS uuid) AND starts_at >= NOW()
+        """), {"st": status.upper(), "sid": series_id})
+        await db.commit()
+    return {"ok": True, "updated": r.rowcount or 0}
 
 
 @router.get("/admin/seva/shifts")
@@ -239,10 +302,11 @@ async def admin_list_shifts(space: CurrentSpace, branch_id: str = "") -> dict[st
         rows = (await db.execute(text("""
             SELECT s.id::text AS id, s.branch_id, s.title, s.description, s.starts_at,
                    s.ends_at, s.needed, s.status, s.created_at,
+                   s.kind, s.recurrence, s.series_id::text AS series_id,
                    COUNT(b.id) FILTER (WHERE b.status = 'BOOKED') AS booked
             FROM seva_shifts s LEFT JOIN seva_bookings b ON b.shift_id = s.id
             WHERE (:branch = '' OR s.branch_id = :branch)
-            GROUP BY s.id ORDER BY s.starts_at DESC LIMIT 200
+            GROUP BY s.id ORDER BY s.starts_at ASC LIMIT 300
         """), {"branch": branch_id})).mappings().all()
     return {"shifts": [dict(r) for r in rows]}
 
