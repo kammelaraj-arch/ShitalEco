@@ -488,6 +488,8 @@ async def my_volunteering(request: Request) -> dict[str, Any]:
         rows = (await db.execute(text("""
             SELECT reference_number AS reference, COALESCE(stage, 0) AS stage,
                    status, branch_id, created_at,
+                   first_names, last_name, email, mobile, phone, address, postcode,
+                   ec_full_name, ec_mobile, ec_phone,
                    (ec_full_name <> '' AND (ec_mobile <> '' OR ec_phone <> '')) AS has_emergency_contact,
                    (ref1_first_names <> '' AND ref2_first_names <> '' AND confidentiality_agreed) AS has_references
             FROM volunteers
@@ -496,3 +498,66 @@ async def my_volunteering(request: Request) -> dict[str, Any]:
             ORDER BY created_at DESC LIMIT 20
         """), {"cid": cid, "email": email})).mappings().all()
     return {"applications": [dict(r) for r in rows]}
+
+
+# Fields a volunteer may self-edit from the service portal "My Account".
+# References + safeguarding data are NOT self-editable here (they go through
+# the guided registration ladder); this is just contact + emergency details.
+_VOL_EDITABLE = (
+    "first_names", "last_name", "mobile", "phone", "address", "postcode",
+    "ec_full_name", "ec_mobile", "ec_phone",
+)
+
+
+class VolunteerDetailsUpdate(BaseModel):
+    first_names: str | None = None
+    last_name: str | None = None
+    mobile: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    postcode: str | None = None
+    ec_full_name: str | None = None
+    ec_mobile: str | None = None
+    ec_phone: str | None = None
+
+
+@router.patch("/volunteer/{reference}")
+async def update_my_volunteer_details(reference: str, body: VolunteerDetailsUpdate, request: Request) -> dict[str, Any]:
+    """Let a signed-in volunteer update their own contact + emergency-contact
+    details. Scoped to the donor's own record (contact or email match). Adding
+    an emergency contact here advances them to Stage 1 automatically."""
+    claims = _bearer(request)
+    cid = claims["sub"]
+    email = (claims.get("email") or "").lower()
+    updates = {k: (v.strip() if isinstance(v, str) else v)
+               for k, v in body.model_dump().items() if v is not None and k in _VOL_EDITABLE}
+    if not updates:
+        return {"ok": True, "unchanged": True}
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        owned = (await db.execute(text("""
+            SELECT id::text AS id FROM volunteers
+            WHERE reference_number = :ref
+              AND ((contact_id = CAST(:cid AS uuid)) OR (:email <> '' AND lower(email) = :email))
+            LIMIT 1
+        """), {"ref": reference, "cid": cid, "email": email})).mappings().first()
+        if not owned:
+            raise HTTPException(status_code=404, detail="Volunteer record not found for your account.")
+        set_sql = ", ".join(f"{col} = :{col}" for col in updates)
+        await db.execute(text(f"UPDATE volunteers SET {set_sql} WHERE id = CAST(:id AS uuid)"),
+                         {**updates, "id": owned["id"]})
+        # Recompute the progression stage from the fresh row (emergency contact
+        # → Stage 1; two references + confidentiality → Stage 2). Never downgrade
+        # someone who already earned references.
+        row = (await db.execute(text("""
+            SELECT (ec_full_name <> '' AND (ec_mobile <> '' OR ec_phone <> '')) AS ec_ok,
+                   (ref1_first_names <> '' AND ref2_first_names <> '' AND confidentiality_agreed) AS refs_ok
+            FROM volunteers WHERE id = CAST(:id AS uuid)
+        """), {"id": owned["id"]})).mappings().first()
+        stage = 2 if (row and row["ec_ok"] and row["refs_ok"]) else (1 if (row and row["ec_ok"]) else 0)
+        await db.execute(text("UPDATE volunteers SET stage = :st WHERE id = CAST(:id AS uuid)"),
+                         {"st": stage, "id": owned["id"]})
+        await db.commit()
+    return {"ok": True, "stage": stage}

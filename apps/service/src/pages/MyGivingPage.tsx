@@ -6,8 +6,18 @@ const API = (import.meta.env.VITE_API_URL as string) || '/api/v1'
 
 interface Sub { id: string; provider: string; amount: number; frequency: string; status: string; branch_id: string; created_at: string; last_payment_at: string | null }
 interface Don { id: string; amount: number; payment_provider: string; purpose: string; status: string; created_at: string }
-interface VolApp { reference: string; stage: number; status: string; branch_id: string; created_at: string; has_emergency_contact: boolean; has_references: boolean }
+interface VolApp {
+  reference: string; stage: number; status: string; branch_id: string; created_at: string
+  has_emergency_contact: boolean; has_references: boolean
+  first_names?: string; last_name?: string; email?: string; mobile?: string; phone?: string
+  address?: string; postcode?: string; ec_full_name?: string; ec_mobile?: string; ec_phone?: string
+}
+type VolForm = {
+  first_names: string; last_name: string; mobile: string; phone: string
+  address: string; postcode: string; ec_full_name: string; ec_mobile: string; ec_phone: string
+}
 
+const inp = 'w-full px-3 py-2 rounded-lg text-sm outline-none bg-white/5 border border-white/10 text-white placeholder-white/30 focus:border-gold-400/50'
 const PROVIDER_LABEL: Record<string, string> = { stripe: '💳 Card', paypal: 'PayPal' }
 const STAGE_META: Record<number, { icon: string; name: string; next: string }> = {
   0: { icon: '🌱', name: 'Registered',     next: 'Add an emergency contact to help at a one-day seva.' },
@@ -22,6 +32,38 @@ export function MyGivingPage() {
   const [vols, setVols] = useState<VolApp[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [editRef, setEditRef] = useState('')     // reference currently being edited
+  const [form, setForm] = useState<VolForm | null>(null)
+  const [savingVol, setSavingVol] = useState(false)
+  const [volMsg, setVolMsg] = useState('')
+
+  function startEdit(v: VolApp) {
+    setVolMsg(''); setEditRef(v.reference)
+    setForm({
+      first_names: v.first_names || '', last_name: v.last_name || '', mobile: v.mobile || '',
+      phone: v.phone || '', address: v.address || '', postcode: v.postcode || '',
+      ec_full_name: v.ec_full_name || '', ec_mobile: v.ec_mobile || '', ec_phone: v.ec_phone || '',
+    })
+  }
+  const fset = (k: keyof VolForm, val: string) => setForm(p => p ? { ...p, [k]: val } : p)
+
+  async function saveVol(reference: string) {
+    if (!form) return
+    setSavingVol(true); setVolMsg('')
+    try {
+      const res = await fetch(`${API}/auth/donor/volunteer/${reference}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${donorToken}` },
+        body: JSON.stringify(form),
+      })
+      if (!res.ok) throw new Error('save failed')
+      // Reload volunteering so the card + stage reflect the update.
+      const d = await fetch(`${API}/auth/donor/volunteering`, { headers: { Authorization: `Bearer ${donorToken}` } })
+        .then(r => r.ok ? r.json() : { applications: [] })
+      setVols(d.applications || []); setEditRef(''); setForm(null); setVolMsg('✓ Details updated.')
+    } catch { setVolMsg('Could not save — please try again.') }
+    finally { setSavingVol(false) }
+  }
 
   useEffect(() => {
     if (!donorToken) { setScreen('donor-login'); return }
@@ -43,8 +85,8 @@ export function MyGivingPage() {
   const activeSub = subs.find(s => (s.status || '').toUpperCase() === 'ACTIVE')
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6 pb-24">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-5xl mx-auto px-4 py-8 pb-24">
+      <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="font-display font-bold text-2xl text-gold-400">My Account</h1>
           <p className="text-sm" style={{ color: 'rgba(255,248,220,0.5)' }}>{donorName || donorEmail}</p>
@@ -61,7 +103,9 @@ export function MyGivingPage() {
         <>
           {error && <p className="text-sm mb-4" style={{ color: '#f87171' }}>{error}</p>}
 
-          {/* ── My Volunteering ── */}
+          <div className="grid md:grid-cols-2 gap-x-8 gap-y-8 items-start">
+          {/* ── Left column: My Volunteering ── */}
+          <div>
           <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>My volunteering</p>
           {vols.length === 0 ? (
             <div className="temple-card p-5 text-center mb-6">
@@ -82,18 +126,73 @@ export function MyGivingPage() {
                     </div>
                     <p className="text-xs mt-1.5" style={{ color: 'rgba(255,248,220,0.55)' }}>{m.next}</p>
                     <p className="text-[11px] mt-1" style={{ color: 'rgba(255,248,220,0.35)' }}>{v.branch_id} · since {fmt(v.created_at)}</p>
-                    {v.stage < 2 && (
-                      <button onClick={() => setScreen('volunteer')} className="mt-3 text-xs font-bold px-3 py-1.5 rounded-lg"
-                        style={{ background: 'rgba(212,175,55,0.15)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.3)' }}>
-                        Add details to unlock more →
-                      </button>
+
+                    {/* Submitted details (read-only) */}
+                    {editRef !== v.reference && (
+                      <div className="mt-3 pt-3 space-y-1 text-xs" style={{ borderTop: '1px solid rgba(212,175,55,0.15)' }}>
+                        <p style={{ color: 'rgba(255,248,220,0.7)' }}>
+                          <b style={{ color: 'rgba(255,248,220,0.85)' }}>{(v.first_names || '') + ' ' + (v.last_name || '')}</b>
+                        </p>
+                        {v.email && <p style={{ color: 'rgba(255,248,220,0.5)' }}>✉️ {v.email}</p>}
+                        {(v.mobile || v.phone) && <p style={{ color: 'rgba(255,248,220,0.5)' }}>📱 {v.mobile || v.phone}</p>}
+                        {(v.address || v.postcode) && <p style={{ color: 'rgba(255,248,220,0.5)' }}>🏠 {[v.address, v.postcode].filter(Boolean).join(', ')}</p>}
+                        {v.ec_full_name
+                          ? <p style={{ color: 'rgba(255,248,220,0.5)' }}>🆘 {v.ec_full_name} · {v.ec_mobile || v.ec_phone}</p>
+                          : <p style={{ color: 'rgba(255,248,220,0.4)' }}>🆘 No emergency contact yet — add one to help at a seva.</p>}
+                      </div>
                     )}
+
+                    {/* Edit form */}
+                    {editRef === v.reference && form && (
+                      <div className="mt-3 pt-3 space-y-2" style={{ borderTop: '1px solid rgba(212,175,55,0.15)' }}>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input className={inp} placeholder="First name" value={form.first_names} onChange={e => fset('first_names', e.target.value)} />
+                          <input className={inp} placeholder="Last name" value={form.last_name} onChange={e => fset('last_name', e.target.value)} />
+                        </div>
+                        <input className={inp} placeholder="Mobile" value={form.mobile} onChange={e => fset('mobile', e.target.value)} />
+                        <input className={inp} placeholder="Phone (optional)" value={form.phone} onChange={e => fset('phone', e.target.value)} />
+                        <input className={inp} placeholder="Address" value={form.address} onChange={e => fset('address', e.target.value)} />
+                        <input className={inp} placeholder="Postcode" value={form.postcode} onChange={e => fset('postcode', e.target.value)} />
+                        <p className="text-[11px] pt-1" style={{ color: 'rgba(212,175,55,0.6)' }}>Emergency contact (unlocks one-day seva)</p>
+                        <input className={inp} placeholder="Emergency contact name" value={form.ec_full_name} onChange={e => fset('ec_full_name', e.target.value)} />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input className={inp} placeholder="Their mobile" value={form.ec_mobile} onChange={e => fset('ec_mobile', e.target.value)} />
+                          <input className={inp} placeholder="Their phone" value={form.ec_phone} onChange={e => fset('ec_phone', e.target.value)} />
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <button onClick={() => saveVol(v.reference)} disabled={savingVol}
+                            className="text-xs font-bold px-4 py-1.5 rounded-lg disabled:opacity-50"
+                            style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+                            {savingVol ? 'Saving…' : 'Save details'}
+                          </button>
+                          <button onClick={() => { setEditRef(''); setForm(null) }} className="text-xs font-bold px-3 py-1.5 rounded-lg"
+                            style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.6)' }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {editRef !== v.reference && (
+                      <div className="flex gap-2 flex-wrap mt-3">
+                        <button onClick={() => startEdit(v)} className="text-xs font-bold px-3 py-1.5 rounded-lg"
+                          style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.75)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                          ✏️ Update my details
+                        </button>
+                        <button onClick={() => setScreen('seva')} className="text-xs font-bold px-3 py-1.5 rounded-lg"
+                          style={{ background: 'rgba(212,175,55,0.15)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.3)' }}>
+                          🪔 Book a seva slot →
+                        </button>
+                      </div>
+                    )}
+                    {volMsg && editRef !== v.reference && <p className="text-xs mt-2" style={{ color: '#4ade80' }}>{volMsg}</p>}
                   </motion.div>
                 )
               })}
             </div>
           )}
 
+          </div>
+          {/* ── Right column: Monthly support + Recent donations ── */}
+          <div>
           <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Monthly support</p>
           {subs.length === 0 ? (
             <div className="temple-card p-5 text-center mb-6">
@@ -138,6 +237,8 @@ export function MyGivingPage() {
               ))}
             </div>
           )}
+          </div>
+          </div>
         </>
       )}
     </div>
