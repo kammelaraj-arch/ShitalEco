@@ -192,9 +192,12 @@ function KeyRow({
             )}
           </div>
           <p className="text-white/40 text-xs mt-0.5 truncate">{k.description}</p>
-          {k.updated_at && k.updated_by && (
-            <p className="text-white/20 text-xs mt-0.5">
-              Updated by {k.updated_by} · {new Date(k.updated_at).toLocaleDateString('en-GB')}
+          {k.has_value && (
+            <p className="text-white/40 text-xs mt-0.5">
+              🔒 Set by <span className="text-white/60 font-semibold">{k.updated_by || 'system'}</span>
+              {k.updated_at && ` · ${new Date(k.updated_at).toLocaleString('en-GB', {
+                day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+              })}`}
             </p>
           )}
         </div>
