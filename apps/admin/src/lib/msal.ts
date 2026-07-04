@@ -53,26 +53,25 @@ export interface ShitalAuthResult {
   }
 }
 
-// ── Sign-in with Microsoft (popup, no MSAL / no window.crypto) ───────────────
+// ── Build the Azure AD authorize URL (shared by popup + redirect flows) ──────
 
-export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
+async function buildAuthUrl(): Promise<string> {
   const config = await getAzureConfig()
   if (!config.enabled || !config.client_id) {
     throw new Error('Azure AD SSO is not configured. Add MS_CLIENT_ID and MS_TENANT_ID in Admin → API Keys.')
   }
-
   // Use admin-configured redirect URI (MS_REDIRECT_URI secret) so it matches
   // exactly what's registered in Azure AD app registration.
   //
   // Fallback must include the /admin basePath — the Next.js admin app is
   // served under /admin/* (next.config.mjs: basePath:'/admin', trailingSlash:
   // true), so /auth-callback without that prefix doesn't resolve and nginx
-  // bounces the popup to /admin/login/, looking like an infinite sign-in loop.
+  // bounces to /admin/login/, looking like an infinite sign-in loop.
   const redirectUri = (config as any).redirect_uri || `${window.location.origin}/admin/auth-callback/`
   // Use Date.now() as nonce — avoids window.crypto which is HTTPS-only
   const nonce = String(Date.now())
   const scope = encodeURIComponent('openid profile email')
-  const authUrl = [
+  return [
     `${config.authority}/oauth2/v2.0/authorize`,
     `?client_id=${config.client_id}`,
     `&response_type=id_token`,
@@ -82,6 +81,21 @@ export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
     `&nonce=${nonce}`,
     `&prompt=select_account`,
   ].join('')
+}
+
+// ── Redirect flow (mobile — popups don't work in mobile browsers) ────────────
+// Full-page navigate to Azure AD; the id_token comes back to /auth-callback/
+// which completes sign-in in the same tab (see auth-callback/page.tsx). This
+// never returns — the page navigates away.
+export async function beginMicrosoftRedirect(): Promise<void> {
+  const authUrl = await buildAuthUrl()
+  window.location.assign(authUrl)
+}
+
+// ── Sign-in with Microsoft (popup, desktop — no MSAL / no window.crypto) ─────
+
+export async function signInWithMicrosoft(): Promise<ShitalAuthResult> {
+  const authUrl = await buildAuthUrl()
 
   const width = 520, height = 640
   const left = window.screenX + (window.innerWidth - width) / 2
