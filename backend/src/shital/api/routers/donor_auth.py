@@ -472,3 +472,27 @@ async def my_giving(request: Request) -> dict[str, Any]:
         "subscriptions": [dict(s) for s in subs],
         "donations": [dict(d) for d in dons],
     }
+
+
+@router.get("/volunteering")
+async def my_volunteering(request: Request) -> dict[str, Any]:
+    """The logged-in donor's volunteer registration(s) + progress, matched by
+    contact or email — so a volunteer who signs in sees their own dashboard."""
+    claims = _bearer(request)
+    cid = claims["sub"]
+    email = (claims.get("email") or "").lower()
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT reference_number AS reference, COALESCE(stage, 0) AS stage,
+                   status, branch_id, created_at,
+                   (ec_full_name <> '' AND (ec_mobile <> '' OR ec_phone <> '')) AS has_emergency_contact,
+                   (ref1_first_names <> '' AND ref2_first_names <> '' AND confidentiality_agreed) AS has_references
+            FROM volunteers
+            WHERE (contact_id = CAST(:cid AS uuid))
+               OR (:email <> '' AND lower(email) = :email)
+            ORDER BY created_at DESC LIMIT 20
+        """), {"cid": cid, "email": email})).mappings().all()
+    return {"applications": [dict(r) for r in rows]}

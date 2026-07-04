@@ -219,7 +219,7 @@ export function Header() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold text-sm transition-all active:scale-95"
             style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text)', border: '1px solid rgba(255,255,255,0.12)' }}>
             <span>{donorToken ? '🙏' : '👤'}</span>
-            <span className="hidden sm:inline">{donorToken ? 'My Giving' : 'Sign in'}</span>
+            <span className="hidden sm:inline">{donorToken ? 'My Account' : 'Sign in'}</span>
           </button>
 
           {/* Basket */}
