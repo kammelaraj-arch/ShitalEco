@@ -85,6 +85,19 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  apps/admin-app:
+    dependencies:
+      '@capacitor/android':
+        specifier: ^6.0.0
+        version: 6.2.1(@capacitor/core@6.2.1)
+      '@capacitor/core':
+        specifier: ^6.0.0
+        version: 6.2.1
+    devDependencies:
+      '@capacitor/cli':
+        specifier: ^6.0.0
+        version: 6.2.1
+
   apps/kiosk:
     dependencies:
       '@capacitor/android':
