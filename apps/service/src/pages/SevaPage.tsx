@@ -54,6 +54,9 @@ export function SevaPage() {
 
   // Shift ids the caller has already booked — server truth + this session's.
   const bookedIds = new Set<string>([...booked, ...myBookings.map(b => b.shift_id)])
+  // Hide slots the caller already booked from "Open seva needs" so they can't
+  // book the same slot twice — those appear in the "My booked seva" section.
+  const openShifts = shifts.filter(s => !bookedIds.has(s.id))
 
   function ensureIdentity(): boolean {
     if (!name.trim() || !email.includes('@')) {
@@ -140,14 +143,17 @@ export function SevaPage() {
       <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Open seva needs</p>
       {loading ? (
         <p className="text-center py-10 text-sm" style={{ color: 'rgba(255,248,220,0.4)' }}>Loading…</p>
-      ) : shifts.length === 0 ? (
+      ) : openShifts.length === 0 ? (
         <div className="temple-card p-5 text-center mb-6">
-          <p className="text-sm" style={{ color: 'rgba(255,248,220,0.6)' }}>No open seva right now. Offer your availability below and we'll call on you. 🙏</p>
+          <p className="text-sm" style={{ color: 'rgba(255,248,220,0.6)' }}>
+            {myBookings.length > 0
+              ? 'You\'ve booked all the open seva — thank you! 🙏 Offer more availability below.'
+              : 'No open seva right now. Offer your availability below and we\'ll call on you. 🙏'}
+          </p>
         </div>
       ) : (
         <div className="space-y-2 mb-6">
-          {shifts.map(s => {
-            const isBooked = bookedIds.has(s.id)
+          {openShifts.map(s => {
             const full = s.spots_left <= 0
             return (
               <motion.div key={s.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="temple-card p-4">
@@ -159,16 +165,12 @@ export function SevaPage() {
                       🕒 {whenLabel(s.starts_at)} · 📍 {branchLabel(s.branch_id)} · {s.booked}/{s.needed} booked
                     </p>
                   </div>
-                  {isBooked ? (
-                    <span className="text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0" style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80' }}>✓ Booked</span>
-                  ) : (
-                    <button onClick={() => book(s)} disabled={busyId === s.id || full}
-                      className="text-xs font-black px-3 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-50"
-                      style={full ? { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }
-                                  : { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
-                      {busyId === s.id ? '…' : full ? 'Full' : `Book · ${s.spots_left} left`}
-                    </button>
-                  )}
+                  <button onClick={() => book(s)} disabled={busyId === s.id || full}
+                    className="text-xs font-black px-3 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-50"
+                    style={full ? { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }
+                                : { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
+                    {busyId === s.id ? '…' : full ? 'Full' : `Book · ${s.spots_left} left`}
+                  </button>
                 </div>
               </motion.div>
             )
