@@ -253,6 +253,35 @@ export const api = {
     return data
   },
 
+  // ── Seva shifts & booking ───────────────────────────────────────────────
+  async getSevaShifts(branchId = ''): Promise<{ shifts: SevaShift[] }> {
+    const r = await fetch(`${API}/seva/shifts?branch_id=${encodeURIComponent(branchId)}`)
+    if (!r.ok) throw new Error(`Could not load seva (HTTP ${r.status})`)
+    return r.json()
+  },
+  async bookSeva(shiftId: string, body: { name: string; email: string; phone?: string }, token?: string):
+      Promise<{ ok: boolean; already_booked?: boolean }> {
+    const r = await fetch(`${API}/seva/shifts/${encodeURIComponent(shiftId)}/book`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+    })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error((d as { detail?: string }).detail || `Booking failed (HTTP ${r.status})`)
+    return d
+  },
+  async offerSevaAvailability(body: { name: string; email: string; branch_id: string; note: string }, token?: string):
+      Promise<{ ok: boolean }> {
+    const r = await fetch(`${API}/seva/availability`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+    })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error((d as { detail?: string }).detail || `Could not save (HTTP ${r.status})`)
+    return d
+  },
+
   async getFormConfig(formKey: string): Promise<{ form_key: string; fields: Record<string, string> }> {
     const r = await fetch(`${API}/service/form-config/${formKey}`)
     if (!r.ok) throw new Error(`form-config fetch failed: ${r.status}`)
@@ -338,6 +367,11 @@ export interface VolunteerRegistrationPayload {
   // Where the volunteer wants to help: array of branch codes, with the
   // literal "remote" as a sentinel for online/remote-only volunteering.
   preferred_branches: string[]
+}
+
+export interface SevaShift {
+  id: string; branch_id: string; title: string; description: string
+  starts_at: string; ends_at: string | null; needed: number; booked: number; spots_left: number
 }
 
 export interface VolunteerAdvancePayload {

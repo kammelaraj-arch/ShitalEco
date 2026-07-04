@@ -50,6 +50,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/hr/alerts',         icon: '🚨', label: 'HR Alerts' },
       { href: '/payroll',           icon: '💷', label: 'Payroll' },
       { href: '/volunteers',        icon: '🤝', label: 'Volunteers' },
+      { href: '/seva',              icon: '🪔', label: 'Seva Shifts' },
       { href: '/volunteers/reference-requests', icon: '📨', label: 'Reference Requests' },
     ],
   },
