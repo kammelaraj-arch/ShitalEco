@@ -85,8 +85,8 @@ export function MyGivingPage() {
   const activeSub = subs.find(s => (s.status || '').toUpperCase() === 'ACTIVE')
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6 pb-24">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-5xl mx-auto px-4 py-8 pb-24">
+      <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="font-display font-bold text-2xl text-gold-400">My Account</h1>
           <p className="text-sm" style={{ color: 'rgba(255,248,220,0.5)' }}>{donorName || donorEmail}</p>
@@ -103,7 +103,9 @@ export function MyGivingPage() {
         <>
           {error && <p className="text-sm mb-4" style={{ color: '#f87171' }}>{error}</p>}
 
-          {/* ── My Volunteering ── */}
+          <div className="grid md:grid-cols-2 gap-x-8 gap-y-8 items-start">
+          {/* ── Left column: My Volunteering ── */}
+          <div>
           <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>My volunteering</p>
           {vols.length === 0 ? (
             <div className="temple-card p-5 text-center mb-6">
@@ -188,6 +190,9 @@ export function MyGivingPage() {
             </div>
           )}
 
+          </div>
+          {/* ── Right column: Monthly support + Recent donations ── */}
+          <div>
           <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Monthly support</p>
           {subs.length === 0 ? (
             <div className="temple-card p-5 text-center mb-6">
@@ -232,6 +237,8 @@ export function MyGivingPage() {
               ))}
             </div>
           )}
+          </div>
+          </div>
         </>
       )}
     </div>
