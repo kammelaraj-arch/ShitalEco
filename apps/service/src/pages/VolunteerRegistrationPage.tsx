@@ -96,9 +96,8 @@ export function VolunteerRegistrationPage() {
     setError('')
     if (!f.first_names.trim() || !f.last_name.trim()) return setError('Please enter your first and last name.')
     if (!EMAIL_RE.test(f.email.trim())) return setError('Please enter a valid email address (e.g. name@example.com).')
-    if (!f.mobile.trim() && !f.phone.trim()) return setError('Please give a mobile or phone number.')
-    if (f.mobile.trim() && !PHONE_RE.test(f.mobile.trim())) return setError('Please enter a valid mobile number.')
-    if (f.phone.trim() && !PHONE_RE.test(f.phone.trim())) return setError('Please enter a valid phone number.')
+    if (!f.mobile.trim()) return setError('Please give a mobile number.')
+    if (!PHONE_RE.test(f.mobile.trim())) return setError('Please enter a valid mobile number.')
     if (!f.age_range) return setError('Please confirm your age range (18+).')
     // Capture the branch the volunteer is registering with. Use their explicit
     // pick; else the branch already selected in the portal; require a real one.
@@ -159,7 +158,6 @@ export function VolunteerRegistrationPage() {
           <input className={inp} type="email" placeholder="Email*" value={f.email} onChange={e => set('email', e.target.value)} />
           <div className="flex gap-2">
             <input className={inp} placeholder="Mobile*" value={f.mobile} onChange={e => set('mobile', e.target.value)} />
-            <input className={inp} placeholder="Phone (optional)" value={f.phone} onChange={e => set('phone', e.target.value)} />
           </div>
           <div>
             <label className={lbl} style={lblGold}>Age range (must be 18+)*</label>
