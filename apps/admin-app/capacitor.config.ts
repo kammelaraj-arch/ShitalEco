@@ -26,13 +26,14 @@ const config: CapacitorConfig = {
       backgroundColor: '#0B0B0F',
       showSpinner: false,
     },
-    // Route fetch()/XHR through Android's native HTTP stack so the admin API
-    // calls to https://admin.shital.org.uk/api/v1/* don't hit a CORS preflight
-    // against https://localhost (the WebView's default origin). Same fix used
-    // by the Kiosk and Quick Donation apps.
-    CapacitorHttp: {
-      enabled: true,
-    },
+    // NOTE: CapacitorHttp is intentionally NOT enabled. The admin panel is a
+    // Next.js app served from admin.shital.org.uk, and its API calls to
+    // /api/v1/* are SAME-ORIGIN (the WebView origin is admin.shital.org.uk via
+    // server.url), so there's no CORS preflight to bypass. Enabling
+    // CapacitorHttp patches window.fetch/XHR, which breaks Next.js's
+    // client-side data / RSC fetches → "a client-side exception has occurred"
+    // on load. (Quick Donation needs it only because it calls a cross-origin
+    // API from a different origin — not the case here.)
   },
 }
 
