@@ -437,6 +437,19 @@ async def register_volunteer(
         branch_id=body.branch_id,
     )
 
+    # Auto-add to the branch's default seva group (mandatory) so admins can
+    # message all of a branch's volunteers. Best-effort — never blocks signup.
+    try:
+        from shital.api.routers.seva import add_volunteer_to_branch_group
+        await add_volunteer_to_branch_group(
+            body.branch_id,
+            f"{body.first_names.strip()} {body.last_name.strip()}".strip(),
+            email_key,
+            (body.mobile or body.phone or "").strip(),
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "success": True,
         "reference_number": reference,

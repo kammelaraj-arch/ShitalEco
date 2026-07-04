@@ -11,9 +11,19 @@ interface Booking { id: string; name: string; email: string; phone: string; stat
 interface Avail { id: string; name: string; email: string; branch_id: string; note: string; created_at: string }
 interface Group {
   id: string; branch_id: string; name: string; description: string; status: string
-  members: number; staff: number; volunteers: number
+  members: number; staff: number; volunteers: number; leads: number; is_default: boolean
 }
 interface Member { id: string; member_type: string; name: string; email: string; phone: string; added_at: string }
+interface Person { name: string; email: string; phone: string; source: string }
+
+const MEMBER_TYPES: Array<{ v: string; label: string }> = [
+  { v: 'volunteer', label: 'Volunteer' },
+  { v: 'staff', label: 'Staff' },
+  { v: 'volunteer_lead', label: 'Volunteer lead ⭐' },
+  { v: 'staff_lead', label: 'Staff lead ⭐' },
+]
+const typeLabel = (t: string) => MEMBER_TYPES.find(x => x.v === t)?.label.replace(' ⭐', '') || t
+const isLead = (t: string) => t.endsWith('_lead')
 
 const BRANCHES = [
   { id: 'wembley', label: 'Wembley' }, { id: 'leicester', label: 'Leicester' },
@@ -46,6 +56,10 @@ export default function SevaPage() {
   const [gMsg, setGMsg] = useState('')
   const [openMembers, setOpenMembers] = useState<Record<string, Member[]>>({})
   const [mForm, setMForm] = useState<Record<string, { name: string; email: string; phone: string; member_type: string }>>({})
+  const [peopleQ, setPeopleQ] = useState<Record<string, string>>({})
+  const [people, setPeople] = useState<Record<string, Person[]>>({})
+  const [gCompose, setGCompose] = useState<Record<string, { subject: string; body: string } | undefined>>({})
+  const [syncMsg, setSyncMsg] = useState('')
 
   const set = <K extends keyof typeof EMPTY>(k: K, v: (typeof EMPTY)[K]) => setF(p => ({ ...p, [k]: v }))
 
@@ -91,10 +105,46 @@ export default function SevaPage() {
     } catch (e) { setGMsg(e instanceof Error ? e.message : 'Failed to add member') }
   }
   async function removeMember(gid: string, mid: string) {
-    await apiFetch(`/admin/seva/groups/${gid}/members/${mid}`, { method: 'DELETE' })
+    try {
+      await apiFetch(`/admin/seva/groups/${gid}/members/${mid}`, { method: 'DELETE' })
+    } catch (e) { setGMsg(e instanceof Error ? e.message : 'Could not remove'); return }
     const d = await apiFetch<{ members: Member[] }>(`/admin/seva/groups/${gid}/members`)
     setOpenMembers(p => ({ ...p, [gid]: d.members || [] }))
     await load()
+  }
+  // Search staff + volunteers (by the group's branch) and pick to fill the form.
+  async function searchPeople(gid: string, branch: string, q: string) {
+    setPeopleQ(p => ({ ...p, [gid]: q }))
+    if (q.trim().length < 2) { setPeople(p => ({ ...p, [gid]: [] })); return }
+    try {
+      const d = await apiFetch<{ people: Person[] }>(`/admin/seva/people?branch_id=${encodeURIComponent(branch)}&q=${encodeURIComponent(q)}`)
+      setPeople(p => ({ ...p, [gid]: d.people || [] }))
+    } catch { /* ignore */ }
+  }
+  function pickPerson(gid: string, pn: Person) {
+    setMForm(p => ({ ...p, [gid]: {
+      name: pn.name, email: pn.email, phone: pn.phone,
+      member_type: pn.source === 'staff' ? 'staff' : (p[gid]?.member_type || 'volunteer'),
+    } }))
+    setPeople(p => ({ ...p, [gid]: [] })); setPeopleQ(p => ({ ...p, [gid]: '' }))
+  }
+  async function syncVolunteers() {
+    setSyncMsg('Syncing…')
+    try {
+      const r = await apiFetch<{ added: number; scanned: number }>('/admin/seva/groups/sync-volunteers', { method: 'POST' })
+      setSyncMsg(`✓ Added ${r.added} volunteer(s) to their branch groups (${r.scanned} scanned).`)
+      await load()
+    } catch (e) { setSyncMsg(e instanceof Error ? e.message : 'Sync failed') }
+  }
+  async function sendGroupMessage(gid: string) {
+    const c = gCompose[gid]
+    if (!c || !c.subject.trim() || !c.body.trim()) { setGMsg('Add a subject and message.'); return }
+    setGMsg('')
+    try {
+      const r = await apiFetch<{ sent: number; total: number }>(`/admin/seva/groups/${gid}/message`, { method: 'POST', body: JSON.stringify(c) })
+      setGCompose(p => ({ ...p, [gid]: undefined }))
+      setGMsg(`✓ Message sent to ${r.sent}/${r.total} member(s).`)
+    } catch (e) { setGMsg(e instanceof Error ? e.message : 'Could not send') }
   }
   const mSet = (gid: string, k: 'name' | 'email' | 'phone' | 'member_type', v: string) =>
     setMForm(p => {
@@ -266,8 +316,13 @@ export default function SevaPage() {
 
       {/* Groups */}
       <div className={card}>
-        <p className="text-xs font-bold uppercase tracking-widest text-saffron-300 mb-1">Groups</p>
-        <p className="text-white/40 text-sm mb-4">Create a group (e.g. Palki group, cooking help) and add staff &amp; volunteer members.</p>
+        <div className="flex items-start justify-between gap-3 mb-1">
+          <p className="text-xs font-bold uppercase tracking-widest text-saffron-300">Groups</p>
+          <button onClick={syncVolunteers} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 flex-shrink-0">↻ Sync branch volunteers</button>
+        </div>
+        <p className="text-white/40 text-sm mb-1">Create a group (e.g. Palki group, cooking help) and add staff &amp; volunteer members — search existing people, or type them in. Set staff/volunteer leads (⭐, more than one for backup).</p>
+        <p className="text-white/30 text-xs mb-4">Each branch has an auto-managed <b>“All … volunteers”</b> group — every registered volunteer is added automatically, so you can message a whole branch at once.</p>
+        {syncMsg && <p className="text-sm text-saffron-300 mb-3">{syncMsg}</p>}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div className="sm:col-span-2">
             <label className={lbl}>Group name</label>
@@ -296,22 +351,40 @@ export default function SevaPage() {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="min-w-0">
                   <p className="font-bold text-white">
-                    {g.name}
+                    {g.is_default && <span className="mr-1">🏛️</span>}{g.name}
                     <span className="text-white/40 text-xs font-normal"> · {g.branch_id}</span>
+                    {g.is_default && <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-saffron-400/15 text-saffron-300">Default</span>}
                     {g.status !== 'ACTIVE' && <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-white/50">{g.status}</span>}
                   </p>
                   <p className="text-xs text-white/50 mt-0.5">
-                    👥 <b className="text-saffron-300">{g.members}</b> members · {g.staff} staff · {g.volunteers} volunteers
+                    👥 <b className="text-saffron-300">{g.members}</b> members · {g.staff} staff · {g.volunteers} volunteers{g.leads ? ` · ⭐ ${g.leads} lead${g.leads > 1 ? 's' : ''}` : ''}
                   </p>
                   {g.description && <p className="text-xs text-white/40 mt-0.5">{g.description}</p>}
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 flex-shrink-0 flex-wrap">
+                  <button onClick={() => setGCompose(p => ({ ...p, [g.id]: p[g.id] ? undefined : { subject: '', body: '' } }))}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-saffron-400/10 border border-saffron-400/25 text-saffron-300">✉️ Message</button>
                   <button onClick={() => toggleMembers(g.id)} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70">{openMembers[g.id] ? 'Hide' : 'Members'}</button>
-                  {g.status === 'ACTIVE'
+                  {!g.is_default && (g.status === 'ACTIVE'
                     ? <button onClick={() => archiveGroup(g.id, 'ARCHIVED')} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70">Archive</button>
-                    : <button onClick={() => archiveGroup(g.id, 'ACTIVE')} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70">Restore</button>}
+                    : <button onClick={() => archiveGroup(g.id, 'ACTIVE')} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70">Restore</button>)}
                 </div>
               </div>
+
+              {/* Message compose */}
+              {gCompose[g.id] && (
+                <div className="mt-3 border-t border-white/10 pt-3 space-y-2">
+                  <input className={field} placeholder="Subject" value={gCompose[g.id]?.subject || ''}
+                    onChange={e => setGCompose(p => ({ ...p, [g.id]: { subject: e.target.value, body: p[g.id]?.body || '' } }))} />
+                  <textarea className={field} rows={3} placeholder={`Message to everyone in ${g.name}…`} value={gCompose[g.id]?.body || ''}
+                    onChange={e => setGCompose(p => ({ ...p, [g.id]: { subject: p[g.id]?.subject || '', body: e.target.value } }))} />
+                  <div className="flex gap-2">
+                    <button onClick={() => sendGroupMessage(g.id)} className="text-xs font-black px-4 py-2 rounded-lg bg-saffron-gradient text-white">Send email to {g.members} member{g.members !== 1 ? 's' : ''}</button>
+                    <button onClick={() => setGCompose(p => ({ ...p, [g.id]: undefined }))} className="text-xs px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white/60">Cancel</button>
+                  </div>
+                  <p className="text-[11px] text-white/30">Sent by email now — in-app push notifications arrive with the native Seva app.</p>
+                </div>
+              )}
 
               {openMembers[g.id] && (
                 <div className="mt-3 border-t border-white/10 pt-3 space-y-2">
@@ -319,25 +392,48 @@ export default function SevaPage() {
                   {openMembers[g.id].map(m => (
                     <div key={m.id} className="flex items-center justify-between gap-2 text-xs">
                       <span className="text-white/70">
-                        <span className={`mr-1.5 px-1.5 py-0.5 rounded ${m.member_type === 'staff' ? 'bg-saffron-400/20 text-saffron-300' : 'bg-white/10 text-white/50'}`}>{m.member_type}</span>
+                        <span className={`mr-1.5 px-1.5 py-0.5 rounded ${isLead(m.member_type) ? 'bg-saffron-400/25 text-saffron-200' : m.member_type === 'staff' ? 'bg-saffron-400/15 text-saffron-300' : 'bg-white/10 text-white/50'}`}>
+                          {isLead(m.member_type) && '⭐ '}{typeLabel(m.member_type)}{isLead(m.member_type) ? ' lead' : ''}
+                        </span>
                         <b className="text-white">{m.name}</b> · {m.email}{m.phone ? ` · ${m.phone}` : ''}
                       </span>
-                      <button onClick={() => removeMember(g.id, m.id)} className="text-red-300/70 hover:text-red-300 px-2">Remove</button>
+                      {!g.is_default && <button onClick={() => removeMember(g.id, m.id)} className="text-red-300/70 hover:text-red-300 px-2">Remove</button>}
                     </div>
                   ))}
                   {/* Add member */}
-                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-2">
-                    <input className={field + ' sm:col-span-1'} placeholder="Name" value={mForm[g.id]?.name || ''} onChange={e => mSet(g.id, 'name', e.target.value)} />
-                    <input className={field + ' sm:col-span-2'} placeholder="Email" value={mForm[g.id]?.email || ''} onChange={e => mSet(g.id, 'email', e.target.value)} />
-                    <input className={field} placeholder="Phone (optional)" value={mForm[g.id]?.phone || ''} onChange={e => mSet(g.id, 'phone', e.target.value)} />
-                    <div className="flex gap-1">
-                      <select className={field} value={mForm[g.id]?.member_type || 'volunteer'} onChange={e => mSet(g.id, 'member_type', e.target.value)}>
-                        <option value="volunteer">Volunteer</option>
-                        <option value="staff">Staff</option>
-                      </select>
-                      <button onClick={() => addMember(g.id)} className="px-3 rounded-xl font-black text-sm bg-saffron-gradient text-white">Add</button>
+                  {g.is_default ? (
+                    <p className="text-[11px] text-white/40 pt-1">Members here are managed automatically from volunteer registrations — use “↻ Sync branch volunteers” to backfill.</p>
+                  ) : (
+                    <div className="pt-2 space-y-2">
+                      {/* Search existing staff / volunteers for this branch */}
+                      <div className="relative">
+                        <input className={field} placeholder="🔍 Search staff or volunteers by name / email…"
+                          value={peopleQ[g.id] || ''} onChange={e => searchPeople(g.id, g.branch_id, e.target.value)} />
+                        {(people[g.id]?.length ?? 0) > 0 && (
+                          <div className="absolute z-10 left-0 right-0 mt-1 rounded-xl bg-[#1a1206] border border-white/10 max-h-52 overflow-auto shadow-xl">
+                            {people[g.id].map((pn, i) => (
+                              <button key={i} onClick={() => pickPerson(g.id, pn)}
+                                className="w-full text-left px-3 py-2 hover:bg-white/5 flex items-center justify-between gap-2">
+                                <span className="text-xs text-white/80"><b>{pn.name}</b> · {pn.email}</span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${pn.source === 'staff' ? 'bg-saffron-400/20 text-saffron-300' : 'bg-white/10 text-white/50'}`}>{pn.source}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                        <input className={field + ' sm:col-span-1'} placeholder="Name" value={mForm[g.id]?.name || ''} onChange={e => mSet(g.id, 'name', e.target.value)} />
+                        <input className={field + ' sm:col-span-2'} placeholder="Email" value={mForm[g.id]?.email || ''} onChange={e => mSet(g.id, 'email', e.target.value)} />
+                        <input className={field} placeholder="Phone (optional)" value={mForm[g.id]?.phone || ''} onChange={e => mSet(g.id, 'phone', e.target.value)} />
+                        <div className="flex gap-1">
+                          <select className={field} value={mForm[g.id]?.member_type || 'volunteer'} onChange={e => mSet(g.id, 'member_type', e.target.value)}>
+                            {MEMBER_TYPES.map(t => <option key={t.v} value={t.v}>{t.label}</option>)}
+                          </select>
+                          <button onClick={() => addMember(g.id)} className="px-3 rounded-xl font-black text-sm bg-saffron-gradient text-white">Add</button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>

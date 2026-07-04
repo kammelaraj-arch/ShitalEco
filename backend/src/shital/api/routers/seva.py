@@ -105,6 +105,10 @@ async def _ensure_schema() -> None:
         # withdraw ("I can't make it"), so no-one who merely knows your email
         # can cancel your booking.
         await db.execute(text("ALTER TABLE seva_bookings ADD COLUMN IF NOT EXISTS cancel_pin VARCHAR(8) NOT NULL DEFAULT ''"))
+        # Per-branch default group — every volunteer registered for a branch is
+        # auto-added (mandatory), so admins can message all of a branch's
+        # volunteers at once.
+        await db.execute(text("ALTER TABLE seva_groups ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT false"))
         # Recurrence + festival tagging (added after the first release).
         await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS series_id UUID"))
         await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS recurrence VARCHAR(20) NOT NULL DEFAULT 'ONCE'"))
@@ -504,11 +508,19 @@ class GroupUpdate(BaseModel):
     status: str | None = None       # ACTIVE | ARCHIVED
 
 
+_MEMBER_TYPES = ("volunteer", "staff", "volunteer_lead", "staff_lead")
+
+
 class MemberBody(BaseModel):
     name: str = ""
     email: str = ""
     phone: str = ""
-    member_type: str = "volunteer"  # staff | volunteer
+    member_type: str = "volunteer"  # volunteer | staff | volunteer_lead | staff_lead
+
+
+class GroupMessageBody(BaseModel):
+    subject: str
+    body: str
 
 
 @router.post("/admin/seva/groups")
@@ -541,9 +553,11 @@ async def admin_list_groups(space: CurrentSpace, branch_id: str = "") -> dict[st
     async with SessionLocal() as db:
         rows = (await db.execute(text("""
             SELECT g.id::text AS id, g.branch_id, g.name, g.description, g.status, g.created_at,
+                   g.is_default,
                    COUNT(m.id) AS members,
-                   COUNT(m.id) FILTER (WHERE m.member_type = 'staff') AS staff,
-                   COUNT(m.id) FILTER (WHERE m.member_type = 'volunteer') AS volunteers
+                   COUNT(m.id) FILTER (WHERE m.member_type IN ('staff', 'staff_lead')) AS staff,
+                   COUNT(m.id) FILTER (WHERE m.member_type IN ('volunteer', 'volunteer_lead')) AS volunteers,
+                   COUNT(m.id) FILTER (WHERE m.member_type IN ('staff_lead', 'volunteer_lead')) AS leads
             FROM seva_groups g LEFT JOIN seva_group_members m ON m.group_id = g.id
             WHERE (:branch = '' OR g.branch_id = :branch)
             GROUP BY g.id ORDER BY g.status ASC, g.name ASC
@@ -606,7 +620,7 @@ async def admin_add_member(group_id: str, body: MemberBody, space: CurrentSpace)
     email = body.email.strip().lower()
     if not name or "@" not in email:
         raise HTTPException(400, detail="Member name and a valid email are required.")
-    mtype = "staff" if body.member_type == "staff" else "volunteer"
+    mtype = body.member_type if body.member_type in _MEMBER_TYPES else "volunteer"
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
@@ -634,8 +648,180 @@ async def admin_remove_member(group_id: str, member_id: str, space: CurrentSpace
 
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
+        # Membership of a branch's default group is mandatory for registered
+        # volunteers — don't let it be removed by hand.
+        grp = (await db.execute(text(
+            "SELECT is_default FROM seva_groups WHERE id = CAST(:gid AS uuid)"), {"gid": group_id})).mappings().first()
+        if grp and grp["is_default"]:
+            raise HTTPException(400, detail="This is the branch's default group — members are managed automatically and can't be removed here.")
         await db.execute(text(
             "DELETE FROM seva_group_members WHERE id = CAST(:mid AS uuid) AND group_id = CAST(:gid AS uuid)"
         ), {"mid": member_id, "gid": group_id})
         await db.commit()
     return {"ok": True}
+
+
+_BRANCH_LABELS = {
+    "wembley": "Wembley", "wembley_main": "Wembley", "leicester": "Leicester",
+    "reading": "Reading", "milton_keynes": "Milton Keynes", "main": "All temples",
+}
+
+
+def _branch_label(bid: str) -> str:
+    return _BRANCH_LABELS.get((bid or "").lower(), (bid or "Temple").replace("_", " ").title())
+
+
+async def _ensure_default_group_id(db: Any, branch_id: str) -> str:
+    """Find (or create) the mandatory default group for a branch."""
+    from sqlalchemy import text
+    bid = branch_id or "main"
+    row = (await db.execute(text(
+        "SELECT id::text AS id FROM seva_groups WHERE is_default = true AND branch_id = :b LIMIT 1"
+    ), {"b": bid})).mappings().first()
+    if row:
+        return row["id"]
+    gid = str(uuid.uuid4())
+    await db.execute(text("""
+        INSERT INTO seva_groups (id, branch_id, name, description, is_default, created_by)
+        VALUES (:id, :b, :name, :desc, true, 'system')
+    """), {"id": gid, "b": bid, "name": f"All {_branch_label(bid)} volunteers",
+           "desc": "Everyone registered to volunteer at this branch (auto-managed)."})
+    return gid
+
+
+async def add_volunteer_to_branch_group(branch_id: str, name: str, email: str, phone: str = "") -> None:
+    """Add a registered volunteer to their branch's mandatory default group.
+    Best-effort — never raises into the caller (volunteer registration)."""
+    email = (email or "").strip().lower()
+    if "@" not in email:
+        return
+    try:
+        await _ensure_schema()
+        from sqlalchemy import text
+
+        from shital.core.fabrics.database import SessionLocal
+        async with SessionLocal() as db:
+            gid = await _ensure_default_group_id(db, branch_id or "main")
+            await db.execute(text("""
+                INSERT INTO seva_group_members (id, group_id, member_type, name, email, phone, added_by)
+                VALUES (:id, CAST(:gid AS uuid), 'volunteer', :name, :em, :ph, 'system')
+                ON CONFLICT (group_id, email) DO UPDATE SET name = EXCLUDED.name
+            """), {"id": str(uuid.uuid4()), "gid": gid, "name": (name or "").strip() or email,
+                   "em": email, "ph": (phone or "").strip()})
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@router.post("/admin/seva/groups/sync-volunteers")
+async def admin_sync_volunteers(space: CurrentSpace, branch_id: str = "") -> dict[str, Any]:
+    """Backfill every registered volunteer into their branch's default group."""
+    _require_admin(space)
+    await _ensure_schema()
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    added = 0
+    async with SessionLocal() as db:
+        vols = (await db.execute(text("""
+            SELECT branch_id,
+                   TRIM(CONCAT(first_names, ' ', last_name)) AS name,
+                   lower(COALESCE(email, '')) AS email,
+                   COALESCE(mobile, phone, '') AS phone
+            FROM volunteers
+            WHERE COALESCE(email, '') <> '' AND (:branch = '' OR branch_id = :branch)
+        """), {"branch": branch_id})).mappings().all()
+        cache: dict[str, str] = {}
+        for v in vols:
+            b = v["branch_id"] or "main"
+            if b not in cache:
+                cache[b] = await _ensure_default_group_id(db, b)
+            r = await db.execute(text("""
+                INSERT INTO seva_group_members (id, group_id, member_type, name, email, phone, added_by)
+                VALUES (:id, CAST(:gid AS uuid), 'volunteer', :name, :em, :ph, 'system')
+                ON CONFLICT (group_id, email) DO NOTHING
+            """), {"id": str(uuid.uuid4()), "gid": cache[b], "name": v["name"] or v["email"],
+                   "em": v["email"], "ph": v["phone"]})
+            added += r.rowcount or 0
+        await db.commit()
+    return {"ok": True, "added": added, "scanned": len(vols)}
+
+
+@router.get("/admin/seva/people")
+async def admin_search_people(space: CurrentSpace, branch_id: str = "", q: str = "") -> dict[str, Any]:
+    """Type-ahead over staff (employees) + volunteers, optionally filtered to a
+    branch, to add group members without typing name/email by hand."""
+    _require_admin(space)
+    await _ensure_schema()
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    like = f"%{q.strip().lower()}%"
+    out: list[dict[str, Any]] = []
+    async with SessionLocal() as db:
+        staff = (await db.execute(text("""
+            SELECT full_name AS name, COALESCE(email, '') AS email, COALESCE(phone, '') AS phone
+            FROM employees
+            WHERE is_active = true AND deleted_at IS NULL
+              AND (:branch = '' OR branch_id = :branch)
+              AND (:q = '%%' OR lower(full_name) LIKE :q OR lower(COALESCE(email, '')) LIKE :q)
+            ORDER BY full_name ASC LIMIT 15
+        """), {"branch": branch_id, "q": like})).mappings().all()
+        for r in staff:
+            out.append(dict(r) | {"source": "staff"})
+        vols = (await db.execute(text("""
+            SELECT TRIM(CONCAT(first_names, ' ', last_name)) AS name,
+                   COALESCE(email, '') AS email, COALESCE(mobile, phone, '') AS phone
+            FROM volunteers
+            WHERE (:branch = '' OR branch_id = :branch)
+              AND (:q = '%%' OR lower(CONCAT(first_names, ' ', last_name)) LIKE :q
+                   OR lower(COALESCE(email, '')) LIKE :q)
+            ORDER BY first_names ASC LIMIT 15
+        """), {"branch": branch_id, "q": like})).mappings().all()
+        for r in vols:
+            if r["email"]:
+                out.append(dict(r) | {"source": "volunteer"})
+    return {"people": out}
+
+
+@router.post("/admin/seva/groups/{group_id}/message")
+async def admin_message_group(group_id: str, body: GroupMessageBody, space: CurrentSpace) -> dict[str, Any]:
+    """Email everyone in a group. (In-app push lands with the native Seva app.)"""
+    _require_admin(space)
+    await _ensure_schema()
+    subject = body.subject.strip()
+    message = body.body.strip()
+    if not subject or not message:
+        raise HTTPException(400, detail="A subject and a message are required.")
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        grp = (await db.execute(text(
+            "SELECT name FROM seva_groups WHERE id = CAST(:id AS uuid)"), {"id": group_id})).mappings().first()
+        if not grp:
+            raise HTTPException(404, detail="Group not found.")
+        rows = (await db.execute(text(
+            "SELECT DISTINCT lower(email) AS email, name FROM seva_group_members "
+            "WHERE group_id = CAST(:id AS uuid) AND email <> ''"
+        ), {"id": group_id})).mappings().all()
+
+    from shital.api.routers.email_templates import send_raw_email
+    html = (
+        f"<p>Dear {{name}},</p><p>{message.replace(chr(10), '<br>')}</p>"
+        f"<p style='color:#888;font-size:12px'>— {grp['name']} · Shri Shirdi Saibaba Temple (SHITAL)</p>"
+    )
+    sent = 0
+    for r in rows:
+        try:
+            await send_raw_email(
+                to_email=r["email"],
+                subject=subject,
+                html_body=html.replace("{name}", r["name"] or "volunteer"),
+                text_body=f"Dear {r['name'] or 'volunteer'},\n\n{message}\n\n— {grp['name']} · SHITAL",
+                related_type="seva_group", related_id=group_id, triggered_by=space.user_email,
+            )
+            sent += 1
+        except Exception:  # noqa: BLE001,PERF203
+            continue
+    return {"ok": True, "sent": sent, "total": len(rows)}
