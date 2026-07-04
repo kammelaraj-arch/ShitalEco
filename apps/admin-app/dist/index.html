@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Shital Admin</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0B0B0F; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+  .wrap { height: 100%; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 1.25rem; padding: 2rem; text-align: center; }
+  .logo { width: 72px; height: 72px; border-radius: 1.3rem;
+    background: linear-gradient(135deg, #d97706, #b91c1c); display: flex; align-items: center;
+    justify-content: center; font-size: 2rem; box-shadow: 0 10px 32px rgba(185,28,28,0.35); }
+  h1 { font-size: 1.25rem; font-weight: 800; margin: 0; }
+  p { color: rgba(255,255,255,0.5); font-size: 0.9rem; max-width: 20rem; line-height: 1.5; margin: 0; }
+  .spinner { width: 26px; height: 26px; border: 3px solid rgba(255,255,255,0.15);
+    border-top-color: #FF9933; border-radius: 50%; animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  a { color: #FF9933; text-decoration: none; font-weight: 700; }
+</style>
+</head>
+<body>
+  <!-- Shown only if the device is offline; normally the app live-loads
+       https://admin.shital.org.uk/ via the Capacitor server.url config. -->
+  <div class="wrap">
+    <div class="logo">🛕</div>
+    <h1>Shital Admin</h1>
+    <div class="spinner"></div>
+    <p>Connecting to the admin panel…<br>If this persists, check your internet connection, then reopen the app.</p>
+    <p><a href="https://admin.shital.org.uk/">Open admin.shital.org.uk</a></p>
+  </div>
+  <script>
+    // Belt-and-braces: if the live server.url didn't take over, push to the
+    // live admin panel once we detect connectivity.
+    setTimeout(function () {
+      if (navigator.onLine) location.href = 'https://admin.shital.org.uk/'
+    }, 2500)
+    window.addEventListener('online', function () {
+      location.href = 'https://admin.shital.org.uk/'
+    })
+  </script>
+</body>
+</html>

@@ -6,6 +6,7 @@ on:
     paths:
       - 'apps/kiosk/**'
       - 'apps/quick-donation/**'
+      - 'apps/admin-app/**'
       - '.github/workflows/build-kiosk.yml'
   workflow_dispatch:
 
@@ -225,6 +226,45 @@ jobs:
           path: apps/quick-donation/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
+  build-admin-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install pnpm
+        run: npm install -g pnpm@9.4.0
+      - name: Install dependencies
+        working-directory: apps/admin-app
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - name: Add Android platform
+        working-directory: apps/admin-app
+        env:
+          ADMIN_LIVE_URL: "https://admin.shital.org.uk/"
+        run: npx cap add android
+      - name: Sync web assets into Android project
+        working-directory: apps/admin-app
+        env:
+          ADMIN_LIVE_URL: "https://admin.shital.org.uk/"
+        run: npx cap sync android --inline
+      - name: Set Gradle permissions
+        working-directory: apps/admin-app/android
+        run: chmod +x gradlew
+      - name: Build debug APK
+        working-directory: apps/admin-app/android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Upload Admin APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-android
+          path: apps/admin-app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
   # ─── Publish ALL installers to a stable GitHub Release ─────────────────────
   # Maintains a rolling `kiosk-latest` tag/release with consistent filenames:
   #   shital-kiosk-windows-setup.exe       (Windows x64 NSIS installer)
@@ -238,8 +278,8 @@ jobs:
   #
   # The admin Software Downloads page links directly to these.
   publish-installers:
-    needs: [build-windows, build-linux-x64, build-linux-arm64, build-android, build-quick-donation-android]
-    if: ${{ always() && (needs.build-android.result == 'success' || needs.build-windows.result == 'success' || needs.build-linux-x64.result == 'success' || needs.build-linux-arm64.result == 'success' || needs.build-quick-donation-android.result == 'success') }}
+    needs: [build-windows, build-linux-x64, build-linux-arm64, build-android, build-quick-donation-android, build-admin-android]
+    if: ${{ always() && (needs.build-android.result == 'success' || needs.build-windows.result == 'success' || needs.build-linux-x64.result == 'success' || needs.build-linux-arm64.result == 'success' || needs.build-quick-donation-android.result == 'success' || needs.build-admin-android.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -281,6 +321,11 @@ jobs:
             cp artifacts/quick-donation-android/app-debug.apk release/shital-quick-donation-latest.apk
             cp artifacts/quick-donation-android/app-debug.apk "release/shital-quick-donation-${GITHUB_SHA::7}.apk"
             echo "✓ Quick Donation Android APK"
+          fi
+          if [ -f artifacts/admin-android/app-debug.apk ]; then
+            cp artifacts/admin-android/app-debug.apk release/shital-admin-latest.apk
+            cp artifacts/admin-android/app-debug.apk "release/shital-admin-${GITHUB_SHA::7}.apk"
+            echo "✓ Admin Android APK"
           fi
           ls -lh release/
       - name: Move kiosk-latest tag and upload assets
