@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useStore } from '../store'
+import { AddressLookup } from '../components/AddressLookup'
 
 const API = (import.meta.env.VITE_API_URL as string) || '/api/v1'
 
@@ -151,8 +152,8 @@ export function MyGivingPage() {
                         </div>
                         <input className={inp} placeholder="Mobile" value={form.mobile} onChange={e => fset('mobile', e.target.value)} />
                         <input className={inp} placeholder="Phone (optional)" value={form.phone} onChange={e => fset('phone', e.target.value)} />
-                        <input className={inp} placeholder="Address" value={form.address} onChange={e => fset('address', e.target.value)} />
-                        <input className={inp} placeholder="Postcode" value={form.postcode} onChange={e => fset('postcode', e.target.value)} />
+                        <AddressLookup compact postcode={form.postcode} address={form.address}
+                          onChange={next => setForm(p => p ? { ...p, postcode: next.postcode, address: next.address } : p)} />
                         <p className="text-[11px] pt-1" style={{ color: 'rgba(212,175,55,0.6)' }}>Emergency contact (unlocks one-day seva)</p>
                         <input className={inp} placeholder="Emergency contact name" value={form.ec_full_name} onChange={e => fset('ec_full_name', e.target.value)} />
                         <div className="grid grid-cols-2 gap-2">

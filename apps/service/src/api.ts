@@ -259,6 +259,15 @@ export const api = {
     if (!r.ok) throw new Error(`Could not load seva (HTTP ${r.status})`)
     return r.json()
   },
+  // The caller's own booked seva — by donor token if signed in, else by email.
+  async getMySevaBookings(email = '', token?: string): Promise<{ bookings: SevaBooking[] }> {
+    const q = email ? `?email=${encodeURIComponent(email)}` : ''
+    const r = await fetch(`${API}/seva/my-bookings${q}`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+    if (!r.ok) return { bookings: [] }
+    return r.json()
+  },
   async bookSeva(shiftId: string, body: { name: string; email: string; phone?: string }, token?: string):
       Promise<{ ok: boolean; already_booked?: boolean }> {
     const r = await fetch(`${API}/seva/shifts/${encodeURIComponent(shiftId)}/book`, {
@@ -372,6 +381,11 @@ export interface VolunteerRegistrationPayload {
 export interface SevaShift {
   id: string; branch_id: string; title: string; description: string
   starts_at: string; ends_at: string | null; needed: number; booked: number; spots_left: number
+}
+
+export interface SevaBooking {
+  id: string; shift_id: string; title: string; description: string
+  branch_id: string; starts_at: string; kind: string; status: string; booked_at: string
 }
 
 export interface VolunteerAdvancePayload {
