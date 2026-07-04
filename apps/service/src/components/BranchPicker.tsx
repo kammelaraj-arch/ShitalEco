@@ -107,6 +107,7 @@ export function BranchPicker() {
                 name={b.name}
                 city={b.city}
                 emoji={cityEmoji(b.city)}
+                logo
                 onClick={() => setBranch(b.branch_id, b.name, false)}
               />
             ))}
@@ -122,9 +123,9 @@ export function BranchPicker() {
 }
 
 function BranchCard({
-  name, city, emoji, onClick,
+  name, city, emoji, onClick, logo = false,
 }: {
-  name: string; city: string; emoji: string; onClick: () => void
+  name: string; city: string; emoji: string; onClick: () => void; logo?: boolean
 }) {
   return (
     <motion.button
@@ -133,12 +134,30 @@ function BranchCard({
       onClick={onClick}
       className="w-full temple-card p-4 flex items-center gap-4 text-left"
     >
-      <div
-        className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0"
-        style={{ background: 'rgba(212,175,55,0.12)' }}
-      >
-        {emoji}
-      </div>
+      {logo ? (
+        <div className="w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0"
+          style={{ background: '#fff' }}>
+          <img src={SHITAL_LOGO_URL} alt="" className="w-full h-full object-contain p-0.5"
+            onError={e => {
+              const el = e.currentTarget
+              el.style.display = 'none'
+              const parent = el.parentElement
+              if (parent && !parent.querySelector('.fallback-emoji')) {
+                const span = document.createElement('span')
+                span.className = 'fallback-emoji text-2xl'
+                span.textContent = '🛕'
+                parent.appendChild(span)
+              }
+            }} />
+        </div>
+      ) : (
+        <div
+          className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0"
+          style={{ background: 'rgba(212,175,55,0.12)' }}
+        >
+          {emoji}
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <p className="font-bold text-ivory-200 truncate text-sm">{name}</p>
         {city && <p className="text-xs truncate mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>{city}</p>}
