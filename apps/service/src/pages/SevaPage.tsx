@@ -95,6 +95,12 @@ export function SevaPage() {
         <div className="text-4xl mb-2">🤝</div>
         <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">Seva at the temple</h1>
         <p className="text-sm" style={{ color: 'rgba(255,248,220,0.55)' }}>Book a slot to help — every hand is a blessing.</p>
+        <a href="https://github.com/kammelaraj-arch/ShitalEco/releases/download/kiosk-latest/shital-seva-latest.apk"
+          target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 mt-3 text-xs font-bold px-3 py-1.5 rounded-lg"
+          style={{ background: 'rgba(212,175,55,0.15)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.3)' }}>
+          📲 Get the Seva app (Android)
+        </a>
       </div>
 
       {/* Identity */}
