@@ -161,6 +161,9 @@ jobs:
           python3 scripts/patch-manifest.py \
             --manifest android/app/src/main/AndroidManifest.xml \
             --snippet  android-kiosk-overlay/AndroidManifest.kiosk-snippet.xml
+      - name: Generate app icons (SHITAL logo)
+        working-directory: apps/kiosk
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
       - name: Set Gradle permissions
         working-directory: apps/kiosk/android
         run: chmod +x gradlew
@@ -215,6 +218,9 @@ jobs:
         env:
           QD_LIVE_URL: "https://donate.shital.org.uk/donate/"
         run: npx cap sync android --inline
+      - name: Generate app icons (SHITAL logo)
+        working-directory: apps/quick-donation
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
       - name: Set Gradle permissions
         working-directory: apps/quick-donation/android
         run: chmod +x gradlew
@@ -254,6 +260,9 @@ jobs:
         env:
           ADMIN_LIVE_URL: "https://admin.shital.org.uk/"
         run: npx cap sync android --inline
+      - name: Generate app icons (SHITAL logo)
+        working-directory: apps/admin-app
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
       - name: Set Gradle permissions
         working-directory: apps/admin-app/android
         run: chmod +x gradlew
@@ -293,6 +302,9 @@ jobs:
         env:
           SEVA_LIVE_URL: "https://service.shital.org.uk/?screen=seva"
         run: npx cap sync android --inline
+      - name: Generate app icons (SHITAL logo)
+        working-directory: apps/seva-app
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
       - name: Set Gradle permissions
         working-directory: apps/seva-app/android
         run: chmod +x gradlew
