@@ -259,6 +259,14 @@ export const api = {
     if (!r.ok) throw new Error(`Could not load seva (HTTP ${r.status})`)
     return r.json()
   },
+  // Active seva groups that have a WhatsApp invite link, for the "join" buttons.
+  async getSevaWhatsappGroups(branchId = ''): Promise<{ groups: SevaWhatsappGroup[] }> {
+    try {
+      const r = await fetch(`${API}/seva/whatsapp-groups?branch_id=${encodeURIComponent(branchId)}`)
+      if (!r.ok) return { groups: [] }
+      return r.json()
+    } catch { return { groups: [] } }
+  },
   // The caller's own booked seva — by donor token if signed in, else by email.
   async getMySevaBookings(email = '', token?: string): Promise<{ bookings: SevaBooking[] }> {
     const q = email ? `?email=${encodeURIComponent(email)}` : ''
@@ -398,6 +406,11 @@ export interface SevaBooking {
   id: string; shift_id: string; title: string; description: string
   branch_id: string; starts_at: string; kind: string; status: string; booked_at: string
   cancel_pin?: string
+}
+
+export interface SevaWhatsappGroup {
+  name: string; description: string; whatsapp_invite_url: string
+  branch_id: string; is_default: boolean
 }
 
 export interface VolunteerAdvancePayload {

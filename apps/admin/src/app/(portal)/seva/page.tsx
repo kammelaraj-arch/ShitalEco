@@ -12,6 +12,7 @@ interface Avail { id: string; name: string; email: string; branch_id: string; no
 interface Group {
   id: string; branch_id: string; name: string; description: string; status: string
   members: number; staff: number; volunteers: number; leads: number; is_default: boolean
+  whatsapp_invite_url: string
 }
 interface Member { id: string; member_type: string; name: string; email: string; phone: string; added_at: string }
 interface Person { name: string; email: string; phone: string; source: string }
@@ -52,8 +53,10 @@ export default function SevaPage() {
   const [openBookings, setOpenBookings] = useState<Record<string, Booking[]>>({})
 
   // Groups
-  const [gForm, setGForm] = useState({ name: '', description: '', branch_id: 'wembley' })
+  const [gForm, setGForm] = useState({ name: '', description: '', branch_id: 'wembley', whatsapp_invite_url: '' })
   const [gMsg, setGMsg] = useState('')
+  const [waEdit, setWaEdit] = useState<Record<string, string>>({})   // group id → draft invite url
+  const [waMsg, setWaMsg] = useState<Record<string, string>>({})
   const [openMembers, setOpenMembers] = useState<Record<string, Member[]>>({})
   const [mForm, setMForm] = useState<Record<string, { name: string; email: string; phone: string; member_type: string }>>({})
   const [peopleQ, setPeopleQ] = useState<Record<string, string>>({})
@@ -80,12 +83,23 @@ export default function SevaPage() {
     if (!gForm.name.trim()) { setGMsg('Give the group a name.'); return }
     try {
       await apiFetch('/admin/seva/groups', { method: 'POST', body: JSON.stringify(gForm) })
-      setGForm({ name: '', description: '', branch_id: gForm.branch_id }); setGMsg('✓ Group created.')
+      setGForm({ name: '', description: '', branch_id: gForm.branch_id, whatsapp_invite_url: '' }); setGMsg('✓ Group created.')
       await load()
     } catch (e) { setGMsg(e instanceof Error ? e.message : 'Failed to create group') }
   }
   async function archiveGroup(id: string, status: string) {
     await apiFetch(`/admin/seva/groups/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }); await load()
+  }
+  async function saveInvite(id: string) {
+    const url = (waEdit[id] ?? '').trim()
+    setWaMsg(p => ({ ...p, [id]: '' }))
+    try {
+      await apiFetch(`/admin/seva/groups/${id}`, { method: 'PATCH', body: JSON.stringify({ whatsapp_invite_url: url }) })
+      setWaMsg(p => ({ ...p, [id]: '✓ Saved' }))
+      setWaEdit(p => { const n = { ...p }; delete n[id]; return n })
+      await load()
+      setTimeout(() => setWaMsg(p => ({ ...p, [id]: '' })), 2500)
+    } catch (e) { setWaMsg(p => ({ ...p, [id]: e instanceof Error ? e.message : 'Save failed' })) }
   }
   async function toggleMembers(id: string) {
     if (openMembers[id]) { setOpenMembers(p => { const n = { ...p }; delete n[id]; return n }); return }
@@ -341,6 +355,11 @@ export default function SevaPage() {
             <label className={lbl}>What the group is for (optional)</label>
             <input className={field} placeholder="Short description" value={gForm.description} onChange={e => setGForm(p => ({ ...p, description: e.target.value }))} />
           </div>
+          <div className="sm:col-span-4">
+            <label className={lbl}>WhatsApp group invite link (optional)</label>
+            <input className={field} placeholder="https://chat.whatsapp.com/…" value={gForm.whatsapp_invite_url} onChange={e => setGForm(p => ({ ...p, whatsapp_invite_url: e.target.value }))} />
+            <p className="text-white/30 text-[11px] mt-1">In WhatsApp: open the group → Invite via link → Copy. Volunteers see a “Join on WhatsApp” button on the Seva page.</p>
+          </div>
         </div>
         {gMsg && <p className="text-sm text-saffron-300 mt-3">{gMsg}</p>}
 
@@ -369,6 +388,24 @@ export default function SevaPage() {
                     ? <button onClick={() => archiveGroup(g.id, 'ARCHIVED')} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70">Archive</button>
                     : <button onClick={() => archiveGroup(g.id, 'ACTIVE')} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70">Restore</button>)}
                 </div>
+              </div>
+
+              {/* WhatsApp invite link */}
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <span className="text-sm">💬</span>
+                <input
+                  className="flex-1 min-w-[220px] px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white text-xs outline-none focus:border-green-400/40 placeholder-white/30"
+                  placeholder="https://chat.whatsapp.com/…  (WhatsApp group invite link)"
+                  value={waEdit[g.id] ?? g.whatsapp_invite_url ?? ''}
+                  onChange={e => setWaEdit(p => ({ ...p, [g.id]: e.target.value }))}
+                />
+                <button onClick={() => saveInvite(g.id)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-green-500/15 border border-green-500/30 text-green-300 font-bold">Save link</button>
+                {g.whatsapp_invite_url && (
+                  <a href={g.whatsapp_invite_url} target="_blank" rel="noopener noreferrer"
+                    className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/60">Open</a>
+                )}
+                {waMsg[g.id] && <span className="text-xs text-green-300">{waMsg[g.id]}</span>}
               </div>
 
               {/* Message compose */}

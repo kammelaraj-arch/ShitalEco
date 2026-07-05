@@ -109,6 +109,10 @@ async def _ensure_schema() -> None:
         # auto-added (mandatory), so admins can message all of a branch's
         # volunteers at once.
         await db.execute(text("ALTER TABLE seva_groups ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT false"))
+        # WhatsApp group invite link — there is no official WhatsApp *group* API,
+        # so we store the shareable invite URL (https://chat.whatsapp.com/…) per
+        # group and surface it to volunteers as a "Join the group" button.
+        await db.execute(text("ALTER TABLE seva_groups ADD COLUMN IF NOT EXISTS whatsapp_invite_url VARCHAR(300) NOT NULL DEFAULT ''"))
         # Recurrence + festival tagging (added after the first release).
         await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS series_id UUID"))
         await db.execute(text("ALTER TABLE seva_shifts ADD COLUMN IF NOT EXISTS recurrence VARCHAR(20) NOT NULL DEFAULT 'ONCE'"))
@@ -161,6 +165,26 @@ async def list_open_shifts(branch_id: str = "") -> dict[str, Any]:
             LIMIT 100
         """), {"branch": branch_id})).mappings().all()
     return {"shifts": [dict(r) | {"spots_left": max(0, int(r["needed"]) - int(r["booked"]))} for r in rows]}
+
+
+@router.get("/seva/whatsapp-groups")
+async def list_whatsapp_groups(branch_id: str = "") -> dict[str, Any]:
+    """Public: active seva groups that have a WhatsApp invite link, so volunteers
+    can tap through to join. Only groups with a link set are returned."""
+    await _ensure_schema()
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT name, description, whatsapp_invite_url, branch_id, is_default
+            FROM seva_groups
+            WHERE status = 'ACTIVE'
+              AND COALESCE(whatsapp_invite_url, '') <> ''
+              AND (:branch = '' OR branch_id = :branch)
+            ORDER BY is_default DESC, name ASC
+        """), {"branch": branch_id})).mappings().all()
+    return {"groups": [dict(r) for r in rows]}
 
 
 class BookBody(BaseModel):
@@ -500,12 +524,14 @@ class GroupBody(BaseModel):
     name: str
     description: str = ""
     branch_id: str = "main"
+    whatsapp_invite_url: str = ""
 
 
 class GroupUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     status: str | None = None       # ACTIVE | ARCHIVED
+    whatsapp_invite_url: str | None = None
 
 
 _MEMBER_TYPES = ("volunteer", "staff", "volunteer_lead", "staff_lead")
@@ -535,10 +561,11 @@ async def admin_create_group(body: GroupBody, space: CurrentSpace) -> dict[str, 
     gid = str(uuid.uuid4())
     async with SessionLocal() as db:
         await db.execute(text("""
-            INSERT INTO seva_groups (id, branch_id, name, description, created_by)
-            VALUES (:id, :branch, :name, :desc, :by)
+            INSERT INTO seva_groups (id, branch_id, name, description, whatsapp_invite_url, created_by)
+            VALUES (:id, :branch, :name, :desc, :wa, :by)
         """), {"id": gid, "branch": body.branch_id, "name": body.name.strip(),
-               "desc": body.description.strip(), "by": space.user_email})
+               "desc": body.description.strip(), "wa": body.whatsapp_invite_url.strip(),
+               "by": space.user_email})
         await db.commit()
     return {"ok": True, "id": gid}
 
@@ -553,7 +580,7 @@ async def admin_list_groups(space: CurrentSpace, branch_id: str = "") -> dict[st
     async with SessionLocal() as db:
         rows = (await db.execute(text("""
             SELECT g.id::text AS id, g.branch_id, g.name, g.description, g.status, g.created_at,
-                   g.is_default,
+                   g.is_default, g.whatsapp_invite_url,
                    COUNT(m.id) AS members,
                    COUNT(m.id) FILTER (WHERE m.member_type IN ('staff', 'staff_lead')) AS staff,
                    COUNT(m.id) FILTER (WHERE m.member_type IN ('volunteer', 'volunteer_lead')) AS volunteers,
@@ -583,6 +610,9 @@ async def admin_update_group(group_id: str, body: GroupUpdate, space: CurrentSpa
             raise HTTPException(400, detail="status must be ACTIVE or ARCHIVED")
         sets.append("status = :st")
         params["st"] = st
+    if body.whatsapp_invite_url is not None:
+        sets.append("whatsapp_invite_url = :wa")
+        params["wa"] = body.whatsapp_invite_url.strip()
     if not sets:
         return {"ok": True, "unchanged": True}
     sets.append("updated_at = NOW()")
