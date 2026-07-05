@@ -17,7 +17,7 @@ interface ApiKey {
 
 // ── Group ordering ────────────────────────────────────────────────────────────
 
-const GROUP_ORDER = ['Stripe', 'SumUp', 'PayPal', 'Microsoft', 'AI', 'Email', 'Google', 'WhatsApp', 'HMRC', 'Address', 'Other']
+const GROUP_ORDER = ['Stripe', 'SumUp', 'PayPal', 'Microsoft', 'AI', 'Email', 'Google', 'TV', 'WhatsApp', 'HMRC', 'Address', 'Other']
 const GROUP_ICONS: Record<string, string> = {
   Stripe:    '💳',
   SumUp:     '🟦',
@@ -26,6 +26,7 @@ const GROUP_ICONS: Record<string, string> = {
   AI:        '🤖',
   Email:     '✉️',
   Google:    '🔍',
+  TV:        '📺',
   WhatsApp:  '💬',
   HMRC:      '🏛️',
   Address:   '📮',
@@ -485,7 +486,12 @@ export default function ApiKeysPage() {
     return acc
   }, {})
 
-  const allGroups = GROUP_ORDER.filter(g => grouped[g])
+  // Known groups first (in order), then any group present in the data that
+  // isn't in GROUP_ORDER (e.g. TV, or a custom group) so nothing is ever hidden.
+  const allGroups = [
+    ...GROUP_ORDER.filter(g => grouped[g]),
+    ...Object.keys(grouped).filter(g => !GROUP_ORDER.includes(g)).sort(),
+  ]
   const filtered = activeGroup === 'all' ? keys : (grouped[activeGroup] || [])
   const filteredGrouped = activeGroup === 'all' ? grouped : { [activeGroup]: filtered }
   const filteredGroupOrder = activeGroup === 'all' ? allGroups : allGroups.filter(g => g === activeGroup)
