@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useStore, detectBranchFromHostname } from './store'
+import { useStore, detectBranchFromHostname, type Screen } from './store'
 import { applyTheme, getTheme } from './themes'
 import { Header } from './components/Header'
 import { BranchPicker } from './components/BranchPicker'
@@ -85,7 +85,13 @@ export default function App() {
           .then(r => r.ok ? r.json() : null)
           .then(d => { if (d) useStore.getState().setDonor(tok, d.name || '', d.email || '') })
           .catch(() => {})
-        setScreen('my-giving')
+        // Land where the login was started from. The OAuth round-trip carries
+        // ?screen=… (e.g. volunteer registration signs in mid-flow); honour it
+        // instead of always dropping the donor on My Giving. Falls back to
+        // My Giving for the plain "sign in" flow that carries no screen param.
+        const want = new URLSearchParams(window.location.search).get('screen')
+        const deepScreens: Screen[] = ['volunteer', 'seva', 'monthly-giving', 'browse', 'reference']
+        setScreen(deepScreens.includes(want as Screen) ? (want as Screen) : 'my-giving')
       }
       history.replaceState(null, '', window.location.pathname + window.location.search)
     } else if (hash.includes('donor_error=')) {
