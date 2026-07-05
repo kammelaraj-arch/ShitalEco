@@ -163,7 +163,12 @@ jobs:
             --snippet  android-kiosk-overlay/AndroidManifest.kiosk-snippet.xml
       - name: Generate app icons (SHITAL logo)
         working-directory: apps/kiosk
-        run: npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
+        run: |
+          # pnpm installs with --ignore-scripts (and pnpm 9 gates build scripts),
+          # so sharp's native binary is never fetched. Rebuild it explicitly —
+          # `pnpm rebuild` runs the package's install script regardless of the gate.
+          pnpm rebuild sharp
+          npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
       - name: Set Gradle permissions
         working-directory: apps/kiosk/android
         run: chmod +x gradlew
@@ -220,7 +225,12 @@ jobs:
         run: npx cap sync android --inline
       - name: Generate app icons (SHITAL logo)
         working-directory: apps/quick-donation
-        run: npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
+        run: |
+          # pnpm installs with --ignore-scripts (and pnpm 9 gates build scripts),
+          # so sharp's native binary is never fetched. Rebuild it explicitly —
+          # `pnpm rebuild` runs the package's install script regardless of the gate.
+          pnpm rebuild sharp
+          npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
       - name: Set Gradle permissions
         working-directory: apps/quick-donation/android
         run: chmod +x gradlew
@@ -262,7 +272,12 @@ jobs:
         run: npx cap sync android --inline
       - name: Generate app icons (SHITAL logo)
         working-directory: apps/admin-app
-        run: npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
+        run: |
+          # pnpm installs with --ignore-scripts (and pnpm 9 gates build scripts),
+          # so sharp's native binary is never fetched. Rebuild it explicitly —
+          # `pnpm rebuild` runs the package's install script regardless of the gate.
+          pnpm rebuild sharp
+          npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
       - name: Set Gradle permissions
         working-directory: apps/admin-app/android
         run: chmod +x gradlew
@@ -304,7 +319,12 @@ jobs:
         run: npx cap sync android --inline
       - name: Generate app icons (SHITAL logo)
         working-directory: apps/seva-app
-        run: npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
+        run: |
+          # pnpm installs with --ignore-scripts (and pnpm 9 gates build scripts),
+          # so sharp's native binary is never fetched. Rebuild it explicitly —
+          # `pnpm rebuild` runs the package's install script regardless of the gate.
+          pnpm rebuild sharp
+          npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
       - name: Set Gradle permissions
         working-directory: apps/seva-app/android
         run: chmod +x gradlew
