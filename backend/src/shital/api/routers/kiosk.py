@@ -1177,6 +1177,130 @@ async def sumup_webhook(request: Request):
     return {"ok": True, "status": status, "applied": new_status}
 
 
+@router.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    """
+    Stripe calls this the instant a Terminal PaymentIntent changes state.
+
+    Real-time complement to the 15-min reconciliation sweeper
+    (`_stripe_reconcile_once`): it flips the matching donations row the moment
+    Stripe confirms the money moved, instead of waiting on the kiosk's
+    fire-and-forget `/order/confirm` or the next sweeper pass. Correctness still
+    comes from the sweeper even if this endpoint (or its signing secret) is
+    never configured — the webhook only makes the flip near-instant.
+
+    Setup (one-time, in the Stripe Dashboard → Developers → Webhooks):
+      • URL:    {SITE_URL}/api/v1/kiosk/stripe/webhook
+      • Events: payment_intent.succeeded, payment_intent.payment_failed,
+                payment_intent.canceled
+      • Copy the signing secret (whsec_…) into Admin → API Keys as
+        STRIPE_WEBHOOK_SECRET (or set the env var).
+
+    Idempotent — the guarded UPDATE (`status IN ('PENDING','')`) makes
+    re-deliveries and races with the sweeper / order-confirm converge on one
+    row, exactly like the SumUp webhook. We only act on the three terminal
+    events above, so a row is never touched mid-tap (the PI is still
+    `requires_payment_method`/`processing` during a live tap and we don't
+    subscribe to those).
+    """
+    import stripe
+
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    secret = await SecretsManager.get("STRIPE_WEBHOOK_SECRET") or settings.STRIPE_WEBHOOK_SECRET
+    if not secret:
+        # Not configured — never trust an unsigned payload. The sweeper still
+        # resolves every row within ~15 min, so this is a no-op, not a failure.
+        return {"ok": False, "reason": "webhook_not_configured"}
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, secret)
+    except Exception:  # noqa: BLE001 — signature mismatch or malformed body
+        raise HTTPException(status_code=400, detail="invalid signature")
+
+    etype = event.get("type", "")
+    if not etype.startswith("payment_intent."):
+        return {"ok": True, "ignored": etype}
+
+    pi = (event.get("data") or {}).get("object") or {}
+    pi_id = pi.get("id") or ""
+    st = (pi.get("status") or "").lower()
+    if not pi_id:
+        return {"ok": False, "reason": "no_payment_intent_id"}
+
+    # Pull actuals (fee/net/card/failure) straight from Stripe — the same fields
+    # the sweeper records — so a COMPLETED row carries real settlement data now,
+    # not 15 min later. Best-effort: on any error we still flip status below and
+    # the sweeper backfills the actuals on its next pass.
+    fee = net = card_type = err_code = err_msg = None
+    try:
+        api_key = await SecretsManager.get("STRIPE_SECRET_KEY") or settings.STRIPE_SECRET_KEY
+
+        def _details() -> dict[str, Any]:
+            stripe.api_key = api_key
+            full = stripe.PaymentIntent.retrieve(pi_id, expand=["latest_charge.balance_transaction"])
+            out: dict[str, Any] = {"fee": None, "net": None, "ct": None, "ec": None, "em": None}
+            lpe = full.get("last_payment_error") or {}
+            if lpe:
+                out["ec"] = (lpe.get("decline_code") or lpe.get("code") or "")[:60] or None
+                out["em"] = (lpe.get("message") or "")[:500] or None
+            ch = full.get("latest_charge")
+            if isinstance(ch, dict):
+                bt = ch.get("balance_transaction")
+                if isinstance(bt, dict):
+                    if bt.get("fee") is not None:
+                        out["fee"] = round(int(bt["fee"]) / 100, 2)
+                    if bt.get("net") is not None:
+                        out["net"] = round(int(bt["net"]) / 100, 2)
+                pmd = ch.get("payment_method_details") or {}
+                card = pmd.get("card_present") or pmd.get("card") or {}
+                if isinstance(card, dict) and card.get("brand"):
+                    out["ct"] = str(card["brand"]).upper()[:30]
+                if not out["em"] and ch.get("failure_message"):
+                    out["ec"] = (ch.get("failure_code") or "")[:60] or None
+                    out["em"] = (ch.get("failure_message") or "")[:500] or None
+            return out
+
+        if api_key:
+            import asyncio as _asyncio
+            d = await _asyncio.to_thread(_details)
+            fee, net, card_type, err_code, err_msg = d["fee"], d["net"], d["ct"], d["ec"], d["em"]
+    except Exception:  # noqa: BLE001
+        pass  # actuals are a bonus; the sweeper backfills them if this fails
+
+    params = {"pi": pi_id, "fee": fee, "net": net, "ct": card_type, "ec": err_code, "em": err_msg}
+    applied: str | None = None
+    async with SessionLocal() as db:
+        if st == "succeeded":
+            await db.execute(text("""
+                UPDATE donations SET status = 'COMPLETED',
+                    actual_fee_amount = COALESCE(:fee, actual_fee_amount),
+                    actual_net_amount = COALESCE(:net, actual_net_amount),
+                    settled_at = CASE WHEN :net IS NOT NULL THEN NOW() ELSE settled_at END,
+                    card_type  = COALESCE(:ct, card_type),
+                    updated_at = NOW()
+                WHERE payment_ref = :pi AND deleted_at IS NULL
+                  AND UPPER(COALESCE(status, '')) IN ('PENDING', '')
+            """), params)
+            applied = "COMPLETED"
+        elif etype == "payment_intent.payment_failed" or st == "canceled":
+            # payment_failed = a real decline (carries last_payment_error) → FAILED.
+            # canceled with no error = abandoned/voided → CANCELLED.
+            new_status = "FAILED" if (etype == "payment_intent.payment_failed" or err_msg) else "CANCELLED"
+            await db.execute(text("""
+                UPDATE donations SET status = :st,
+                    last_failure_code    = COALESCE(:ec, last_failure_code),
+                    last_failure_message = COALESCE(:em, last_failure_message),
+                    card_type  = COALESCE(:ct, card_type),
+                    updated_at = NOW()
+                WHERE payment_ref = :pi AND deleted_at IS NULL
+                  AND UPPER(COALESCE(status, '')) IN ('PENDING', '')
+            """), {**params, "st": new_status})
+            applied = new_status
+        await db.commit()
+
+    return {"ok": True, "event": etype, "status": st, "applied": applied}
+
+
 @router.get("/sumup/checkout/{checkout_id}")
 async def sumup_checkout_status(checkout_id: str):
     """

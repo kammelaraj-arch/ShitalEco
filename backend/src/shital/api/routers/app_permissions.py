@@ -109,12 +109,111 @@ async def update_permissions(body: UpdatePermissionsBody, ctx: RequiredSpace) ->
     return {"saved": True}
 
 
-@router.get("/check")
-async def check_access(app_slug: str, role: str) -> dict[str, bool]:
-    """Quick check — is role allowed to access app_slug?"""
+# ── Per-user app access overrides ────────────────────────────────────────────
+# The role→app matrix above is the platform default. On top of it, an admin can
+# grant or revoke a specific app for a specific user — so every app effectively
+# has its own admin-managed user list. Overrides live in a second app_settings
+# blob (key: app_user_overrides) => { user_id: { app_slug: bool } }. Reusing the
+# existing settings store keeps this a thin layer over what already exists (no
+# new table, no migration).
+
+async def _load_overrides(db: Any) -> dict[str, dict[str, bool]]:
+    row = await db.execute(
+        text("SELECT value FROM app_settings WHERE key = 'app_user_overrides' LIMIT 1")
+    )
+    value: str | None = row.scalar()
+    if value is not None:
+        try:
+            return json.loads(value)
+        except Exception:
+            pass
+    return {}
+
+
+async def _save_overrides(db: Any, ov: dict[str, dict[str, bool]]) -> None:
+    value = json.dumps(ov)
+    await db.execute(text("""
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES ('app_user_overrides', :v, NOW())
+        ON CONFLICT (key) DO UPDATE SET value = :v, updated_at = NOW()
+    """), {"v": value})
+    await db.commit()
+
+
+def _role_allows(app_slug: str, role: str, perms: dict[str, list[str]]) -> bool:
+    """Access from the role→app matrix alone (empty allow-list = public)."""
+    allowed = perms.get(app_slug, DEFAULT_PERMISSIONS.get(app_slug, []))
+    if not allowed:
+        return True
+    return role in allowed
+
+
+@router.get("/users")
+async def list_app_access(ctx: RequiredSpace) -> dict[str, Any]:
+    """Every user with their per-app access: the role default plus any admin
+    grant/revoke override, so admins manage each app's user list from one page."""
     from shital.core.fabrics.database import SessionLocal
     async with SessionLocal() as db:
         perms = await _load_permissions(db)
+        overrides = await _load_overrides(db)
+        rows = (await db.execute(text("""
+            SELECT id::text AS id, email, name, role, branch_id, is_active
+            FROM users
+            WHERE deleted_at IS NULL
+            ORDER BY role, name
+        """))).mappings().all()
+
+    slugs = [a["slug"] for a in PLATFORM_APPS]
+    users = []
+    for r in rows:
+        role = r["role"] or ""
+        uov = overrides.get(r["id"], {}) or {}
+        role_default = {s: _role_allows(s, role, perms) for s in slugs}
+        effective = {s: (bool(uov[s]) if s in uov else role_default[s]) for s in slugs}
+        users.append({
+            "id": r["id"], "email": r["email"], "name": r["name"],
+            "role": role, "branch_id": r["branch_id"], "is_active": r["is_active"],
+            "role_default": role_default,
+            "overrides": uov,
+            "effective": effective,
+        })
+    return {"apps": PLATFORM_APPS, "roles": ALL_ROLES, "users": users}
+
+
+class UpdateUserAccessBody(BaseModel):
+    overrides: dict[str, bool]   # { app_slug: allowed } — only the explicit grants/revokes
+
+
+@router.put("/users/{user_id}")
+async def update_user_access(user_id: str, body: UpdateUserAccessBody, ctx: RequiredSpace) -> dict[str, Any]:
+    valid_slugs = {a["slug"] for a in PLATFORM_APPS}
+    for slug in body.overrides:
+        if slug not in valid_slugs:
+            raise HTTPException(status_code=400, detail=f"Unknown app slug: {slug}")
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        overrides = await _load_overrides(db)
+        clean = {k: bool(v) for k, v in body.overrides.items()}
+        if clean:
+            overrides[user_id] = clean
+        else:
+            overrides.pop(user_id, None)   # back to pure role defaults
+        await _save_overrides(db, overrides)
+    return {"saved": True, "user_id": user_id, "overrides": clean}
+
+
+@router.get("/check")
+async def check_access(app_slug: str, role: str, user_id: str = "") -> dict[str, Any]:
+    """Quick check — is this role (and optional user) allowed to access app_slug?
+    A per-user override, when present, wins over the role default."""
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        perms = await _load_permissions(db)
+        overrides = await _load_overrides(db) if user_id else {}
+    uov = overrides.get(user_id, {}) if user_id else {}
+    if app_slug in uov:
+        return {"allowed": bool(uov[app_slug]), "public": False, "override": True}
     allowed_roles = perms.get(app_slug, DEFAULT_PERMISSIONS.get(app_slug, []))
     # Empty list = public (no restriction)
     if not allowed_roles:
