@@ -565,6 +565,90 @@ async def public_archive(kind: str = "", limit: int = 50) -> dict[str, Any]:
     return {"items": out[:limit]}
 
 
+# ─── Channel branding ────────────────────────────────────────────────────────
+
+class ChannelIn(BaseModel):
+    branch_id: str | None = None
+    channel_name: str = "SHITAL TV"
+    channel_subtitle: str = ""
+    theme_id: str = "dark"
+    banner_url: str = ""
+    secondary_logo_url: str = ""
+
+
+_CHANNEL_DEFAULT = {
+    "branch_id": None, "channel_name": "SHITAL TV", "channel_subtitle": "",
+    "theme_id": "dark", "banner_url": "", "secondary_logo_url": "",
+}
+
+
+async def _channel_for(db: Any, branch_id: str | None) -> dict[str, Any]:
+    """The channel row for a branch, falling back to the default (branch NULL),
+    then to hard-coded defaults so the TV app always renders."""
+    bid = (branch_id or "").strip() or None
+    row = None
+    if bid:
+        row = (await db.execute(text("""
+            SELECT branch_id, channel_name, channel_subtitle, theme_id,
+                   banner_url, secondary_logo_url
+            FROM broadcast_channels WHERE branch_id = :b LIMIT 1
+        """), {"b": bid})).mappings().first()
+    if not row:
+        row = (await db.execute(text("""
+            SELECT branch_id, channel_name, channel_subtitle, theme_id,
+                   banner_url, secondary_logo_url
+            FROM broadcast_channels WHERE branch_id IS NULL LIMIT 1
+        """))).mappings().first()
+    return dict(row) if row else dict(_CHANNEL_DEFAULT)
+
+
+@router.get("/broadcast/channel")
+async def public_channel(branch_id: str = "") -> dict[str, Any]:
+    """Public channel branding for the TV viewer (name/subtitle/theme/logos)."""
+    async with SessionLocal() as db:
+        return await _channel_for(db, branch_id)
+
+
+@router.get("/admin/broadcast/channel")
+async def admin_get_channel(ctx: CurrentSpace, branch_id: str = "") -> dict[str, Any]:
+    _require_admin(ctx)
+    async with SessionLocal() as db:
+        return await _channel_for(db, branch_id)
+
+
+@router.patch("/admin/broadcast/channel")
+async def admin_set_channel(body: ChannelIn, ctx: CurrentSpace) -> dict[str, Any]:
+    """Upsert the channel branding for a branch (branch_id NULL = default)."""
+    _require_admin(ctx)
+    bid = (body.branch_id or "").strip() or None
+    params = {
+        "b": bid, "n": body.channel_name.strip() or "SHITAL TV",
+        "s": body.channel_subtitle.strip(), "t": (body.theme_id or "dark").strip(),
+        "ban": body.banner_url.strip(), "logo": body.secondary_logo_url.strip(),
+    }
+    async with SessionLocal() as db:
+        # COALESCE(branch_id,'') matches the unique index so the upsert targets
+        # the right row for both a specific branch and the NULL default.
+        existing = (await db.execute(text(
+            "SELECT id FROM broadcast_channels WHERE COALESCE(branch_id,'') = COALESCE(:b,'')"
+        ), {"b": bid})).first()
+        if existing:
+            await db.execute(text("""
+                UPDATE broadcast_channels SET
+                    channel_name = :n, channel_subtitle = :s, theme_id = :t,
+                    banner_url = :ban, secondary_logo_url = :logo, updated_at = NOW()
+                WHERE COALESCE(branch_id,'') = COALESCE(:b,'')
+            """), params)
+        else:
+            await db.execute(text("""
+                INSERT INTO broadcast_channels
+                    (branch_id, channel_name, channel_subtitle, theme_id, banner_url, secondary_logo_url)
+                VALUES (:b, :n, :s, :t, :ban, :logo)
+            """), params)
+        await db.commit()
+        return await _channel_for(db, bid)
+
+
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
 def _extract_youtube_id(url: str) -> str | None:

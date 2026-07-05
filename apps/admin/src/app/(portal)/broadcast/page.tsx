@@ -51,7 +51,7 @@ function fmtTime(s: string | null): string {
 }
 
 export default function BroadcastPage() {
-  const [tab, setTab] = useState<'live' | 'schedule' | 'library'>('live')
+  const [tab, setTab] = useState<'live' | 'schedule' | 'library' | 'branding'>('live')
   return (
     <div className="space-y-5 animate-fade-in max-w-7xl">
       <div className="flex items-start justify-between flex-wrap gap-3">
@@ -71,6 +71,7 @@ export default function BroadcastPage() {
           ['live', '🔴 Live Events'],
           ['schedule', '📅 Schedule'],
           ['library', '📚 Content Library'],
+          ['branding', '🎨 Branding'],
         ] as const).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors ${tab === t ? 'border-saffron-400 text-saffron-400' : 'border-transparent text-white/50 hover:text-white/80'}`}>
@@ -82,6 +83,114 @@ export default function BroadcastPage() {
       {tab === 'live'     && <LiveTab />}
       {tab === 'schedule' && <ScheduleTab />}
       {tab === 'library'  && <LibraryTab />}
+      {tab === 'branding' && <BrandingTab />}
+    </div>
+  )
+}
+
+// ─── Branding Tab ───────────────────────────────────────────────────────────
+
+const BRANCHES: Array<{ id: string; label: string }> = [
+  { id: '',          label: 'Default (all branches)' },
+  { id: 'wembley',   label: 'Wembley' },
+  { id: 'leicester', label: 'Leicester' },
+  { id: 'reading',   label: 'Reading' },
+  { id: 'milton',    label: 'Milton Keynes' },
+]
+const THEMES: Array<{ id: string; label: string }> = [
+  { id: 'dark',    label: 'Dark (default)' },
+  { id: 'ivory',   label: 'Ivory (light)' },
+  { id: 'crimson', label: 'Crimson' },
+  { id: 'saffron', label: 'Saffron' },
+  { id: 'indigo',  label: 'Indigo' },
+]
+
+interface Channel {
+  branch_id: string | null; channel_name: string; channel_subtitle: string
+  theme_id: string; banner_url: string; secondary_logo_url: string
+}
+
+function BrandingTab() {
+  const [branch, setBranch] = useState('')
+  const [ch, setCh] = useState<Channel | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const load = useCallback(async (bid: string) => {
+    setLoading(true); setMsg('')
+    try {
+      const q = bid ? `?branch_id=${encodeURIComponent(bid)}` : ''
+      const d = await apiFetch<Channel>(`/admin/broadcast/channel${q}`)
+      setCh(d)
+    } catch { setCh(null) } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load(branch) }, [branch, load])
+
+  async function save() {
+    if (!ch) return
+    setSaving(true); setMsg('')
+    try {
+      await apiFetch('/admin/broadcast/channel', {
+        method: 'PATCH',
+        body: JSON.stringify({ ...ch, branch_id: branch || null }),
+      })
+      setMsg('✓ Saved')
+      setTimeout(() => setMsg(''), 2500)
+    } catch (e) { setMsg(e instanceof Error ? e.message : 'Save failed') }
+    finally { setSaving(false) }
+  }
+
+  const upd = (k: keyof Channel, v: string) => setCh(c => c ? { ...c, [k]: v } : c)
+  const tvUrl = `https://shital.org.uk/tv${branch ? `?branch_id=${branch}` : ''}`
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      <div className="glass-card rounded-2xl p-5 space-y-4">
+        <div>
+          <label className={lbl}>Channel for</label>
+          <select className={inp} value={branch} onChange={e => setBranch(e.target.value)}>
+            {BRANCHES.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+          </select>
+          <p className="text-white/30 text-[11px] mt-1">Each branch can have its own channel skin. “Default” is used when a branch has no override.</p>
+        </div>
+
+        {loading || !ch ? (
+          <p className="text-white/40 text-sm">Loading…</p>
+        ) : (
+          <>
+            <div>
+              <label className={lbl}>Channel name</label>
+              <input className={inp} value={ch.channel_name} onChange={e => upd('channel_name', e.target.value)} placeholder="SHITAL TV" />
+            </div>
+            <div>
+              <label className={lbl}>Subtitle / tagline</label>
+              <input className={inp} value={ch.channel_subtitle} onChange={e => upd('channel_subtitle', e.target.value)} placeholder="Live bhajans · aarti · festivals" />
+            </div>
+            <div>
+              <label className={lbl}>Theme</label>
+              <select className={inp} value={ch.theme_id} onChange={e => upd('theme_id', e.target.value)}>
+                {THEMES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Logo URL (optional)</label>
+              <input className={inp} value={ch.secondary_logo_url} onChange={e => upd('secondary_logo_url', e.target.value)} placeholder="https://…/logo.png" />
+            </div>
+            <div>
+              <label className={lbl}>Banner image URL (optional)</label>
+              <input className={inp} value={ch.banner_url} onChange={e => upd('banner_url', e.target.value)} placeholder="https://…/banner.jpg" />
+            </div>
+            <div className="flex items-center gap-3 pt-1">
+              <button onClick={save} disabled={saving} className="px-5 py-2 rounded-xl bg-saffron-gradient text-white text-sm font-bold disabled:opacity-50">
+                {saving ? 'Saving…' : 'Save branding'}
+              </button>
+              <a href={tvUrl} target="_blank" rel="noreferrer" className="text-saffron-300 text-sm hover:underline">Preview channel ↗</a>
+              {msg && <span className="text-sm text-green-300">{msg}</span>}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

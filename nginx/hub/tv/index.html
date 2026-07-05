@@ -8,8 +8,9 @@
   <link rel="icon" href="/favicon.ico">
   <style>
     *,*:before,*:after { box-sizing: border-box }
-    html, body { margin: 0; padding: 0; background: #0a0606; color: #fff; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif }
-    a { color: #fbbf24 }
+    :root { --accent: #fbbf24 }
+    html, body { margin: 0; padding: 0; background: #0a0606; color: #fff; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; transition: background .3s, color .3s }
+    a { color: var(--accent) }
     .wrap { max-width: 1200px; margin: 0 auto; padding: 16px }
     header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0 16px; border-bottom: 1px solid rgba(255,255,255,.08) }
     header h1 { margin: 0; font-size: 18px; font-weight: 900; letter-spacing: -.01em }
@@ -67,8 +68,12 @@
 </head>
 <body>
   <div class="wrap">
+    <div id="ch-banner" style="display:none;height:120px;border-radius:12px;background:center/cover no-repeat;margin-bottom:12px"></div>
     <header>
-      <h1>📺 Shital TV<small>Live bhajans · aarti · festivals from Shirdi Sai Temple</small></h1>
+      <div style="display:flex;align-items:center;gap:12px;min-width:0">
+        <img id="ch-logo" alt="" style="display:none;height:38px;width:auto;border-radius:8px">
+        <h1><span id="ch-name">📺 Shital TV</span><small id="ch-sub">Live bhajans · aarti · festivals from Shirdi Sai Temple</small></h1>
+      </div>
       <span id="live-pill" class="live-pill off"><span class="dot"></span><span id="live-text">Checking…</span></span>
     </header>
 
@@ -131,6 +136,49 @@
   const API = '/api/v1';
   const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
+  // ── Per-branch channel: /tv?branch_id=wembley&lang=hi ─────────────────────
+  const params = new URLSearchParams(location.search);
+  const BRANCH = (params.get('branch_id') || '').trim();
+  const LANG   = (params.get('lang') || '').trim();
+  const bq = BRANCH ? ('?branch_id=' + encodeURIComponent(BRANCH)) : '';
+  const bqAmp = BRANCH ? ('&branch_id=' + encodeURIComponent(BRANCH)) : '';
+
+  // Channel skins — theme_id from broadcast_channels drives the palette so a
+  // branch can be re-skinned from Admin → Broadcast → Branding, no redeploy.
+  const THEMES = {
+    dark:    { bg: '#0a0606', fg: '#ffffff', accent: '#fbbf24' },
+    ivory:   { bg: '#faf7f0', fg: '#1a1410', accent: '#b8860b' },
+    crimson: { bg: '#1a0505', fg: '#fff5f5', accent: '#f87171' },
+    saffron: { bg: '#1a0f00', fg: '#fff8ec', accent: '#f59e0b' },
+    indigo:  { bg: '#0b0a1f', fg: '#eef0ff', accent: '#a5b4fc' },
+  };
+
+  async function loadChannel() {
+    try {
+      var r = await fetch(API + '/broadcast/channel' + bq);
+      if (!r.ok) return;
+      var c = await r.json();
+      if (c.channel_name) {
+        document.getElementById('ch-name').textContent = '📺 ' + c.channel_name;
+        document.title = c.channel_name + ' — Live Bhajans · Aarti · Festivals';
+      }
+      if (c.channel_subtitle) document.getElementById('ch-sub').textContent = c.channel_subtitle;
+      var th = THEMES[(c.theme_id || 'dark')] || THEMES.dark;
+      document.body.style.background = th.bg;
+      document.body.style.color = th.fg;
+      document.documentElement.style.setProperty('--accent', th.accent);
+      if (c.secondary_logo_url) {
+        var lg = document.getElementById('ch-logo');
+        lg.src = c.secondary_logo_url; lg.style.display = 'block';
+      }
+      if (c.banner_url) {
+        var bn = document.getElementById('ch-banner');
+        bn.style.backgroundImage = 'url(' + c.banner_url + ')';
+        bn.style.display = 'block';
+      }
+    } catch (e) { /* keep defaults */ }
+  }
+
   function setLive(state, text) {
     var pill = document.getElementById('live-pill');
     var txt  = document.getElementById('live-text');
@@ -186,7 +234,7 @@
 
   async function loadNow() {
     try {
-      var r = await fetch(API + '/broadcast/now');
+      var r = await fetch(API + '/broadcast/now' + bq);
       if (!r.ok) throw new Error(r.status);
       var d = await r.json();
 
@@ -234,7 +282,7 @@
 
   async function loadSchedule() {
     try {
-      var r = await fetch(API + '/broadcast/schedule');
+      var r = await fetch(API + '/broadcast/schedule' + bq);
       if (!r.ok) throw new Error(r.status);
       var d = await r.json();
       var todayIdx = (new Date().getDay() + 6) % 7;
@@ -290,7 +338,19 @@
     }
   }
 
-  loadNow(); loadSchedule(); loadArchive();
+  // Carry the branch through to the donate links so a gift from a branch's
+  // channel is attributed to that branch.
+  if (BRANCH) {
+    document.querySelectorAll('.donate a').forEach(function (a) {
+      try {
+        var u = new URL(a.href);
+        u.searchParams.set('branch', BRANCH);
+        a.href = u.toString();
+      } catch (e) { /* ignore */ }
+    });
+  }
+
+  loadChannel(); loadNow(); loadSchedule(); loadArchive();
   setInterval(loadNow, 60_000);  // re-check live status every minute
 })();
 </script>
