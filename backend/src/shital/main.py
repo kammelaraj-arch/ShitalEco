@@ -885,6 +885,21 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_broadcast_live_status  ON broadcast_live_events(status, scheduled_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_broadcast_live_branch  ON broadcast_live_events(branch_id, scheduled_at DESC)",
+        # Channel branding — one row per branch (branch_id NULL = the default
+        # channel). Drives the public TV app's name/subtitle/theme/logos so the
+        # channel can be skinned per branch without a code change.
+        """CREATE TABLE IF NOT EXISTS broadcast_channels (
+            id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id          VARCHAR(100) DEFAULT NULL,
+            channel_name       VARCHAR(160) NOT NULL DEFAULT 'SHITAL TV',
+            channel_subtitle   VARCHAR(255) NOT NULL DEFAULT '',
+            theme_id           VARCHAR(40)  NOT NULL DEFAULT 'dark',
+            banner_url         TEXT         NOT NULL DEFAULT '',
+            secondary_logo_url TEXT         NOT NULL DEFAULT '',
+            created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_broadcast_channels_branch ON broadcast_channels(COALESCE(branch_id, ''))",
 
         # Budget breakdown — one row per category (LABOUR / MATERIALS /
         # SERVICES / TRAVEL / OTHER, matching the project_expenses category
