@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useStore } from '../store'
-import { api, type SevaShift, type SevaBooking } from '../api'
+import { api, type SevaShift, type SevaBooking, type SevaWhatsappGroup } from '../api'
 
 const inp = 'w-full px-4 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 focus:border-saffron-400/50 outline-none text-ivory-100 placeholder-white/30'
 
@@ -45,6 +45,14 @@ export function SevaPage() {
       .catch(() => setError('Could not load seva right now.'))
       .finally(() => setLoading(false))
   }, [])
+
+  // Seva groups with a WhatsApp invite link — shown as "Join on WhatsApp" buttons.
+  const [waGroups, setWaGroups] = useState<SevaWhatsappGroup[]>([])
+  useEffect(() => {
+    api.getSevaWhatsappGroups(branchId || '')
+      .then(d => setWaGroups(d.groups || []))
+      .catch(() => {})
+  }, [branchId])
 
   // Load the caller's own booked seva (by donor token if signed in, else by
   // the email in the form). Refreshed after each booking.
@@ -127,6 +135,31 @@ export function SevaPage() {
           📲 Get the Seva app (Android)
         </a>
       </div>
+
+      {/* WhatsApp groups — join links */}
+      {waGroups.length > 0 && (
+        <div className="temple-card p-4 mb-5">
+          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(37,211,102,0.85)' }}>
+            💬 Seva WhatsApp groups
+          </p>
+          <p className="text-xs mb-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
+            Join to hear about seva needs and coordinate with the team.
+          </p>
+          <div className="space-y-2">
+            {waGroups.map((g, i) => (
+              <a key={i} href={g.whatsapp_invite_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl transition-colors"
+                style={{ background: 'rgba(37,211,102,0.10)', border: '1px solid rgba(37,211,102,0.25)' }}>
+                <span className="min-w-0">
+                  <span className="block text-sm font-bold text-ivory-100 truncate">{g.name}</span>
+                  {g.description && <span className="block text-xs truncate" style={{ color: 'rgba(255,248,220,0.45)' }}>{g.description}</span>}
+                </span>
+                <span className="text-xs font-bold flex-shrink-0" style={{ color: '#25D366' }}>Join →</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Identity */}
       <div className="temple-card p-4 mb-5 space-y-2">
