@@ -178,8 +178,13 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
             subscription_data={"metadata": meta},
             billing_address_collection="auto",
             allow_promotion_codes=False,
-            success_url=f"{origin}/monthly/thank-you/?provider=stripe&amount={amount}&session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{origin}/monthly/?cancelled=1",
+            # Return to the SAME shape the PayPal flow uses (?screen=monthly-giving
+            # &status=approved). Critically, do NOT pass a bare `amount` param — the
+            # SPA treats `?amount=…` (without `status`) as a PayPal quick-link and
+            # would redirect a just-paid Stripe donor into a PayPal subscription.
+            # Pass the amount as `amt` (display only) so nothing collides.
+            success_url=f"{origin}/?screen=monthly-giving&status=approved&provider=stripe&amt={amount}&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{origin}/?screen=monthly-giving&status=cancelled",
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("stripe_checkout_create_failed", error=str(exc), rgs_id=rgs_id)

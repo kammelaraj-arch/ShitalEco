@@ -85,6 +85,25 @@ export function MonthlyGivingPage() {
     ]).finally(() => setLoading(false))
   }, [])
 
+  // Returning from a hosted checkout (Stripe or PayPal redirect) lands here with
+  // ?status=approved. Show the thank-you ('done') and, for display only, the
+  // amount passed as `amt`. Then clean the URL so a refresh doesn't re-fire.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search)
+    if (p.get('status') === 'approved') {
+      const amt = Number(p.get('amt') || '')
+      if (Number.isFinite(amt) && amt > 0) {
+        setSelected(s => s ?? {
+          id: 'return', amount: amt, label: 'Monthly Gift',
+          description: `£${amt.toFixed(2)} every month`, frequency: 'MONTH',
+          is_default: false, display_order: 0,
+        })
+      }
+      setStep('done')
+      window.history.replaceState(null, '', `${window.location.pathname}?screen=monthly-giving`)
+    }
+  }, [])
+
   // Stripe card: go STRAIGHT to Stripe Checkout from the amount step — no
   // on-site details form. Stripe collects name/email/address on its hosted page.
   async function payByStripe() {
