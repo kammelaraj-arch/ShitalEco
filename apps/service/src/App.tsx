@@ -127,7 +127,12 @@ export default function App() {
     // also present (donor is coming BACK from PayPal — don't loop).
     const amountParam = params.get('amount')
     const status = params.get('status')
-    if (amountParam && !status) {
+    // Never treat a payment RETURN as a fresh quick-link: a Stripe/PayPal return
+    // carries provider= / session_id= / status=. Without these guards a just-paid
+    // donor landing on the thank-you URL would be redirected into a PayPal
+    // subscription. The quick-link is only for bare QR/email links (?amount=…).
+    const isPaymentReturn = !!(status || params.get('provider') || params.get('session_id'))
+    if (amountParam && !isPaymentReturn) {
       const amount = Number(amountParam)
       if (Number.isFinite(amount) && amount >= 1 && amount <= 1000) {
         const branch = params.get('branch') || ''
