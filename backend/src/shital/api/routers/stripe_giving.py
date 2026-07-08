@@ -159,6 +159,10 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
     try:
         session = stripe.checkout.Session.create(
             mode="subscription",
+            # This is the CARD path — Monthly Giving has its own separate PayPal
+            # button, so don't let Stripe Checkout also surface PayPal / Link
+            # here (that was confusing donors who picked "Pay by card"). Card only.
+            payment_method_types=["card"],
             line_items=[{
                 "price_data": {
                     "currency": "gbp",
