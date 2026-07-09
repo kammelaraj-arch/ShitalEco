@@ -1,4 +1,4 @@
-export type ThemeId = 'dark' | 'crimson'
+export type ThemeId = 'dark' | 'crimson' | 'legacy'
 
 export interface ThemeVars {
   '--bg': string
@@ -78,6 +78,34 @@ export const THEMES: Theme[] = [
       '--btn-dark':       '#6B0000',
       '--input-bg':       'rgba(255,255,255,0.09)',
       '--input-border':   'rgba(212,175,55,0.28)',
+      '--input-text':     '#FFF8DC',
+      '--input-focus':    'rgba(212,175,55,0.6)',
+    },
+  },
+  {
+    id: 'legacy',
+    name: 'Legacy Maroon',
+    swatch: '#48101C',
+    light: false,
+    vars: {
+      '--bg':             '#48101C',
+      // Appeal-page look: a warm maroon radial lift at the top over the deep
+      // maroon base. Layers over the ambient gold glow. Matches /appeal.
+      '--bg-image':       'radial-gradient(120% 80% at 50% -8%, #6A1A2C 0%, transparent 55%)',
+      '--bg-deep':        '#340A15',
+      '--bg-header':      'rgba(52,10,21,0.94)',
+      '--bg-sticky':      'rgba(52,10,21,0.99)',
+      '--bg-footer':      'rgba(40,8,16,0.72)',
+      '--bg-card':        'rgba(92,22,38,0.5)',
+      '--bg-card-image':  'rgba(212,175,55,0.1)',
+      '--border-card':    'rgba(212,175,55,0.28)',
+      '--text':           '#FFF8DC',
+      '--text-muted':     'rgba(255,248,220,0.6)',
+      '--text-faint':     'rgba(255,248,220,0.3)',
+      '--select-bg':      '#340A15',
+      '--btn-dark':       '#340A15',
+      '--input-bg':       'rgba(255,255,255,0.06)',
+      '--input-border':   'rgba(212,175,55,0.3)',
       '--input-text':     '#FFF8DC',
       '--input-focus':    'rgba(212,175,55,0.6)',
     },
