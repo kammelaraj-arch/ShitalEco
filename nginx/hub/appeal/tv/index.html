@@ -83,7 +83,21 @@
   .thermo .pct{ color:var(--maroon-2); font:800 1.8vh/1 ui-sans-serif,system-ui,sans-serif; padding-right:1.4vh; opacity:0; transition:opacity .8s ease 1s; }
   .thermo.on .pct{ opacity:1; }
 
-  /* Footer strip — QR + CTA */
+  /* Donation options */
+  .give{ margin-top:2.4vh; padding-top:2.2vh; border-top:0.18vh solid var(--line); }
+  .give-k{ color:var(--gold); font:700 1.7vh/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.18em; text-transform:uppercase; margin-bottom:1.2vh; }
+  .give-k.mt{ margin-top:2vh; }
+  .chips{ display:flex; flex-wrap:wrap; gap:1.2vh; }
+  .chip{ border:0.2vh solid var(--gold); color:var(--gold-br); border-radius:99vh; padding:1.1vh 2.1vh;
+    font:700 2.5vh/1 ui-sans-serif,system-ui,sans-serif; }
+  .chip small{ font-size:1.5vh; opacity:.75; font-weight:600; }
+  .give-cta{ margin-top:2.4vh; color:var(--cream); font-size:2.3vh; display:flex; align-items:center; gap:2vh; flex-wrap:wrap; }
+  .give-cta strong{ color:var(--gold-br); font-size:2.9vh; }
+  .give-cta .ga{ background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--maroon-2);
+    font:800 1.8vh/1 ui-sans-serif,system-ui,sans-serif; padding:1vh 1.6vh; border-radius:99vh; }
+  .give .reg{ text-align:left; color:var(--ink-soft); font:600 1.45vh/1.5 ui-sans-serif,system-ui,sans-serif; letter-spacing:.03em; opacity:.8; margin-top:1.6vh; }
+
+  /* Footer strip — QR + CTA (legacy, unused) */
   .foot{ display:flex; align-items:center; gap:3vh; padding-top:2vh; margin-top:2vh; border-top:0.18vh solid var(--line); }
   .qr{ background:var(--cream); border-radius:1.4vh; padding:1.3vh; flex:none; }
   .qr img{ width:15vh; height:15vh; display:block; }
@@ -131,24 +145,17 @@
           <div class="desc sans">In 2024 we secured the <strong>residential property next to our Wembley temple</strong> — bought on a mortgage. Clearing it lets us <strong>own it outright and expand and improve our services</strong> for the whole community — a hall, food hall and facilities for all.</div>
         </div>
 
-        <div class="thermo sans" id="thermo">
-          <div class="row">
-            <span class="raised num" id="raisedLbl">£215,000 raised</span>
-            <span class="togo num" id="togoLbl">£685,000 to go</span>
+        <div class="give sans">
+          <div class="give-k">Give once — choose your seva</div>
+          <div class="chips">
+            <span class="chip num">£21</span><span class="chip num">£51</span><span class="chip num">£108</span><span class="chip num">£251</span><span class="chip num">£501</span><span class="chip num">£1,008+</span>
           </div>
-          <div class="track"><div class="fill" id="fill"><span class="pct num" id="pct">24%</span></div></div>
-        </div>
-
-        <div class="foot">
-          <div class="qr">
-            <img src="data:image/png;base64,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" alt="Scan to donate">
+          <div class="give-k mt">Or give monthly</div>
+          <div class="chips">
+            <span class="chip num">£11<small>/mo</small></span><span class="chip num">£21<small>/mo</small></span><span class="chip num">£31<small>/mo</small></span><span class="chip num">£51<small>/mo</small></span>
           </div>
-          <div class="cta">
-            <div class="lead sans">Scan to donate · one-off or monthly</div>
-            <div class="url sans">service.shital.org.uk</div>
-            <span class="ga sans">Every gift Gift-Aided +25%</span>
-          </div>
-          <div class="reg sans">Shri Shirdi Saibaba Temple, Wembley · UK Registered Charity No. 1138530</div>
+          <div class="give-cta">Donate at <strong>service.shital.org.uk</strong><span class="ga">Every gift Gift-Aided +25%</span></div>
+          <div class="reg">Shri Shirdi Saibaba Temple, Wembley · UK Registered Charity No. 1138530</div>
         </div>
       </div>
     </div>
@@ -161,21 +168,5 @@
       <div class="step now"><span class="dot"></span><div class="yr num">Today</div><div class="lbl">Pay off &amp; grow</div><div class="d">Clear the mortgage — own it outright and expand our services.</div></div>
     </div>
   </div>
-
-<script>
-(function(){
-  var GOAL = 900000, RAISED = 215000;                 // edit these two numbers
-  var pct = Math.max(0, Math.min(100, Math.round(RAISED / GOAL * 100)));
-  var gbp = function(n){ return '£' + n.toLocaleString('en-GB'); };
-  document.getElementById('raisedLbl').textContent = gbp(RAISED) + ' raised';
-  document.getElementById('togoLbl').textContent   = gbp(GOAL - RAISED) + ' to go';
-  document.getElementById('pct').textContent = pct + '%';
-  var fill = document.getElementById('fill'), thermo = document.getElementById('thermo');
-  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  function go(){ fill.style.width = pct + '%'; thermo.classList.add('on'); }
-  if (reduce){ fill.style.transition='none'; go(); }
-  else { requestAnimationFrame(function(){ setTimeout(go, 400); }); }
-})();
-</script>
 </body>
 </html>
