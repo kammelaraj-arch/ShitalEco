@@ -99,6 +99,17 @@ export function MonthlyGivingPage() {
           is_default: false, display_order: 0,
         })
       }
+      // Belt-and-braces: activate the Stripe subscription immediately on return
+      // (don't wait for a webhook / manual sync). The confirm endpoint is
+      // idempotent and never fails the donor — it flips the row to ACTIVE and
+      // records the first payment. Without this, paid subs sit at PENDING_APPROVAL.
+      const sessionId = p.get('session_id') || ''
+      if (p.get('provider') === 'stripe' && sessionId) {
+        fetch(`${import.meta.env.VITE_API_URL ?? '/api/v1'}/service/giving/stripe/confirm`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        }).catch(() => { /* webhook / sync will still reconcile it */ })
+      }
       setStep('done')
       window.history.replaceState(null, '', `${window.location.pathname}?screen=monthly-giving`)
     }

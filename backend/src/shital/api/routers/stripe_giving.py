@@ -493,17 +493,19 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
                 await _record_paid_invoices(str(sub.get("id")))
 
         # Anything still unmatched and old → reap so it stops showing as pending.
-        if want:
+        # Per-id UPDATEs (CAST(:id AS uuid)) — avoids a fragile array bind that
+        # could throw and 500 the whole sync.
+        for rgs_id in want:
             async with SessionLocal() as db:
                 reaped = await db.execute(text("""
                     UPDATE recurring_giving_subscriptions
                     SET status = 'EXPIRED', updated_at = NOW()
-                    WHERE id = ANY(CAST(:ids AS uuid[]))
+                    WHERE id = CAST(:id AS uuid)
                       AND created_at < NOW() - INTERVAL '2 days'
                       AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'
-                """), {"ids": list(want)})
+                """), {"id": rgs_id})
                 await db.commit()
-                summary["orphans_expired"] = reaped.rowcount or 0
+                summary["orphans_expired"] += (reaped.rowcount or 0)
 
     return summary
 
