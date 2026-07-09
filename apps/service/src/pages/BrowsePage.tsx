@@ -115,6 +115,38 @@ export function BrowsePage() {
           roughly the same vertical height — `h-full` + `flex-col` on each
           inner card lets the grid stretch them. */}
       <div className="max-w-5xl mx-auto px-4 mt-5">
+
+        {/* Future Legacy Appeal — Sponsor a Square Foot (dedicated page) */}
+        <button
+          onClick={() => setScreen('sqft')}
+          className="w-full rounded-2xl p-4 mb-3 text-left flex items-center gap-4 transition-all active:scale-[0.99] hover:brightness-110"
+          style={{
+            background: 'linear-gradient(135deg,rgba(212,175,55,0.22),rgba(140,0,0,0.14))',
+            border: '1.5px solid rgba(212,175,55,0.55)',
+            boxShadow: '0 6px 24px rgba(212,175,55,0.18)',
+          }}
+        >
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
+            style={{ background: 'rgba(212,175,55,0.22)', border: '1px solid rgba(212,175,55,0.4)' }}>
+            🏛
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.9)' }}>
+              Future Legacy Appeal
+            </p>
+            <p className="font-black text-sm sm:text-base leading-tight" style={{ color: 'var(--text)' }}>
+              Sponsor a Square Foot — £351
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.55)' }}>
+              Help pay off the mortgage. Your name on our donor wall. Gift Aid +25%.
+            </p>
+          </div>
+          <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#4a0e18' }}>
+            Sponsor →
+          </span>
+        </button>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
           {/* 1 hr/week Seva — Volunteer Registration */}
