@@ -84,7 +84,11 @@
   .thermo.on .pct{ opacity:1; }
 
   /* Donation options */
-  .give{ margin-top:2.4vh; padding-top:2.2vh; border-top:0.18vh solid var(--line); }
+  .give{ margin-top:2.4vh; padding-top:2.2vh; border-top:0.18vh solid var(--line); display:flex; gap:3vh; align-items:flex-start; }
+  .give-left{ flex:1; min-width:0; }
+  .give-qr{ flex:none; text-align:center; }
+  .give-qr img{ width:17vh; height:17vh; display:block; border-radius:1.2vh; background:var(--cream); padding:0.8vh; }
+  .give-qr .cap{ color:var(--gold-br); font:800 1.5vh/1.2 ui-sans-serif,system-ui,sans-serif; letter-spacing:.08em; text-transform:uppercase; margin-top:1vh; }
   .give-k{ color:var(--gold); font:700 1.7vh/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.18em; text-transform:uppercase; margin-bottom:1.2vh; }
   .give-k.mt{ margin-top:2vh; }
   .chips{ display:flex; flex-wrap:wrap; gap:1.2vh; }
@@ -146,16 +150,22 @@
         </div>
 
         <div class="give sans">
-          <div class="give-k">Give once — choose your seva</div>
-          <div class="chips">
-            <span class="chip num">£21</span><span class="chip num">£51</span><span class="chip num">£108</span><span class="chip num">£251</span><span class="chip num">£501</span><span class="chip num">£1,008+</span>
+          <div class="give-left">
+            <div class="give-k">Give once — choose your seva</div>
+            <div class="chips">
+              <span class="chip num">£21</span><span class="chip num">£51</span><span class="chip num">£108</span><span class="chip num">£251</span><span class="chip num">£501</span><span class="chip num">£1,008+</span>
+            </div>
+            <div class="give-k mt">Or give monthly</div>
+            <div class="chips">
+              <span class="chip num">£11<small>/mo</small></span><span class="chip num">£21<small>/mo</small></span><span class="chip num">£31<small>/mo</small></span><span class="chip num">£51<small>/mo</small></span>
+            </div>
+            <div class="give-cta">Donate at <strong>service.shital.org.uk</strong><span class="ga">Every gift Gift-Aided +25%</span></div>
+            <div class="reg">Shri Shirdi Saibaba Temple, Wembley · UK Registered Charity No. 1138530</div>
           </div>
-          <div class="give-k mt">Or give monthly</div>
-          <div class="chips">
-            <span class="chip num">£11<small>/mo</small></span><span class="chip num">£21<small>/mo</small></span><span class="chip num">£31<small>/mo</small></span><span class="chip num">£51<small>/mo</small></span>
+          <div class="give-qr">
+            <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAdQAAAHUAQMAAAC56UsvAAAABlBMVEU0ChX27NY7yYcbAAACG0lEQVR42u2cbYrDMAxExV7A97+lb+D9iCuPlBaWQkGCF8ISL3l/wlSMR0psvX1Mg4WFhYWFhYX9LzvNj5+VjfV7NR4X1/+npdvW/LL3D1jYT7AWfhGXaMe+UMHn29AzbGU9z1OEd4n+K86XvI/C/Tb0DNtHz3u51nEgY6Fn2Mb12cxVrSYEPcP28s9qkvfG0B56xj/DdtBzyjFeneQbsA30/OxwvxGMR8j6eM6wVfXs7sJlPFayIieOHugZtrbfGI+/bj+iYT5KnuwHYRv4Z0/nvBRv4zFi3SbfgG2Rb8wnIYZWbO+tsB+ELe6fNV7eGlYZ+/wGeoZtkm94E9BiZzDZDPwGbIt8Q3uCV5X283QMvZKjZ9jK/nkemxHCDYk+TgaCnmHL+43QNHG3/DTQo58CW7s+u6nQ5fHPqThTn2HL6zm0/+J7Ky71SPGcYYv6Dd33qdNI+0HyOtg2fiMNi+ogtI92MC8K22Q/6Lr1rsqJo6eljBo9w5auz/f3UNJOUK01eoatX5/jcJ3pAJLOReOfYVvUZ8mcwwjHLdlAz7D16/P9FUJ3zprgiTnhOcPWrc97eZ+Flp74OdEzbGE95za3xtGxPuOfYRvoWXK50zoxmbK7+xP0DNtBz6kDrtMdrnD0DNtDz1PM86u5O/wGbBf/rG+gLMnupAOO34Btk29olLGWfpQjfE0XPcOW1TPffoeFhYWFhYX9IPsN+WcNTlOF/JcAAAAASUVORK5CYII=" alt="Scan to donate at service.shital.org.uk">
+            <div class="cap">Scan to donate</div>
           </div>
-          <div class="give-cta">Donate at <strong>service.shital.org.uk</strong><span class="ga">Every gift Gift-Aided +25%</span></div>
-          <div class="reg">Shri Shirdi Saibaba Temple, Wembley · UK Registered Charity No. 1138530</div>
         </div>
       </div>
     </div>
