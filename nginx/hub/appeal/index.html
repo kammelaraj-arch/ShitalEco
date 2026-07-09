@@ -41,7 +41,10 @@
   /* hero */
   header{padding:34px 0 22px}
   .brand{ text-align:center }
-  .brand .lotus{font-size:30px; color:var(--gold)}
+  .darshan{ display:flex; justify-content:center; margin:4px 0 2px }
+  .darshan img{ width:min(280px,72vw); height:auto; border-radius:20px; background:rgba(0,0,0,.2);
+    border:2px solid var(--gold); box-shadow:0 0 0 7px rgba(215,178,90,.12), 0 22px 60px -24px rgba(0,0,0,.85) }
+  .brand .logo{ height:62px; width:auto; margin:2px auto 0; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,.5)) }
   .brand h1{
     font-size:clamp(40px,8vw,86px); line-height:.92; letter-spacing:.02em; font-weight:600;
     background:linear-gradient(180deg,var(--gold-br),var(--gold) 55%,var(--gold-deep));
@@ -170,8 +173,11 @@
   <header>
     <div class="wrap">
       <p class="om">❁ Om Sai Ram ❁</p>
+      <div class="darshan">
+        <img src="https://admin.shital.org.uk/api/v1/media/library/00a4a66d-d25b-4195-8d33-57b1f2853f63" alt="Shirdi Sai Baba" loading="eager" width="280">
+      </div>
       <div class="brand">
-        <div class="lotus">✺</div>
+        <img class="logo" src="https://admin.shital.org.uk/api/v1/media/library/47cf82c8-ea9d-4a0a-96ac-e9acb8676097" alt="SHITAL — Shri Shirdi Saibaba Temple logo">
         <h1>SHITAL</h1>
         <div class="subttl">Future Legacy Appeal</div>
       </div>
