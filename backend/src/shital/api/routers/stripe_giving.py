@@ -156,6 +156,21 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
         "rgs_id": rgs_id, "branch_id": body.branch_id,
         "gift_aid": "1" if body.gift_aid_declared else "0", "source": "monthly-giving",
     }
+
+    # Pre-fill the donor's email + phone on the Stripe page. Passing a Customer
+    # (with phone) lets Checkout pre-fill BOTH email and phone; a bare
+    # customer_email only pre-fills the email. Falls back gracefully.
+    prefill: dict[str, Any] = {}
+    if email:
+        try:
+            cust = stripe.Customer.create(
+                email=email, name=(full_name or None),
+                phone=(body.donor_phone or None) if body.donor_phone else None,
+            )
+            prefill = {"customer": cust.id}
+        except Exception:  # noqa: BLE001
+            prefill = {"customer_email": email}
+
     try:
         session = stripe.checkout.Session.create(
             mode="subscription",
@@ -172,11 +187,26 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
                 },
                 "quantity": 1,
             }],
-            customer_email=email or None,
+            **prefill,
             client_reference_id=rgs_id,
             metadata=meta,
             subscription_data={"metadata": meta},
-            billing_address_collection="auto",
+            # Collect the full home address (Gift Aid needs it) + phone, and ask
+            # the Gift Aid question right on the Stripe page so card monthlies are
+            # Gift-Aid claimable (+25%). We read these back on completion.
+            billing_address_collection="required",
+            phone_number_collection={"enabled": True},
+            custom_fields=[{
+                "key": "giftaid",
+                "label": {"type": "custom",
+                          "custom": "Gift Aid — I am a UK taxpayer (reclaim 25% at no cost)"},
+                "type": "dropdown",
+                "dropdown": {"options": [
+                    {"label": "Yes, claim Gift Aid on my gift", "value": "yes"},
+                    {"label": "No", "value": "no"},
+                ]},
+                "optional": False,
+            }],
             allow_promotion_codes=False,
             # Return to the SAME shape the PayPal flow uses (?screen=monthly-giving
             # &status=approved). Critically, do NOT pass a bare `amount` param — the
@@ -198,9 +228,12 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
 async def _link_subscription_row(*, rgs_id: str | None, stripe_sub_id: str,
                                   customer_id: str | None, checkout_id: str | None,
                                   name: str, email: str, branch_id: str,
-                                  gift_aid: bool, amount: float | None) -> None:
+                                  gift_aid: bool, amount: float | None,
+                                  phone: str = "", address: str = "", postcode: str = "") -> None:
     """Attach a Stripe subscription to its pre-created PENDING row (by rgs_id),
-    or INSERT a fresh ACTIVE row if the pre-insert was lost. Idempotent."""
+    or INSERT a fresh ACTIVE row if the pre-insert was lost. Idempotent.
+    Also backfills the donor contact details Stripe collected (phone, home
+    address, postcode) and the Gift Aid answer so the gift is claimable."""
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
@@ -217,12 +250,19 @@ async def _link_subscription_row(*, rgs_id: str | None, stripe_sub_id: str,
                     donor_name       = COALESCE(NULLIF(donor_name,''), :name),
                     donor_email      = COALESCE(NULLIF(donor_email,''), :email),
                     donor_first_name = COALESCE(NULLIF(donor_first_name,''), :first),
-                    donor_surname    = COALESCE(NULLIF(donor_surname,''), :surname)
+                    donor_surname    = COALESCE(NULLIF(donor_surname,''), :surname),
+                    donor_phone      = COALESCE(NULLIF(donor_phone,''), :phone),
+                    donor_address    = COALESCE(NULLIF(donor_address,''), :address),
+                    donor_postcode   = COALESCE(NULLIF(donor_postcode,''), :postcode),
+                    gift_aid_declared    = (gift_aid_declared OR :ga),
+                    gift_aid_declared_at = CASE WHEN :ga THEN COALESCE(gift_aid_declared_at, :now) ELSE gift_aid_declared_at END
                 WHERE id = CAST(:id AS uuid)
                 RETURNING id
             """), {
                 "sub": stripe_sub_id, "cust": customer_id, "cko": checkout_id, "now": now,
-                "name": name, "email": email, "first": first, "surname": surname, "id": rgs_id,
+                "name": name, "email": email, "first": first, "surname": surname,
+                "phone": phone, "address": address, "postcode": postcode, "ga": bool(gift_aid),
+                "id": rgs_id,
             })
             updated = r.first()
         if not updated:
@@ -236,15 +276,18 @@ async def _link_subscription_row(*, rgs_id: str | None, stripe_sub_id: str,
                         (id, payment_provider, stripe_subscription_id, stripe_customer_id,
                          stripe_checkout_id, amount, frequency, status, branch_id,
                          donor_name, donor_email, donor_first_name, donor_surname,
+                         donor_phone, donor_address, donor_postcode,
                          gift_aid_declared, gift_aid_declared_at, approved_at, created_at, updated_at)
                     VALUES
                         (:id, 'stripe', :sub, :cust, :cko, :amount, 'MONTH', 'ACTIVE', :branch,
-                         :name, :email, :first, :surname, :ga, :ga_at, :now, :now, :now)
+                         :name, :email, :first, :surname, :phone, :address, :postcode,
+                         :ga, :ga_at, :now, :now, :now)
                     ON CONFLICT DO NOTHING
                 """), {
                     "id": str(uuid.uuid4()), "sub": stripe_sub_id, "cust": customer_id,
                     "cko": checkout_id, "amount": amount or 0, "branch": branch_id,
                     "name": name, "email": email, "first": first, "surname": surname,
+                    "phone": phone, "address": address, "postcode": postcode,
                     "ga": gift_aid, "ga_at": now if gift_aid else None, "now": now,
                 })
         await db.commit()
@@ -281,6 +324,8 @@ async def _link_subscription_row(*, rgs_id: str | None, stripe_sub_id: str,
                     "gift_aid_declared": bool(claim["ga"]),
                     "logo_url": "https://shirdisai.org.uk/Cnt/img/shital-logo-new.png",
                     "charity_number": settings.CHARITY_NUMBER or "1138530",
+                    "manage_url": "https://service.shital.org.uk/?screen=my-giving",
+                    "support_email": "info@shirdisai.org.uk",
                 },
                 related_type="recurring_giving_subscription",
             )
@@ -292,6 +337,21 @@ async def _handle_checkout_completed(session: dict[str, Any]) -> None:
     meta = session.get("metadata") or {}
     details = session.get("customer_details") or {}
     amount_total = session.get("amount_total")
+
+    # Gift Aid answer from the Stripe custom field (falls back to the metadata
+    # flag set at checkout-create time).
+    gift_aid = meta.get("gift_aid") == "1"
+    for cf in (session.get("custom_fields") or []):
+        if cf.get("key") == "giftaid":
+            gift_aid = ((cf.get("dropdown") or {}).get("value") == "yes")
+
+    # Home address (for Gift Aid) + phone from what Stripe collected.
+    addr = details.get("address") or {}
+    address = ", ".join(p for p in [
+        addr.get("line1"), addr.get("line2"), addr.get("city"),
+    ] if p) if isinstance(addr, dict) else ""
+    postcode = (addr.get("postal_code") or "") if isinstance(addr, dict) else ""
+
     await _link_subscription_row(
         rgs_id=meta.get("rgs_id") or session.get("client_reference_id"),
         stripe_sub_id=str(session.get("subscription") or ""),
@@ -299,8 +359,10 @@ async def _handle_checkout_completed(session: dict[str, Any]) -> None:
         checkout_id=str(session.get("id") or ""),
         name=(details.get("name") or "").strip(),
         email=(details.get("email") or "").strip(),
+        phone=(details.get("phone") or "").strip(),
+        address=address, postcode=postcode,
         branch_id=meta.get("branch_id") or "main",
-        gift_aid=(meta.get("gift_aid") == "1"),
+        gift_aid=gift_aid,
         amount=(float(amount_total) / 100.0 if amount_total else None),
     )
 

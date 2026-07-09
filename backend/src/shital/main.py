@@ -3654,8 +3654,9 @@ _{{ branch_name }} — Registered UK Charity_"""
                 '    for the community. Thank you for choosing to support us every month.'
                 '  </p>'
                 '  <p style="font-size:13px;color:#666">'
-                '    Manage or cancel anytime through your PayPal account: '
-                '    <a href="https://www.paypal.com/myaccount/autopay/">paypal.com/myaccount/autopay</a>'
+                '    You can <strong>manage or cancel anytime</strong> from your account: '
+                '    <a href="{{ manage_url }}">{{ manage_url }}</a>.<br>'
+                '    Questions? Email <a href="mailto:{{ support_email }}">{{ support_email }}</a>.'
                 '  </p>'
                 '  <p style="font-size:12px;color:#999;margin-top:24px;border-top:1px solid #eee;padding-top:12px">'
                 '    SHITAL — Shri Shirdi Saibaba Temple Association<br>'
@@ -3673,13 +3674,14 @@ _{{ branch_name }} — Registered UK Charity_"""
                 "for every £1.\n{% endif %}\n"
                 "Your generosity keeps the lamps lit, the prasad flowing, and the temple "
                 "thriving for the community. Thank you for choosing to support us every month.\n\n"
-                "You can manage or cancel anytime through your PayPal account:\n"
-                "https://www.paypal.com/myaccount/autopay/\n\n"
+                "You can manage or cancel anytime from your account:\n"
+                "{{ manage_url }}\n"
+                "Questions? Email {{ support_email }}\n\n"
                 "— SHITAL\n"
                 "Shri Shirdi Saibaba Temple Association\n"
                 "Registered UK Charity No. {{ charity_number }}"
             ),
-            "variables": '["donor_first_name","amount","frequency","tier_label","subscription_id","gift_aid_declared","logo_url","charity_number"]',
+            "variables": '["donor_first_name","amount","frequency","tier_label","subscription_id","gift_aid_declared","logo_url","charity_number","manage_url","support_email"]',
         },
         # ── Volunteer reference request ─────────────────────────────────────
         # Sent to ref1_email and ref2_email when the trustee clicks
@@ -3852,6 +3854,23 @@ _{{ branch_name }} — Registered UK Charity_"""
                 # donation flows. Log loud, keep going so one bad template
                 # doesn't block the others.
                 logger.error("email_template_seed_failed", template_key=t.get("key"), error=str(exc))
+
+        # Heal the monthly-giving confirmation's cancel line to the self-service
+        # manage/cancel link. Only touch rows STILL on the old PayPal-autopay
+        # default (never clobber a temple customisation).
+        try:
+            rg = next((x for x in templates if x.get("key") == "recurring_giving_confirmation"), None)
+            if rg:
+                await db.execute(text("""
+                    UPDATE email_templates
+                    SET html_body = :h, text_body = :tx,
+                        variables = CAST(:v AS JSONB), updated_at = NOW()
+                    WHERE template_key = 'recurring_giving_confirmation'
+                      AND html_body LIKE '%paypal.com/myaccount/autopay%'
+                """), {"h": rg["html_body"], "tx": rg["text_body"], "v": rg["variables"]})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recurring_confirmation_heal_failed", error=str(exc))
+
         await db.commit()
     logger.info("email_templates_seeded")
 

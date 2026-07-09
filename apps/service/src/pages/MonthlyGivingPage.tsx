@@ -21,6 +21,8 @@ const PayPalButtons = _PPB as ComponentType<PayPalButtonsComponentProps>
 
 export function MonthlyGivingPage() {
   const { branchId, setScreen } = useStore()
+  const acctEmail = useStore(s => s.donorEmail)
+  const acctName = useStore(s => s.donorName)
   const [tiers, setTiers]           = useState<GivingTier[]>([])
   const [selected, setSelected]     = useState<GivingTier | null>(null)
   const [clientId, setClientId]     = useState('')
@@ -127,6 +129,12 @@ export function MonthlyGivingPage() {
         body: JSON.stringify({
           amount: Number(selected.amount), branch_id: branchId,
           tier_label: selected.label || 'Monthly Giving', return_origin: window.location.origin,
+          // Pre-fill the donor's details on the Stripe page: use whatever they've
+          // typed here, else their signed-in account name/email.
+          donor_email: (donorEmail || acctEmail || '').trim(),
+          donor_first_name: (firstName || (acctName || '').split(' ')[0] || '').trim(),
+          donor_surname: (surname || (acctName || '').split(' ').slice(1).join(' ') || '').trim(),
+          donor_phone: donorPhone.trim(),
         }),
       })
       const d = await r.json()

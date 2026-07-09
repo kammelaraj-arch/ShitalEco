@@ -82,6 +82,23 @@ export function MyGivingPage() {
 
   function logout() { setDonor(null); setScreen('browse') }
 
+  const [cancelling, setCancelling] = useState('')
+  async function cancelSub(id: string) {
+    if (!window.confirm('Cancel your monthly gift? No further payments will be taken. You can start again any time.')) return
+    setCancelling(id)
+    try {
+      const r = await fetch(`${API}/auth/donor/giving/${encodeURIComponent(id)}/cancel`, {
+        method: 'POST', headers: { Authorization: `Bearer ${donorToken}` },
+      })
+      if (!r.ok) throw new Error()
+      // Reload subscriptions so the status reflects the cancellation.
+      const d = await fetch(`${API}/auth/donor/giving`, { headers: { Authorization: `Bearer ${donorToken}` } })
+        .then(x => x.ok ? x.json() : { subscriptions: subs })
+      setSubs(d.subscriptions || [])
+    } catch { setError('Could not cancel just now — please email info@shirdisai.org.uk.') }
+    finally { setCancelling('') }
+  }
+
   const fmt = (d: string) => d ? new Date(d).toLocaleDateString('en-GB') : '—'
   const activeSub = subs.find(s => (s.status || '').toUpperCase() === 'ACTIVE')
 
@@ -203,25 +220,38 @@ export function MyGivingPage() {
             </div>
           ) : (
             <div className="space-y-2 mb-6">
-              {subs.map(s => (
-                <motion.div key={s.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="temple-card p-4 flex items-center justify-between">
-                  <div>
-                    <p className="font-black text-lg text-gold-400">£{Number(s.amount).toFixed(0)}/{(s.frequency || 'month').toLowerCase()}</p>
-                    <p className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>{PROVIDER_LABEL[s.provider] || s.provider} · since {fmt(s.created_at)}</p>
+              {subs.map(s => {
+                const active = (s.status || '').toUpperCase() === 'ACTIVE'
+                return (
+                <motion.div key={s.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="temple-card p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-black text-lg text-gold-400">£{Number(s.amount).toFixed(0)}/{(s.frequency || 'month').toLowerCase()}</p>
+                      <p className="text-xs" style={{ color: 'rgba(255,248,220,0.5)' }}>{PROVIDER_LABEL[s.provider] || s.provider} · since {fmt(s.created_at)}</p>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                      style={{ background: active ? 'rgba(34,197,94,0.2)' : 'rgba(148,163,184,0.2)',
+                               color: active ? '#4ade80' : '#94a3b8' }}>{s.status}</span>
                   </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                    style={{ background: (s.status || '').toUpperCase() === 'ACTIVE' ? 'rgba(34,197,94,0.2)' : 'rgba(148,163,184,0.2)',
-                             color: (s.status || '').toUpperCase() === 'ACTIVE' ? '#4ade80' : '#94a3b8' }}>{s.status}</span>
+                  {active && (
+                    <div className="mt-3 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                      <button onClick={() => cancelSub(s.id)} disabled={cancelling === s.id}
+                        className="text-xs font-bold px-3 py-1.5 rounded-lg disabled:opacity-50"
+                        style={{ background: 'rgba(239,68,68,0.12)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.3)' }}>
+                        {cancelling === s.id ? 'Cancelling…' : 'Cancel my monthly gift'}
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
-              ))}
+                )
+              })}
             </div>
           )}
 
           {activeSub && (
             <p className="text-xs mb-6" style={{ color: 'rgba(255,248,220,0.4)' }}>
-              To cancel or change your monthly gift, sign in to your{' '}
-              {activeSub.provider === 'stripe' ? 'card provider' : 'PayPal'} account, or email{' '}
-              <a href="mailto:info@shirdisai.org.uk" style={{ color: '#D4AF37' }}>info@shirdisai.org.uk</a>.
+              You can cancel any time using the button above — no further payments will be taken.
+              Need help? Email <a href="mailto:info@shirdisai.org.uk" style={{ color: '#D4AF37' }}>info@shirdisai.org.uk</a>.
             </p>
           )}
 

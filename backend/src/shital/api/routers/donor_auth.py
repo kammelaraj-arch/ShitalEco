@@ -14,6 +14,7 @@ donor JWT and bounce the browser back to the portal with it in the URL fragment.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import os
@@ -472,6 +473,57 @@ async def my_giving(request: Request) -> dict[str, Any]:
         "subscriptions": [dict(s) for s in subs],
         "donations": [dict(d) for d in dons],
     }
+
+
+@router.post("/giving/{sub_id}/cancel")
+async def cancel_my_giving(sub_id: str, request: Request) -> dict[str, Any]:
+    """Let a signed-in donor cancel their OWN monthly gift. Verifies ownership
+    (by contact or email on the token), cancels it on Stripe / PayPal, and marks
+    the row CANCELLED. Idempotent and best-effort on the provider call — the
+    local row is always marked cancelled so the donor sees it stop."""
+    claims = _bearer(request)
+    cid = claims["sub"]
+    email = (claims.get("email") or "").lower()
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT id::text AS id, COALESCE(payment_provider,'paypal') AS provider,
+                   stripe_subscription_id, paypal_subscription_id, UPPER(COALESCE(status,'')) AS status
+            FROM recurring_giving_subscriptions
+            WHERE id = CAST(:sid AS uuid)
+              AND (contact_id = CAST(:cid AS uuid)
+                   OR (:email <> '' AND lower(donor_email) = :email))
+            LIMIT 1
+        """), {"sid": sub_id, "cid": cid, "email": email})).mappings().first()
+    if not row:
+        raise HTTPException(404, detail="Subscription not found")
+    if row["status"] in ("CANCELLED", "EXPIRED"):
+        return {"ok": True, "status": row["status"], "already": True}
+
+    provider = (row["provider"] or "").lower()
+    try:
+        if provider == "stripe" and row["stripe_subscription_id"]:
+            from shital.api.routers.stripe_giving import _stripe
+            stripe = await _stripe()
+            if stripe.api_key:
+                await asyncio.to_thread(stripe.Subscription.cancel, row["stripe_subscription_id"])
+        elif row["paypal_subscription_id"]:
+            from shital.api.routers.recurring_giving import _paypal_subscription_action
+            await _paypal_subscription_action(row["paypal_subscription_id"], "cancel", "Cancelled by donor")
+    except Exception as exc:  # noqa: BLE001 — still mark it cancelled locally
+        logger.warning("donor_cancel_provider_failed", sub_id=sub_id, error=str(exc))
+
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET status = 'CANCELLED', cancelled_at = NOW(),
+                cancel_reason = 'Cancelled by donor', cancelled_by = :who, updated_at = NOW()
+            WHERE id = CAST(:sid AS uuid)
+        """), {"sid": sub_id, "who": email or cid})
+        await db.commit()
+    return {"ok": True, "status": "CANCELLED"}
 
 
 @router.get("/volunteering")

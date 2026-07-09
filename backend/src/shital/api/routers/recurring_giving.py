@@ -832,6 +832,8 @@ async def approve_subscription(body: ApproveBody) -> dict[str, Any]:
                     "gift_aid_declared": body.gift_aid_declared,
                     "logo_url": "https://shirdisai.org.uk/Cnt/img/shital-logo-new.png",
                     "charity_number": settings.CHARITY_NUMBER or "1138530",
+                    "manage_url": "https://service.shital.org.uk/?screen=my-giving",
+                    "support_email": "info@shirdisai.org.uk",
                 },
                 related_type="recurring_giving_subscription",
                 related_id=sub_uuid,
