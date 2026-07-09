@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SHITAL Future Legacy Appeal — Together, We Secure the Future</title>
+<meta name="description" content="Help clear the mortgage on the property beside our Wembley temple and secure it forever — for a community hall, food hall and facilities for generations. Every gift. Every heart. One shared legacy.">
+<meta property="og:title" content="SHITAL Future Legacy Appeal — Together, We Secure the Future">
+<meta property="og:description" content="Help us clear the mortgage and secure our temple's future. Every gift is Gift-Aided (+25%). Om Sai Ram 🙏">
+<link rel="icon" href="/favicon.ico">
+<style>
+  :root{
+    --maroon:#48101c; --maroon-2:#340a15; --maroon-3:#5c1626;
+    --gold:#d7b25a; --gold-br:#f0d488; --gold-deep:#b1863a;
+    --cream:#f6ecd6; --cream-soft:#efe1c4; --ink:#f4ead6; --ink-soft:#d8c298;
+    --green:#3f7d54; --line:rgba(215,178,90,.28);
+    --maxw:1120px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%; scroll-behavior:smooth}
+  body{
+    margin:0; color:var(--ink);
+    background:
+      radial-gradient(120% 80% at 50% -8%, #6a1a2c 0%, transparent 55%),
+      linear-gradient(180deg,var(--maroon) 0%, var(--maroon-2) 100%);
+    background-attachment:fixed;
+    font:400 17px/1.6 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  }
+  .sans{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 22px}
+  h1,h2,h3{margin:0; text-wrap:balance}
+  p{margin:0}
+  a{color:var(--gold-br)}
+  .num{font-variant-numeric:tabular-nums lining-nums}
+  .om{color:var(--gold); letter-spacing:.32em; font:600 13px/1 ui-sans-serif,system-ui,sans-serif; text-transform:uppercase; text-align:center}
+
+  /* frame */
+  .frame{border:1px solid var(--line); border-radius:18px; margin:18px auto; max-width:calc(var(--maxw) + 44px);
+         box-shadow:0 0 0 6px rgba(0,0,0,.15), 0 30px 80px -40px rgba(0,0,0,.8)}
+
+  /* hero */
+  header{padding:34px 0 22px}
+  .brand{ text-align:center }
+  .darshan{ display:flex; justify-content:center; margin:4px 0 2px }
+  .darshan img{ width:min(280px,72vw); height:auto; border-radius:20px; background:rgba(0,0,0,.2);
+    border:2px solid var(--gold); box-shadow:0 0 0 7px rgba(215,178,90,.12), 0 22px 60px -24px rgba(0,0,0,.85) }
+  .brand .logo{ height:62px; width:auto; margin:2px auto 0; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,.5)) }
+  .brand h1{
+    font-size:clamp(40px,8vw,86px); line-height:.92; letter-spacing:.02em; font-weight:600;
+    background:linear-gradient(180deg,var(--gold-br),var(--gold) 55%,var(--gold-deep));
+    -webkit-background-clip:text; background-clip:text; color:transparent; margin-top:8px;
+  }
+  .brand .subttl{ color:var(--ink-soft); font:600 15px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.42em; text-transform:uppercase; margin-top:10px }
+  .tagline{ text-align:center; margin-top:24px }
+  .tagline h2{ font-size:clamp(26px,4.4vw,44px); font-weight:600; color:var(--cream); letter-spacing:.01em }
+  .fsl{ display:flex; gap:16px; justify-content:center; margin-top:12px; color:var(--gold); font:600 15px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase; align-items:center }
+  .fsl span.d{ opacity:.6 }
+  .intro{ max-width:56ch; margin:22px auto 0; text-align:center; color:var(--ink-soft); font-size:19px }
+
+  /* goal band */
+  .goal{ margin:34px auto 0; max-width:860px; text-align:center;
+    background:linear-gradient(180deg,rgba(92,22,38,.7),rgba(52,10,21,.7));
+    border:1px solid var(--line); border-radius:16px; padding:26px 24px }
+  .goal .k{ color:var(--gold); font:600 13px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.2em; text-transform:uppercase }
+  .goal .v{ font-size:clamp(46px,9vw,84px); font-weight:600; line-height:1; margin:8px 0 6px;
+    background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); -webkit-background-clip:text; background-clip:text; color:transparent }
+  .goal p{ color:var(--ink-soft); max-width:44ch; margin:0 auto; font-size:17px }
+  .ribbon{ display:inline-block; margin-top:16px; background:linear-gradient(180deg,var(--gold),var(--gold-deep));
+    color:var(--maroon-2); font:700 14px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.04em;
+    padding:11px 20px; border-radius:999px; box-shadow:0 8px 20px -10px rgba(0,0,0,.6) }
+
+  /* thermometer */
+  .thermo{ max-width:860px; margin:22px auto 0 }
+  .thermo .row{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:9px;
+    font:600 14px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.03em }
+  .thermo .row .raised{ color:var(--gold-br); font-size:18px }
+  .thermo .row .togo{ color:var(--ink-soft) }
+  .thermo .track{ height:26px; border-radius:999px; background:rgba(0,0,0,.28); border:1px solid var(--line); overflow:hidden; position:relative }
+  .thermo .fill{ position:absolute; inset:0 auto 0 0; width:0;
+    background:linear-gradient(90deg,var(--gold-deep),var(--gold-br)); border-radius:999px;
+    transition:width 1.7s cubic-bezier(.22,.61,.36,1); box-shadow:0 0 24px rgba(240,212,136,.4) }
+  .thermo .pct{ position:absolute; top:50%; transform:translateY(-50%); right:12px; color:var(--maroon-2);
+    font:800 13px/1 ui-sans-serif,system-ui,sans-serif; opacity:0; transition:opacity .8s ease .9s }
+  .thermo.on .pct{ opacity:1 }
+
+  /* CTA buttons */
+  .cta-row{ display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin:26px 0 6px }
+  .btn{ display:inline-flex; align-items:center; gap:9px; text-decoration:none; border-radius:12px;
+    padding:15px 26px; font:700 16px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.01em; transition:transform .12s ease, box-shadow .2s ease }
+  .btn:hover{ transform:translateY(-2px) }
+  .btn.primary{ background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); color:var(--maroon-2);
+    box-shadow:0 12px 28px -12px rgba(240,212,136,.6) }
+  .btn.ghost{ background:transparent; color:var(--gold-br); border:1px solid var(--line) }
+
+  /* sections */
+  section{ padding:46px 0; border-top:1px solid var(--line) }
+  .sec-title{ text-align:center; margin-bottom:30px }
+  .sec-title .eye{ color:var(--gold); font:600 13px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.2em; text-transform:uppercase }
+  .sec-title h2{ font-size:clamp(26px,3.6vw,38px); font-weight:600; color:var(--cream); margin-top:10px }
+
+  /* timeline */
+  .timeline{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px }
+  .tl{ background:linear-gradient(180deg,rgba(255,255,255,.04),transparent); border:1px solid var(--line); border-radius:14px; padding:22px; text-align:center }
+  .tl .yr{ font-size:34px; font-weight:600; color:var(--gold-br); line-height:1 }
+  .tl h3{ font:700 13px/1.2 ui-sans-serif,system-ui,sans-serif; letter-spacing:.14em; text-transform:uppercase; color:var(--gold); margin:10px 0 8px }
+  .tl p{ color:var(--ink-soft); font-size:15.5px }
+
+  /* achieve */
+  .achieve{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px }
+  .ac{ display:flex; gap:14px; align-items:flex-start; background:rgba(0,0,0,.16); border:1px solid var(--line); border-radius:12px; padding:18px }
+  .ac .ic{ font-size:22px; line-height:1; flex:none }
+  .ac h3{ font:700 14px/1.25 ui-sans-serif,system-ui,sans-serif; color:var(--gold-br); letter-spacing:.02em }
+  .ac p{ color:var(--ink-soft); font-size:14.5px; margin-top:5px; line-height:1.5 }
+
+  /* seva tiers */
+  .tiers{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px }
+  a.tier{ text-decoration:none; color:inherit; background:linear-gradient(180deg,rgba(92,22,38,.55),rgba(52,10,21,.55));
+    border:1px solid var(--line); border-radius:14px; padding:20px 16px; text-align:center; transition:transform .12s ease, border-color .2s ease; display:block }
+  a.tier:hover{ transform:translateY(-3px); border-color:var(--gold) }
+  a.tier .amt{ font-size:30px; font-weight:600; color:var(--gold-br); line-height:1 }
+  a.tier .nm{ font:600 15px/1.15 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif; color:var(--cream); margin-top:10px; letter-spacing:.01em }
+  a.tier .mean{ font-size:12px; color:var(--ink-soft); margin-top:4px; line-height:1.35 }
+  a.tier .mean .dev{ color:var(--gold); font-size:12.5px }
+  .tier-note{ text-align:center; color:var(--ink-soft); font-size:14px; margin-top:14px }
+
+  /* monthly */
+  .monthly{ max-width:760px; margin:0 auto; text-align:center; background:rgba(0,0,0,.18); border:1px solid var(--line); border-radius:16px; padding:26px }
+  .monthly h3{ color:var(--gold-br); font:700 14px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase }
+  .monthly p{ color:var(--ink-soft); margin-top:8px; font-size:15.5px }
+  .m-row{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:18px }
+  a.mchip{ text-decoration:none; background:transparent; border:1px solid var(--gold); color:var(--gold-br);
+    border-radius:999px; padding:12px 20px; font:700 17px/1 ui-sans-serif,system-ui,sans-serif; transition:background .15s ease, color .15s ease }
+  a.mchip:hover{ background:var(--gold); color:var(--maroon-2) }
+  a.mchip small{ font-size:11px; opacity:.7; font-weight:600 }
+
+  /* donate block */
+  .donate{ display:grid; grid-template-columns:1.3fr .9fr; gap:24px; align-items:center }
+  .dlist{ display:grid; gap:14px }
+  .di{ display:flex; gap:14px; align-items:flex-start }
+  .di .ic{ font-size:20px; flex:none; color:var(--gold) }
+  .di h3{ font:700 13px/1.2 ui-sans-serif,system-ui,sans-serif; letter-spacing:.1em; text-transform:uppercase; color:var(--gold-br) }
+  .di p{ color:var(--ink-soft); font-size:15px; margin-top:3px }
+  .di a{ color:var(--gold-br) }
+  .qr-card{ text-align:center; background:var(--cream); border-radius:16px; padding:20px }
+  .qr-card img{ width:180px; height:180px; display:block; margin:0 auto; border-radius:8px }
+  .qr-card .cap{ color:var(--maroon-2); font:700 13px/1.3 ui-sans-serif,system-ui,sans-serif; letter-spacing:.08em; text-transform:uppercase; margin-top:12px }
+
+  /* vision */
+  .vision{ text-align:center }
+  .vision .oneline{ font-size:clamp(24px,3.6vw,34px); font-weight:600; color:var(--gold-br); line-height:1.3 }
+  .vision p{ color:var(--ink-soft); max-width:52ch; margin:16px auto 0; font-size:17px }
+
+  /* share */
+  .share{ display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:8px }
+  .share a, .share button{ cursor:pointer; text-decoration:none; border:1px solid var(--line); background:rgba(0,0,0,.16);
+    color:var(--ink); border-radius:10px; padding:12px 18px; font:600 14px/1 ui-sans-serif,system-ui,sans-serif; display:inline-flex; gap:8px; align-items:center }
+  .share a:hover, .share button:hover{ border-color:var(--gold) }
+
+  footer{ text-align:center; padding:34px 0 46px; color:var(--ink-soft) }
+  footer .quote{ font-style:italic; font-size:19px; color:var(--cream); max-width:46ch; margin:0 auto 14px }
+  footer .reg{ font:500 12px/1.5 ui-sans-serif,system-ui,sans-serif; letter-spacing:.04em; opacity:.7 }
+
+  @media (max-width:760px){
+    .timeline{ grid-template-columns:1fr }
+    .donate{ grid-template-columns:1fr }
+    .qr-card{ max-width:280px; margin:0 auto }
+  }
+  @media (prefers-reduced-motion:reduce){ .thermo .fill{ transition:none } html{scroll-behavior:auto} }
+</style>
+</head>
+<body>
+<div class="frame">
+  <header>
+    <div class="wrap">
+      <p class="om">❁ Om Sai Ram ❁</p>
+      <div class="darshan">
+        <img src="https://admin.shital.org.uk/api/v1/media/library/00a4a66d-d25b-4195-8d33-57b1f2853f63" alt="Shirdi Sai Baba" loading="eager" width="280">
+      </div>
+      <div class="brand">
+        <img class="logo" src="https://admin.shital.org.uk/api/v1/media/library/47cf82c8-ea9d-4a0a-96ac-e9acb8676097" alt="SHITAL — Shri Shirdi Saibaba Temple logo">
+        <h1>SHITAL</h1>
+        <div class="subttl">Future Legacy Appeal</div>
+      </div>
+      <div class="tagline">
+        <h2>Together, we secure the future</h2>
+        <div class="fsl sans"><span>Faith</span><span class="d">✦</span><span>Seva</span><span class="d">✦</span><span>Legacy</span></div>
+      </div>
+      <p class="intro sans">With the blessings of Shirdi Sai Baba and the devotion of our community, SHITAL has become a place of faith, prayer, culture and service for thousands.</p>
+
+      <div class="goal">
+        <div class="k">Our Goal</div>
+        <div class="v num">£900,000</div>
+        <p>To clear the mortgage on the residential property beside our Wembley temple — and secure it forever.</p>
+        <div class="ribbon sans">Every Gift · Every Heart · One Shared Legacy</div>
+      </div>
+
+      <div class="thermo sans" id="thermo" aria-label="Fundraising progress">
+        <div class="row">
+          <span class="raised num" id="raisedLbl">£215,000 raised</span>
+          <span class="togo num" id="togoLbl">£685,000 to go</span>
+        </div>
+        <div class="track"><div class="fill" id="fill"><span class="pct num" id="pct">24%</span></div></div>
+      </div>
+
+      <div class="cta-row">
+        <a class="btn primary sans" href="https://service.shital.org.uk/">🙏 Donate now</a>
+        <a class="btn ghost sans" href="https://service.shital.org.uk/?screen=monthly-giving">Give monthly →</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Journey -->
+  <section>
+    <div class="wrap">
+      <div class="sec-title"><span class="eye sans">Our journey so far</span><h2>Today, the next chapter begins</h2></div>
+      <div class="timeline">
+        <div class="tl"><div class="yr num">2010</div><h3>The Beginning</h3><p>A humble start with a divine vision — to serve our community through faith and seva.</p></div>
+        <div class="tl"><div class="yr num">2016</div><h3>Our Temple Home</h3><p>We purchased our Wembley temple — a permanent home for worship, celebration and community.</p></div>
+        <div class="tl"><div class="yr num">2024</div><h3>A Rare Blessing</h3><p>We secured the neighbouring residential property — a once-in-a-generation opportunity.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- What support achieves -->
+  <section>
+    <div class="wrap">
+      <div class="sec-title"><span class="eye sans">What your support achieves</span><h2>Clearing the mortgage builds everything after it</h2></div>
+      <div class="achieve">
+        <div class="ac"><div class="ic">🛕</div><div><h3>Secure it forever</h3><p>Permanently protect this precious property for our temple and community.</p></div></div>
+        <div class="ac"><div class="ic">🤝</div><div><h3>A space for all</h3><p>Room for a community hall, food hall, education and culture.</p></div></div>
+        <div class="ac"><div class="ic">🍲</div><div><h3>Expand our seva</h3><p>More annadanam, more programmes, more service to the needy.</p></div></div>
+        <div class="ac"><div class="ic">🪔</div><div><h3>Preserve our heritage</h3><p>Keep our traditions, values and spirit alive for generations.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Offer your seva (one-off) -->
+  <section>
+    <div class="wrap">
+      <div class="sec-title"><span class="eye sans">Offer your seva</span><h2>Give something to hold — a piece of the legacy</h2></div>
+      <div class="tiers">
+        <a class="tier" href="https://service.shital.org.uk/"><div class="amt num">£21</div><div class="nm">Archana</div><div class="mean"><span class="dev">अर्चना</span> · an offering of worship</div></a>
+        <a class="tier" href="https://service.shital.org.uk/"><div class="amt num">£51</div><div class="nm">Bhakta</div><div class="mean"><span class="dev">भक्त</span> · a devoted heart</div></a>
+        <a class="tier" href="https://service.shital.org.uk/"><div class="amt num">£108</div><div class="nm">Shila Daan</div><div class="mean"><span class="dev">शिला दान</span> · a foundation stone</div></a>
+        <a class="tier" href="https://service.shital.org.uk/"><div class="amt num">£251</div><div class="nm">Nirmata</div><div class="mean"><span class="dev">निर्माता</span> · a builder of the future</div></a>
+        <a class="tier" href="https://service.shital.org.uk/"><div class="amt num">£501</div><div class="nm">Sthapak</div><div class="mean"><span class="dev">स्थापक</span> · a founder of the legacy</div></a>
+        <a class="tier" href="https://service.shital.org.uk/"><div class="amt num">£1,008+</div><div class="nm">Kshetra Rakshak</div><div class="mean"><span class="dev">क्षेत्र रक्षक</span> · guardian of the sacred ground</div></a>
+      </div>
+      <p class="tier-note sans">No offering is too small. No act of seva is ever forgotten. Every gift is Gift-Aided (+25%) if you’re a UK taxpayer.</p>
+    </div>
+  </section>
+
+  <!-- Monthly seva -->
+  <section>
+    <div class="wrap">
+      <div class="monthly">
+        <h3>Nitya Seva · नित्य सेवा — the steady flame</h3>
+        <p>Daily, unbroken service. Every month, every devotee, every heart — together we achieve. A regular gift the trustees can build on.</p>
+        <div class="m-row">
+          <a class="mchip num" href="https://service.shital.org.uk/?amount=11">£11<small>/mo</small></a>
+          <a class="mchip num" href="https://service.shital.org.uk/?amount=21">£21<small>/mo</small></a>
+          <a class="mchip num" href="https://service.shital.org.uk/?amount=31">£31<small>/mo</small></a>
+          <a class="mchip num" href="https://service.shital.org.uk/?amount=51">£51<small>/mo</small></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Donate ways + QR -->
+  <section>
+    <div class="wrap">
+      <div class="sec-title"><span class="eye sans">Donate today</span><h2>Be part of SHITAL’s history</h2></div>
+      <div class="donate">
+        <div class="dlist">
+          <div class="di"><div class="ic">🌐</div><div><h3>Online</h3><p><a href="https://service.shital.org.uk/">service.shital.org.uk</a> — card or PayPal, one-off or monthly.</p></div></div>
+          <div class="di"><div class="ic">🏦</div><div><h3>Bank transfer</h3><p>Account details available on request from the temple office.</p></div></div>
+          <div class="di"><div class="ic">🇬🇧</div><div><h3>Gift Aid</h3><p>Add 25% to your gift at no cost — just tick the box when you donate.</p></div></div>
+        </div>
+        <div class="qr-card">
+          <img src="data:image/png;base64,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" alt="Scan to donate to the SHITAL Future Legacy Appeal">
+          <div class="cap">Scan to donate</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Vision -->
+  <section>
+    <div class="wrap vision">
+      <div class="sec-title"><span class="eye sans">Our vision for the future</span></div>
+      <div class="oneline">One Temple. One Community.<br>One Legacy.</div>
+      <p class="sans">A vibrant spiritual and cultural centre where devotion, seva and community come together — for today and for generations to come.</p>
+      <div class="share" style="margin-top:26px">
+        <a id="waShare" target="_blank" rel="noopener">💬 Share on WhatsApp</a>
+        <a id="fbShare" target="_blank" rel="noopener">📘 Share on Facebook</a>
+        <button id="copyBtn" type="button">🔗 Copy link</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p class="quote">“No single person can build the future — but together, as one SHITAL family, we can make it happen.”</p>
+      <p class="om" style="margin:14px 0">❁ Om Sai Ram ❁</p>
+      <p class="reg sans">Shri Shirdi Saibaba Temple · SHITAL · UK Registered Charity No. 1138530 · <a href="/">shital.org.uk</a></p>
+    </div>
+  </footer>
+</div>
+
+<script>
+(function(){
+  // ── Progress (edit these two numbers, or wire to live donations later) ──────
+  var GOAL = 900000, RAISED = 215000;
+  var pct = Math.max(0, Math.min(100, Math.round(RAISED / GOAL * 100)));
+  var gbp = function(n){ return '£' + n.toLocaleString('en-GB'); };
+  document.getElementById('raisedLbl').textContent = gbp(RAISED) + ' raised';
+  document.getElementById('togoLbl').textContent   = gbp(GOAL - RAISED) + ' to go';
+  document.getElementById('pct').textContent = pct + '%';
+  var fill = document.getElementById('fill'), thermo = document.getElementById('thermo');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function go(){ fill.style.width = pct + '%'; thermo.classList.add('on'); }
+  if (reduce){ fill.style.transition='none'; go(); }
+  else { requestAnimationFrame(function(){ setTimeout(go, 300); }); }
+
+  // ── Share ───────────────────────────────────────────────────────────────────
+  var url = 'https://shital.org.uk/appeal';
+  var msg = 'Help us secure our temple’s future 🛕🙏 SHITAL Future Legacy Appeal — every gift is Gift-Aided (+25%). Om Sai Ram. ';
+  document.getElementById('waShare').href = 'https://wa.me/?text=' + encodeURIComponent(msg + url);
+  document.getElementById('fbShare').href = 'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(url);
+  document.getElementById('copyBtn').addEventListener('click', function(){
+    var b = this;
+    (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(function(){
+      b.textContent = '✓ Link copied'; setTimeout(function(){ b.textContent = '🔗 Copy link'; }, 2000);
+    }).catch(function(){ b.textContent = url; });
+  });
+})();
+</script>
+</body>
+</html>
