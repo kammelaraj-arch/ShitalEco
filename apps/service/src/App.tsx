@@ -16,6 +16,7 @@ import { DonorLoginPage } from './pages/DonorLoginPage'
 import { MyGivingPage } from './pages/MyGivingPage'
 import { VolunteerRegistrationPage } from './pages/VolunteerRegistrationPage'
 import { SevaPage } from './pages/SevaPage'
+import { SqFtPage } from './pages/SqFtPage'
 import { ReferenceResponsePage } from './pages/ReferenceResponsePage'
 import { scheduleDailyCatalogRefresh, clearServiceCache } from './utils/cachedFetch'
 
@@ -162,7 +163,7 @@ export default function App() {
     if (
       urlScreen === 'monthly-giving' || urlScreen === 'browse' ||
       urlScreen === 'volunteer'      || urlScreen === 'reference' ||
-      urlScreen === 'seva'
+      urlScreen === 'seva'           || urlScreen === 'sqft'
     ) {
       setScreen(urlScreen)
     }
@@ -219,6 +220,7 @@ export default function App() {
       case 'my-giving':      return <MyGivingPage />
       case 'volunteer': return <VolunteerRegistrationPage />
       case 'seva': return <SevaPage />
+      case 'sqft': return <SqFtPage />
       case 'reference': return <ReferenceResponsePage />
       default:               return <BrowsePage />
     }
