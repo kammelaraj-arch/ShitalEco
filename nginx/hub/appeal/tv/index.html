@@ -60,11 +60,11 @@
   }
   .subttl{ color:var(--ink-soft); font:700 1.9vh/1 ui-sans-serif,system-ui,sans-serif;
     letter-spacing:.44em; text-transform:uppercase; margin-top:1.3vh; }
-  .tagline{ color:var(--cream); font-size:2.7vh; font-weight:600; margin-top:1.8vh; }
+  .tagline{ color:var(--cream); font-size:2.5vh; font-weight:600; margin-top:1.2vh; }
 
-  .goal{ margin-top:2vh; }
+  .goal{ margin-top:1.4vh; }
   .goal .k{ color:var(--gold); font:700 1.7vh/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.22em; text-transform:uppercase; }
-  .goal .v{ font-size:8vh; font-weight:600; line-height:.98; margin:.4vh 0;
+  .goal .v{ font-size:6.4vh; font-weight:600; line-height:.98; margin:.4vh 0;
     background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); -webkit-background-clip:text; background-clip:text; color:transparent; }
   .goal .desc{ color:var(--ink-soft); font-size:2vh; line-height:1.5; max-width:58ch; }
   .goal .desc strong{ color:var(--cream); font-weight:700; }
@@ -84,8 +84,13 @@
   .thermo.on .pct{ opacity:1; }
 
   /* Donation options */
-  .give{ margin-top:2.4vh; padding-top:2.2vh; border-top:0.18vh solid var(--line); display:flex; gap:3vh; align-items:flex-start; }
+  .give{ margin-top:1.6vh; padding-top:1.5vh; border-top:0.18vh solid var(--line); display:flex; gap:3vh; align-items:flex-start; }
   .give-left{ flex:1; min-width:0; }
+  .sqft{ display:flex; align-items:center; gap:1.6vh; margin-bottom:1.3vh; padding:1.1vh 1.9vh; border-radius:1.4vh;
+    background:linear-gradient(180deg,rgba(215,178,90,.18),rgba(215,178,90,.05)); border:0.2vh solid var(--gold); }
+  .sqft-amt{ color:var(--gold-br); font:700 3.6vh/1 ui-sans-serif,system-ui,sans-serif; flex:none; }
+  .sqft-txt{ color:var(--cream); font-size:2.05vh; line-height:1.3; }
+  .sqft-txt strong{ color:var(--gold-br); }
   .give-qr{ flex:none; text-align:center; }
   .give-qr img{ width:17vh; height:17vh; display:block; border-radius:1.2vh; background:var(--cream); padding:0.8vh; }
   .give-qr .cap{ color:var(--gold-br); font:800 1.5vh/1.2 ui-sans-serif,system-ui,sans-serif; letter-spacing:.08em; text-transform:uppercase; margin-top:1vh; }
@@ -95,11 +100,11 @@
   .chip{ border:0.2vh solid var(--gold); color:var(--gold-br); border-radius:99vh; padding:1.1vh 2.1vh;
     font:700 2.5vh/1 ui-sans-serif,system-ui,sans-serif; }
   .chip small{ font-size:1.5vh; opacity:.75; font-weight:600; }
-  .give-cta{ margin-top:2.4vh; color:var(--cream); font-size:2.3vh; display:flex; align-items:center; gap:2vh; flex-wrap:wrap; }
+  .give-cta{ margin-top:1.5vh; color:var(--cream); font-size:2.3vh; display:flex; align-items:center; gap:2vh; flex-wrap:wrap; }
   .give-cta strong{ color:var(--gold-br); font-size:2.9vh; }
   .give-cta .ga{ background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--maroon-2);
     font:800 1.8vh/1 ui-sans-serif,system-ui,sans-serif; padding:1vh 1.6vh; border-radius:99vh; }
-  .give .reg{ text-align:left; color:var(--ink-soft); font:600 1.45vh/1.5 ui-sans-serif,system-ui,sans-serif; letter-spacing:.03em; opacity:.8; margin-top:1.6vh; }
+  .give .reg{ text-align:left; color:var(--ink-soft); font:600 1.45vh/1.5 ui-sans-serif,system-ui,sans-serif; letter-spacing:.03em; opacity:.8; margin-top:1.1vh; }
 
   /* Footer strip — QR + CTA (legacy, unused) */
   .foot{ display:flex; align-items:center; gap:3vh; padding-top:2vh; margin-top:2vh; border-top:0.18vh solid var(--line); }
@@ -117,7 +122,7 @@
   .roadmap{ margin-top:auto; padding-top:2.4vh; border-top:0.18vh solid var(--line);
     display:grid; grid-template-columns:repeat(4,1fr); gap:1.8vh; position:relative; }
   .roadmap .rl{ position:absolute; top:calc(2.4vh + 0.8vh); left:12.5%; right:12.5%; height:0.22vh; background:var(--line); }
-  .step{ position:relative; text-align:center; padding-top:4vh; }
+  .step{ position:relative; text-align:center; padding-top:3.2vh; }
   .step .dot{ position:absolute; top:0; left:50%; transform:translateX(-50%); width:1.6vh; height:1.6vh; border-radius:50%;
     background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); box-shadow:0 0 0 0.6vh var(--maroon-2); }
   .step.now .dot{ box-shadow:0 0 0 0.6vh var(--maroon-2), 0 0 2.4vh rgba(240,212,136,.7); }
@@ -151,6 +156,7 @@
 
         <div class="give sans">
           <div class="give-left">
+            <div class="sqft"><span class="sqft-amt num">£351</span><span class="sqft-txt">sponsors a <strong>square foot</strong> of our temple’s future</span></div>
             <div class="give-k">Give once — choose your seva</div>
             <div class="chips">
               <span class="chip num">£21</span><span class="chip num">£51</span><span class="chip num">£108</span><span class="chip num">£251</span><span class="chip num">£501</span><span class="chip num">£1,008+</span>
