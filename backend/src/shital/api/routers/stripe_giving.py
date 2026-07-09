@@ -249,6 +249,44 @@ async def _link_subscription_row(*, rgs_id: str | None, stripe_sub_id: str,
                 })
         await db.commit()
 
+    # ── Confirmation email (idempotent) ───────────────────────────────────────
+    # Send the temple's own recurring-giving confirmation for Stripe subs too
+    # (donors otherwise only get Stripe's receipt). We "claim" the send with a
+    # guarded UPDATE on confirmation_sent_at so webhook + confirm + sync all
+    # firing for the same subscription only ever send ONE email. Non-fatal.
+    try:
+        async with SessionLocal() as db:
+            claim = (await db.execute(text("""
+                UPDATE recurring_giving_subscriptions
+                SET confirmation_sent_at = :now
+                WHERE stripe_subscription_id = :sub
+                  AND confirmation_sent_at IS NULL
+                  AND COALESCE(donor_email,'') <> ''
+                RETURNING donor_email, donor_first_name, donor_name, amount,
+                          COALESCE(gift_aid_declared, false) AS ga
+            """), {"now": now, "sub": stripe_sub_id})).mappings().first()
+            await db.commit()
+        if claim:
+            from shital.api.routers.email_templates import send_template
+            from shital.core.fabrics.config import settings
+            await send_template(
+                "recurring_giving_confirmation",
+                claim["donor_email"],
+                {
+                    "donor_first_name": claim["donor_first_name"] or claim["donor_name"] or "Friend",
+                    "amount": f"{float(claim['amount'] or amount or 0):.2f}",
+                    "frequency": "month",
+                    "tier_label": "Monthly Gift",
+                    "subscription_id": stripe_sub_id,
+                    "gift_aid_declared": bool(claim["ga"]),
+                    "logo_url": "https://shirdisai.org.uk/Cnt/img/shital-logo-new.png",
+                    "charity_number": settings.CHARITY_NUMBER or "1138530",
+                },
+                related_type="recurring_giving_subscription",
+            )
+    except Exception as exc:  # noqa: BLE001 — email is non-fatal
+        logger.warning("stripe_confirmation_email_failed", sub=stripe_sub_id, error=str(exc))
+
 
 async def _handle_checkout_completed(session: dict[str, Any]) -> None:
     meta = session.get("metadata") or {}

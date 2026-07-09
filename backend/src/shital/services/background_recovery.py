@@ -1021,6 +1021,15 @@ async def recovery_loop() -> None:
         except Exception as exc:  # noqa: BLE001
             logger.error("recovery_paypal_reconcile_failed", error=str(exc))
         try:
+            # Stripe monthly-giving reconcile — the mirror of the PayPal one, so
+            # Stripe subscriptions self-heal to ACTIVE + record ongoing invoices
+            # automatically (not only via the manual admin button).
+            from shital.api.routers.stripe_giving import _stripe_giving_reconcile_once
+            stripe_giving = await _stripe_giving_reconcile_once()
+            logger.info("recovery_stripe_giving_reconcile", result=stripe_giving)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("recovery_stripe_giving_reconcile_failed", error=str(exc))
+        try:
             digest = await _alert_digest_once()
             logger.info("recovery_alert_digest", result=digest)
         except Exception as exc:  # noqa: BLE001

@@ -1048,6 +1048,7 @@ async def _ensure_subscription_columns() -> None:
             "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_reason  VARCHAR(500) NOT NULL DEFAULT ''",
             "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancel_reason        VARCHAR(500) NOT NULL DEFAULT ''",
             "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancelled_by         VARCHAR(255) NOT NULL DEFAULT ''",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS confirmation_sent_at TIMESTAMPTZ",
         ]:
             await db.execute(text(stmt))
         await db.commit()
