@@ -308,8 +308,8 @@ export function MonthlyGivingPage() {
         shipping_preference: addressBlock ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
         user_action:         'SUBSCRIBE_NOW',
         landing_page:        'BILLING',
-        return_url: `${window.location.origin}/?screen=monthly-giving&status=approved`,
-        cancel_url: `${window.location.origin}/?screen=monthly-giving&status=cancelled`,
+        return_url: `${window.location.origin}/?screen=monthly-giving&status=approved&branch=${encodeURIComponent(branchId)}`,
+        cancel_url: `${window.location.origin}/?screen=monthly-giving&status=cancelled&branch=${encodeURIComponent(branchId)}`,
       },
     } as Parameters<typeof actions.subscription.create>[0])
   }, [])

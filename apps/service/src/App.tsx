@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useStore, detectBranchFromHostname, type Screen } from './store'
+import { api } from './api'
 import { applyTheme, getTheme } from './themes'
 import { Header } from './components/Header'
 import { BranchPicker } from './components/BranchPicker'
@@ -170,10 +171,17 @@ export default function App() {
     const sub = detectBranchFromHostname()
     if (sub) { setBranch(sub, sub, true); return }
 
-    // 2. Explicit branch query param (used when kiosk launches us with a pre-selected branch)
+    // 2. Explicit branch query param (kiosk launch, or a payment return that
+    // keeps the donor in their temple's context). Set the id immediately, then
+    // resolve the proper display name from the branches list so the header shows
+    // "Wembley", not the raw "wembley_main" code.
     const urlBranch = params.get('branch')
     if (urlBranch) {
-      setBranch(urlBranch, urlBranch, true)
+      setBranch(urlBranch, branchName || urlBranch, true)
+      api.getBranches().then(list => {
+        const b = list.find(x => x.branch_id === urlBranch)
+        if (b?.name) setBranch(urlBranch, b.name, true)
+      }).catch(() => {})
       return
     }
 

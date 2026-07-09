@@ -189,11 +189,12 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
         metadata=meta,
         subscription_data={"metadata": meta},
         allow_promotion_codes=False,
-        # Return to the SAME shape the PayPal flow uses. NO bare `amount` param —
-        # the SPA treats `?amount=` (without `status`) as a PayPal quick-link and
-        # would bounce a just-paid Stripe donor into PayPal. Pass it as `amt`.
-        success_url=f"{origin}/?screen=monthly-giving&status=approved&provider=stripe&amt={amount}&session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{origin}/?screen=monthly-giving&status=cancelled",
+        # Return to the SAME shape the PayPal flow uses, KEEPING the branch so the
+        # donor lands back in their temple's context (not the default). NO bare
+        # `amount` param — the SPA treats `?amount=` (without `status`) as a PayPal
+        # quick-link and would bounce a just-paid Stripe donor into PayPal; pass `amt`.
+        success_url=f"{origin}/?screen=monthly-giving&status=approved&provider=stripe&branch={body.branch_id}&amt={amount}&session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{origin}/?screen=monthly-giving&status=cancelled&branch={body.branch_id}",
         **prefill,
     )
     # Nice-to-haves that must never break the donation: full address (Gift Aid),
