@@ -171,54 +171,57 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             prefill = {"customer_email": email}
 
+    # Core session — everything the payment needs. This is the CARD path;
+    # Monthly Giving has its own PayPal button, so card only (no PayPal/Link).
+    base_kwargs: dict[str, Any] = dict(
+        mode="subscription",
+        payment_method_types=["card"],
+        line_items=[{
+            "price_data": {
+                "currency": "gbp",
+                "product_data": {"name": f"Monthly Temple Support — {body.tier_label or 'Monthly Giving'}"},
+                "unit_amount": int(round(amount * 100)),
+                "recurring": {"interval": "month"},
+            },
+            "quantity": 1,
+        }],
+        client_reference_id=rgs_id,
+        metadata=meta,
+        subscription_data={"metadata": meta},
+        allow_promotion_codes=False,
+        # Return to the SAME shape the PayPal flow uses. NO bare `amount` param —
+        # the SPA treats `?amount=` (without `status`) as a PayPal quick-link and
+        # would bounce a just-paid Stripe donor into PayPal. Pass it as `amt`.
+        success_url=f"{origin}/?screen=monthly-giving&status=approved&provider=stripe&amt={amount}&session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{origin}/?screen=monthly-giving&status=cancelled",
+        **prefill,
+    )
+    # Nice-to-haves that must never break the donation: full address (Gift Aid),
+    # phone, and the Gift Aid question. If Stripe rejects any of these we retry
+    # without them so the donor can still give.
+    extras: dict[str, Any] = dict(
+        billing_address_collection="required",
+        phone_number_collection={"enabled": True},
+        custom_fields=[{
+            "key": "giftaid",
+            "label": {"type": "custom", "custom": "Gift Aid — I am a UK taxpayer"},  # ≤50 chars
+            "type": "dropdown",
+            "dropdown": {"options": [
+                {"label": "Yes — reclaim 25% at no cost to me", "value": "yes"},
+                {"label": "No", "value": "no"},
+            ]},
+            "optional": False,
+        }],
+    )
     try:
-        session = stripe.checkout.Session.create(
-            mode="subscription",
-            # This is the CARD path — Monthly Giving has its own separate PayPal
-            # button, so don't let Stripe Checkout also surface PayPal / Link
-            # here (that was confusing donors who picked "Pay by card"). Card only.
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "gbp",
-                    "product_data": {"name": f"Monthly Temple Support — {body.tier_label or 'Monthly Giving'}"},
-                    "unit_amount": int(round(amount * 100)),
-                    "recurring": {"interval": "month"},
-                },
-                "quantity": 1,
-            }],
-            **prefill,
-            client_reference_id=rgs_id,
-            metadata=meta,
-            subscription_data={"metadata": meta},
-            # Collect the full home address (Gift Aid needs it) + phone, and ask
-            # the Gift Aid question right on the Stripe page so card monthlies are
-            # Gift-Aid claimable (+25%). We read these back on completion.
-            billing_address_collection="required",
-            phone_number_collection={"enabled": True},
-            custom_fields=[{
-                "key": "giftaid",
-                "label": {"type": "custom",
-                          "custom": "Gift Aid — I am a UK taxpayer (reclaim 25% at no cost)"},
-                "type": "dropdown",
-                "dropdown": {"options": [
-                    {"label": "Yes, claim Gift Aid on my gift", "value": "yes"},
-                    {"label": "No", "value": "no"},
-                ]},
-                "optional": False,
-            }],
-            allow_promotion_codes=False,
-            # Return to the SAME shape the PayPal flow uses (?screen=monthly-giving
-            # &status=approved). Critically, do NOT pass a bare `amount` param — the
-            # SPA treats `?amount=…` (without `status`) as a PayPal quick-link and
-            # would redirect a just-paid Stripe donor into a PayPal subscription.
-            # Pass the amount as `amt` (display only) so nothing collides.
-            success_url=f"{origin}/?screen=monthly-giving&status=approved&provider=stripe&amt={amount}&session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{origin}/?screen=monthly-giving&status=cancelled",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.error("stripe_checkout_create_failed", error=str(exc), rgs_id=rgs_id)
-        raise HTTPException(502, detail="Could not start card checkout. Please try again.") from exc
+        session = stripe.checkout.Session.create(**base_kwargs, **extras)
+    except Exception as exc:  # noqa: BLE001 — retry minimal so donations never break
+        logger.warning("stripe_checkout_extras_failed", error=str(exc), rgs_id=rgs_id)
+        try:
+            session = stripe.checkout.Session.create(**base_kwargs)
+        except Exception as exc2:  # noqa: BLE001
+            logger.error("stripe_checkout_create_failed", error=str(exc2), rgs_id=rgs_id)
+            raise HTTPException(502, detail="Could not start card checkout. Please try again.") from exc2
 
     return {"url": session.url, "id": session.id, "rgs_id": rgs_id}
 
