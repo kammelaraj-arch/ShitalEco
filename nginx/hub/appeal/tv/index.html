@@ -39,12 +39,12 @@
   .om{ text-align:center; color:var(--gold); letter-spacing:.5em;
     font:600 1.9vh/1 ui-sans-serif,system-ui,sans-serif; text-transform:uppercase; }
 
-  .main{ flex:1; display:grid; grid-template-columns:38% 62%; gap:3.4vh; align-items:center; padding-top:1.4vh; }
+  .main{ display:grid; grid-template-columns:38% 62%; gap:3.4vh; align-items:center; padding-top:1vh; }
 
   /* Left — darshan */
   .darshan{ display:flex; align-items:center; justify-content:center; }
   .darshan img{
-    width:100%; max-height:64vh; object-fit:contain; border-radius:2.2vh;
+    width:100%; max-height:53vh; object-fit:contain; border-radius:2.2vh;
     border:0.5vh solid var(--gold);
     box-shadow:0 0 0 1.4vh rgba(215,178,90,.12), 0 4vh 8vh -3vh rgba(0,0,0,.85);
     background:rgba(0,0,0,.2);
@@ -60,17 +60,17 @@
   }
   .subttl{ color:var(--ink-soft); font:700 1.9vh/1 ui-sans-serif,system-ui,sans-serif;
     letter-spacing:.44em; text-transform:uppercase; margin-top:1.3vh; }
-  .tagline{ color:var(--cream); font-size:3vh; font-weight:600; margin-top:2.4vh; }
+  .tagline{ color:var(--cream); font-size:2.7vh; font-weight:600; margin-top:1.8vh; }
 
-  .goal{ margin-top:2.6vh; }
+  .goal{ margin-top:2vh; }
   .goal .k{ color:var(--gold); font:700 1.7vh/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.22em; text-transform:uppercase; }
-  .goal .v{ font-size:9.2vh; font-weight:600; line-height:.98; margin:.4vh 0;
+  .goal .v{ font-size:8vh; font-weight:600; line-height:.98; margin:.4vh 0;
     background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); -webkit-background-clip:text; background-clip:text; color:transparent; }
   .goal .desc{ color:var(--ink-soft); font-size:2vh; line-height:1.5; max-width:58ch; }
   .goal .desc strong{ color:var(--cream); font-weight:700; }
 
   /* Thermometer */
-  .thermo{ margin-top:2.6vh; }
+  .thermo{ margin-top:2vh; }
   .thermo .row{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1vh;
     font:700 2vh/1 ui-sans-serif,system-ui,sans-serif; }
   .thermo .raised{ color:var(--gold-br); font-size:2.5vh; }
@@ -84,7 +84,7 @@
   .thermo.on .pct{ opacity:1; }
 
   /* Footer strip — QR + CTA */
-  .foot{ display:flex; align-items:center; gap:3vh; padding-top:2.2vh; margin-top:auto; border-top:0.18vh solid var(--line); }
+  .foot{ display:flex; align-items:center; gap:3vh; padding-top:2vh; margin-top:2vh; border-top:0.18vh solid var(--line); }
   .qr{ background:var(--cream); border-radius:1.4vh; padding:1.3vh; flex:none; }
   .qr img{ width:15vh; height:15vh; display:block; }
   .cta{ flex:1; }
@@ -94,6 +94,19 @@
     color:var(--maroon-2); font:800 1.9vh/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.02em;
     padding:1.1vh 1.8vh; border-radius:99vh; }
   .reg{ text-align:right; color:var(--ink-soft); font:600 1.5vh/1.5 ui-sans-serif,system-ui,sans-serif; letter-spacing:.03em; opacity:.85; flex:none; max-width:24ch; }
+
+  /* Roadmap 2010 → today */
+  .roadmap{ margin-top:auto; padding-top:2.4vh; border-top:0.18vh solid var(--line);
+    display:grid; grid-template-columns:repeat(4,1fr); gap:1.8vh; position:relative; }
+  .roadmap .rl{ position:absolute; top:calc(2.4vh + 0.8vh); left:12.5%; right:12.5%; height:0.22vh; background:var(--line); }
+  .step{ position:relative; text-align:center; padding-top:4vh; }
+  .step .dot{ position:absolute; top:0; left:50%; transform:translateX(-50%); width:1.6vh; height:1.6vh; border-radius:50%;
+    background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); box-shadow:0 0 0 0.6vh var(--maroon-2); }
+  .step.now .dot{ box-shadow:0 0 0 0.6vh var(--maroon-2), 0 0 2.4vh rgba(240,212,136,.7); }
+  .step .yr{ color:var(--gold-br); font:700 2.7vh/1 ui-sans-serif,system-ui,sans-serif; }
+  .step .lbl{ color:var(--cream); font:700 1.65vh/1.15 ui-sans-serif,system-ui,sans-serif; text-transform:uppercase; letter-spacing:.07em; margin-top:.9vh; }
+  .step.now .lbl{ color:var(--gold-br); }
+  .step .d{ color:var(--ink-soft); font-size:1.55vh; line-height:1.4; margin:.7vh auto 0; max-width:26ch; }
 
   @media (prefers-reduced-motion:reduce){ .thermo .fill{ transition:none } }
 </style>
@@ -115,7 +128,7 @@
         <div class="goal">
           <div class="k">Our goal — pay off the mortgage</div>
           <div class="v num">£900,000</div>
-          <div class="desc sans">In 2024 we secured the <strong>residential property next to our Wembley temple</strong> — bought on a mortgage. Every gift helps <strong>pay off that mortgage</strong> so we own it outright and secure it forever — a future community hall, food hall and facilities for all.</div>
+          <div class="desc sans">In 2024 we secured the <strong>residential property next to our Wembley temple</strong> — bought on a mortgage. Clearing it lets us <strong>own it outright and expand and improve our services</strong> for the whole community — a hall, food hall and facilities for all.</div>
         </div>
 
         <div class="thermo sans" id="thermo">
@@ -138,6 +151,14 @@
           <div class="reg sans">Shri Shirdi Saibaba Temple, Wembley · UK Registered Charity No. 1138530</div>
         </div>
       </div>
+    </div>
+
+    <div class="roadmap sans">
+      <span class="rl"></span>
+      <div class="step"><span class="dot"></span><div class="yr num">2010</div><div class="lbl">The beginning</div><div class="d">A humble start with a divine vision — faith, prayer and seva.</div></div>
+      <div class="step"><span class="dot"></span><div class="yr num">2016</div><div class="lbl">Our temple home</div><div class="d">We purchased our Wembley temple — a permanent home for worship.</div></div>
+      <div class="step"><span class="dot"></span><div class="yr num">2024</div><div class="lbl">A rare blessing</div><div class="d">We secured the neighbouring residential property on a mortgage.</div></div>
+      <div class="step now"><span class="dot"></span><div class="yr num">Today</div><div class="lbl">Pay off &amp; grow</div><div class="d">Clear the mortgage — own it outright and expand our services.</div></div>
     </div>
   </div>
 
