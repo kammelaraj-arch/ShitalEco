@@ -887,8 +887,13 @@ async def admin_sync_paypal(space: CurrentSpace, days: int = 35) -> dict[str, An
     of whether the background loop is enabled. SUPER_ADMIN / ADMIN only."""
     if space.role not in ("SUPER_ADMIN", "ADMIN"):
         raise HTTPException(403, detail="SUPER_ADMIN or ADMIN required")
+    await _ensure_subscription_columns()
     from shital.services.background_recovery import _paypal_reconcile_once
-    result = await _paypal_reconcile_once(days=days)
+    try:
+        result = await _paypal_reconcile_once(days=days)
+    except Exception as exc:  # noqa: BLE001 — a sync must never 500 the admin page
+        logger.warning("sync_paypal_failed", error=str(exc))
+        return {"ok": False, "error": str(exc)[:300]}
     return {"ok": True, "result": result}
 
 
@@ -900,8 +905,13 @@ async def admin_sync_stripe(space: CurrentSpace, days: int = 90) -> dict[str, An
     donations. SUPER_ADMIN / ADMIN only."""
     if space.role not in ("SUPER_ADMIN", "ADMIN"):
         raise HTTPException(403, detail="SUPER_ADMIN or ADMIN required")
+    await _ensure_subscription_columns()
     from shital.api.routers.stripe_giving import _stripe_giving_reconcile_once
-    result = await _stripe_giving_reconcile_once(days=days)
+    try:
+        result = await _stripe_giving_reconcile_once(days=days)
+    except Exception as exc:  # noqa: BLE001 — a sync must never 500 the admin page
+        logger.warning("sync_stripe_failed", error=str(exc))
+        return {"ok": False, "error": str(exc)[:300]}
     return {"ok": True, "result": result}
 
 
@@ -1038,6 +1048,7 @@ async def _ensure_subscription_columns() -> None:
             "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_reason  VARCHAR(500) NOT NULL DEFAULT ''",
             "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancel_reason        VARCHAR(500) NOT NULL DEFAULT ''",
             "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancelled_by         VARCHAR(255) NOT NULL DEFAULT ''",
+            "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS confirmation_sent_at TIMESTAMPTZ",
         ]:
             await db.execute(text(stmt))
         await db.commit()
