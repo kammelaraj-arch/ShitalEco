@@ -14,9 +14,9 @@ donor JWT and bounce the browser back to the portal with it in the URL fragment.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
-import asyncio
 import os
 import time
 import uuid
