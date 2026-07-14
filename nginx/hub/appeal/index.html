@@ -160,6 +160,31 @@
   footer .quote{ font-style:italic; font-size:19px; color:var(--cream); max-width:46ch; margin:0 auto 14px }
   footer .reg{ font:500 12px/1.5 ui-sans-serif,system-ui,sans-serif; letter-spacing:.04em; opacity:.7 }
 
+  /* story */
+  .story{ max-width:760px; margin:0 auto }
+  .story .lead{ font-size:clamp(20px,2.6vw,26px); line-height:1.5; color:var(--cream); text-align:center; margin-bottom:26px }
+  .story p{ font-size:17.5px; line-height:1.75; color:var(--ink-soft); margin:0 0 18px }
+  .story p .hi{ color:var(--gold-br); font-weight:600 }
+  .story .sig{ text-align:center; color:var(--gold); font-style:italic; font-size:18px; margin-top:8px }
+
+  /* roadmap (vertical timeline: past → now → future) */
+  .rmap{ max-width:820px; margin:0 auto; position:relative; padding-left:40px }
+  .rmap::before{ content:""; position:absolute; left:11px; top:8px; bottom:8px; width:2px;
+    background:linear-gradient(180deg,var(--gold-deep),var(--line)) }
+  .rstep{ position:relative; margin-bottom:20px }
+  .rstep:last-child{ margin-bottom:0 }
+  .rstep::before{ content:""; position:absolute; left:-34px; top:20px; width:14px; height:14px; border-radius:50%;
+    background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); box-shadow:0 0 0 5px var(--maroon-2) }
+  .rstep.now::before{ box-shadow:0 0 0 5px var(--maroon-2), 0 0 20px rgba(240,212,136,.85) }
+  .rcard{ background:linear-gradient(180deg,rgba(92,22,38,.4),rgba(52,10,21,.4)); border:1px solid var(--line);
+    border-radius:14px; padding:16px 20px }
+  .rstep.now .rcard{ border-color:var(--gold); box-shadow:0 0 34px -10px rgba(240,212,136,.5) }
+  .rstep.future .rcard{ background:rgba(0,0,0,.14); border-style:dashed }
+  .rcard .when{ color:var(--gold); font:700 12.5px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase }
+  .rcard h3{ color:var(--cream); font-size:clamp(20px,2.4vw,24px); font-weight:600; margin:6px 0 6px }
+  .rstep.now .rcard h3{ color:var(--gold-br) }
+  .rcard p{ color:var(--ink-soft); font-size:16px; line-height:1.55 }
+
   @media (max-width:760px){
     .timeline{ grid-template-columns:1fr }
     .donate{ grid-template-columns:1fr }
@@ -204,19 +229,37 @@
 
       <div class="cta-row">
         <a class="btn primary sans" href="https://service.shital.org.uk/">🙏 Donate now</a>
+        <a class="btn primary sans" href="https://service.shital.org.uk/?screen=sqft">🏛 Sponsor a square foot · £351</a>
         <a class="btn ghost sans" href="https://service.shital.org.uk/?screen=monthly-giving">Give monthly →</a>
       </div>
     </div>
   </header>
 
-  <!-- Journey -->
+  <!-- Our Story -->
   <section>
     <div class="wrap">
-      <div class="sec-title"><span class="eye sans">Our journey so far</span><h2>Today, the next chapter begins</h2></div>
-      <div class="timeline">
-        <div class="tl"><div class="yr num">2010</div><h3>The Beginning</h3><p>A humble start with a divine vision — to serve our community through faith and seva.</p></div>
-        <div class="tl"><div class="yr num">2016</div><h3>Our Temple Home</h3><p>We purchased our Wembley temple — a permanent home for worship, celebration and community.</p></div>
-        <div class="tl"><div class="yr num">2024</div><h3>A Rare Blessing</h3><p>We secured the neighbouring residential property — a once-in-a-generation opportunity.</p></div>
+      <div class="sec-title"><span class="eye sans">Our story</span><h2>Fifteen years of faith — and the door Baba opened</h2></div>
+      <div class="story">
+        <p class="lead">It began with nothing but faith and a shared dream — a home for Shirdi Sai Baba in Wembley, where families could pray, celebrate and serve together.</p>
+        <p>That dream became real. In <span class="hi">2016</span> we bought our temple — a permanent spiritual home. Every aarti, every festival, every langar since has been offered from these walls, built by the hands and the hearts of our community.</p>
+        <p>Then, in <span class="hi">2024</span>, Baba opened a door that may never open again: the residential property <span class="hi">right beside our temple</span> came up for sale. To let it pass would be to lose the only space we will ever have to grow. So, in faith, we secured it — on a mortgage of <span class="hi">£900,000</span>.</p>
+        <p>Now the final chapter is ours to write, together. Clearing this mortgage means we <span class="hi">own it outright, forever</span> — and can transform it into the community hall, food hall and facilities our growing family needs.</p>
+        <p class="sig">“No single person can build the future — but together, as one Sai family, we can.”</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- The Roadmap: past → now → future -->
+  <section>
+    <div class="wrap">
+      <div class="sec-title"><span class="eye sans">The roadmap</span><h2>From a humble beginning to a lasting legacy</h2></div>
+      <div class="rmap">
+        <div class="rstep past"><div class="rcard"><div class="when">2010 · The beginning</div><h3>A divine vision</h3><p>A small group of devotees gather with faith and a dream — to serve the community through prayer and seva.</p></div></div>
+        <div class="rstep past"><div class="rcard"><div class="when">2016 · Our temple home</div><h3>We buy our Wembley temple</h3><p>A permanent home for worship, festivals and langar — the heart of our growing community.</p></div></div>
+        <div class="rstep past"><div class="rcard"><div class="when">2024 · A rare blessing</div><h3>We secure the property next door</h3><p>A once-in-a-generation chance to grow — the residential property beside the temple, bought on a mortgage.</p></div></div>
+        <div class="rstep now"><div class="rcard"><div class="when">Now · 2025</div><h3>Pay off the £900,000 mortgage</h3><p>Every gift clears the debt so we own it outright and secure it forever — and stop paying interest that could be seva instead. <strong>This is where you come in.</strong></p></div></div>
+        <div class="rstep future"><div class="rcard"><div class="when">Next · Once cleared</div><h3>Redevelop &amp; reopen</h3><p>Transform the building into a community hall, food hall, and space for education, culture and expanded annadanam.</p></div></div>
+        <div class="rstep future"><div class="rcard"><div class="when">The future</div><h3>One Temple. One Community. One Legacy.</h3><p>A vibrant spiritual and cultural centre serving Wembley and beyond — for today, and for generations to come.</p></div></div>
       </div>
     </div>
   </section>
@@ -230,6 +273,25 @@
         <div class="ac"><div class="ic">🤝</div><div><h3>A space for all</h3><p>Room for a community hall, food hall, education and culture.</p></div></div>
         <div class="ac"><div class="ic">🍲</div><div><h3>Expand our seva</h3><p>More annadanam, more programmes, more service to the needy.</p></div></div>
         <div class="ac"><div class="ic">🪔</div><div><h3>Preserve our heritage</h3><p>Keep our traditions, values and spirit alive for generations.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Sponsor a Square Foot + donor wall -->
+  <section>
+    <div class="wrap">
+      <div class="sec-title"><span class="eye sans">Leave your mark</span><h2>Sponsor a square foot — your name on our donor wall</h2></div>
+      <div class="monthly" style="max-width:840px">
+        <p style="font-size:19px; color:var(--cream)"><strong style="color:var(--gold-br); font-size:26px">£351</strong> sponsors one square foot of the property beside our temple — and your name goes on our <strong style="color:var(--gold-br)">donor wall</strong>, forever part of the foundation.</p>
+        <div class="tiers" style="margin-top:20px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+          <div class="tier" style="cursor:default"><div class="amt num">£351</div><div class="nm">1 sq ft</div><div class="mean">Your name on the donor wall</div></div>
+          <div class="tier" style="cursor:default"><div class="amt num">10+</div><div class="nm">Square feet</div><div class="mean">A larger dedicated name block</div></div>
+          <div class="tier" style="cursor:default"><div class="amt num">£5,000+</div><div class="nm">Founder</div><div class="mean">A premium Founder panel</div></div>
+        </div>
+        <div class="cta-row" style="margin-top:22px">
+          <a class="btn primary sans" href="https://service.shital.org.uk/?screen=sqft">🏛 Sponsor a square foot →</a>
+        </div>
+        <p class="tier-note sans" style="margin-top:14px">Every gift is Gift-Aided (+25%) if you’re a UK taxpayer.</p>
       </div>
     </div>
   </section>
