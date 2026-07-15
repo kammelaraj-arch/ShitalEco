@@ -135,10 +135,10 @@ export function BrowsePage() {
               Future Legacy Appeal
             </p>
             <p className="font-black text-sm sm:text-base leading-tight" style={{ color: 'var(--text)' }}>
-              Sponsor a Square Foot — £351
+              Leave your mark — sponsor the build (from £51)
             </p>
             <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.55)' }}>
-              Help pay off the mortgage. Your name on our donor wall. Gift Aid +25%.
+              Sponsor a brick, a square foot &amp; more. Your name on our donor wall. Gift Aid +25%.
             </p>
           </div>
           <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs flex-shrink-0"
