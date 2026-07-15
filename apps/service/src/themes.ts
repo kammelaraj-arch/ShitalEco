@@ -88,10 +88,10 @@ export const THEMES: Theme[] = [
     swatch: '#48101C',
     light: false,
     vars: {
-      '--bg':             '#48101C',
-      // Appeal-page look: a warm maroon radial lift at the top over the deep
-      // maroon base. Layers over the ambient gold glow. Matches /appeal.
-      '--bg-image':       'radial-gradient(120% 80% at 50% -8%, #6A1A2C 0%, transparent 55%)',
+      '--bg':             '#340A15',
+      // Exact shital.org.uk/appeal backdrop: a warm maroon radial glow over the
+      // deep-maroon vertical gradient (fixed, full-bleed via index.css).
+      '--bg-image':       'radial-gradient(120% 80% at 50% -8%, #6A1A2C 0%, transparent 55%), linear-gradient(180deg, #48101C 0%, #340A15 100%)',
       '--bg-deep':        '#340A15',
       '--bg-header':      'rgba(52,10,21,0.94)',
       '--bg-sticky':      'rgba(52,10,21,0.99)',
@@ -114,7 +114,7 @@ export const THEMES: Theme[] = [
 
 // Old colours are the default; the crimson paisley is opt-in via the theme
 // picker (Temple Crimson). Users can switch anytime.
-export const DEFAULT_THEME: ThemeId = 'dark'
+export const DEFAULT_THEME: ThemeId = 'legacy'
 
 export function applyTheme(theme: Theme) {
   const root = document.documentElement
