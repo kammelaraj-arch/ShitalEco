@@ -15,27 +15,29 @@ const SAI_IMG =
 
 interface Product {
   key: string
-  tier: string       // Red Brick, Bronze Brick, …
-  color: string      // plaque colour
+  tier: string       // Square Foot, Red Brick, …
+  emoji?: string     // defaults to 🧱
+  color: string      // accent / plaque colour
   price: number
   blurb: string
-  wall: string       // recognition on the donor wall
+  wall: string       // recognition on the digital donor wall
   featured?: boolean
 }
 
-// Tiered "brick" sponsorship ladder. Every gift funds the one Future Legacy
-// Appeal (pay off the mortgage first, then the extension). The higher the
-// tier, the larger/more prominent the plaque on the temple donor wall.
+// Every gift funds the one Future Legacy Appeal. The Square Foot is the
+// priority — it clears the mortgage (secures the ground). Bricks help build
+// the future. The higher the tier, the larger the name on the temple's
+// (virtual) donor wall.
 const PRODUCTS: Product[] = [
+  { key: 'sqft',   tier: 'Square Foot', emoji: '🏛', color: '#d4af37', price: 351, featured: true,
+    blurb: 'Secures a square foot of the sacred ground — this clears the mortgage.',
+    wall: 'Your name on the digital donor wall' },
   { key: 'red',    tier: 'Red Brick',    color: '#c0392b', price: 51,
-    blurb: 'A brick in the foundation — for every devotee, child and family.',
+    blurb: 'A brick to build our future — for every devotee, child and family.',
     wall: 'Your name on the donor wall' },
   { key: 'bronze', tier: 'Bronze Brick', color: '#cd7f32', price: 151,
     blurb: 'A lasting mark of your seva.',
     wall: 'A bronze plaque on the donor wall' },
-  { key: 'silver', tier: 'Silver Brick', color: '#bfc1c2', price: 351, featured: true,
-    blurb: 'A square foot of our temple’s future.',
-    wall: 'A larger silver plaque' },
   { key: 'gold',   tier: 'Gold Brick',   color: '#d4af37', price: 1008,
     blurb: 'A generous gift that builds the future.',
     wall: 'A prominent gold plaque' },
@@ -82,7 +84,7 @@ function SponsorCard({ p }: { p: Product }) {
         <div className="w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0 text-xl"
           style={{ background: `linear-gradient(135deg, ${p.color}, ${p.color}bb)`,
                    border: '1px solid rgba(255,255,255,0.25)', boxShadow: `0 2px 12px ${p.color}66` }}>
-          🧱
+          {p.emoji ?? '🧱'}
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-black text-sm leading-tight" style={{ color: 'var(--text)' }}>{p.tier}</p>
@@ -139,12 +141,13 @@ export function SqFtPage() {
           Future Legacy Appeal
         </p>
         <h1 className="font-display text-2xl sm:text-3xl font-black mt-1" style={{ color: 'var(--text)' }}>
-          Sponsor a brick — leave your mark
+          Secure our ground · build our future
         </h1>
         <p className="text-sm mt-3 max-w-xl mx-auto" style={{ color: 'var(--text-muted)' }}>
-          Every gift helps <strong style={{ color: 'var(--text)' }}>pay off the mortgage</strong> and build our future.
-          Choose your brick — the higher the tier, the larger your name on the
-          temple <strong style={{ color: 'var(--text)' }}>donor wall</strong>. Every gift is <strong style={{ color: 'var(--text)' }}>Gift-Aided (+25%)</strong>.
+          Sponsor a <strong style={{ color: 'var(--text)' }}>square foot</strong> to help
+          <strong style={{ color: 'var(--text)' }}> clear the mortgage</strong>, or a <strong style={{ color: 'var(--text)' }}>brick</strong> to
+          build our future. The higher the tier, the larger your name on the temple’s
+          <strong style={{ color: 'var(--text)' }}> digital donor wall</strong>. Every gift is <strong style={{ color: 'var(--text)' }}>Gift-Aided (+25%)</strong>.
         </p>
       </div>
 
