@@ -15,30 +15,33 @@ const SAI_IMG =
 
 interface Product {
   key: string
-  emoji: string
-  name: string
+  tier: string       // Red Brick, Bronze Brick, …
+  color: string      // plaque colour
   price: number
   blurb: string
-  wall: string       // recognition
+  wall: string       // recognition on the donor wall
   featured?: boolean
 }
 
+// Tiered "brick" sponsorship ladder. Every gift funds the one Future Legacy
+// Appeal (pay off the mortgage first, then the extension). The higher the
+// tier, the larger/more prominent the plaque on the temple donor wall.
 const PRODUCTS: Product[] = [
-  { key: 'brick',  emoji: '🧱', name: 'Sponsor a Brick',  price: 51,
-    blurb: 'A brick in the foundation — perfect for children & families to sponsor one each.',
+  { key: 'red',    tier: 'Red Brick',    color: '#c0392b', price: 51,
+    blurb: 'A brick in the foundation — for every devotee, child and family.',
     wall: 'Your name on the donor wall' },
-  { key: 'sqft',   emoji: '🏛', name: 'Sponsor a Square Foot', price: 351, featured: true,
+  { key: 'bronze', tier: 'Bronze Brick', color: '#cd7f32', price: 151,
+    blurb: 'A lasting mark of your seva.',
+    wall: 'A bronze plaque on the donor wall' },
+  { key: 'silver', tier: 'Silver Brick', color: '#bfc1c2', price: 351, featured: true,
     blurb: 'A square foot of our temple’s future.',
-    wall: 'Your name on the donor wall' },
-  { key: 'window', emoji: '🪟', name: 'Sponsor a Window', price: 1100,
-    blurb: 'Light for prayer — a named window in the new build.',
-    wall: 'A named window + donor wall' },
-  { key: 'door',   emoji: '🚪', name: 'Sponsor a Doorway', price: 2100,
-    blurb: 'A blessed threshold, for every devotee who enters.',
-    wall: 'A named doorway + Founder recognition' },
-  { key: 'room',   emoji: '🕉️', name: 'Founder — Sponsor a Room', price: 5100,
+    wall: 'A larger silver plaque' },
+  { key: 'gold',   tier: 'Gold Brick',   color: '#d4af37', price: 1008,
+    blurb: 'A generous gift that builds the future.',
+    wall: 'A prominent gold plaque' },
+  { key: 'founder', tier: 'Founder Brick', color: '#e5e4e2', price: 5100,
     blurb: 'Help shape a whole space in the new build.',
-    wall: 'A premium Founder panel' },
+    wall: 'A premium Founder panel — our largest recognition' },
 ]
 
 const gbp = (n: number) => '£' + n.toLocaleString('en-GB')
@@ -60,7 +63,7 @@ function SponsorCard({ p }: { p: Product }) {
     if (!valid) return
     addItem({
       type: 'DONATION',
-      name: `${p.name}${qty > 1 ? ` ×${qty}` : ''}`,
+      name: `${p.tier}${qty > 1 ? ` ×${qty}` : ''}`,
       quantity: qty,
       unitPrice: p.price,
       totalPrice: total,
@@ -73,14 +76,16 @@ function SponsorCard({ p }: { p: Product }) {
 
   return (
     <div className="temple-card p-4 flex flex-col"
-      style={p.featured ? { borderColor: 'rgba(212,175,55,0.6)', boxShadow: '0 0 24px -6px rgba(212,175,55,0.4)' } : undefined}>
+      style={{ borderLeft: `4px solid ${p.color}`,
+               ...(p.featured ? { boxShadow: `0 0 24px -6px ${p.color}88` } : {}) }}>
       <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
-          style={{ background: 'rgba(212,175,55,0.18)', border: '1px solid rgba(212,175,55,0.35)' }}>
-          {p.emoji}
+        <div className="w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0 text-xl"
+          style={{ background: `linear-gradient(135deg, ${p.color}, ${p.color}bb)`,
+                   border: '1px solid rgba(255,255,255,0.25)', boxShadow: `0 2px 12px ${p.color}66` }}>
+          🧱
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-black text-sm leading-tight" style={{ color: 'var(--text)' }}>{p.name}</p>
+          <p className="font-black text-sm leading-tight" style={{ color: 'var(--text)' }}>{p.tier}</p>
           <p className="text-lg font-black price-display" style={{ color: 'rgba(212,175,55,0.95)' }}>{gbp(p.price)}<span className="text-[11px] font-semibold opacity-70"> each</span></p>
         </div>
       </div>
@@ -134,12 +139,12 @@ export function SqFtPage() {
           Future Legacy Appeal
         </p>
         <h1 className="font-display text-2xl sm:text-3xl font-black mt-1" style={{ color: 'var(--text)' }}>
-          Leave your mark — sponsor the build
+          Sponsor a brick — leave your mark
         </h1>
         <p className="text-sm mt-3 max-w-xl mx-auto" style={{ color: 'var(--text-muted)' }}>
-          Help secure and extend our Wembley temple. Sponsor a brick, a square foot or more —
-          your name goes on our <strong style={{ color: 'var(--text)' }}>donor wall</strong>, forever part of the foundation.
-          Every gift is <strong style={{ color: 'var(--text)' }}>Gift-Aided (+25%)</strong>.
+          Every gift helps <strong style={{ color: 'var(--text)' }}>pay off the mortgage</strong> and build our future.
+          Choose your brick — the higher the tier, the larger your name on the
+          temple <strong style={{ color: 'var(--text)' }}>donor wall</strong>. Every gift is <strong style={{ color: 'var(--text)' }}>Gift-Aided (+25%)</strong>.
         </p>
       </div>
 
