@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SHITAL Future Legacy Appeal — Together, We Secure the Future</title>
+<title>Shri Shirdi Saibaba Temple, Wembley — Future Legacy Appeal</title>
 <meta name="description" content="Help clear the mortgage on the property beside our Wembley temple and secure it forever — for a community hall, food hall and facilities for generations. Every gift. Every heart. One shared legacy.">
-<meta property="og:title" content="SHITAL Future Legacy Appeal — Together, We Secure the Future">
+<meta property="og:title" content="Shri Shirdi Saibaba Temple, Wembley — Future Legacy Appeal">
 <meta property="og:description" content="Help us clear the mortgage and secure our temple's future. Every gift is Gift-Aided (+25%). Om Sai Ram 🙏">
 <link rel="icon" href="/favicon.ico">
 <style>
@@ -160,6 +160,36 @@
   footer .quote{ font-style:italic; font-size:19px; color:var(--cream); max-width:46ch; margin:0 auto 14px }
   footer .reg{ font:500 12px/1.5 ui-sans-serif,system-ui,sans-serif; letter-spacing:.04em; opacity:.7 }
 
+  /* story */
+  .story{ max-width:760px; margin:0 auto }
+  .story .lead{ font-size:clamp(20px,2.6vw,26px); line-height:1.5; color:var(--cream); text-align:center; margin-bottom:26px }
+  .story p{ font-size:17.5px; line-height:1.75; color:var(--ink-soft); margin:0 0 18px }
+  .story p .hi{ color:var(--gold-br); font-weight:600 }
+  .story .sig{ text-align:center; color:var(--gold); font-style:italic; font-size:18px; margin-top:8px }
+  .baba-quote{ margin:26px auto; max-width:600px; text-align:center; padding:22px 24px; border-radius:16px;
+    background:linear-gradient(180deg,rgba(92,22,38,.5),rgba(52,10,21,.5)); border:1px solid var(--gold) }
+  .baba-quote .dev{ color:var(--gold-br); font-size:clamp(20px,3vw,26px); line-height:1.5; font-weight:600 }
+  .baba-quote .en{ color:var(--cream); font-style:italic; font-size:17px; margin-top:10px }
+  .baba-quote .en span{ color:var(--gold); font-style:normal; font-weight:600; letter-spacing:.02em }
+
+  /* roadmap (vertical timeline: past → now → future) */
+  .rmap{ max-width:820px; margin:0 auto; position:relative; padding-left:40px }
+  .rmap::before{ content:""; position:absolute; left:11px; top:8px; bottom:8px; width:2px;
+    background:linear-gradient(180deg,var(--gold-deep),var(--line)) }
+  .rstep{ position:relative; margin-bottom:20px }
+  .rstep:last-child{ margin-bottom:0 }
+  .rstep::before{ content:""; position:absolute; left:-34px; top:20px; width:14px; height:14px; border-radius:50%;
+    background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); box-shadow:0 0 0 5px var(--maroon-2) }
+  .rstep.now::before{ box-shadow:0 0 0 5px var(--maroon-2), 0 0 20px rgba(240,212,136,.85) }
+  .rcard{ background:linear-gradient(180deg,rgba(92,22,38,.4),rgba(52,10,21,.4)); border:1px solid var(--line);
+    border-radius:14px; padding:16px 20px }
+  .rstep.now .rcard{ border-color:var(--gold); box-shadow:0 0 34px -10px rgba(240,212,136,.5) }
+  .rstep.future .rcard{ background:rgba(0,0,0,.14); border-style:dashed }
+  .rcard .when{ color:var(--gold); font:700 12.5px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase }
+  .rcard h3{ color:var(--cream); font-size:clamp(20px,2.4vw,24px); font-weight:600; margin:6px 0 6px }
+  .rstep.now .rcard h3{ color:var(--gold-br) }
+  .rcard p{ color:var(--ink-soft); font-size:16px; line-height:1.55 }
+
   @media (max-width:760px){
     .timeline{ grid-template-columns:1fr }
     .donate{ grid-template-columns:1fr }
@@ -178,19 +208,19 @@
       </div>
       <div class="brand">
         <img class="logo" src="https://admin.shital.org.uk/api/v1/media/library/47cf82c8-ea9d-4a0a-96ac-e9acb8676097" alt="SHITAL — Shri Shirdi Saibaba Temple logo">
-        <h1>SHITAL</h1>
+        <h1>Shri Shirdi Saibaba Temple, Wembley</h1>
         <div class="subttl">Future Legacy Appeal</div>
       </div>
       <div class="tagline">
         <h2>Together, we secure the future</h2>
         <div class="fsl sans"><span>Faith</span><span class="d">✦</span><span>Seva</span><span class="d">✦</span><span>Legacy</span></div>
       </div>
-      <p class="intro sans">With the blessings of Shirdi Sai Baba and the devotion of our community, SHITAL has become a place of faith, prayer, culture and service for thousands.</p>
+      <p class="intro sans">With the blessings of Shirdi Sai Baba and the devotion of our community, Shri Shirdi Saibaba Temple, Wembley has become a place of faith, prayer, culture and service for thousands.</p>
 
       <div class="goal">
-        <div class="k">Our Goal</div>
-        <div class="v num">£900,000</div>
-        <p>To clear the mortgage on the residential property beside our Wembley temple — and secure it forever.</p>
+        <div class="k">Our Goal · Secure &amp; Extend</div>
+        <div class="v num">£1.2M</div>
+        <p><strong style="color:var(--gold-br)">Phase 1</strong> — pay off the <strong>£900,000</strong> mortgage on the property. <strong style="color:var(--gold-br)">Phase 2</strong> — add a <strong>welcome &amp; reception area</strong> and essential <strong>back-office &amp; service facilities</strong> (front + back extensions, subject to planning) to serve us for the next five years.</p>
         <div class="ribbon sans">Every Gift · Every Heart · One Shared Legacy</div>
       </div>
 
@@ -204,19 +234,45 @@
 
       <div class="cta-row">
         <a class="btn primary sans" href="https://service.shital.org.uk/">🙏 Donate now</a>
+        <a class="btn primary sans" href="https://service.shital.org.uk/?screen=sqft">🧱 Sponsor a brick · from £51</a>
         <a class="btn ghost sans" href="https://service.shital.org.uk/?screen=monthly-giving">Give monthly →</a>
       </div>
     </div>
   </header>
 
-  <!-- Journey -->
+  <!-- Our Story -->
   <section>
     <div class="wrap">
-      <div class="sec-title"><span class="eye sans">Our journey so far</span><h2>Today, the next chapter begins</h2></div>
-      <div class="timeline">
-        <div class="tl"><div class="yr num">2010</div><h3>The Beginning</h3><p>A humble start with a divine vision — to serve our community through faith and seva.</p></div>
-        <div class="tl"><div class="yr num">2016</div><h3>Our Temple Home</h3><p>We purchased our Wembley temple — a permanent home for worship, celebration and community.</p></div>
-        <div class="tl"><div class="yr num">2024</div><h3>A Rare Blessing</h3><p>We secured the neighbouring residential property — a once-in-a-generation opportunity.</p></div>
+      <div class="sec-title"><span class="eye sans">Our story · श्रद्धा और सबूरी</span><h2>Faith opened this door. Together, let us walk through it.</h2></div>
+      <div class="story">
+        <p class="lead">Shirdi Sai Baba built everything on two words — <span class="hi">Shraddha</span> (faith) and <span class="hi">Saburi</span> (patience). On those same two words, so did we.</p>
+        <p>It began on a winter’s day — <span class="hi">31 January 2010</span> — with a handful of devotees in a small rented hall in Wembley, and a dream: a home for Baba where families could gather to pray, to celebrate, to serve. By His grace, in <span class="hi">2016</span> we bought that Wembley temple outright. Every aarti, every festival, every plate of langar since has been offered from these walls.</p>
+        <p>And by His grace, we grew. Temples opened in <span class="hi">Leicester</span> and <span class="hi">Reading</span>; in <span class="hi">2017</span> we secured land <em>and full planning permission</em> for two temples and a community centre in <span class="hi">Milton Keynes</span>. Through it all, Wembley — where it all began — has remained our first home, and our heart.</p>
+        <p>Then in <span class="hi">2024</span>, Baba opened a door that may never open again — the property <span class="hi">right beside our Wembley temple</span>. Our elders say that when Baba places such an opportunity before you, it is not chance — it is a call. We answered in faith, and secured it.</p>
+        <p>Our shastras teach that few acts earn greater <span class="hi">punya</span> than building a home for God and feeding His children — <span class="hi">मंदिर निर्माण और अन्नदान</span>. The blessings of such seva do not end with us; they flow to our children, and to our children’s children.</p>
+        <p>Today Baba asks of us what He always asked — faith, and a giving heart. Give what your heart allows. Trust that together, brick by brick, square foot by square foot, we will build what no one could build alone.</p>
+        <div class="baba-quote">
+          <p class=" dev">“श्रद्धा रखो — डरो मत, मैं तुम्हारे साथ हूँ।”</p>
+          <p class="en">“Have faith — why fear when I am here?” <span>— Shri Sai Baba</span></p>
+        </div>
+        <p class="sig">No single person can build the future — but together, as one Sai family, we can. 🙏 Om Sai Ram.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- The Roadmap: past → now → future -->
+  <section>
+    <div class="wrap">
+      <div class="sec-title"><span class="eye sans">The roadmap</span><h2>From a humble beginning to a lasting legacy</h2></div>
+      <div class="rmap">
+        <div class="rstep past"><div class="rcard"><div class="when">31 Jan 2010 · The beginning</div><h3>Our first temple opens in Wembley</h3><p>A small group of devotees gather in a rented hall with faith and a dream — to serve the community through prayer and seva.</p></div></div>
+        <div class="rstep past"><div class="rcard"><div class="when">2016 · Our temple home</div><h3>We buy our Wembley temple</h3><p>A permanent home for worship, festivals and langar — the heart of our growing community.</p></div></div>
+        <div class="rstep past"><div class="rcard"><div class="when">By 2017 · Growing across the UK</div><h3>Leicester, Reading &amp; Milton Keynes</h3><p>Temples open in Leicester and Reading. In 2017 we secure land <strong>and full planning permission</strong> for two temples and a community centre in Milton Keynes — proof, by His grace, that together we deliver.</p></div></div>
+        <div class="rstep past"><div class="rcard"><div class="when">2024 · A rare blessing</div><h3>We secure the property next door</h3><p>A once-in-a-generation chance to grow — the residential property beside our Wembley temple, bought on a mortgage.</p></div></div>
+        <div class="rstep now"><div class="rcard"><div class="when">Now · 2025 · Phase 1 — Secure it</div><h3>Pay off the £900,000 mortgage</h3><p>Every gift clears the debt so we own the property outright, forever — and stop paying interest that could be seva instead. <strong>This is where you come in.</strong></p></div></div>
+        <div class="rstep now"><div class="rcard"><div class="when">Next 5 years · Phase 2 — Extend it</div><h3>Add a welcome area &amp; service facilities</h3><p>Two single-storey extensions (front + back) add a proper welcome &amp; reception area and much-needed back-office and service space — practical improvements to serve us now, while we plan for more. <em>In progress — working with our local council on planning.</em></p></div></div>
+        <div class="rstep future"><div class="rcard"><div class="when">2027–2028 · The bigger vision</div><h3>Redevelop the whole site</h3><p>A separate future project to rebuild the entire site into a landmark temple &amp; community centre — a multi-million-pound vision with its own appeal, once planning is secured.</p></div></div>
+        <div class="rstep future"><div class="rcard"><div class="when">The legacy</div><h3>One Temple. One Community. One Legacy.</h3><p>A vibrant spiritual and cultural centre serving Wembley and beyond — for today, and for generations to come.</p></div></div>
       </div>
     </div>
   </section>
@@ -231,6 +287,35 @@
         <div class="ac"><div class="ic">🍲</div><div><h3>Expand our seva</h3><p>More annadanam, more programmes, more service to the needy.</p></div></div>
         <div class="ac"><div class="ic">🪔</div><div><h3>Preserve our heritage</h3><p>Keep our traditions, values and spirit alive for generations.</p></div></div>
       </div>
+    </div>
+  </section>
+
+  <!-- Sponsor: Square Foot (clears the mortgage) + Brick tiers (the build) -->
+  <section>
+    <div class="wrap">
+      <div class="sec-title"><span class="eye sans">Leave your mark</span><h2>Secure our ground · build our future</h2></div>
+
+      <!-- Square Foot — the priority: clears the mortgage -->
+      <div class="monthly" style="max-width:840px; border-color:var(--gold); box-shadow:0 0 34px -10px rgba(240,212,136,.4)">
+        <h3 style="color:var(--gold-br); font-size:15px">🏛 Sponsor a Square Foot · £351</h3>
+        <p style="font-size:19px; color:var(--cream); margin-top:8px"><strong style="color:var(--gold-br)">This clears the mortgage.</strong> Each square foot secures a piece of the sacred ground beside our temple — the most important step — and puts your name on our <strong style="color:var(--gold-br)">digital donor wall</strong> (shown online &amp; on screen in the temple).</p>
+        <div class="cta-row" style="margin-top:18px">
+          <a class="btn primary sans" href="https://service.shital.org.uk/?screen=sqft">🏛 Sponsor a square foot →</a>
+        </div>
+      </div>
+
+      <!-- Bricks — help build our future -->
+      <p class="intro sans" style="margin-top:36px">Or <strong style="color:var(--gold-br)">sponsor a brick</strong> to help build our future — the higher the tier, the larger your name on the donor wall.</p>
+      <div class="tiers" style="margin-top:22px; grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+        <a class="tier" href="https://service.shital.org.uk/?screen=sqft" style="border-left:4px solid #c0392b"><div class="amt num">£51</div><div class="nm">Red Brick</div><div class="mean">Your name on the donor wall</div></a>
+        <a class="tier" href="https://service.shital.org.uk/?screen=sqft" style="border-left:4px solid #cd7f32"><div class="amt num">£151</div><div class="nm">Bronze Brick</div><div class="mean">A bronze plaque</div></a>
+        <a class="tier" href="https://service.shital.org.uk/?screen=sqft" style="border-left:4px solid #d4af37"><div class="amt num">£1,008</div><div class="nm">Gold Brick</div><div class="mean">A prominent gold plaque</div></a>
+        <a class="tier" href="https://service.shital.org.uk/?screen=sqft" style="border-left:4px solid #e5e4e2"><div class="amt num">£5,100</div><div class="nm">Founder Brick</div><div class="mean">A premium Founder panel</div></a>
+      </div>
+      <div class="cta-row" style="margin-top:22px">
+        <a class="btn ghost sans" href="https://service.shital.org.uk/?screen=sqft">🧱 Sponsor a brick →</a>
+      </div>
+      <p class="tier-note sans" style="margin-top:14px">Every gift is Gift-Aided (+25%) if you’re a UK taxpayer. Your name grows with your gift.</p>
     </div>
   </section>
 
@@ -269,7 +354,7 @@
   <!-- Donate ways + QR -->
   <section>
     <div class="wrap">
-      <div class="sec-title"><span class="eye sans">Donate today</span><h2>Be part of SHITAL’s history</h2></div>
+      <div class="sec-title"><span class="eye sans">Donate today</span><h2>Be part of our temple’s history</h2></div>
       <div class="donate">
         <div class="dlist">
           <div class="di"><div class="ic">🌐</div><div><h3>Online</h3><p><a href="https://service.shital.org.uk/">service.shital.org.uk</a> — card or PayPal, one-off or monthly.</p></div></div>
@@ -277,7 +362,7 @@
           <div class="di"><div class="ic">🇬🇧</div><div><h3>Gift Aid</h3><p>Add 25% to your gift at no cost — just tick the box when you donate.</p></div></div>
         </div>
         <div class="qr-card">
-          <img src="data:image/png;base64,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" alt="Scan to donate to the SHITAL Future Legacy Appeal">
+          <img src="data:image/png;base64,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" alt="Scan to donate to the Shri Shirdi Saibaba Temple, Wembley Future Legacy Appeal">
           <div class="cap">Scan to donate</div>
         </div>
       </div>
@@ -300,9 +385,9 @@
 
   <footer>
     <div class="wrap">
-      <p class="quote">“No single person can build the future — but together, as one SHITAL family, we can make it happen.”</p>
+      <p class="quote">“No single person can build the future — but together, as one Sai family, we can make it happen.”</p>
       <p class="om" style="margin:14px 0">❁ Om Sai Ram ❁</p>
-      <p class="reg sans">Shri Shirdi Saibaba Temple · SHITAL · UK Registered Charity No. 1138530 · <a href="/">shital.org.uk</a></p>
+      <p class="reg sans">Shri Shirdi Saibaba Temple, Wembley · UK Registered Charity No. 1138530 · <a href="/">shital.org.uk</a></p>
     </div>
   </footer>
 </div>
@@ -310,7 +395,7 @@
 <script>
 (function(){
   // ── Progress (edit these two numbers, or wire to live donations later) ──────
-  var GOAL = 900000, RAISED = 215000;
+  var GOAL = 1200000, RAISED = 215000;
   var pct = Math.max(0, Math.min(100, Math.round(RAISED / GOAL * 100)));
   var gbp = function(n){ return '£' + n.toLocaleString('en-GB'); };
   document.getElementById('raisedLbl').textContent = gbp(RAISED) + ' raised';
@@ -324,7 +409,7 @@
 
   // ── Share ───────────────────────────────────────────────────────────────────
   var url = 'https://shital.org.uk/appeal';
-  var msg = 'Help us secure our temple’s future 🛕🙏 SHITAL Future Legacy Appeal — every gift is Gift-Aided (+25%). Om Sai Ram. ';
+  var msg = 'Help us secure our temple’s future 🛕🙏 Shri Shirdi Saibaba Temple, Wembley — Future Legacy Appeal — every gift is Gift-Aided (+25%). Om Sai Ram. ';
   document.getElementById('waShare').href = 'https://wa.me/?text=' + encodeURIComponent(msg + url);
   document.getElementById('fbShare').href = 'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(url);
   document.getElementById('copyBtn').addEventListener('click', function(){

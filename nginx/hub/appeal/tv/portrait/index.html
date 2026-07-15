@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shri Shirdi Saibaba Temple, Wembley — Future Legacy Appeal (Portrait TV)</title>
+<meta name="description" content="Portrait digital-signage poster for a 40-inch TV. Pay off the mortgage on the residential property beside our Wembley temple.">
+<style>
+  :root{
+    --maroon:#48101c; --maroon-2:#340a15; --maroon-3:#5c1626;
+    --gold:#d7b25a; --gold-br:#f0d488; --gold-deep:#b1863a;
+    --cream:#f6ecd6; --ink:#f4ead6; --ink-soft:#d8c298;
+    --line:rgba(215,178,90,.30);
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; overflow:hidden}
+  html{background:#340a15}
+  body{
+    color:var(--ink);
+    background:
+      radial-gradient(120% 55% at 50% -4%, #6a1a2c 0%, transparent 55%),
+      linear-gradient(180deg,var(--maroon) 0%, var(--maroon-2) 100%);
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .sans{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .num{font-variant-numeric:tabular-nums lining-nums}
+
+  /* Fixed 9:16 stage that scales to any portrait TV without scrolling */
+  .stage{
+    width:100vw; height:177.78vw;         /* 9:16 */
+    max-height:100vh; max-width:56.25vh;
+    padding:2.6vh 3.2vh;
+    display:flex; flex-direction:column; align-items:center; text-align:center;
+    border:0.22vh solid var(--line);
+    outline:1.1vh solid rgba(0,0,0,.18); outline-offset:-1.4vh;
+  }
+
+  .om{ color:var(--gold); letter-spacing:.5em; font:600 1.7vh/1 ui-sans-serif,system-ui,sans-serif; text-transform:uppercase; }
+
+  .darshan{ margin-top:1vh; }
+  .darshan img{
+    width:auto; max-height:12.5vh; max-width:53vw; height:auto; border-radius:1.8vh;
+    border:0.5vh solid var(--gold);
+    box-shadow:0 0 0 1.2vh rgba(215,178,90,.12), 0 3vh 7vh -3vh rgba(0,0,0,.85);
+    background:rgba(0,0,0,.2);
+  }
+
+  .name{
+    margin-top:1.2vh; font-size:3.1vh; font-weight:600; line-height:1.06; letter-spacing:.005em;
+    background:linear-gradient(180deg,var(--gold-br),var(--gold) 55%,var(--gold-deep));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .subttl{ color:var(--ink-soft); font:700 1.7vh/1 ui-sans-serif,system-ui,sans-serif;
+    letter-spacing:.4em; text-transform:uppercase; margin-top:.7vh; }
+  .tagline{ color:var(--cream); font-size:2.1vh; font-weight:600; margin-top:1vh; }
+
+  .goal{ margin-top:1vh; }
+  .goal .k{ color:var(--gold); font:700 1.5vh/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.2em; text-transform:uppercase; }
+  .goal .v{ font-size:4.6vh; font-weight:600; line-height:1; margin:.4vh 0;
+    background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .goal .desc{ color:var(--ink-soft); font-size:1.55vh; line-height:1.35; max-width:52ch; margin:0 auto; }
+  .goal .desc strong{ color:var(--cream); font-weight:700; }
+
+  .sqft{ display:inline-flex; align-items:center; gap:1.3vh; margin-top:1.1vh; padding:.9vh 1.7vh; border-radius:1.3vh;
+    background:linear-gradient(180deg,rgba(215,178,90,.18),rgba(215,178,90,.05)); border:0.2vh solid var(--gold); }
+  .sqft-amt{ color:var(--gold-br); font:700 2.6vh/1 ui-sans-serif,system-ui,sans-serif; }
+  .sqft-txt{ color:var(--cream); font-size:1.7vh; line-height:1.25; }
+  .sqft-txt strong{ color:var(--gold-br); }
+  .wall-tiers{ color:var(--ink-soft); font-size:1.35vh; margin-top:.4vh; }
+
+  .give-k{ color:var(--gold); font:700 1.35vh/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase; margin:.8vh 0 .6vh; }
+  .chips{ display:flex; flex-wrap:wrap; gap:1vh; justify-content:center; }
+  .chip{ border:0.2vh solid var(--gold); color:var(--gold-br); border-radius:99vh; padding:.8vh 1.5vh;
+    font:700 1.9vh/1 ui-sans-serif,system-ui,sans-serif; }
+  .chip small{ font-size:1.4vh; opacity:.75; font-weight:600; }
+
+  .qrwrap{ margin-top:.8vh; display:flex; align-items:center; justify-content:center; gap:2.2vh; }
+  .qrwrap img{ width:11vh; height:11vh; border-radius:1.1vh; background:var(--cream); padding:0.7vh; }
+  .qrwrap .txt{ text-align:left; }
+  .qrwrap .lead{ color:var(--gold-br); font:800 1.5vh/1.2 ui-sans-serif,system-ui,sans-serif; letter-spacing:.1em; text-transform:uppercase; }
+  .qrwrap .url{ color:var(--cream); font-size:2.1vh; font-weight:600; margin-top:.5vh; }
+  .qrwrap .ga{ display:inline-block; margin-top:1vh; background:linear-gradient(180deg,var(--gold),var(--gold-deep));
+    color:var(--maroon-2); font:800 1.5vh/1 ui-sans-serif,system-ui,sans-serif; padding:.9vh 1.4vh; border-radius:99vh; }
+
+  /* Roadmap — vertical 4-across at the bottom */
+  .roadmap{ margin-top:.8vh; padding-top:1.1vh; width:100%; border-top:0.18vh solid var(--line);
+    display:grid; grid-template-columns:repeat(4,1fr); gap:1.2vh; position:relative; }
+  .roadmap .rl{ position:absolute; top:calc(2vh + 0.7vh); left:12.5%; right:12.5%; height:0.2vh; background:var(--line); }
+  .step{ position:relative; padding-top:2.2vh; }
+  .step .dot{ position:absolute; top:0; left:50%; transform:translateX(-50%); width:1.4vh; height:1.4vh; border-radius:50%;
+    background:linear-gradient(180deg,var(--gold-br),var(--gold-deep)); box-shadow:0 0 0 0.55vh var(--maroon-2); }
+  .step.now .dot{ box-shadow:0 0 0 0.55vh var(--maroon-2), 0 0 2vh rgba(240,212,136,.7); }
+  .step .yr{ color:var(--gold-br); font:700 2vh/1 ui-sans-serif,system-ui,sans-serif; }
+  .step .lbl{ color:var(--cream); font:700 1.2vh/1.1 ui-sans-serif,system-ui,sans-serif; text-transform:uppercase; letter-spacing:.05em; margin-top:.7vh; }
+  .step.now .lbl{ color:var(--gold-br); }
+  .step .d{ color:var(--ink-soft); font-size:1.25vh; line-height:1.35; margin-top:.6vh; }
+
+  .reg{ color:var(--ink-soft); font:600 1.15vh/1.4 ui-sans-serif,system-ui,sans-serif; letter-spacing:.03em; opacity:.8; margin-top:.8vh; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <p class="om">❁ Om Sai Ram ❁</p>
+
+    <div class="darshan">
+      <img src="https://admin.shital.org.uk/api/v1/media/library/00a4a66d-d25b-4195-8d33-57b1f2853f63" alt="Shirdi Sai Baba">
+    </div>
+
+    <h1 class="name">Shri Shirdi Saibaba Temple, Wembley</h1>
+    <div class="subttl">Future Legacy Appeal</div>
+    <div class="tagline">Together, we secure the future</div>
+
+    <div class="goal">
+      <div class="k">Our goal — secure &amp; extend</div>
+      <div class="v num">£1.2M</div>
+      <div class="desc sans"><strong>Phase 1</strong> — pay off the <strong>£900k mortgage</strong>. <strong>Phase 2</strong> — add a welcome &amp; reception area and service facilities, subject to planning.</div>
+    </div>
+
+    <div class="sqft sans"><span class="sqft-amt num">£351</span><div class="sqft-txt">sponsors a <strong>square foot</strong> — <strong>your name on our donor wall</strong><div class="wall-tiers">10+ sq ft · larger name block · £5,000+ · Founder panel</div></div></div>
+
+    <div class="give-k sans">Give once — choose your seva</div>
+    <div class="chips sans">
+      <span class="chip num">£21</span><span class="chip num">£51</span><span class="chip num">£108</span><span class="chip num">£251</span><span class="chip num">£501</span><span class="chip num">£1,008+</span>
+    </div>
+    <div class="give-k sans">Or give monthly</div>
+    <div class="chips sans">
+      <span class="chip num">£11<small>/mo</small></span><span class="chip num">£21<small>/mo</small></span><span class="chip num">£31<small>/mo</small></span><span class="chip num">£51<small>/mo</small></span>
+    </div>
+
+    <div class="qrwrap sans">
+      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAdQAAAHUAQMAAAC56UsvAAAABlBMVEU0ChX27NY7yYcbAAACG0lEQVR42u2cbYrDMAxExV7A97+lb+D9iCuPlBaWQkGCF8ISL3l/wlSMR0psvX1Mg4WFhYWFhYX9LzvNj5+VjfV7NR4X1/+npdvW/LL3D1jYT7AWfhGXaMe+UMHn29AzbGU9z1OEd4n+K86XvI/C/Tb0DNtHz3u51nEgY6Fn2Mb12cxVrSYEPcP28s9qkvfG0B56xj/DdtBzyjFeneQbsA30/OxwvxGMR8j6eM6wVfXs7sJlPFayIieOHugZtrbfGI+/bj+iYT5KnuwHYRv4Z0/nvBRv4zFi3SbfgG2Rb8wnIYZWbO+tsB+ELe6fNV7eGlYZ+/wGeoZtkm94E9BiZzDZDPwGbIt8Q3uCV5X283QMvZKjZ9jK/nkemxHCDYk+TgaCnmHL+43QNHG3/DTQo58CW7s+u6nQ5fHPqThTn2HL6zm0/+J7Ky71SPGcYYv6Dd33qdNI+0HyOtg2fiMNi+ogtI92MC8K22Q/6Lr1rsqJo6eljBo9w5auz/f3UNJOUK01eoatX5/jcJ3pAJLOReOfYVvUZ8mcwwjHLdlAz7D16/P9FUJ3zprgiTnhOcPWrc97eZ+Flp74OdEzbGE95za3xtGxPuOfYRvoWXK50zoxmbK7+xP0DNtBz6kDrtMdrnD0DNtDz1PM86u5O/wGbBf/rG+gLMnupAOO34Btk29olLGWfpQjfE0XPcOW1TPffoeFhYWFhYX9IPsN+WcNTlOF/JcAAAAASUVORK5CYII=" alt="Scan to donate at service.shital.org.uk">
+      <div class="txt">
+        <div class="lead">Scan to donate</div>
+        <div class="url">service.shital.org.uk</div>
+        <span class="ga">Every gift Gift-Aided +25%</span>
+      </div>
+    </div>
+
+    <div class="roadmap sans">
+      <span class="rl"></span>
+      <div class="step"><span class="dot"></span><div class="yr num">2010</div><div class="lbl">The beginning</div></div>
+      <div class="step"><span class="dot"></span><div class="yr num">2016</div><div class="lbl">Our temple home</div></div>
+      <div class="step"><span class="dot"></span><div class="yr num">2024</div><div class="lbl">A rare blessing</div></div>
+      <div class="step now"><span class="dot"></span><div class="yr num">Now</div><div class="lbl">Secure &amp; extend</div></div>
+    </div>
+
+    <div class="reg sans">Shri Shirdi Saibaba Temple, Wembley · UK Registered Charity No. 1138530</div>
+  </div>
+</body>
+</html>
