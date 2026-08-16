@@ -229,16 +229,19 @@ jobs:
             curl -sf -X POST http://localhost:8001/api/v1/admin/seed-catalog || true
 
             # ── Post-deploy sanity: probe deployer from inside backend-dev.
-            # The prod-side deployer container has its DEPLOY_SECRET baked in
-            # at start time. If the secret has rotated since the deployer was
-            # last recreated, the dev backend gets HTTP 403 here even though
-            # everything in the DEV stack is healthy.
+            # The deployer is a single container shared between prod and dev
+            # backends, with DEPLOY_SECRET baked in at start time. If the
+            # secret rotated since it was last started, the dev backend gets
+            # HTTP 403 here even though every dev container is healthy —
+            # which then makes /admin/settings/system/ops show
+            # "Deployer rejected request: DEPLOY_SECRET mismatch" on every
+            # button until the next prod deploy runs.
             #
-            # Treat as a warning, not a hard failure: the prod deploy
-            # (.github/workflows/deploy-vultr.yml) is what reconciles the
-            # deployer container; failing the dev deploy on this would block
-            # every dev push until prod is touched. Surfaces the issue
-            # loudly so it's still actionable from the workflow log.
+            # Reconcile from this workflow too: if the probe fails, force-
+            # recreate the deployer with the secret we just injected into
+            # .env.dev (== the GitHub Actions DEPLOY_SECRET == the same
+            # value the prod .env holds). Symmetric with the prod
+            # workflow's "Recreate deployer (sync DEPLOY_SECRET)" step.
             echo "=== Sanity: probe deployer from inside backend-dev ==="
             DEPLOYER_PROBE=$(docker exec shitaleco-dev-backend-dev-1 \
               curl -s -o /dev/null -w "%{http_code}" \
@@ -246,10 +249,42 @@ jobs:
                 http://deployer:9000/status 2>&1 || echo 000)
             echo "deployer /status from backend-dev → HTTP $DEPLOYER_PROBE"
             if [ "$DEPLOYER_PROBE" != "200" ]; then
-              echo "::warning::Deployer probe returned $DEPLOYER_PROBE (expected 200)."
-              echo "::warning::DEPLOY_SECRET in the prod-side deployer container is out of sync with the GitHub secret."
-              echo "::warning::Next prod deploy will reconcile (see deploy-vultr.yml force-recreate step)."
-              # Non-fatal — dev stack is healthy regardless.
+              echo "::warning::Deployer probe returned $DEPLOYER_PROBE — reconciling now."
+
+              # The deployer lives in the prod compose project under
+              # /opt/shitaleco. .env there already holds the same
+              # DEPLOY_SECRET we just propagated to .env.dev (both come
+              # from the GitHub Actions secret). Force-recreate so the
+              # container reads the current value.
+              if [ -d /opt/shitaleco/.git ]; then
+                (
+                  cd /opt/shitaleco
+                  # Make sure .env has the current value before recreate.
+                  if grep -q '^DEPLOY_SECRET=' .env 2>/dev/null; then
+                    sed -i "s|^DEPLOY_SECRET=.*|DEPLOY_SECRET=${DEPLOY_SECRET}|" .env
+                  else
+                    echo "DEPLOY_SECRET=${DEPLOY_SECRET}" >> .env
+                  fi
+                  # Stale-id guard: same pattern PR #60 / #82 use for
+                  # dev containers. Remove by name in case compose state
+                  # still references a vanished container id.
+                  docker rm -f shitaleco-deployer-1 2>/dev/null || true
+                  docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate deployer 2>&1 | tail -5
+                ) || echo "::warning::Could not auto-recreate deployer — /opt/shitaleco may be missing or compose unavailable."
+
+                # Re-probe to confirm.
+                sleep 3
+                DEPLOYER_PROBE2=$(docker exec shitaleco-dev-backend-dev-1 \
+                  curl -s -o /dev/null -w "%{http_code}" \
+                    -H "X-Deploy-Secret: $DEPLOY_SECRET" \
+                    http://deployer:9000/status 2>&1 || echo 000)
+                echo "deployer /status after recreate → HTTP $DEPLOYER_PROBE2"
+                if [ "$DEPLOYER_PROBE2" != "200" ]; then
+                  echo "::warning::Deployer still mismatched after recreate. Check /opt/shitaleco/.env DEPLOY_SECRET matches the GitHub Actions secret."
+                fi
+              else
+                echo "::warning::/opt/shitaleco missing — first-time bootstrap path. Run a prod deploy to install the deployer."
+              fi
             fi
 
             # ── dev-watchdog cron REMOVED (12-Jun) ──────────────────────────────
