@@ -107,7 +107,32 @@ async def verify_azure_token(body: VerifyTokenInput):
     """
     Validate a Microsoft ID token from MSAL, create or link the user in our DB,
     and return our own JWT access + refresh tokens.
+
+    Wrapped in a catch-all so any unexpected failure (DB drift, JWKS network
+    blip, missing role constant, etc.) surfaces a useful message back to the
+    login UI instead of bare "Internal Server Error" — and lands a full
+    traceback in structlog for ops to chase.
     """
+    try:
+        return await _verify_azure_token_impl(body)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        import structlog
+        structlog.get_logger().exception(
+            "azure_verify_token_unhandled",
+            error=str(exc), error_type=type(exc).__name__,
+        )
+        # Keep the message terse + safe — never echo a stack trace to the
+        # browser, but give the admin enough to act on / paste into a
+        # bug report.
+        raise HTTPException(
+            status_code=500,
+            detail=f"Sign-in failed: {type(exc).__name__}: {exc}"[:300],
+        ) from exc
+
+
+async def _verify_azure_token_impl(body: VerifyTokenInput):
     from jose import JWTError
     from jose import jwt as jose_jwt
     from sqlalchemy import text
