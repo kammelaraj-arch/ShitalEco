@@ -100,13 +100,6 @@ interface DailyRecord {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const todayISO = () => new Date().toISOString().slice(0, 10)
-// Branches — same stopgap list as the HR form uses, until /branches is public.
-const BRANCHES = ['main', 'wembley', 'wembley_main']
-
-// Roles permitted to switch between branches. Everyone else is pinned to
-// their own branch_id (and the backend enforces the same, so this is just
-// about hiding the picker).
-const CROSS_BRANCH_ROLES = new Set(['SUPER_ADMIN', 'TRUSTEE', 'AUDITOR'])
 
 interface LoggedInUser {
   id?: string
@@ -161,20 +154,15 @@ function TriCheck({ value }: { value: CheckBool }) {
 }
 
 export default function CompliancDailyPage() {
-  // Logged-in user — read once on mount. Determines default branch, auto-
-  // populated names, and whether the branch picker is shown.
+  // Logged-in user — read once on mount. Determines the pinned branch and
+  // the auto-populated name / initials.
   const [me, setMe] = useState<LoggedInUser>({})
   useEffect(() => { setMe(readUser()) }, [])
   const myName = me.name || me.email || ''
   const myInitials = useMemo(() => initialsFrom(myName), [myName])
-  const canSwitchBranch = CROSS_BRANCH_ROLES.has((me.role || '').toUpperCase())
 
-  // Default branch to the user's assigned branch_id. Falls back to 'main'
-  // only before the localStorage read completes.
-  const [branch, setBranch] = useState<string>('main')
-  useEffect(() => {
-    if (me.branch_id) setBranch(me.branch_id)
-  }, [me.branch_id])
+  // Branch is pulled from the account and never changed on this page.
+  const branch = me.branch_id || 'main'
 
   const [recordDate, setRecordDate] = useState<string>(todayISO())
   const [rec, setRec] = useState<DailyRecord | null>(null)
@@ -325,23 +313,18 @@ export default function CompliancDailyPage() {
         )}
       </div>
 
-      {/* Branch + date pickers. Branch is read-only unless the caller holds
-          a cross-branch role (SUPER_ADMIN / TRUSTEE / AUDITOR); matches the
-          server-side scoping so volunteers can't try to pick someone else's
-          branch and get an unhelpful 403. */}
+      {/* Branch is always read-only on this page — the volunteer / branch
+          manager always fills in their own branch's record. Cross-branch
+          viewing (for trustees / super-admins) belongs in the history view
+          where the branch picker is a legitimate filter, not an editing
+          hazard. */}
       <div className="grid grid-cols-2 gap-3 glass rounded-2xl p-4 border border-white/10">
         <div>
           <label className="text-white/50 text-xs font-bold uppercase tracking-wide mb-1 block">Branch</label>
-          {canSwitchBranch ? (
-            <select value={branch} onChange={e => setBranch(e.target.value)} className={INP}>
-              {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
-          ) : (
-            <div className={INP + ' flex items-center justify-between opacity-80'}>
-              <span>{branch}</span>
-              <span className="text-white/30 text-xs">from your account</span>
-            </div>
-          )}
+          <div className={INP + ' flex items-center justify-between opacity-80 cursor-not-allowed'}>
+            <span className="font-semibold">{branch || '—'}</span>
+            <span className="text-white/30 text-xs">from your account</span>
+          </div>
         </div>
         <div>
           <label className="text-white/50 text-xs font-bold uppercase tracking-wide mb-1 block">Date</label>
