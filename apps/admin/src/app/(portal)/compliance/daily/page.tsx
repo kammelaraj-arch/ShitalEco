@@ -103,6 +103,40 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 // Branches — same stopgap list as the HR form uses, until /branches is public.
 const BRANCHES = ['main', 'wembley', 'wembley_main']
 
+// Roles permitted to switch between branches. Everyone else is pinned to
+// their own branch_id (and the backend enforces the same, so this is just
+// about hiding the picker).
+const CROSS_BRANCH_ROLES = new Set(['SUPER_ADMIN', 'TRUSTEE', 'AUDITOR'])
+
+interface LoggedInUser {
+  id?: string
+  name?: string
+  email?: string
+  role?: string
+  branch_id?: string
+}
+
+/**
+ * Read the logged-in user from localStorage (set at /login).
+ * Returns an empty object if nothing is stored or JSON is malformed.
+ */
+function readUser(): LoggedInUser {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem('shital_user')
+    return raw ? (JSON.parse(raw) as LoggedInUser) : {}
+  } catch { return {} }
+}
+
+/**
+ * Initials for the row-level "init" field — first letter of each name token,
+ * uppercased, max 3 chars. "Priya Patel" → "PP"; "Raj K Mehta" → "RKM".
+ */
+function initialsFrom(name: string | undefined): string {
+  if (!name) return ''
+  return name.trim().split(/\s+/).map(w => w[0] || '').join('').toUpperCase().slice(0, 3)
+}
+
 const emptyData = (): DailyRecordData => ({
   opening_closing: {
     opening: {}, closing: {}, opened_by: '', closed_by: '', manager_action: '',
@@ -127,7 +161,21 @@ function TriCheck({ value }: { value: CheckBool }) {
 }
 
 export default function CompliancDailyPage() {
-  const [branch, setBranch] = useState<string>('wembley_main')
+  // Logged-in user — read once on mount. Determines default branch, auto-
+  // populated names, and whether the branch picker is shown.
+  const [me, setMe] = useState<LoggedInUser>({})
+  useEffect(() => { setMe(readUser()) }, [])
+  const myName = me.name || me.email || ''
+  const myInitials = useMemo(() => initialsFrom(myName), [myName])
+  const canSwitchBranch = CROSS_BRANCH_ROLES.has((me.role || '').toUpperCase())
+
+  // Default branch to the user's assigned branch_id. Falls back to 'main'
+  // only before the localStorage read completes.
+  const [branch, setBranch] = useState<string>('main')
+  useEffect(() => {
+    if (me.branch_id) setBranch(me.branch_id)
+  }, [me.branch_id])
+
   const [recordDate, setRecordDate] = useState<string>(todayISO())
   const [rec, setRec] = useState<DailyRecord | null>(null)
   const [loading, setLoading] = useState(false)
@@ -147,12 +195,21 @@ export default function CompliancDailyPage() {
       d.data = { ...emptyData(), ...(d.data || {}) }
       d.data.opening_closing = { ...emptyData().opening_closing, ...(d.data.opening_closing || {}) }
       d.data.food_prep       = { ...emptyData().food_prep, ...(d.data.food_prep || {}) }
+      // Pre-fill names on a brand-new record so the volunteer doesn't retype
+      // their own name on four fields. Only touches blanks — never overwrites
+      // a value already saved by a previous session for this day.
+      if (!d.id && myName) {
+        if (!d.data.opening_closing.opened_by) d.data.opening_closing.opened_by = myName
+        if (!d.data.opening_closing.closed_by) d.data.opening_closing.closed_by = myName
+        if (!d.data.food_prep.food_lead)       d.data.food_prep.food_lead = myName
+        if (!d.data.food_prep.served_by)       d.data.food_prep.served_by = myName
+      }
       setRec(d)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load record')
       setRec(null)
     } finally { setLoading(false) }
-  }, [branch, recordDate])
+  }, [branch, recordDate, myName])
 
   useEffect(() => { load() }, [load])
 
@@ -268,19 +325,37 @@ export default function CompliancDailyPage() {
         )}
       </div>
 
-      {/* Branch + date pickers */}
+      {/* Branch + date pickers. Branch is read-only unless the caller holds
+          a cross-branch role (SUPER_ADMIN / TRUSTEE / AUDITOR); matches the
+          server-side scoping so volunteers can't try to pick someone else's
+          branch and get an unhelpful 403. */}
       <div className="grid grid-cols-2 gap-3 glass rounded-2xl p-4 border border-white/10">
         <div>
           <label className="text-white/50 text-xs font-bold uppercase tracking-wide mb-1 block">Branch</label>
-          <select value={branch} onChange={e => setBranch(e.target.value)} className={INP}>
-            {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
-          </select>
+          {canSwitchBranch ? (
+            <select value={branch} onChange={e => setBranch(e.target.value)} className={INP}>
+              {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          ) : (
+            <div className={INP + ' flex items-center justify-between opacity-80'}>
+              <span>{branch}</span>
+              <span className="text-white/30 text-xs">from your account</span>
+            </div>
+          )}
         </div>
         <div>
           <label className="text-white/50 text-xs font-bold uppercase tracking-wide mb-1 block">Date</label>
           <input type="date" value={recordDate} onChange={e => setRecordDate(e.target.value)} className={INP} />
         </div>
       </div>
+
+      {/* Submitting-as badge — makes it clear whose name goes on the record. */}
+      {myName && (
+        <div className="text-xs text-white/40 -mt-2">
+          Signing as <span className="text-white/70 font-semibold">{myName}</span>
+          {myInitials && <span className="text-white/40"> · initials {myInitials}</span>}
+        </div>
+      )}
 
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 px-4 py-3 text-sm">{error}</div>}
       {flash && <div className="rounded-xl border border-green-500/30 bg-green-500/10 text-green-400 px-4 py-3 text-sm">{flash}</div>}
@@ -406,7 +481,7 @@ export default function CompliancDailyPage() {
                     className="text-red-400 hover:text-red-300 text-xs">✕</button>
                 </div>
               ))}
-              <button type="button" onClick={() => setData({ donations: [...rec.data.donations, { time: '', donor_or_supplier: '', food_quantity: '', date_or_batch: '', condition_ok: false, accepted: true, initials: '', reject_action: '' }] })}
+              <button type="button" onClick={() => setData({ donations: [...rec.data.donations, { time: '', donor_or_supplier: '', food_quantity: '', date_or_batch: '', condition_ok: false, accepted: true, initials: myInitials, reject_action: '' }] })}
                 className="mt-2 px-3 py-1.5 rounded-lg bg-saffron-500/20 text-saffron-400 border border-saffron-500/30 text-xs font-semibold hover:bg-saffron-500/30">
                 + Add donation
               </button>
@@ -433,7 +508,7 @@ export default function CompliancDailyPage() {
                     className="text-red-400 hover:text-red-300 text-xs">✕</button>
                 </div>
               ))}
-              <button type="button" onClick={() => setData({ temperatures: [...rec.data.temperatures, { time: '', food_batch: '', stage: '', target: '', actual: '', passed: true, initials: '', corrective_action: '' }] })}
+              <button type="button" onClick={() => setData({ temperatures: [...rec.data.temperatures, { time: '', food_batch: '', stage: '', target: '', actual: '', passed: true, initials: myInitials, corrective_action: '' }] })}
                 className="mt-2 px-3 py-1.5 rounded-lg bg-saffron-500/20 text-saffron-400 border border-saffron-500/30 text-xs font-semibold hover:bg-saffron-500/30">
                 + Add temperature reading
               </button>
@@ -456,7 +531,7 @@ export default function CompliancDailyPage() {
                     className="text-red-400 hover:text-red-300 text-xs">✕</button>
                 </div>
               ))}
-              <button type="button" onClick={() => setData({ allergens: [...rec.data.allergens, { food_or_prasad: '', known_allergen: '', separate_utensil: false, info_given: false, initials: '' }] })}
+              <button type="button" onClick={() => setData({ allergens: [...rec.data.allergens, { food_or_prasad: '', known_allergen: '', separate_utensil: false, info_given: false, initials: myInitials }] })}
                 className="mt-2 px-3 py-1.5 rounded-lg bg-saffron-500/20 text-saffron-400 border border-saffron-500/30 text-xs font-semibold hover:bg-saffron-500/30">
                 + Add allergen entry
               </button>
@@ -475,7 +550,7 @@ export default function CompliancDailyPage() {
                     className="text-red-400 hover:text-red-300 text-xs">✕</button>
                 </div>
               ))}
-              <button type="button" onClick={() => setData({ issues: [...rec.data.issues, { time: '', issue: '', immediate_action: '', reported_to: '', initials: '' }] })}
+              <button type="button" onClick={() => setData({ issues: [...rec.data.issues, { time: '', issue: '', immediate_action: '', reported_to: '', initials: myInitials }] })}
                 className="mt-2 px-3 py-1.5 rounded-lg bg-saffron-500/20 text-saffron-400 border border-saffron-500/30 text-xs font-semibold hover:bg-saffron-500/30">
                 + Add issue
               </button>
