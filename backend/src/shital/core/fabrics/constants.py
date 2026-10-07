@@ -80,6 +80,12 @@ PERMISSIONS: dict[str, list[str]] = {
     "assets:write": ["SUPER_ADMIN", "BRANCH_MANAGER"],
     "compliance:read": ["SUPER_ADMIN", "TRUSTEE", "AUDITOR"],
     "compliance:write": ["SUPER_ADMIN", "TRUSTEE"],
+    # Daily operational forms (MASTER 05A) — volunteers submit for their own
+    # branch; branch managers and above can review/sign-off. Scoping to the
+    # caller's branch happens in the compliance router, not here.
+    "compliance:daily:read":   ["SUPER_ADMIN", "TRUSTEE", "AUDITOR", "BRANCH_MANAGER", "VOLUNTEER"],
+    "compliance:daily:write":  ["SUPER_ADMIN", "TRUSTEE", "BRANCH_MANAGER", "VOLUNTEER"],
+    "compliance:daily:review": ["SUPER_ADMIN", "TRUSTEE", "BRANCH_MANAGER"],
     "admin:users": ["SUPER_ADMIN"],
     "admin:branches": ["SUPER_ADMIN", "TRUSTEE"],
     "bookings:read": ["SUPER_ADMIN", "BRANCH_MANAGER", "STAFF"],

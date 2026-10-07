@@ -1,5 +1,6 @@
 'use client'
 import { motion } from 'framer-motion'
+import Link from 'next/link'
 
 const COMPLIANCE_ITEMS = [
   { title: 'Charity Registration', status: 'compliant', icon: '🏛️', desc: 'Registered with Charity Commission England & Wales', detail: 'Reg No: 123456', reviewed: '2024-04-01', action: 'View Certificate' },
@@ -36,6 +37,21 @@ export default function CompliancePage() {
         <h1 className="text-3xl font-black text-white">Compliance</h1>
         <p className="text-white/40 mt-1">Regulatory compliance and risk management</p>
       </div>
+
+      {/* MASTER 05 operational forms — the day-to-day work the branches do */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+        className="glass rounded-2xl p-5 border border-saffron-500/20 bg-gradient-to-br from-saffron-500/5 to-transparent">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-white font-bold text-lg flex items-center gap-2">📋 MASTER 05 — Operational Forms</h2>
+            <p className="text-white/50 text-sm mt-1">Daily checklists, food &amp; prasad records, allergen checks, quarterly &amp; yearly reviews.</p>
+          </div>
+          <Link href="/compliance/daily"
+            className="px-5 py-2.5 rounded-xl bg-saffron-gradient text-white font-black text-sm hover:brightness-110 transition">
+            Open Daily Record →
+          </Link>
+        </div>
+      </motion.div>
 
       <div className="grid grid-cols-2 gap-4">
         {COMPLIANCE_ITEMS.map((item, i) => {
