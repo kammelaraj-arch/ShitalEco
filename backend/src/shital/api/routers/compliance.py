@@ -391,11 +391,14 @@ async def list_daily_records(
         where.append("branch_id = :bid")
         params["bid"] = target_branch
     if date_from:
-        where.append("record_date >= :df"); params["df"] = date.fromisoformat(date_from)
+        where.append("record_date >= :df")
+        params["df"] = date.fromisoformat(date_from)
     if date_to:
-        where.append("record_date <= :dt"); params["dt"] = date.fromisoformat(date_to)
+        where.append("record_date <= :dt")
+        params["dt"] = date.fromisoformat(date_to)
     if status:
-        where.append("status = :st"); params["st"] = status
+        where.append("status = :st")
+        params["st"] = status
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     async with SessionLocal() as db:
