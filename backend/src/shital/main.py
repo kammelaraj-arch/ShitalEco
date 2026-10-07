@@ -1672,6 +1672,7 @@ _mount("shital.api.routers.accounts",             "router")
 _mount("shital.api.routers.app_permissions",      "router")
 _mount("shital.api.routers.menus",                 "router")
 _mount("shital.api.routers.system",                "router")
+_mount("shital.api.routers.compliance",            "router")
 
 
 @app.get("/health", tags=["system"])
