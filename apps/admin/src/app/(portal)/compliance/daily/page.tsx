@@ -577,99 +577,208 @@ export default function CompliancDailyPage() {
               </div>
             </Panel>
 
-            {/* §3 Donations */}
+            {/* §3 Donations — card-per-event list, "+ Add" at top so a
+                volunteer with ten donations already logged doesn't scroll
+                past them to add the eleventh. Each card = a two-row grid:
+                top row for who/what/time, bottom row for condition + decision
+                + initials + remove. Field labels tucked above each input
+                because at ~90px tall per card the hint text pays off. */}
             <Panel id="don" title="§3  Donation / Delivery Receiving Record" flag={rec.data.donations.length > 0 ? `${rec.data.donations.length}` : undefined}>
-              {rec.data.donations.map((d, i) => (
-                <div key={i} className="grid grid-cols-[80px_1fr_1fr_90px_60px_90px_60px_auto] gap-2 mb-2 items-center">
-                  <input placeholder="Time" value={d.time} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, time: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Donor / supplier" value={d.donor_or_supplier} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, donor_or_supplier: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Food / qty" value={d.food_quantity} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, food_quantity: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Date/batch" value={d.date_or_batch} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, date_or_batch: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <label className="text-white/60 text-xs flex items-center gap-1 justify-center">
-                    <input type="checkbox" checked={d.condition_ok} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, condition_ok: e.target.checked } : x) })} /> OK
-                  </label>
-                  <select value={d.accepted ? 'accept' : 'reject'} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, accepted: e.target.value === 'accept' } : x) })} className={INP + ' py-1'}>
-                    <option value="accept">Accept</option>
-                    <option value="reject">Reject</option>
-                  </select>
-                  <input placeholder="Initials" value={d.initials} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, initials: e.target.value } : x) })} className={INP + ' py-1 text-center'} />
-                  <button type="button" onClick={() => setData({ donations: rec.data.donations.filter((_, j) => j !== i) })}
-                    className="text-red-400 hover:text-red-300 text-xs">✕</button>
-                </div>
-              ))}
-              <button type="button" onClick={() => setData({ donations: [...rec.data.donations, { time: '', donor_or_supplier: '', food_quantity: '', date_or_batch: '', condition_ok: false, accepted: true, initials: myInitials, reject_action: '' }] })}
-                className="mt-2 px-3 py-1.5 rounded-lg bg-saffron-500/20 text-saffron-400 border border-saffron-500/30 text-xs font-semibold hover:bg-saffron-500/30">
-                + Add donation
+              <button type="button"
+                onClick={() => setData({ donations: [{ time: '', donor_or_supplier: '', food_quantity: '', date_or_batch: '', condition_ok: false, accepted: true, initials: myInitials, reject_action: '' }, ...rec.data.donations] })}
+                className="w-full py-3 rounded-xl bg-saffron-500/15 text-saffron-400 border border-dashed border-saffron-500/40 text-sm font-bold hover:bg-saffron-500/25 transition mb-3 min-h-[48px]">
+                + Add Donation
               </button>
+              {rec.data.donations.length === 0 ? (
+                <p className="text-white/40 text-sm text-center py-8">No donations recorded yet today.</p>
+              ) : (
+                <div className="space-y-3">
+                  {rec.data.donations.map((d, i) => (
+                    <div key={i} className="rounded-xl border border-white/10 bg-white/[0.03] p-4 hover:border-white/20 transition">
+                      <div className="grid grid-cols-[80px_1fr_1fr] gap-3 mb-3">
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Time</label>
+                          <input placeholder="08:15" value={d.time} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, time: e.target.value } : x) })} className={INP} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Donor / Supplier</label>
+                          <input placeholder="Anonymous donor, or Ambika Sweets" value={d.donor_or_supplier} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, donor_or_supplier: e.target.value } : x) })} className={INP} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Food / Quantity</label>
+                          <input placeholder="12 bananas · 2 kg" value={d.food_quantity} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, food_quantity: e.target.value } : x) })} className={INP} />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-[1fr_80px_110px_70px_40px] gap-3 items-end">
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Date / Batch</label>
+                          <input placeholder="BB 09/10/26" value={d.date_or_batch} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, date_or_batch: e.target.value } : x) })} className={INP} />
+                        </div>
+                        <label className={`flex items-center justify-center gap-2 min-h-[42px] rounded-lg border transition cursor-pointer ${d.condition_ok ? 'bg-green-500/10 border-green-500/40 text-green-400' : 'bg-white/5 border-white/10 text-white/50'}`}>
+                          <input type="checkbox" checked={d.condition_ok} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, condition_ok: e.target.checked } : x) })} className="accent-green-500" />
+                          <span className="text-xs font-bold">Cond. OK</span>
+                        </label>
+                        <select value={d.accepted ? 'accept' : 'reject'} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, accepted: e.target.value === 'accept' } : x) })} className={INP + (d.accepted ? '' : ' text-red-400')}>
+                          <option value="accept">✓ Accept</option>
+                          <option value="reject">✗ Reject</option>
+                        </select>
+                        <input placeholder="Init" value={d.initials} onChange={e => setData({ donations: rec.data.donations.map((x, j) => j === i ? { ...x, initials: e.target.value } : x) })} className={INP + ' text-center font-bold'} />
+                        <button type="button" onClick={() => setData({ donations: rec.data.donations.filter((_, j) => j !== i) })}
+                          className="min-h-[42px] rounded-lg text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition text-lg">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Panel>
 
             {/* §4 Temperatures */}
+            {/* §4 Temperatures — card-per-reading. Pass/Fail is a prominent
+                coloured chip, not a buried select, since temp failures are
+                the most consequential finding on this form (food safety). */}
             <Panel id="temp" title="§4  Temperature &amp; Cooking Record" flag={rec.data.temperatures.length > 0 ? `${rec.data.temperatures.length}` : undefined}>
-              {rec.data.temperatures.map((t, i) => (
-                <div key={i} className="grid grid-cols-[70px_1fr_120px_80px_80px_70px_60px_auto] gap-2 mb-2 items-center">
-                  <input placeholder="Time" value={t.time} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, time: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Food / batch" value={t.food_batch} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, food_batch: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <select value={t.stage} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, stage: e.target.value } : x) })} className={INP + ' py-1'}>
-                    <option value="">Stage…</option>
-                    {TEMP_STAGES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-                  </select>
-                  <input placeholder="Target" value={t.target} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, target: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Actual" value={t.actual} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, actual: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <select value={t.passed ? 'pass' : 'fail'} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, passed: e.target.value === 'pass' } : x) })} className={INP + ' py-1'}>
-                    <option value="pass">Pass</option>
-                    <option value="fail">Fail</option>
-                  </select>
-                  <input placeholder="Init" value={t.initials} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, initials: e.target.value } : x) })} className={INP + ' py-1 text-center'} />
-                  <button type="button" onClick={() => setData({ temperatures: rec.data.temperatures.filter((_, j) => j !== i) })}
-                    className="text-red-400 hover:text-red-300 text-xs">✕</button>
-                </div>
-              ))}
-              <button type="button" onClick={() => setData({ temperatures: [...rec.data.temperatures, { time: '', food_batch: '', stage: '', target: '', actual: '', passed: true, initials: myInitials, corrective_action: '' }] })}
-                className="mt-2 px-3 py-1.5 rounded-lg bg-saffron-500/20 text-saffron-400 border border-saffron-500/30 text-xs font-semibold hover:bg-saffron-500/30">
-                + Add temperature reading
+              <button type="button"
+                onClick={() => setData({ temperatures: [{ time: '', food_batch: '', stage: '', target: '', actual: '', passed: true, initials: myInitials, corrective_action: '' }, ...rec.data.temperatures] })}
+                className="w-full py-3 rounded-xl bg-saffron-500/15 text-saffron-400 border border-dashed border-saffron-500/40 text-sm font-bold hover:bg-saffron-500/25 transition mb-3 min-h-[48px]">
+                + Add Temperature Reading
               </button>
+              {rec.data.temperatures.length === 0 ? (
+                <p className="text-white/40 text-sm text-center py-8">No temperature readings recorded yet today.</p>
+              ) : (
+                <div className="space-y-3">
+                  {rec.data.temperatures.map((t, i) => (
+                    <div key={i} className={`rounded-xl border p-4 hover:border-white/20 transition ${t.passed ? 'border-white/10 bg-white/[0.03]' : 'border-red-500/40 bg-red-500/[0.05]'}`}>
+                      <div className="grid grid-cols-[80px_1fr_140px] gap-3 mb-3">
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Time</label>
+                          <input placeholder="11:20" value={t.time} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, time: e.target.value } : x) })} className={INP} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Food / Batch</label>
+                          <input placeholder="Khichdi batch A" value={t.food_batch} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, food_batch: e.target.value } : x) })} className={INP} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Stage</label>
+                          <select value={t.stage} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, stage: e.target.value } : x) })} className={INP}>
+                            <option value="">Choose…</option>
+                            {TEMP_STAGES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-[100px_100px_1fr_70px_40px] gap-3 items-end">
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Target</label>
+                          <input placeholder="≥75°C" value={t.target} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, target: e.target.value } : x) })} className={INP} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Actual</label>
+                          <input placeholder="82°C" value={t.actual} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, actual: e.target.value } : x) })} className={INP + (t.passed ? '' : ' text-red-400 font-bold')} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Result</label>
+                          <button type="button"
+                            onClick={() => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, passed: !x.passed } : x) })}
+                            className={`w-full min-h-[42px] rounded-lg border font-bold text-sm transition ${t.passed ? 'bg-green-500/15 text-green-400 border-green-500/40 hover:bg-green-500/25' : 'bg-red-500/15 text-red-400 border-red-500/40 hover:bg-red-500/25'}`}>
+                            {t.passed ? '✓ Pass' : '✗ Fail'}
+                          </button>
+                        </div>
+                        <input placeholder="Init" value={t.initials} onChange={e => setData({ temperatures: rec.data.temperatures.map((x, j) => j === i ? { ...x, initials: e.target.value } : x) })} className={INP + ' text-center font-bold'} />
+                        <button type="button" onClick={() => setData({ temperatures: rec.data.temperatures.filter((_, j) => j !== i) })}
+                          className="min-h-[42px] rounded-lg text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition text-lg">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Panel>
 
             {/* §5 Allergens */}
             <Panel id="alg" title="§5  Allergen &amp; Serving Check" flag={rec.data.allergens.length > 0 ? `${rec.data.allergens.length}` : undefined}>
-              {rec.data.allergens.map((a, i) => (
-                <div key={i} className="grid grid-cols-[1fr_1fr_90px_90px_60px_auto] gap-2 mb-2 items-center">
-                  <input placeholder="Food / prasad" value={a.food_or_prasad} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, food_or_prasad: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Known allergen" value={a.known_allergen} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, known_allergen: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <label className="text-white/60 text-xs flex items-center gap-1 justify-center">
-                    <input type="checkbox" checked={a.separate_utensil} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, separate_utensil: e.target.checked } : x) })} /> Sep.
-                  </label>
-                  <label className="text-white/60 text-xs flex items-center gap-1 justify-center">
-                    <input type="checkbox" checked={a.info_given} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, info_given: e.target.checked } : x) })} /> Info
-                  </label>
-                  <input placeholder="Init" value={a.initials} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, initials: e.target.value } : x) })} className={INP + ' py-1 text-center'} />
-                  <button type="button" onClick={() => setData({ allergens: rec.data.allergens.filter((_, j) => j !== i) })}
-                    className="text-red-400 hover:text-red-300 text-xs">✕</button>
-                </div>
-              ))}
-              <button type="button" onClick={() => setData({ allergens: [...rec.data.allergens, { food_or_prasad: '', known_allergen: '', separate_utensil: false, info_given: false, initials: myInitials }] })}
-                className="mt-2 px-3 py-1.5 rounded-lg bg-saffron-500/20 text-saffron-400 border border-saffron-500/30 text-xs font-semibold hover:bg-saffron-500/30">
-                + Add allergen entry
+              <button type="button"
+                onClick={() => setData({ allergens: [{ food_or_prasad: '', known_allergen: '', separate_utensil: false, info_given: false, initials: myInitials }, ...rec.data.allergens] })}
+                className="w-full py-3 rounded-xl bg-saffron-500/15 text-saffron-400 border border-dashed border-saffron-500/40 text-sm font-bold hover:bg-saffron-500/25 transition mb-3 min-h-[48px]">
+                + Add Allergen Entry
               </button>
+              {rec.data.allergens.length === 0 ? (
+                <p className="text-white/40 text-sm text-center py-8">No allergen checks logged yet today.</p>
+              ) : (
+                <div className="space-y-3">
+                  {rec.data.allergens.map((a, i) => (
+                    <div key={i} className="rounded-xl border border-white/10 bg-white/[0.03] p-4 hover:border-white/20 transition">
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Food / Prasad</label>
+                          <input placeholder="Barfi (gift from devotee)" value={a.food_or_prasad} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, food_or_prasad: e.target.value } : x) })} className={INP} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Known Allergen</label>
+                          <input placeholder="Peanuts, milk" value={a.known_allergen} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, known_allergen: e.target.value } : x) })} className={INP} />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-[1fr_1fr_80px_40px] gap-3 items-end">
+                        <label className={`flex items-center justify-center gap-2 min-h-[42px] rounded-lg border transition cursor-pointer ${a.separate_utensil ? 'bg-green-500/10 border-green-500/40 text-green-400' : 'bg-white/5 border-white/10 text-white/50'}`}>
+                          <input type="checkbox" checked={a.separate_utensil} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, separate_utensil: e.target.checked } : x) })} className="accent-green-500" />
+                          <span className="text-xs font-bold">Separate utensil</span>
+                        </label>
+                        <label className={`flex items-center justify-center gap-2 min-h-[42px] rounded-lg border transition cursor-pointer ${a.info_given ? 'bg-green-500/10 border-green-500/40 text-green-400' : 'bg-white/5 border-white/10 text-white/50'}`}>
+                          <input type="checkbox" checked={a.info_given} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, info_given: e.target.checked } : x) })} className="accent-green-500" />
+                          <span className="text-xs font-bold">Info given</span>
+                        </label>
+                        <input placeholder="Init" value={a.initials} onChange={e => setData({ allergens: rec.data.allergens.map((x, j) => j === i ? { ...x, initials: e.target.value } : x) })} className={INP + ' text-center font-bold'} />
+                        <button type="button" onClick={() => setData({ allergens: rec.data.allergens.filter((_, j) => j !== i) })}
+                          className="min-h-[42px] rounded-lg text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition text-lg">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Panel>
 
-            {/* §6 Issues */}
+            {/* §6 Issues — card-per-issue list. Each issue card is bordered
+                red to make it obvious a day's compliance record has any
+                exceptions at all when a reviewer opens the tab. */}
             <Panel id="iss" title="§6  Daily Issue Record" flag={rec.data.issues.length > 0 ? `${rec.data.issues.length} issue(s)` : undefined}>
-              {rec.data.issues.map((it, i) => (
-                <div key={i} className="grid grid-cols-[80px_2fr_2fr_1fr_60px_auto] gap-2 mb-2 items-center">
-                  <input placeholder="Time" value={it.time} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, time: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Issue / failed check" value={it.issue} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, issue: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Immediate action" value={it.immediate_action} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, immediate_action: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Reported to" value={it.reported_to} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, reported_to: e.target.value } : x) })} className={INP + ' py-1'} />
-                  <input placeholder="Init" value={it.initials} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, initials: e.target.value } : x) })} className={INP + ' py-1 text-center'} />
-                  <button type="button" onClick={() => setData({ issues: rec.data.issues.filter((_, j) => j !== i) })}
-                    className="text-red-400 hover:text-red-300 text-xs">✕</button>
-                </div>
-              ))}
-              <button type="button" onClick={() => setData({ issues: [...rec.data.issues, { time: '', issue: '', immediate_action: '', reported_to: '', initials: myInitials }] })}
-                className="mt-2 px-3 py-1.5 rounded-lg bg-saffron-500/20 text-saffron-400 border border-saffron-500/30 text-xs font-semibold hover:bg-saffron-500/30">
-                + Add issue
+              <button type="button"
+                onClick={() => setData({ issues: [{ time: '', issue: '', immediate_action: '', reported_to: '', initials: myInitials }, ...rec.data.issues] })}
+                className="w-full py-3 rounded-xl bg-saffron-500/15 text-saffron-400 border border-dashed border-saffron-500/40 text-sm font-bold hover:bg-saffron-500/25 transition mb-3 min-h-[48px]">
+                + Add Issue
               </button>
+              {rec.data.issues.length === 0 ? (
+                <p className="text-white/40 text-sm text-center py-8">No issues reported today. ✓</p>
+              ) : (
+                <div className="space-y-3">
+                  {rec.data.issues.map((it, i) => (
+                    <div key={i} className="rounded-xl border border-red-500/30 bg-red-500/[0.04] p-4 hover:border-red-500/50 transition">
+                      <div className="grid grid-cols-[80px_1fr] gap-3 mb-3">
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Time</label>
+                          <input placeholder="08:40" value={it.time} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, time: e.target.value } : x) })} className={INP} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Issue / Failed Check</label>
+                          <input placeholder="Fridge-2 reading 7°C (above 5°C limit)" value={it.issue} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, issue: e.target.value } : x) })} className={INP} />
+                        </div>
+                      </div>
+                      <div className="mb-3">
+                        <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Immediate Action Taken</label>
+                        <input placeholder="Moved stock to fridge-1, called engineer, isolated unit" value={it.immediate_action} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, immediate_action: e.target.value } : x) })} className={INP} />
+                      </div>
+                      <div className="grid grid-cols-[1fr_90px_40px] gap-3 items-end">
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Reported To</label>
+                          <input placeholder="Branch Mgr (K.Mehta)" value={it.reported_to} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, reported_to: e.target.value } : x) })} className={INP} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1">Initials</label>
+                          <input placeholder="Init" value={it.initials} onChange={e => setData({ issues: rec.data.issues.map((x, j) => j === i ? { ...x, initials: e.target.value } : x) })} className={INP + ' text-center font-bold'} />
+                        </div>
+                        <button type="button" onClick={() => setData({ issues: rec.data.issues.filter((_, j) => j !== i) })}
+                          className="min-h-[42px] rounded-lg text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition text-lg">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Panel>
           </fieldset>
 
