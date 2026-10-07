@@ -205,6 +205,66 @@ export default function CompliancDailyPage() {
   // can only be reviewed. Keeps the paper form's "ink is final" semantics.
   const locked = rec?.status === 'SUBMITTED' || rec?.status === 'REVIEWED'
 
+  // ── Quick-fill shortcuts ───────────────────────────────────────────────────
+  // "Mark all green" — ticks every opening/closing/food-prep check as pass.
+  // The happy-path day in a quiet temple kitchen has ~30 passes and 0 fails;
+  // this takes submission from ~2 min of clicking to ~10 seconds. Overwrites
+  // existing check states — the volunteer then edits the few that aren't
+  // actually green. Does not touch dynamic lists (donations / temperatures /
+  // allergens / issues), which are per-event by nature.
+  const markAllGreen = () => {
+    if (!rec || locked) return
+    if ((Object.keys(rec.data.opening_closing.opening).length +
+         Object.keys(rec.data.opening_closing.closing).length +
+         Object.keys(rec.data.food_prep.checks).length) > 0) {
+      if (!confirm('Overwrite existing check marks with Pass?')) return
+    }
+    const pass = (): CheckBool => ({ value: true, na: false, action: '' })
+    const opening: Record<string, CheckBool> = {}
+    const closing: Record<string, CheckBool> = {}
+    for (const c of OPENING_CLOSING_CHECKS) { opening[c.key] = pass(); closing[c.key] = pass() }
+    const foodChecks: Record<string, CheckBool> = {}
+    for (const c of FOOD_PREP_CHECKS) { foodChecks[c.key] = pass() }
+    setData({
+      opening_closing: { ...rec.data.opening_closing, opening, closing },
+      food_prep:       { ...rec.data.food_prep, checks: foodChecks },
+    })
+    setFlash('All checks marked Pass — review and submit')
+    setTimeout(() => setFlash(''), 2500)
+  }
+
+  // "Copy from yesterday" — pulls yesterday's record and copies ONLY the
+  // static check patterns (opening/closing/food-prep). Dynamic rows
+  // (donations/temperatures/allergens/issues) are deliberately NOT copied —
+  // those are events specific to that day and copying them would file
+  // yesterday's incidents as today's. If yesterday's record doesn't exist,
+  // say so and do nothing.
+  const copyFromYesterday = async () => {
+    if (!rec || locked) return
+    const yesterday = new Date(recordDate + 'T00:00:00Z')
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1)
+    const ydISO = yesterday.toISOString().slice(0, 10)
+    try {
+      const prev = await apiFetch<DailyRecord>(`/compliance/daily?branch_id=${branch}&record_date=${ydISO}`)
+      if (!prev.id) { setError(`No record found for ${ydISO} — nothing to copy.`); return }
+      setData({
+        opening_closing: {
+          ...rec.data.opening_closing,
+          opening: prev.data.opening_closing?.opening || {},
+          closing: prev.data.opening_closing?.closing || {},
+        },
+        food_prep: {
+          ...rec.data.food_prep,
+          checks: prev.data.food_prep?.checks || {},
+        },
+      })
+      setFlash(`Copied check marks from ${ydISO} — review and submit`)
+      setTimeout(() => setFlash(''), 2500)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not fetch yesterday\'s record')
+    }
+  }
+
   const save = async (submit: boolean) => {
     if (!rec) return
     if (submit && !confirm('Submit this record? Once submitted it cannot be edited (only reviewed by a manager).')) return
@@ -337,6 +397,26 @@ export default function CompliancDailyPage() {
         <div className="text-xs text-white/40 -mt-2">
           Signing as <span className="text-white/70 font-semibold">{myName}</span>
           {myInitials && <span className="text-white/40"> · initials {myInitials}</span>}
+        </div>
+      )}
+
+      {/* Quick-fill shortcuts — only shown while editable. Hidden once the
+          record is submitted/reviewed to avoid an "overwrite" button on a
+          locked form. */}
+      {rec && !locked && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-white/40 text-xs uppercase tracking-wider font-bold mr-1">Shortcuts</span>
+          <button type="button" onClick={markAllGreen}
+            className="px-3 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 text-xs font-bold hover:bg-green-500/25 transition">
+            ✓ Mark all green
+          </button>
+          <button type="button" onClick={copyFromYesterday}
+            className="px-3 py-1.5 rounded-lg bg-white/5 text-white/70 border border-white/15 text-xs font-bold hover:bg-white/10 transition">
+            📋 Copy from yesterday
+          </button>
+          <span className="text-white/30 text-[11px] ml-1">
+            Then edit any exceptions (e.g. a fridge failure) and submit.
+          </span>
         </div>
       )}
 
