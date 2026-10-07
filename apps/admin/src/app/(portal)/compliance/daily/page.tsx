@@ -144,13 +144,14 @@ const emptyData = (): DailyRecordData => ({
 // Field class — matches the shared "temple admin dark glass" look of other pages.
 const INP = 'w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-white/25 text-sm focus:border-saffron-400 focus:outline-none'
 
-// Styled "tri-state" button for Opening/Closing checks: Pass / N/A / Fail (empty)
+// Visual indicator inside a check cell. Sizes are tuned for a tablet
+// touch target (56×48px cell) — the glyph fills ~1/3 of it so it reads
+// across the room on a kitchen countertop iPad.
 function TriCheck({ value }: { value: CheckBool }) {
-  // Visual indicator; actual change happens via dedicated handler per cell
-  if (value.na) return <span className="text-amber-400 text-xs font-bold">N/A</span>
-  if (value.value === true) return <span className="text-green-400 text-base">✓</span>
-  if (value.value === false) return <span className="text-red-400 text-base">✗</span>
-  return <span className="text-white/20 text-xs">—</span>
+  if (value.na) return <span className="text-amber-400 text-sm font-black tracking-wide">N/A</span>
+  if (value.value === true) return <span className="text-green-400 text-2xl font-black">✓</span>
+  if (value.value === false) return <span className="text-red-400 text-2xl font-black">✗</span>
+  return <span className="text-white/25 text-base">—</span>
 }
 
 export default function CompliancDailyPage() {
@@ -170,10 +171,12 @@ export default function CompliancDailyPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>('')
   const [flash, setFlash] = useState<string>('')
-  // Which panels are expanded. Default: opening_closing + issues open; others collapsed.
-  const [open, setOpen] = useState<Record<string, boolean>>({
-    oc: true, fp: false, don: false, temp: false, alg: false, iss: true,
-  })
+  // Which tab is active. Tab-based (not scroll) layout keeps each §-section
+  // on its own view so a kitchen volunteer isn't scrolling a tablet past
+  // sections they don't need right now. `open` is a derived value fed into
+  // the Panel component below so only the active tab renders its body.
+  const [activeTab, setActiveTab] = useState<string>('oc')
+  const open: Record<string, boolean> = { [activeTab]: true }
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -330,29 +333,26 @@ export default function CompliancDailyPage() {
   }
 
   // Memoised panel wrapper — keeps the JSX below readable
+  // Panel renders a section's header + body. In tab mode (what this page
+  // uses) `open` is derived from `activeTab`, so a Panel renders its body
+  // only when its tab is active. The header no longer toggles — the tab
+  // bar above handles navigation.
   const Panel = useMemo(() => function Panel({
     id, title, children, flag,
   }: { id: string; title: string; children: React.ReactNode; flag?: string }) {
     const isOpen = !!open[id]
+    if (!isOpen) return null
     return (
-      <section className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
-        <button type="button"
-          onClick={() => setOpen(p => ({ ...p, [id]: !isOpen }))}
-          className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition">
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+        <div className="w-full flex items-center justify-between px-5 py-4 border-b border-white/10 bg-white/[0.03]">
           <span className="flex items-center gap-3">
-            <span className="text-white/40 text-xs">{isOpen ? '▾' : '▸'}</span>
-            <span className="text-white font-bold text-sm">{title}</span>
+            <span className="text-white font-bold text-base">{title}</span>
             {flag && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">{flag}</span>}
           </span>
-        </button>
-        <AnimatePresence>
-          {isOpen && (
-            <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }}
-              className="overflow-hidden">
-              <div className="px-4 pb-4 pt-1">{children}</div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        </div>
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="px-5 pb-5 pt-4">{children}</div>
+        </motion.div>
       </section>
     )
   }, [open])
@@ -434,17 +434,70 @@ export default function CompliancDailyPage() {
             </div>
           )}
 
+          {/* Tab bar — tablet-friendly navigation between the six MASTER 05A
+              sections. Each tab shows the section number, a short label and
+              a status chip summarising its content. On a tablet (640px+)
+              all six tabs fit on one row; on a phone they wrap. Minimum
+              touch target 44px so a wet-handed volunteer doesn't miss. */}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-2 flex flex-wrap gap-1.5">
+            {([
+              { id: 'oc',   label: 'Opening/Closing', num: '§1',
+                summary: (() => {
+                  const passed = OPENING_CLOSING_CHECKS.filter(c => rec.data.opening_closing.opening[c.key]?.value === true).length
+                                 + OPENING_CLOSING_CHECKS.filter(c => rec.data.opening_closing.closing[c.key]?.value === true).length
+                  return `${passed} / ${OPENING_CLOSING_CHECKS.length * 2}`
+                })(),
+                alert: OPENING_CLOSING_CHECKS.some(c =>
+                  rec.data.opening_closing.opening[c.key]?.value === false ||
+                  rec.data.opening_closing.closing[c.key]?.value === false),
+              },
+              { id: 'fp',   label: 'Food Prep',       num: '§2',
+                summary: `${FOOD_PREP_CHECKS.filter(c => rec.data.food_prep.checks[c.key]?.value === true).length} / ${FOOD_PREP_CHECKS.length}`,
+                alert: FOOD_PREP_CHECKS.some(c => rec.data.food_prep.checks[c.key]?.value === false),
+              },
+              { id: 'don',  label: 'Donations',       num: '§3',
+                summary: rec.data.donations.length ? `${rec.data.donations.length}` : '—',
+                alert: false },
+              { id: 'temp', label: 'Temperatures',    num: '§4',
+                summary: rec.data.temperatures.length ? `${rec.data.temperatures.length}` : '—',
+                alert: rec.data.temperatures.some(t => !t.passed) },
+              { id: 'alg',  label: 'Allergens',       num: '§5',
+                summary: rec.data.allergens.length ? `${rec.data.allergens.length}` : '—',
+                alert: false },
+              { id: 'iss',  label: 'Issues',          num: '§6',
+                summary: rec.data.issues.length ? `${rec.data.issues.length}` : '—',
+                alert: rec.data.issues.length > 0 },
+            ] as const).map(t => {
+              const active = activeTab === t.id
+              return (
+                <button key={t.id} type="button" onClick={() => setActiveTab(t.id)}
+                  className={`flex-1 min-w-[120px] min-h-[52px] px-3 py-2 rounded-xl transition flex flex-col items-center justify-center gap-0.5 border ${
+                    active
+                      ? 'bg-saffron-500/20 border-saffron-400/50 text-white'
+                      : 'bg-white/[0.03] border-white/10 text-white/60 hover:bg-white/5 hover:text-white/90'
+                  }`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-black opacity-70">{t.num}</span>
+                    <span className="text-sm font-bold">{t.label}</span>
+                    {t.alert && <span className="w-1.5 h-1.5 rounded-full bg-red-400" />}
+                  </div>
+                  <div className={`text-[11px] font-semibold ${active ? 'text-saffron-300' : 'text-white/40'}`}>{t.summary}</div>
+                </button>
+              )
+            })}
+          </div>
+
           <fieldset disabled={locked} className={locked ? 'opacity-70' : ''}>
             {/* §1 Opening & Closing */}
             <Panel id="oc" title="§1  Opening &amp; Closing Checklist">
               <div className="overflow-x-auto -mx-4 px-4">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 text-white/40 text-xs uppercase tracking-wider">
-                      <th className="text-left py-2 pr-3 font-semibold">Check</th>
-                      <th className="py-2 px-2 font-semibold w-20">Opening</th>
-                      <th className="py-2 px-2 font-semibold w-20">Closing</th>
-                      <th className="text-left py-2 pl-3 font-semibold">Action / initials</th>
+                    <tr className="border-b border-white/10 text-white/40 text-[11px] uppercase tracking-wider">
+                      <th className="text-left py-3 pr-3 font-bold">Check</th>
+                      <th className="py-3 px-3 font-bold w-24 text-center">Opening</th>
+                      <th className="py-3 px-3 font-bold w-24 text-center">Closing</th>
+                      <th className="text-left py-3 pl-3 font-bold">Action / initials</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -452,17 +505,17 @@ export default function CompliancDailyPage() {
                       const o = rec.data.opening_closing.opening[c.key] || {}
                       const cl = rec.data.opening_closing.closing[c.key] || {}
                       return (
-                        <tr key={c.key} className="border-b border-white/5">
-                          <td className="py-2 pr-3 text-white/80">{c.label}</td>
-                          <td className="py-2 px-2 text-center">
+                        <tr key={c.key} className="border-b border-white/5 hover:bg-white/[0.02]">
+                          <td className="py-3 pr-3 text-white/85 text-sm leading-snug">{c.label}</td>
+                          <td className="py-3 px-3 text-center">
                             <button type="button" onClick={() => setCheckCell('opening', c.key, cycleCheck(o))}
-                              className="w-10 h-8 rounded border border-white/10 hover:border-white/30">
+                              className="w-14 h-12 rounded-lg border border-white/15 hover:border-saffron-400/50 hover:bg-white/5 transition active:scale-95">
                               <TriCheck value={o} />
                             </button>
                           </td>
-                          <td className="py-2 px-2 text-center">
+                          <td className="py-3 px-3 text-center">
                             <button type="button" onClick={() => setCheckCell('closing', c.key, cycleCheck(cl))}
-                              className="w-10 h-8 rounded border border-white/10 hover:border-white/30">
+                              className="w-14 h-12 rounded-lg border border-white/15 hover:border-saffron-400/50 hover:bg-white/5 transition active:scale-95">
                               <TriCheck value={cl} />
                             </button>
                           </td>
@@ -503,10 +556,10 @@ export default function CompliancDailyPage() {
                 {FOOD_PREP_CHECKS.map(c => {
                   const v = rec.data.food_prep.checks[c.key] || {}
                   return (
-                    <div key={c.key} className="grid grid-cols-[1fr_auto_1fr] gap-3 items-center border-b border-white/5 pb-2">
+                    <div key={c.key} className="grid grid-cols-[1fr_auto_1.4fr] gap-4 items-center border-b border-white/5 py-2.5">
                       <span className="text-white/80 text-sm">{c.label}</span>
                       <button type="button" onClick={() => setFoodCheck(c.key, cycleCheck(v))}
-                        className="w-10 h-8 rounded border border-white/10 hover:border-white/30">
+                        className="w-14 h-12 rounded-lg border border-white/15 hover:border-saffron-400/50 hover:bg-white/5 transition active:scale-95">
                         <TriCheck value={v} />
                       </button>
                       <input placeholder="Action if no" value={v.action || ''}
