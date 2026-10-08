@@ -24,6 +24,8 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from shital.api.deps import CurrentSpace
+
 logger = structlog.get_logger()
 router = APIRouter(tags=["stripe-giving"])
 
@@ -681,3 +683,139 @@ async def confirm_checkout(body: ConfirmBody) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("stripe_confirm_failed", error=str(exc), session_id=body.session_id)
     return {"ok": False}
+
+
+# ── Admin diagnostic ──────────────────────────────────────────────────────────
+
+@router.get("/admin/giving/stripe-diagnostic")
+async def stripe_diagnostic(space: CurrentSpace, days: int = 30) -> dict[str, Any]:
+    """Tell the operator what Stripe actually knows vs what our DB thinks.
+
+    Called when subs are stuck in PENDING_APPROVAL with no ``stripe_subscription_id``
+    and the operator can't tell whether donors are abandoning Checkout, Stripe
+    isn't firing webhooks, or something else. Returns a plain-English summary
+    plus the key counts side by side.
+
+    What it does, in order:
+      1. Count DB rows in each state for the last ``days`` days.
+      2. List Checkout sessions from Stripe for the same window (via
+         ``stripe.checkout.Session.list(created={gte})``).
+      3. Count sessions by status + payment_status.
+      4. For every PAID session that has an ``rgs_id`` in metadata, check
+         whether our DB row for that rgs_id has a ``stripe_subscription_id``
+         (i.e. was linked) or not (webhook + confirm both missed).
+      5. Return the result so the operator sees in one glance: donors are
+         abandoning / webhook never arrived / nothing has ever been attempted.
+
+    Read-only. Safe to run any number of times. Admin-only.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    stripe = await _stripe()
+    out: dict[str, Any] = {"days_window": days, "stripe_api_key_present": bool(stripe.api_key)}
+    if not stripe.api_key:
+        out["verdict"] = "STRIPE_SECRET_KEY is not readable from the backend — fix that first."
+        return out
+
+    # ── Our DB view ────────────────────────────────────────────────────────────
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT UPPER(COALESCE(status,'')) AS status,
+                   CASE WHEN stripe_subscription_id IS NULL OR stripe_subscription_id = ''
+                        THEN 'no_id' ELSE 'has_id' END AS id_state,
+                   COUNT(*) AS n
+            FROM   recurring_giving_subscriptions
+            WHERE  payment_provider = 'stripe'
+              AND  created_at >= NOW() - (:days || ' days')::interval
+            GROUP  BY status, id_state
+        """), {"days": str(days)})).mappings().all()
+    out["db_counts"] = [dict(r) for r in rows]
+
+    # ── Stripe's view ──────────────────────────────────────────────────────────
+    since_ts = int((datetime.utcnow() - timedelta(days=days)).timestamp())
+    try:
+        sessions = stripe.checkout.Session.list(
+            created={"gte": since_ts}, limit=100, expand=["data.subscription"],
+        )
+        all_sessions = list(sessions.auto_paging_iter())
+    except Exception as exc:  # noqa: BLE001
+        out["verdict"] = f"Stripe API call failed: {exc}"
+        return out
+
+    def _d(s: Any) -> dict[str, Any]:
+        return s if isinstance(s, dict) else s.to_dict()
+
+    buckets: dict[str, int] = {}
+    paid_rgs_ids: list[str] = []
+    paid_without_rgs = 0
+    for s in all_sessions:
+        d = _d(s)
+        status = d.get("status") or "unknown"
+        pay = d.get("payment_status") or "unknown"
+        key = f"status={status} · payment_status={pay}"
+        buckets[key] = buckets.get(key, 0) + 1
+        if pay == "paid" or status == "complete":
+            rgs = ((d.get("metadata") or {}).get("rgs_id")) or (d.get("client_reference_id") or "")
+            if rgs:
+                paid_rgs_ids.append(rgs)
+            else:
+                paid_without_rgs += 1
+
+    out["stripe_session_count"] = len(all_sessions)
+    out["stripe_session_breakdown"] = buckets
+    out["paid_sessions_with_rgs"] = len(paid_rgs_ids)
+    out["paid_sessions_without_rgs"] = paid_without_rgs
+
+    # ── Cross-check: for every paid rgs_id, is our DB row linked? ─────────────
+    unlinked: list[dict[str, str]] = []
+    if paid_rgs_ids:
+        async with SessionLocal() as db:
+            check = (await db.execute(text("""
+                SELECT id::text AS id,
+                       UPPER(COALESCE(status,'')) AS status,
+                       COALESCE(stripe_subscription_id,'') AS sub_id
+                FROM   recurring_giving_subscriptions
+                WHERE  id::text = ANY(:ids)
+            """), {"ids": paid_rgs_ids})).mappings().all()
+            seen = {r["id"]: dict(r) for r in check}
+        for rgs in paid_rgs_ids:
+            row = seen.get(rgs)
+            if not row:
+                unlinked.append({"rgs_id": rgs, "reason": "no DB row for this rgs_id"})
+            elif not row["sub_id"]:
+                unlinked.append({"rgs_id": rgs, "reason": f"row exists (status={row['status']}) but stripe_subscription_id empty — webhook + confirm both missed"})
+    out["paid_but_unlinked"] = unlinked[:20]  # cap for response size
+
+    # ── Verdict ────────────────────────────────────────────────────────────────
+    if out["stripe_session_count"] == 0:
+        out["verdict"] = (
+            "Stripe has recorded ZERO Checkout sessions in the last "
+            f"{days} days. Donors aren't reaching Stripe — either the "
+            "'Pay by card' button in the service portal is broken, or the "
+            "backend call to /create-checkout is failing. Check backend logs "
+            "for `stripe_checkout_create_failed`."
+        )
+    elif out["paid_sessions_with_rgs"] == 0:
+        out["verdict"] = (
+            f"Stripe shows {out['stripe_session_count']} Checkout sessions "
+            f"in the last {days} days but NONE are paid. "
+            "Donors ARE reaching Stripe but abandoning at the payment page. "
+            "Could be card declines, 3DS friction, or a Stripe-side config "
+            "issue (e.g. GBP recurring not enabled on the account). Check "
+            "the Stripe Dashboard → Payments for the actual failure reasons."
+        )
+    elif unlinked:
+        out["verdict"] = (
+            f"Donors ARE paying — Stripe has {out['paid_sessions_with_rgs']} "
+            "paid Checkout sessions in the window — but our DB didn't link "
+            f"{len(unlinked)} of them. The webhook + confirm paths both "
+            "missed. Fix: make sure the webhook URL in Stripe Dashboard is "
+            "'https://admin.shital.org.uk/api/v1/stripe/webhook'. Then click "
+            "'Sync from Stripe' — the reconcile's Pass B will link these "
+            "orphan paid sessions and mark them ACTIVE."
+        )
+    else:
+        out["verdict"] = "All paid Stripe sessions are linked in the DB. Monthly giving via Stripe is working."
+    return out
