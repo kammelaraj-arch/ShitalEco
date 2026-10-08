@@ -48,12 +48,31 @@ async def _token() -> str:
 
 
 async def _ensure_product(token: str, base: str) -> str:
-    """Get or create the PayPal product for temple giving. Cached in api_keys_store."""
+    """Get or create the PayPal product for temple giving. Cached in api_keys_store.
+
+    Self-heals: if the cached product_id was created against a different
+    PayPal environment (sandbox vs live) or a different PayPal account,
+    the current `base`+`token` won't recognise it. Verify with a HEAD-style
+    GET before trusting the cache; on 404 the cached id is discarded and
+    a fresh product is created.
+    """
     from shital.core.fabrics.secrets import SecretsManager
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     existing = await SecretsManager.get(_PAYPAL_PRODUCT_ID_KEY)
     if existing:
-        return existing
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        async with httpx.AsyncClient(timeout=10) as c:
+            try:
+                check = await c.get(f"{base}/v1/catalogs/products/{existing}", headers=headers)
+                if check.status_code != 404:
+                    # 200 or any other non-404 — trust the cache. We only
+                    # self-heal on the specific "doesn't exist here" case.
+                    return existing
+            except httpx.HTTPError:
+                # Network glitch — don't throw away a working cache on a
+                # transient hiccup. Return the cached id; the subscribe
+                # call that follows will surface any real issue.
+                return existing
+        # Cached id 404s against current env → regenerate below
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.post(
             f"{base}/v1/catalogs/products",
@@ -91,7 +110,33 @@ async def _ensure_plan(tier_id: str, amount: float, label: str, frequency: str) 
             )
             existing = row.scalar_one_or_none()
         if existing:
-            return existing
+            # Self-heal: verify the cached plan_id still exists in the current
+            # PayPal environment. The plan may have been created against
+            # sandbox (or an older PayPal account) at some point in the past;
+            # the current base+token won't recognise it. On 404 drop the
+            # cache and regenerate below. This stops the "every subscribe
+            # call creates a malformed sub against a nonexistent plan" trap
+            # that happens after an env change.
+            token_check = await _token()
+            base_check  = await _base()
+            headers = {"Authorization": f"Bearer {token_check}", "Content-Type": "application/json"}
+            async with httpx.AsyncClient(timeout=10) as c:
+                try:
+                    chk = await c.get(f"{base_check}/v1/billing/plans/{existing}", headers=headers)
+                    if chk.status_code != 404:
+                        return existing
+                except httpx.HTTPError:
+                    # Transient — trust the cache; the subscribe call will
+                    # surface any real failure.
+                    return existing
+            # Cached plan_id 404s — clear it so the regenerate below writes
+            # the new id back to this row.
+            async with SessionLocal() as db:
+                await db.execute(
+                    text("UPDATE recurring_giving_tiers SET paypal_plan_id = '', updated_at = NOW() WHERE id = :id"),
+                    {"id": tier_id},
+                )
+                await db.commit()
 
     token = await _token()
     base  = await _base()
@@ -915,6 +960,76 @@ async def admin_sync_stripe(space: CurrentSpace, days: int = 90) -> dict[str, An
         logger.warning("sync_stripe_failed", error=str(exc))
         return {"ok": False, "error": str(exc)[:300]}
     return {"ok": True, "result": result}
+
+
+@router.post("/admin/giving/rebuild-paypal-plans")
+async def admin_rebuild_paypal_plans(space: CurrentSpace) -> dict[str, Any]:
+    """Wipe the cached PayPal product + plan IDs and recreate them against
+    the currently-configured PayPal environment.
+
+    Needed when:
+      - PAYPAL_ENV was switched between sandbox and live (or back)
+      - PAYPAL_CLIENT_ID/_SECRET point at a different PayPal account than
+        the one that originally issued the cached IDs
+      - PayPal deleted a plan on their side (rare)
+
+    Symptom this fixes: new subscription attempts come back as EXPIRED
+    with "PayPal does not know this subscription_id" because our stored
+    plan_ids don't exist in the current PayPal environment. The self-heal
+    added in _ensure_plan / _ensure_product will also catch this on the
+    next subscribe call, but this endpoint lets an operator fix it
+    immediately without waiting for a donor to trip it.
+
+    Idempotent — safe to run any number of times. Returns per-tier status.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
+
+    # 1. Drop the product-id cache (SecretsManager row). Next subscribe will
+    #    create a new product against the current env + account.
+    await SecretsManager.set(_PAYPAL_PRODUCT_ID_KEY, "", "system")
+
+    # 2. Wipe plan_ids on every tier so _ensure_plan regenerates them.
+    async with SessionLocal() as db:
+        wiped = await db.execute(text("""
+            UPDATE recurring_giving_tiers
+            SET paypal_plan_id = '', updated_at = NOW()
+            WHERE paypal_plan_id <> ''
+        """))
+        await db.commit()
+        cleared_count = wiped.rowcount or 0
+
+        # 3. Immediately regenerate for every active tier so the admin UI
+        #    shows "Plan ready" again right after the operator clicks the
+        #    button, rather than waiting for the first subscribe to trigger
+        #    the lazy regenerate.
+        tiers = (await db.execute(text("""
+            SELECT id::text AS id, amount, label, frequency
+            FROM   recurring_giving_tiers
+            WHERE  is_active = true
+            ORDER  BY display_order, amount
+        """))).mappings().all()
+
+    results: list[dict[str, Any]] = []
+    for t in tiers:
+        try:
+            new_plan_id = await _ensure_plan(
+                t["id"], float(t["amount"]), str(t["label"]), str(t["frequency"]),
+            )
+            results.append({"tier_id": t["id"], "label": t["label"], "ok": True, "plan_id": new_plan_id})
+        except Exception as exc:  # noqa: BLE001 — surface each tier's failure independently
+            results.append({"tier_id": t["id"], "label": t["label"], "ok": False, "error": str(exc)[:300]})
+
+    ok_count = sum(1 for r in results if r["ok"])
+    return {
+        "ok": ok_count == len(results),
+        "cleared": cleared_count,
+        "regenerated": ok_count,
+        "failed": len(results) - ok_count,
+        "tiers": results,
+    }
 
 
 @router.post("/admin/giving/tiers")

@@ -69,6 +69,38 @@ export default function RecurringGivingPage() {
     } finally { setSyncing(false) }
   }
 
+  // Rebuild PayPal product + plan IDs against the currently-configured
+  // PayPal environment. Fixes the "subscriptions come back EXPIRED
+  // immediately" trap that happens after switching PAYPAL_ENV or
+  // PAYPAL_CLIENT_ID — our cached plan_ids still reference the old
+  // environment / account, so new subscriptions reference a plan live
+  // PayPal doesn't recognise.
+  async function rebuildPayPalPlans() {
+    const ok = confirm(
+      'Rebuild PayPal plans?\n\n' +
+      'This clears the cached PayPal product + plan IDs on every tier and ' +
+      'recreates them against the currently-configured PayPal environment.\n\n' +
+      'Use when subscriptions are failing because the stored plan IDs no ' +
+      "longer exist in PayPal (e.g. after switching sandbox ⇄ live, or " +
+      'rotating PayPal credentials).\n\n' +
+      'Safe to run — existing subscriptions are unaffected.'
+    )
+    if (!ok) return
+    setSyncing(true); setSyncNote('')
+    try {
+      const r = await fetch(`${API}/admin/giving/rebuild-paypal-plans`, { method: 'POST', headers: authHeaders() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      const d = await r.json()
+      setSyncNote(
+        `Rebuild · cleared ${d.cleared ?? 0} cached plan IDs · regenerated ${d.regenerated ?? 0}` +
+        (d.failed ? ` · ${d.failed} failed` : '')
+      )
+      await loadTiers()
+    } catch (e) {
+      setSyncNote(e instanceof Error ? e.message : 'Rebuild failed')
+    } finally { setSyncing(false) }
+  }
+
   const SERVICE_BASE = 'https://service.shital.org.uk'
   const buildLink = (amount: string | number, branch = '') =>
     `${SERVICE_BASE}/?amount=${encodeURIComponent(String(amount))}${branch ? `&branch=${encodeURIComponent(branch)}` : ''}`
@@ -229,7 +261,7 @@ export default function RecurringGivingPage() {
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-white/40 text-xs">PayPal &amp; Stripe are the source of truth — sync pulls live statuses + records any payments.</p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button onClick={syncStripe} disabled={syncing}
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#635BFF,#4B45C6)' }}>
@@ -239,6 +271,14 @@ export default function RecurringGivingPage() {
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#0070BA,#003087)' }}>
                 {syncing ? 'Syncing…' : '↻ Sync from PayPal'}
+              </button>
+              {/* Nuclear option — regenerate PayPal product + plan IDs when
+                  cached ones reference a stale environment / account. */}
+              <button onClick={rebuildPayPalPlans} disabled={syncing}
+                title="Clears cached PayPal plan IDs and recreates them against the current PAYPAL_ENV. Use when subs come back EXPIRED immediately."
+                className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
+                {syncing ? 'Rebuilding…' : '🔧 Rebuild PayPal plans'}
               </button>
             </div>
           </div>
