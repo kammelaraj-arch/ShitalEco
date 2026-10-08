@@ -101,6 +101,27 @@ export default function RecurringGivingPage() {
     } finally { setSyncing(false) }
   }
 
+  // Pull a side-by-side view of what Stripe actually knows about recent
+  // Checkout sessions vs what our DB thinks happened. Returns a plain-
+  // English verdict pointing at the specific break: "donors aren't
+  // reaching Stripe", "paying but we're not linking", "all working", etc.
+  async function stripeDiagnostic() {
+    setSyncing(true); setSyncNote('')
+    try {
+      const r = await fetch(`${API}/admin/giving/stripe-diagnostic?days=30`, { headers: authHeaders() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      const d = await r.json()
+      setSyncNote(
+        `Diag · ${d.stripe_session_count ?? 0} Stripe sessions · ` +
+        `${d.paid_sessions_with_rgs ?? 0} paid · ` +
+        `${(d.paid_but_unlinked?.length ?? 0)} unlinked. ` +
+        `${d.verdict || ''}`
+      )
+    } catch (e) {
+      setSyncNote(e instanceof Error ? e.message : 'Diagnostic failed')
+    } finally { setSyncing(false) }
+  }
+
   const SERVICE_BASE = 'https://service.shital.org.uk'
   const buildLink = (amount: string | number, branch = '') =>
     `${SERVICE_BASE}/?amount=${encodeURIComponent(String(amount))}${branch ? `&branch=${encodeURIComponent(branch)}` : ''}`
@@ -279,6 +300,14 @@ export default function RecurringGivingPage() {
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
                 {syncing ? 'Rebuilding…' : '🔧 Rebuild PayPal plans'}
+              </button>
+              {/* Diagnostic — compare what Stripe knows vs what our DB thinks.
+                  Returns a verdict pointing at the specific failure. */}
+              <button onClick={stripeDiagnostic} disabled={syncing}
+                title="Pulls Stripe's view of Checkout sessions for the last 30 days and cross-checks against our DB. Tells you whether donors are abandoning, paying-but-unlinked, or working."
+                className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#0ea5e9,#0369a1)' }}>
+                {syncing ? 'Checking…' : '🔍 Stripe diagnostic'}
               </button>
             </div>
           </div>
