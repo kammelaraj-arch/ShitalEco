@@ -565,19 +565,23 @@ async def paypal_capture_webhook(request: Request) -> dict[str, Any]:
     except Exception:
         raise HTTPException(400, detail="Invalid JSON payload")
 
+    # Mandatory signature verification — see the matching note in
+    # recurring_giving.py's webhook. Same PAYPAL_WEBHOOK_ID covers both
+    # endpoints (sub events + CAPTURE events) as a single Dashboard webhook.
     webhook_id = await SecretsManager.get("PAYPAL_WEBHOOK_ID") or ""
-    if webhook_id:
-        valid = await _verify_paypal_webhook(
-            transmission_id  = request.headers.get("paypal-transmission-id", ""),
-            transmission_time= request.headers.get("paypal-transmission-time", ""),
-            auth_algo        = request.headers.get("paypal-auth-algo", ""),
-            cert_url         = request.headers.get("paypal-cert-url", ""),
-            transmission_sig = request.headers.get("paypal-transmission-sig", ""),
-            webhook_id       = webhook_id,
-            event            = event,
-        )
-        if not valid:
-            raise HTTPException(401, detail="Webhook signature verification failed")
+    if not webhook_id:
+        raise HTTPException(503, detail="PAYPAL_WEBHOOK_ID not configured")
+    valid = await _verify_paypal_webhook(
+        transmission_id  = request.headers.get("paypal-transmission-id", ""),
+        transmission_time= request.headers.get("paypal-transmission-time", ""),
+        auth_algo        = request.headers.get("paypal-auth-algo", ""),
+        cert_url         = request.headers.get("paypal-cert-url", ""),
+        transmission_sig = request.headers.get("paypal-transmission-sig", ""),
+        webhook_id       = webhook_id,
+        event            = event,
+    )
+    if not valid:
+        raise HTTPException(401, detail="Webhook signature verification failed")
 
     event_type = event.get("event_type", "")
     event_id   = event.get("id", "")

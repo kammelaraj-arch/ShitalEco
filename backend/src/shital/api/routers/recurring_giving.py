@@ -1459,20 +1459,26 @@ async def paypal_giving_webhook(request: Request) -> dict[str, Any]:
     except Exception:
         raise HTTPException(400, detail="Invalid JSON payload")
 
-    # Verify signature if webhook ID is configured
+    # Signature verification is MANDATORY — without PAYPAL_WEBHOOK_ID anyone
+    # on the internet can POST a forged BILLING.SUBSCRIPTION.ACTIVATED event
+    # and flip a row to ACTIVE. If the secret isn't configured we return 503
+    # so PayPal keeps the real event in its retry queue, and we never trust
+    # an unsigned payload. Operators set this in Admin → API Keys.
     webhook_id = await SecretsManager.get("PAYPAL_WEBHOOK_ID") or ""
-    if webhook_id:
-        valid = await _verify_paypal_webhook(
-            transmission_id  = request.headers.get("paypal-transmission-id", ""),
-            transmission_time= request.headers.get("paypal-transmission-time", ""),
-            auth_algo        = request.headers.get("paypal-auth-algo", ""),
-            cert_url         = request.headers.get("paypal-cert-url", ""),
-            transmission_sig = request.headers.get("paypal-transmission-sig", ""),
-            webhook_id       = webhook_id,
-            event            = event,
-        )
-        if not valid:
-            raise HTTPException(401, detail="Webhook signature verification failed")
+    if not webhook_id:
+        logger.error("paypal_webhook_id_missing")
+        raise HTTPException(503, detail="PAYPAL_WEBHOOK_ID not configured")
+    valid = await _verify_paypal_webhook(
+        transmission_id  = request.headers.get("paypal-transmission-id", ""),
+        transmission_time= request.headers.get("paypal-transmission-time", ""),
+        auth_algo        = request.headers.get("paypal-auth-algo", ""),
+        cert_url         = request.headers.get("paypal-cert-url", ""),
+        transmission_sig = request.headers.get("paypal-transmission-sig", ""),
+        webhook_id       = webhook_id,
+        event            = event,
+    )
+    if not valid:
+        raise HTTPException(401, detail="Webhook signature verification failed")
 
     # Ensure tracking columns exist (idempotent)
     await _ensure_subscription_columns()
@@ -1586,57 +1592,142 @@ async def _lookup_paypal_sub_id(local_id: str) -> tuple[str, str]:
     return (row["paypal_subscription_id"], row["status"] or "")
 
 
+async def _lookup_subscription(local_id: str) -> dict[str, str]:
+    """Resolve our internal UUID (or a provider id) → the row's provider +
+    provider-side id + current status. Lets admin cancel/suspend/reactivate
+    work for BOTH PayPal and Stripe subs instead of PayPal-only. Raises 404
+    if the row doesn't exist, 400 if it has no provider-side id yet."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("""
+                SELECT COALESCE(LOWER(payment_provider),'paypal') AS provider,
+                       COALESCE(paypal_subscription_id,'')       AS paypal_sub_id,
+                       COALESCE(stripe_subscription_id,'')       AS stripe_sub_id,
+                       COALESCE(status,'')                       AS status
+                FROM   recurring_giving_subscriptions
+                WHERE  id::text = :id
+                    OR paypal_subscription_id = :id
+                    OR stripe_subscription_id = :id
+                LIMIT  1
+            """),
+            {"id": local_id},
+        )).mappings().first()
+    if not row:
+        raise HTTPException(404, detail="Subscription not found")
+    provider = row["provider"] or "paypal"
+    provider_id = row["stripe_sub_id"] if provider == "stripe" else row["paypal_sub_id"]
+    if not provider_id:
+        raise HTTPException(
+            400,
+            detail=f"Subscription has no {provider} id yet — nothing to action upstream",
+        )
+    return {"provider": provider, "provider_id": provider_id, "status": row["status"]}
+
+
+async def _stripe_subscription_action(
+    stripe_sub_id: str, action: str, reason: str,
+) -> None:
+    """Mirror of _paypal_subscription_action for Stripe. Stripe doesn't have
+    separate suspend/activate — pause_collection toggles pay-collection on
+    the subscription without cancelling it, which is what a trustee wants
+    when they "suspend"."""
+    from shital.api.routers.stripe_giving import _stripe as _stripe_client
+    stripe = await _stripe_client()
+    if not stripe.api_key:
+        raise HTTPException(503, detail="Stripe is not configured")
+    try:
+        if action == "cancel":
+            stripe.Subscription.delete(stripe_sub_id, invoice_now=False, prorate=False)
+        elif action == "suspend":
+            stripe.Subscription.modify(
+                stripe_sub_id,
+                pause_collection={"behavior": "void"},
+                metadata={"suspend_reason": reason[:450]},
+            )
+        elif action == "activate":
+            stripe.Subscription.modify(stripe_sub_id, pause_collection="")
+        else:
+            raise HTTPException(400, detail=f"Unknown action: {action}")
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, detail=f"Stripe {action} failed: {exc}") from exc
+
+
+def _action_where_clause(provider: str) -> str:
+    """SQL fragment to match the right id column based on provider."""
+    return (
+        "WHERE stripe_subscription_id = :sid"
+        if provider == "stripe"
+        else "WHERE paypal_subscription_id = :sid"
+    )
+
+
 @router.post("/admin/giving/subscriptions/{sub_id}/cancel")
 async def admin_cancel_subscription(
     sub_id: str, body: _SubscriptionActionBody, space: CurrentSpace,
 ) -> dict[str, Any]:
-    """Trustee-initiated cancel. Hits PayPal's API + marks local row."""
+    """Trustee-initiated cancel. Routes to the correct provider's API
+    (PayPal or Stripe) and marks the local row CANCELLED."""
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
 
-    paypal_id, _ = await _lookup_paypal_sub_id(sub_id)
-    await _paypal_subscription_action(paypal_id, "cancel", body.reason)
+    info = await _lookup_subscription(sub_id)
+    if info["provider"] == "stripe":
+        await _stripe_subscription_action(info["provider_id"], "cancel", body.reason)
+    else:
+        await _paypal_subscription_action(info["provider_id"], "cancel", body.reason)
 
     async with SessionLocal() as db:
-        await db.execute(text("""
+        await db.execute(text(f"""
             UPDATE recurring_giving_subscriptions
             SET    status        = 'CANCELLED',
                    cancelled_at  = NOW(),
                    cancel_reason = :reason,
                    cancelled_by  = :actor,
                    updated_at    = NOW()
-            WHERE  paypal_subscription_id = :sid
+            {_action_where_clause(info["provider"])}
         """), {
-            "sid": paypal_id,
+            "sid": info["provider_id"],
             "reason": body.reason[:500],
             "actor": getattr(space, "user_email", "admin") or "admin",
         })
         await db.commit()
-    return {"success": True, "action": "cancel", "paypal_subscription_id": paypal_id}
+    return {"success": True, "action": "cancel", "provider": info["provider"],
+            "provider_subscription_id": info["provider_id"]}
 
 
 @router.post("/admin/giving/subscriptions/{sub_id}/suspend")
 async def admin_suspend_subscription(
     sub_id: str, body: _SubscriptionActionBody, space: CurrentSpace,
 ) -> dict[str, Any]:
-    """Pause without cancelling — donor can be reactivated later."""
+    """Pause without cancelling — donor can be reactivated later. Stripe
+    doesn't have a formal 'suspend' state; we pause_collection, which stops
+    the next invoice while leaving the subscription intact."""
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
 
-    paypal_id, _ = await _lookup_paypal_sub_id(sub_id)
-    await _paypal_subscription_action(paypal_id, "suspend", body.reason)
+    info = await _lookup_subscription(sub_id)
+    if info["provider"] == "stripe":
+        await _stripe_subscription_action(info["provider_id"], "suspend", body.reason)
+    else:
+        await _paypal_subscription_action(info["provider_id"], "suspend", body.reason)
 
     async with SessionLocal() as db:
-        await db.execute(text("""
+        await db.execute(text(f"""
             UPDATE recurring_giving_subscriptions
             SET    status     = 'SUSPENDED',
                    updated_at = NOW()
-            WHERE  paypal_subscription_id = :sid
-        """), {"sid": paypal_id})
+            {_action_where_clause(info["provider"])}
+        """), {"sid": info["provider_id"]})
         await db.commit()
-    return {"success": True, "action": "suspend", "paypal_subscription_id": paypal_id}
+    return {"success": True, "action": "suspend", "provider": info["provider"],
+            "provider_subscription_id": info["provider_id"]}
 
 
 @router.post("/admin/giving/subscriptions/{sub_id}/reactivate")
@@ -1649,23 +1740,27 @@ async def admin_reactivate_subscription(
 
     from shital.core.fabrics.database import SessionLocal
 
-    paypal_id, current_status = await _lookup_paypal_sub_id(sub_id)
-    if current_status == "CANCELLED":
+    info = await _lookup_subscription(sub_id)
+    if info["status"] == "CANCELLED":
         raise HTTPException(
             400,
             detail="Cancelled subscriptions cannot be reactivated; ask the donor to subscribe again.",
         )
-    await _paypal_subscription_action(paypal_id, "activate", body.reason)
+    if info["provider"] == "stripe":
+        await _stripe_subscription_action(info["provider_id"], "activate", body.reason)
+    else:
+        await _paypal_subscription_action(info["provider_id"], "activate", body.reason)
 
     async with SessionLocal() as db:
-        await db.execute(text("""
+        await db.execute(text(f"""
             UPDATE recurring_giving_subscriptions
             SET    status     = 'ACTIVE',
                    updated_at = NOW()
-            WHERE  paypal_subscription_id = :sid
-        """), {"sid": paypal_id})
+            {_action_where_clause(info["provider"])}
+        """), {"sid": info["provider_id"]})
         await db.commit()
-    return {"success": True, "action": "reactivate", "paypal_subscription_id": paypal_id}
+    return {"success": True, "action": "reactivate", "provider": info["provider"],
+            "provider_subscription_id": info["provider_id"]}
 
 
 @router.post("/admin/giving/subscriptions/{sub_id}/refresh-from-paypal")
