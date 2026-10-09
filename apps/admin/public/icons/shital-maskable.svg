@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Maskable icon: Android may crop this to a circle/squircle. Keep the
+     logo inside the inner 80% safe zone (viewBox center 256±205). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#B91C1C"/>
+      <stop offset="1" stop-color="#7f1010"/>
+    </linearGradient>
+    <linearGradient id="dome" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F4EAD6"/>
+      <stop offset="1" stop-color="#D4AF37"/>
+    </linearGradient>
+  </defs>
+  <!-- Full-bleed bg (no rounding — mask will apply) -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- Content kept inside 80% safe zone (center 256, radius 204) -->
+  <g transform="translate(0, 20)">
+    <path d="M256 150 L256 180" stroke="#D4AF37" stroke-width="10" fill="none"/>
+    <circle cx="256" cy="190" r="14" fill="#D4AF37"/>
+    <path d="M196 220 Q256 162 316 220 L316 268 L196 268 Z" fill="url(#dome)"/>
+    <rect x="190" y="264" width="132" height="14" fill="#D4AF37"/>
+    <rect x="160" y="278" width="192" height="130" fill="#F4EAD6" opacity="0.95"/>
+    <rect x="160" y="278" width="192" height="14" fill="#D4AF37"/>
+    <rect x="182" y="292" width="20" height="116" fill="#B91C1C" opacity="0.3"/>
+    <rect x="246" y="292" width="20" height="116" fill="#B91C1C" opacity="0.3"/>
+    <rect x="310" y="292" width="20" height="116" fill="#B91C1C" opacity="0.3"/>
+    <path d="M228 336 Q256 316 284 336 L284 408 L228 408 Z" fill="#7f1010"/>
+    <rect x="140" y="408" width="232" height="20" fill="#D4AF37"/>
+  </g>
+</svg>

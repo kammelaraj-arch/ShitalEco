@@ -1,0 +1,54 @@
+{
+  "name": "Shital App",
+  "short_name": "Shital",
+  "description": "Shital Temple Business Portal — bookings, donations, Gift Aid, HR, compliance.",
+  "start_url": "/dashboard?src=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a12",
+  "theme_color": "#B91C1C",
+  "lang": "en-GB",
+  "categories": ["productivity", "business"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icons/shital-192.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/shital-512.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/shital-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Home",
+      "url": "/dashboard?src=pwa",
+      "icons": [{ "src": "/icons/shital-192.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Donations",
+      "short_name": "Donations",
+      "url": "/donations?src=pwa",
+      "icons": [{ "src": "/icons/shital-192.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Daily Compliance",
+      "short_name": "Daily",
+      "url": "/compliance/daily?src=pwa",
+      "icons": [{ "src": "/icons/shital-192.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ]
+}
