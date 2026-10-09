@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#B91C1C"/>
+      <stop offset="1" stop-color="#7f1010"/>
+    </linearGradient>
+    <linearGradient id="dome" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F4EAD6"/>
+      <stop offset="1" stop-color="#D4AF37"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="90" fill="url(#bg)"/>
+  <!-- Spire -->
+  <path d="M256 112 L256 148" stroke="#D4AF37" stroke-width="10" fill="none"/>
+  <circle cx="256" cy="156" r="16" fill="#D4AF37"/>
+  <!-- Dome -->
+  <path d="M186 186 Q256 122 326 186 L326 240 L186 240 Z" fill="url(#dome)"/>
+  <rect x="180" y="236" width="152" height="16" fill="#D4AF37"/>
+  <!-- Body -->
+  <rect x="148" y="252" width="216" height="144" fill="#F4EAD6" opacity="0.95"/>
+  <rect x="148" y="252" width="216" height="16" fill="#D4AF37"/>
+  <!-- Pillars -->
+  <rect x="170" y="268" width="22" height="128" fill="#B91C1C" opacity="0.3"/>
+  <rect x="245" y="268" width="22" height="128" fill="#B91C1C" opacity="0.3"/>
+  <rect x="320" y="268" width="22" height="128" fill="#B91C1C" opacity="0.3"/>
+  <!-- Door -->
+  <path d="M224 316 Q256 294 288 316 L288 396 L224 396 Z" fill="#7f1010"/>
+  <!-- Diyas (lamps) -->
+  <circle cx="200" cy="380" r="6" fill="#D4AF37"/>
+  <circle cx="312" cy="380" r="6" fill="#D4AF37"/>
+  <!-- Base platform -->
+  <rect x="128" y="396" width="256" height="22" fill="#D4AF37"/>
+  <rect x="112" y="418" width="288" height="10" fill="#B91C1C" opacity="0.6"/>
+</svg>

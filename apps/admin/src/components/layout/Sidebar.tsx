@@ -123,7 +123,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/settings/branding',         icon: '🎨', label: 'Branding' },
       { href: '/settings/email-templates',  icon: '📧', label: 'Email Templates' },
       { href: '/settings/sent-emails',      icon: '📨', label: 'Sent Emails' },
-      { href: '/settings/downloads',        icon: '📥', label: 'Software Downloads' },
+      { href: '/downloads',                 icon: '📥', label: 'Software Downloads' },
       { href: '/help/glossary',             icon: '📖', label: 'Glossary' },
       { href: '/settings/volunteer-form',   icon: '✍️', label: 'Volunteer Form Text' },
       { href: '/settings/branches',         icon: '🌿', label: 'Branches' },
