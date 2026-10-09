@@ -194,7 +194,7 @@ function ShitalAppSection() {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
         className="rounded-2xl border border-saffron-500/30 bg-gradient-to-br from-saffron-500/10 to-transparent p-6">
         <div className="flex items-start gap-4 flex-wrap">
-          <img src="/icons/shital-192.svg" alt="Shital App" width={96} height={96}
+          <img src="/admin/icons/shital-192.svg" alt="Shital App" width={96} height={96}
             className="rounded-2xl shadow-lg shrink-0" />
           <div className="flex-1 min-w-[260px]">
             <div className="flex items-center gap-2 flex-wrap mb-1">
