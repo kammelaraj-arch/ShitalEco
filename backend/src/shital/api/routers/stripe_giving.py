@@ -15,7 +15,6 @@ Endpoints (all reached by BOTH the Service app and the kiosk, which embeds it):
 """
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
@@ -162,12 +161,17 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
     # Pre-fill the donor's email + phone on the Stripe page. Passing a Customer
     # (with phone) lets Checkout pre-fill BOTH email and phone; a bare
     # customer_email only pre-fills the email. Falls back gracefully.
+    #
+    # Idempotency key = rgs_id scoped by call. If the SPA retries POST
+    # /create-checkout (slow network, user double-click), Stripe returns the
+    # SAME customer + the SAME Checkout session instead of creating duplicates.
     prefill: dict[str, Any] = {}
     if email:
         try:
             cust = stripe.Customer.create(
                 email=email, name=(full_name or None),
                 phone=(body.donor_phone or None) if body.donor_phone else None,
+                idempotency_key=f"rgs-cust-{rgs_id}",
             )
             prefill = {"customer": cust.id}
         except Exception:  # noqa: BLE001
@@ -216,12 +220,20 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
             "optional": False,
         }],
     )
+    # Idempotency key per rgs_id — a retried POST returns the SAME session
+    # URL instead of creating a second Checkout for the same intended donation.
+    # The "extras" and "no-extras" variants carry different keys because
+    # Stripe locks the request body to a given key on the first use.
     try:
-        session = stripe.checkout.Session.create(**base_kwargs, **extras)
+        session = stripe.checkout.Session.create(
+            **base_kwargs, **extras, idempotency_key=f"rgs-cko-{rgs_id}-ex",
+        )
     except Exception as exc:  # noqa: BLE001 — retry minimal so donations never break
         logger.warning("stripe_checkout_extras_failed", error=str(exc), rgs_id=rgs_id)
         try:
-            session = stripe.checkout.Session.create(**base_kwargs)
+            session = stripe.checkout.Session.create(
+                **base_kwargs, idempotency_key=f"rgs-cko-{rgs_id}-base",
+            )
         except Exception as exc2:  # noqa: BLE001
             logger.error("stripe_checkout_create_failed", error=str(exc2), rgs_id=rgs_id)
             raise HTTPException(502, detail="Could not start card checkout. Please try again.") from exc2
@@ -375,7 +387,15 @@ async def _handle_checkout_completed(session: dict[str, Any]) -> None:
 
 async def _record_invoice_donation(invoice: dict[str, Any]) -> None:
     """Insert a COMPLETED donation for a paid subscription invoice (idempotent
-    by payment_ref) and bump the subscription's payment counters."""
+    by payment_ref) and bump the subscription's payment counters.
+
+    Self-heals the "100% Stripe failure" case: when ``invoice.paid`` arrives
+    before (or without) a matching ``checkout.session.completed`` event — so
+    our DB row still has an empty ``stripe_subscription_id`` — we fetch the
+    Stripe subscription, read ``metadata.rgs_id`` (stamped at Checkout
+    create), link the row and flip it ACTIVE. Then record the donation as
+    normal. Prior behaviour silently returned, leaving every subscription
+    PENDING_APPROVAL forever even though the donor had paid."""
     sub_id = str(invoice.get("subscription") or "")
     if not sub_id:
         return
@@ -395,8 +415,49 @@ async def _record_invoice_donation(invoice: dict[str, Any]) -> None:
                    COALESCE(gift_aid_declared,false) AS ga
             FROM recurring_giving_subscriptions WHERE stripe_subscription_id = :sub LIMIT 1
         """), {"sub": sub_id})).mappings().first()
+    if not sub:
+        # Self-heal: no linked row yet. Pull the Stripe sub, use its
+        # metadata.rgs_id to link + activate our pre-created row. Only then
+        # does the donation record below succeed.
+        try:
+            stripe = await _stripe()
+            sub_obj = stripe.Subscription.retrieve(sub_id, expand=["customer"])
+            s = sub_obj if isinstance(sub_obj, dict) else sub_obj.to_dict()
+            meta = s.get("metadata") or {}
+            rgs_id = meta.get("rgs_id") or ""
+            cust = s.get("customer")
+            cust_id = (cust.get("id") if isinstance(cust, dict) else str(cust)) if cust else None
+            cust_email = (cust.get("email") if isinstance(cust, dict) else "") or ""
+            cust_name = (cust.get("name") if isinstance(cust, dict) else "") or ""
+            amount_item = 0.0
+            items = (s.get("items") or {}).get("data") or []
+            if items:
+                price = (items[0].get("price") or {})
+                amount_item = float(price.get("unit_amount") or 0) / 100.0
+            await _link_subscription_row(
+                rgs_id=rgs_id or None,
+                stripe_sub_id=sub_id,
+                customer_id=cust_id,
+                checkout_id=None,
+                name=cust_name,
+                email=cust_email,
+                branch_id=meta.get("branch_id") or "main",
+                gift_aid=(meta.get("gift_aid") == "1"),
+                amount=amount_item or value,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stripe_invoice_selfheal_failed", sub=sub_id, error=str(exc))
+            return
+        async with SessionLocal() as db:
+            sub = (await db.execute(text("""
+                SELECT id::text AS id, branch_id, contact_id::text AS contact_id,
+                       COALESCE(gift_aid_declared,false) AS ga
+                FROM recurring_giving_subscriptions WHERE stripe_subscription_id = :sub LIMIT 1
+            """), {"sub": sub_id})).mappings().first()
         if not sub:
-            return  # subscription row not linked yet — webhook ordering; skip
+            return
+
+    async with SessionLocal() as db:
         exists = (await db.execute(text(
             "SELECT 1 FROM donations WHERE payment_ref = :ref LIMIT 1"
         ), {"ref": ref})).first()
@@ -620,9 +681,11 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
 
 @router.post("/stripe/webhook")
 async def stripe_webhook(request: Request) -> dict[str, Any]:
-    """Stripe events. Verified against STRIPE_WEBHOOK_SECRET when set; if not yet
-    configured we parse the payload unsigned (best-effort) so first-time setup
-    still records — but you SHOULD set the secret for security."""
+    """Stripe events. ALWAYS verified against STRIPE_WEBHOOK_SECRET — if the
+    secret isn't configured we return 503 (not a 2xx) so Stripe keeps the
+    event in its retry queue, and we never trust an unsigned payload. The
+    diagnostic + /service/stripe/config endpoints both report when the
+    secret is missing so operators can see the gap."""
     stripe = await _stripe()
     from shital.core.fabrics.config import settings
     from shital.core.fabrics.secrets import SecretsManager
@@ -630,17 +693,14 @@ async def stripe_webhook(request: Request) -> dict[str, Any]:
 
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
-    if secret:
-        try:
-            event = stripe.Webhook.construct_event(payload, sig, secret)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("stripe_webhook_bad_signature", error=str(exc))
-            raise HTTPException(400, detail="invalid signature") from exc
-    else:
-        try:
-            event = json.loads(payload)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(400, detail="invalid payload") from exc
+    if not secret:
+        logger.error("stripe_webhook_secret_missing")
+        raise HTTPException(503, detail="Stripe webhook secret not configured")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, secret)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("stripe_webhook_bad_signature", error=str(exc))
+        raise HTTPException(400, detail="invalid signature") from exc
 
     etype = event.get("type") if isinstance(event, dict) else event["type"]
     obj = (event.get("data") or {}).get("object") if isinstance(event, dict) else event["data"]["object"]
@@ -668,21 +728,35 @@ class ConfirmBody(BaseModel):
 async def confirm_checkout(body: ConfirmBody) -> dict[str, Any]:
     """Called by the thank-you page after a successful Checkout. Retrieves the
     session and records the subscription immediately (idempotent with the
-    webhook). Never fails the donor's confirmation."""
+    webhook — belt-and-braces for the case where the webhook is slow or the
+    secret isn't configured yet).
+
+    ``custom_fields`` is expanded explicitly: Stripe omits it from the base
+    object, and without it ``_handle_checkout_completed`` can't read the
+    Gift Aid answer from the Checkout dropdown and falls back to the metadata
+    flag — causing a donor who ticked Yes at Checkout to be recorded as
+    non-Gift-Aid. Error payloads carry the Stripe reason so operators and the
+    thank-you page can see WHY it failed instead of a silent {ok: false}."""
     stripe = await _stripe()
-    if not stripe.api_key or not body.session_id:
-        return {"ok": False}
+    if not stripe.api_key:
+        return {"ok": False, "reason": "stripe_not_configured"}
+    if not body.session_id:
+        return {"ok": False, "reason": "missing_session_id"}
     try:
         session = stripe.checkout.Session.retrieve(
-            body.session_id, expand=["customer_details", "subscription"]
+            body.session_id,
+            expand=["customer_details", "subscription", "custom_fields"],
         )
         data = session if isinstance(session, dict) else session.to_dict()
-        if data.get("status") == "complete" or data.get("payment_status") in ("paid", "no_payment_required"):
+        status = data.get("status")
+        pay = data.get("payment_status")
+        if status == "complete" or pay in ("paid", "no_payment_required"):
             await _handle_checkout_completed(data)
             return {"ok": True, "status": "active"}
+        return {"ok": False, "reason": f"status={status} payment_status={pay}"}
     except Exception as exc:  # noqa: BLE001
         logger.warning("stripe_confirm_failed", error=str(exc), session_id=body.session_id)
-    return {"ok": False}
+        return {"ok": False, "reason": str(exc)[:200]}
 
 
 # ── Admin diagnostic ──────────────────────────────────────────────────────────

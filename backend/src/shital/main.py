@@ -3218,6 +3218,7 @@ async def _seed_api_key_metadata() -> None:
         ("PAYPAL_CLIENT_ID",          "PayPal REST API client ID",                      "PayPal",    False),
         ("PAYPAL_CLIENT_SECRET",      "PayPal REST API client secret",                  "PayPal",    True),
         ("PAYPAL_ENV",                "PayPal environment: 'live' or 'sandbox'",        "PayPal",    False),
+        ("PAYPAL_WEBHOOK_ID",         "PayPal webhook ID (from Dashboard → Webhooks). REQUIRED — without this the webhook endpoint rejects everything so forged events can't flip subscriptions to ACTIVE. Covers BOTH /service/giving/webhook/paypal and /service/paypal/webhook.", "PayPal", False),
         ("HMRC_GIFT_AID_USER_ID",     "HMRC Government Gateway user ID",                "HMRC",      True),
         ("HMRC_GIFT_AID_PASSWORD",    "HMRC Government Gateway password",               "HMRC",      True),
         ("HMRC_GIFT_AID_VENDOR_ID",   "HMRC software vendor ID",                        "HMRC",      False),
