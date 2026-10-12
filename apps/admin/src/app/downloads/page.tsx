@@ -30,7 +30,26 @@ const REPO = 'kammelaraj-arch/ShitalEco'
 const KIOSK_RELEASE = `https://github.com/${REPO}/releases/download/kiosk-latest`
 
 const TILES: DownloadTile[] = [
-  // ── Installers ────────────────────────────────────────────────────────────
+  // ── Shital App (native wrappers around admin — one per OS) ─────────────────
+  {
+    title:    'Shital App for Android',
+    subtitle: 'Native APK — admin portal as a real Android app (sideload)',
+    icon:     '📲',
+    href:     `${KIOSK_RELEASE}/shital-admin-latest.apk`,
+    badge:    '.apk',
+    category: 'installer',
+    accent:   'border-l-saffron-500/50',
+  },
+  {
+    title:    'Shital App for Windows',
+    subtitle: 'x64 NSIS installer — admin portal as a real Windows app',
+    icon:     '🪟',
+    href:     `${KIOSK_RELEASE}/shital-admin-windows-setup.exe`,
+    badge:    '.exe',
+    category: 'installer',
+    accent:   'border-l-saffron-500/50',
+  },
+  // ── Kiosk + other installers ──────────────────────────────────────────────
   {
     title:    'Kiosk for Windows',
     subtitle: 'x64 NSIS installer — touchscreens, tills, donation kiosks',
@@ -269,26 +288,35 @@ function ShitalAppSection() {
         </div>
       </motion.div>
 
-      {/* Parked native APK — Play Store listing is a later deliverable */}
+      {/* Direct native-app download links — same wrappers listed as tiles
+          below under "Kiosk app — installers", surfaced here for clarity. */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
-        className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 opacity-70">
-        <div className="flex items-start gap-4 flex-wrap">
-          <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-3xl shrink-0">
-            🤖
-          </div>
-          <div className="flex-1 min-w-[260px]">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <h3 className="text-white font-black text-lg">Shital App for Android (Play Store)</h3>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                Coming soon
-              </span>
-            </div>
-            <p className="text-white/50 text-sm max-w-prose">
-              A native Android app on Google Play — same features, with push notifications and a verified Play Store listing.
-              Use the installable PWA above in the meantime; it&apos;s the same portal.
-            </p>
-          </div>
+        className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+        <p className="text-white/80 font-semibold text-sm mb-3">
+          Prefer a real app file? Direct native-app downloads:
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <a href={`${KIOSK_RELEASE}/shital-admin-latest.apk`} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-bold hover:brightness-110 transition"
+            style={{ background: 'linear-gradient(135deg,#15803d,#166534)' }}>
+            📲 Android APK (.apk)
+          </a>
+          <a href={`${KIOSK_RELEASE}/shital-admin-windows-setup.exe`} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-bold hover:brightness-110 transition"
+            style={{ background: 'linear-gradient(135deg,#1d4ed8,#1e40af)' }}>
+            🪟 Windows installer (.exe)
+          </a>
         </div>
+        <p className="text-white/40 text-xs mt-3">
+          Native wrappers around the admin portal — rebuilt on every push to <code>main</code> by{' '}
+          <a className="text-saffron-300 hover:underline" target="_blank" rel="noreferrer"
+            href={`https://github.com/${REPO}/actions/workflows/build-kiosk.yml`}>
+            build-kiosk.yml
+          </a>
+          . On Android enable <em>Install unknown apps</em> for Chrome. On Windows,
+          SmartScreen will warn on first run — click <em>More info → Run anyway</em>
+          (the installers are unsigned).
+        </p>
       </motion.div>
     </section>
   )
