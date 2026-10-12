@@ -2,8 +2,9 @@
   "name": "Shital App",
   "short_name": "Shital",
   "description": "Shital Temple Business Portal — bookings, donations, Gift Aid, HR, compliance.",
-  "start_url": "/dashboard?src=pwa",
-  "scope": "/",
+  "id": "/admin/",
+  "start_url": "/admin/dashboard?src=pwa",
+  "scope": "/admin/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0a0a12",
@@ -13,20 +14,20 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/icons/shital-192.svg",
-      "sizes": "any",
+      "src": "/admin/icons/shital-192.svg",
+      "sizes": "192x192 any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/icons/shital-512.svg",
-      "sizes": "any",
+      "src": "/admin/icons/shital-512.svg",
+      "sizes": "512x512 any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/icons/shital-maskable.svg",
-      "sizes": "any",
+      "src": "/admin/icons/shital-maskable.svg",
+      "sizes": "512x512 any",
       "type": "image/svg+xml",
       "purpose": "maskable"
     }
@@ -35,20 +36,20 @@
     {
       "name": "Dashboard",
       "short_name": "Home",
-      "url": "/dashboard?src=pwa",
-      "icons": [{ "src": "/icons/shital-192.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "url": "/admin/dashboard?src=pwa",
+      "icons": [{ "src": "/admin/icons/shital-192.svg", "sizes": "192x192 any", "type": "image/svg+xml" }]
     },
     {
       "name": "Donations",
       "short_name": "Donations",
-      "url": "/donations?src=pwa",
-      "icons": [{ "src": "/icons/shital-192.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "url": "/admin/donations?src=pwa",
+      "icons": [{ "src": "/admin/icons/shital-192.svg", "sizes": "192x192 any", "type": "image/svg+xml" }]
     },
     {
       "name": "Daily Compliance",
       "short_name": "Daily",
-      "url": "/compliance/daily?src=pwa",
-      "icons": [{ "src": "/icons/shital-192.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "url": "/admin/compliance/daily?src=pwa",
+      "icons": [{ "src": "/admin/icons/shital-192.svg", "sizes": "192x192 any", "type": "image/svg+xml" }]
     }
   ]
 }
