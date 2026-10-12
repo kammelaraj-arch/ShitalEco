@@ -216,23 +216,20 @@ function ShitalAppSection() {
 
             {alreadyInstalled ? (
               <p className="text-white/50 text-sm italic">You&apos;re already running inside the installed app. 🎉</p>
-            ) : platform === 'android' ? (
-              installEvt ? (
+            ) : installEvt ? (
+              // Chrome/Edge/Chromium fires beforeinstallprompt on BOTH Android
+              // AND Desktop once the PWA is installable — show the real button
+              // whenever we have it, regardless of platform.
+              <div className="space-y-2">
                 <button onClick={install}
-                  className="px-6 py-3 rounded-xl text-white font-black text-sm hover:brightness-110 transition"
+                  className="px-6 py-3 rounded-xl text-white font-black text-sm hover:brightness-110 transition shadow-lg"
                   style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
                   📲 Install Shital App
                 </button>
-              ) : (
-                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70">
-                  <p className="mb-2 font-semibold text-white/90">Install on Android</p>
-                  <p className="mb-1">1. Tap the <strong>⋮</strong> menu in Chrome (top-right).</p>
-                  <p className="mb-1">2. Choose <strong>Install app</strong> (or <strong>Add to Home screen</strong>).</p>
-                  <p className="text-white/40 text-xs mt-2">
-                    If the option isn&apos;t there, Chrome hasn&apos;t registered the install prompt yet — refresh this page and try again.
-                  </p>
-                </div>
-              )
+                <p className="text-white/40 text-xs">
+                  No download file — the app installs directly from your browser.
+                </p>
+              </div>
             ) : platform === 'ios' ? (
               <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70">
                 <p className="mb-2 font-semibold text-white/90">Install on iPhone / iPad</p>
@@ -241,12 +238,23 @@ function ShitalAppSection() {
                 <p className="mb-1">3. Scroll down → <strong>Add to Home Screen</strong>.</p>
                 <p className="mb-1">4. Confirm the name (&quot;Shital App&quot;) → <strong>Add</strong>.</p>
               </div>
+            ) : platform === 'android' ? (
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70">
+                <p className="mb-2 font-semibold text-white/90">Install on Android</p>
+                <p className="mb-1">1. Tap the <strong>⋮</strong> menu in Chrome (top-right).</p>
+                <p className="mb-1">2. Choose <strong>Install app</strong> (or <strong>Add to Home screen</strong>).</p>
+                <p className="text-white/40 text-xs mt-2">
+                  No <code>.apk</code> file — the app installs directly from Chrome.
+                </p>
+              </div>
             ) : (
               <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70">
                 <p className="mb-2 font-semibold text-white/90">Install on Desktop</p>
-                <p className="mb-1">In Chrome / Edge: click the <strong>install icon</strong> (⊕) at the right end of the address bar.</p>
+                <p className="mb-1">In <strong>Chrome / Edge / Brave</strong>: look for the <strong>install icon</strong> (⊕ or a small monitor-with-arrow) at the right end of the address bar — click it, then <em>Install</em>.</p>
+                <p className="mb-1 mt-2">Or from the browser menu: <em>⋮ → Cast, save, and share → Install page as app…</em></p>
                 <p className="text-white/40 text-xs mt-2">
-                  Or use the browser menu: <em>Install Shital App…</em>
+                  No <code>.exe</code> file — the app installs directly from your browser.
+                  Safari / Firefox don&apos;t support installable web apps on desktop — use Chrome, Edge or Brave.
                 </p>
               </div>
             )}
