@@ -1229,16 +1229,18 @@ async def stripe_webhook(request: Request):
     # (symptom: "100% Stripe failure, 0 ACTIVE out of N").
     # Routing happens before we return on non-payment_intent events so we
     # keep the kiosk's own fast-path untouched for the terminal flow.
-    GIVING_EVENTS = {
+    giving_events = {
         "checkout.session.completed",
         "invoice.paid", "invoice.payment_succeeded", "invoice.payment_failed",
         "customer.subscription.updated", "customer.subscription.deleted",
     }
-    if etype in GIVING_EVENTS:
+    if etype in giving_events:
         try:
             from shital.api.routers.stripe_giving import (
-                _handle_checkout_completed, _handle_invoice_failed,
-                _handle_subscription_cancelled, _record_invoice_donation,
+                _handle_checkout_completed,
+                _handle_invoice_failed,
+                _handle_subscription_cancelled,
+                _record_invoice_donation,
             )
             obj = (event.get("data") or {}).get("object") or {}
             if etype == "checkout.session.completed":
