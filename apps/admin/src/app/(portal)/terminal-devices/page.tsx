@@ -121,20 +121,39 @@ function DeviceModal({
 
   const set = (k: keyof FormState, v: string) => setForm(f => ({ ...f, [k]: v }))
 
-  async function save() {
+  async function save(confirmProtected = false) {
     if (!form.label.trim()) { setError('Label is required'); return }
     if (!form.branch_id.trim()) { setError('Branch ID is required'); return }
 
     setSaving(true)
     setError('')
     try {
-      const url = isEdit ? `/terminal-devices/${device!.id}` : `/terminal-devices/`
+      const url = isEdit
+        ? `/terminal-devices/${device!.id}${confirmProtected ? '?confirm_protected_change=true' : ''}`
+        : `/terminal-devices/`
       const method = isEdit ? 'PUT' : 'POST'
       await apiFetch(url, { method, body: JSON.stringify(form) })
       onSaved()
       onClose()
     } catch (e: any) {
-      setError(e.message || 'Save failed')
+      // Backend returns 409 with a changes list when identity-critical
+      // fields are about to change — surface the diff and let the operator
+      // confirm. Prevents the drive-by provider flip we had on 23 Oct.
+      const msg = e.message || 'Save failed'
+      const protectedHit = msg.includes('protected_field_change_requires_confirmation')
+                        || msg.includes('"status":409')
+                        || /409/.test(msg)
+      if (protectedHit && !confirmProtected) {
+        const ok = confirm(
+          'You are changing identity-critical fields on this card reader ' +
+          '(provider / reader id / branch).\n\n' +
+          'This change WILL be recorded in the audit log with your user, ' +
+          'the before and after values, and the timestamp.\n\n' +
+          'Continue?'
+        )
+        if (ok) { await save(true); return }
+      }
+      setError(msg)
     } finally {
       setSaving(false)
     }
@@ -719,6 +738,13 @@ export default function TerminalDevicesPage() {
                           >
                             ✏️
                           </button>
+                          <a
+                            href={`/admin/settings/system/audit?entity=terminal_devices&id=${d.id}`}
+                            className="p-1.5 rounded-lg bg-white/5 text-white/40 hover:text-indigo-300 hover:bg-indigo-400/10 transition-colors text-xs"
+                            title="History — see every change to this reader (who / when / what)"
+                          >
+                            📜
+                          </a>
                           <button
                             onClick={() => deleteDevice(d.id)}
                             className="p-1.5 rounded-lg bg-white/5 text-white/40 hover:text-red-400 hover:bg-red-400/10 transition-colors text-xs"
