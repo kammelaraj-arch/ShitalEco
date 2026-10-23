@@ -47,6 +47,33 @@ interface Person {
   role: string
 }
 
+type ItemType = 'checkbox' | 'text' | 'number' | 'photo' | 'signature'
+
+interface ChecklistItem {
+  id: string
+  label: string
+  item_type: ItemType
+  required: boolean
+  help_text: string
+  order_index: number
+}
+
+interface AssignmentChecklistEntry {
+  item_id: string
+  label: string
+  item_type: ItemType
+  required: boolean
+  help_text: string
+  order_index: number
+  is_checked: boolean
+  value_text: string
+  value_number: number | null
+  photo_url: string
+  signature_data: string
+  checked_by: string
+  checked_at: string | null
+}
+
 interface RosterResponse {
   employees: Person[]
   volunteers: Person[]
@@ -88,6 +115,20 @@ export default function ActivitiesPage() {
   const [assignEnd, setAssignEnd] = useState('')
   const [assignNotes, setAssignNotes] = useState('')
   const [assigning, setAssigning] = useState(false)
+
+  // Checklist editor modal (per template)
+  const [editItemsFor, setEditItemsFor] = useState<Activity | null>(null)
+  const [items, setItems] = useState<ChecklistItem[]>([])
+  const [newItemLabel, setNewItemLabel] = useState('')
+  const [newItemType, setNewItemType] = useState<ItemType>('checkbox')
+  const [newItemRequired, setNewItemRequired] = useState(true)
+  const [newItemHelp, setNewItemHelp] = useState('')
+  const [savingItem, setSavingItem] = useState(false)
+
+  // Per-assignment inline checklist expansion
+  const [expandedAssignmentId, setExpandedAssignmentId] = useState<string | null>(null)
+  const [checklistEntries, setChecklistEntries] = useState<AssignmentChecklistEntry[]>([])
+  const [checklistLoading, setChecklistLoading] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -177,6 +218,132 @@ export default function ActivitiesPage() {
     }
   }
 
+  // ── Checklist editor (template-level) ───────────────────────────────────────
+  async function openEditItems(a: Activity) {
+    setEditItemsFor(a)
+    setItems([])
+    setNewItemLabel(''); setNewItemType('checkbox'); setNewItemRequired(true); setNewItemHelp('')
+    try {
+      const r = await apiFetch<ChecklistItem[]>(`/attendance/activities/${a.id}/checklist-items`)
+      setItems(r)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not load checklist')
+    }
+  }
+
+  async function addItem() {
+    if (!editItemsFor || !newItemLabel.trim()) return
+    setSavingItem(true)
+    try {
+      const r = await apiFetch<ChecklistItem>(
+        `/attendance/activities/${editItemsFor.id}/checklist-items`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            label: newItemLabel.trim(), item_type: newItemType,
+            required: newItemRequired, help_text: newItemHelp.trim() || null,
+          }),
+        })
+      setItems(prev => [...prev, r])
+      setNewItemLabel(''); setNewItemHelp(''); setNewItemRequired(true); setNewItemType('checkbox')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not add item')
+    } finally {
+      setSavingItem(false)
+    }
+  }
+
+  async function updateItem(it: ChecklistItem, patch: Partial<ChecklistItem>) {
+    const next = { ...it, ...patch }
+    setItems(prev => prev.map(x => (x.id === it.id ? next : x)))
+    try {
+      await apiFetch(`/attendance/checklist-items/${it.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: next.label, item_type: next.item_type,
+          required: next.required, help_text: next.help_text || null,
+          order_index: next.order_index,
+        }),
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Update failed')
+      // Revert on failure
+      setItems(prev => prev.map(x => (x.id === it.id ? it : x)))
+    }
+  }
+
+  async function deleteItem(it: ChecklistItem) {
+    if (!confirm(`Delete checklist item "${it.label}"?`)) return
+    try {
+      await apiFetch(`/attendance/checklist-items/${it.id}`, { method: 'DELETE' })
+      setItems(prev => prev.filter(x => x.id !== it.id))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed')
+    }
+  }
+
+  async function moveItem(it: ChecklistItem, dir: -1 | 1) {
+    const sorted = [...items].sort((a, b) => a.order_index - b.order_index)
+    const idx = sorted.findIndex(x => x.id === it.id)
+    const neighbour = sorted[idx + dir]
+    if (!neighbour) return
+    const swapped = sorted.map(x => {
+      if (x.id === it.id) return { ...x, order_index: neighbour.order_index }
+      if (x.id === neighbour.id) return { ...x, order_index: it.order_index }
+      return x
+    })
+    setItems(swapped)
+    try {
+      await apiFetch(`/attendance/activities/${editItemsFor!.id}/checklist-items/reorder`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: swapped.map(x => ({ id: x.id, order_index: x.order_index })),
+        }),
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Reorder failed')
+    }
+  }
+
+  // ── Assignment inline checklist (volunteer-facing tick-off) ────────────────
+  async function openAssignmentChecklist(a: Assignment) {
+    if (expandedAssignmentId === a.id) {
+      setExpandedAssignmentId(null); setChecklistEntries([])
+      return
+    }
+    setExpandedAssignmentId(a.id); setChecklistEntries([]); setChecklistLoading(true)
+    try {
+      const r = await apiFetch<{ items: AssignmentChecklistEntry[] }>(`/attendance/assignments/${a.id}/checklist`)
+      setChecklistEntries(r.items || [])
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not load checklist')
+    } finally {
+      setChecklistLoading(false)
+    }
+  }
+
+  async function setItemState(assignmentId: string, item: AssignmentChecklistEntry,
+                              patch: Partial<AssignmentChecklistEntry>) {
+    const next = { ...item, ...patch }
+    setChecklistEntries(prev => prev.map(x => (x.item_id === item.item_id ? next : x)))
+    try {
+      await apiFetch(`/attendance/assignments/${assignmentId}/checklist/${item.item_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          is_checked: next.is_checked,
+          value_text: next.value_text || null,
+          value_number: next.value_number ?? null,
+          photo_url: next.photo_url || null,
+          signature_data: next.signature_data || null,
+        }),
+      })
+      // Refresh the assignment status (may have auto-flipped to in_progress / done)
+      load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Update failed')
+      setChecklistEntries(prev => prev.map(x => (x.item_id === item.item_id ? item : x)))
+    }
+  }
+
   async function remove(a: Assignment) {
     if (!confirm(`Remove this assignment of "${a.activity_name}" from ${a.person_name}?`)) return
     try {
@@ -242,7 +409,12 @@ export default function ActivitiesPage() {
                       <div className="text-white/50 text-xs mt-1">{a.description}</div>
                     )}
                   </div>
-                  <div className="flex gap-1 shrink-0">
+                  <div className="flex gap-1 shrink-0 flex-wrap">
+                    <button onClick={() => openEditItems(a)}
+                      className="px-3 py-1.5 rounded-lg bg-white/5 text-white/60 border border-white/10 text-xs hover:bg-white/10 hover:text-white"
+                      title="Edit the checklist items that appear when this activity is assigned">
+                      📝 Checklist
+                    </button>
                     <button onClick={() => openAssign(a)}
                       className="px-3 py-1.5 rounded-lg bg-saffron-500/20 text-saffron-200 border border-saffron-400/40 text-xs font-bold hover:bg-saffron-500/30">
                       Assign…
@@ -306,11 +478,81 @@ export default function ActivitiesPage() {
                         {s === 'in_progress' ? 'in progress' : s}
                       </button>
                     ))}
+                    <button onClick={() => openAssignmentChecklist(a)}
+                      className="ml-auto px-2 py-0.5 rounded border bg-white/[0.03] text-saffron-200 border-saffron-400/30 hover:bg-saffron-500/10">
+                      {expandedAssignmentId === a.id ? '▲ Hide' : '▼ Checklist'}
+                    </button>
                     <button onClick={() => remove(a)}
-                      className="ml-auto px-2 py-0.5 rounded border bg-white/[0.03] text-rose-300/80 border-rose-500/20 hover:bg-rose-500/10">
+                      className="px-2 py-0.5 rounded border bg-white/[0.03] text-rose-300/80 border-rose-500/20 hover:bg-rose-500/10">
                       Remove
                     </button>
                   </div>
+
+                  {/* Inline checklist (volunteer tick-off / data entry) */}
+                  {expandedAssignmentId === a.id && (
+                    <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
+                      {checklistLoading ? (
+                        <div className="text-white/40 text-xs">Loading checklist…</div>
+                      ) : checklistEntries.length === 0 ? (
+                        <div className="text-white/40 text-xs italic">
+                          No checklist items defined on this template yet. Add some from the catalogue on the left (📝 Checklist).
+                        </div>
+                      ) : (
+                        checklistEntries.map(it => (
+                          <div key={it.item_id} className="rounded-lg bg-white/[0.02] border border-white/5 p-2">
+                            <div className="flex items-start gap-2">
+                              {it.item_type === 'checkbox' ? (
+                                <input type="checkbox" checked={it.is_checked}
+                                  onChange={e => setItemState(a.id, it, { is_checked: e.target.checked })}
+                                  className="mt-0.5 accent-saffron-400 w-4 h-4 shrink-0" />
+                              ) : (
+                                <span className="mt-0.5 text-saffron-300 text-xs shrink-0">●</span>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <label className="text-white text-xs font-semibold flex items-center gap-1">
+                                  {it.label}
+                                  {it.required && <span className="text-rose-300">*</span>}
+                                  <span className="text-white/30 text-[10px] uppercase ml-1">{it.item_type}</span>
+                                </label>
+                                {it.help_text && (
+                                  <p className="text-white/40 text-[11px] italic mt-0.5">{it.help_text}</p>
+                                )}
+                                {it.item_type === 'text' && (
+                                  <input type="text" defaultValue={it.value_text}
+                                    onBlur={e => setItemState(a.id, it, { value_text: e.target.value })}
+                                    placeholder="Record value…"
+                                    className="mt-1 w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-xs" />
+                                )}
+                                {it.item_type === 'number' && (
+                                  <input type="number" step="any" defaultValue={it.value_number ?? ''}
+                                    onBlur={e => setItemState(a.id, it, { value_number: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                                    placeholder="e.g. 4.5"
+                                    className="mt-1 w-32 bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-xs" />
+                                )}
+                                {it.item_type === 'photo' && (
+                                  <input type="url" defaultValue={it.photo_url}
+                                    onBlur={e => setItemState(a.id, it, { photo_url: e.target.value })}
+                                    placeholder="Paste image URL (uploader coming in phase 3)"
+                                    className="mt-1 w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-xs" />
+                                )}
+                                {it.item_type === 'signature' && (
+                                  <input type="text" defaultValue={it.signature_data}
+                                    onBlur={e => setItemState(a.id, it, { signature_data: e.target.value })}
+                                    placeholder="Signatory name (pad coming in phase 3)"
+                                    className="mt-1 w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-xs" />
+                                )}
+                                {it.checked_by && it.checked_at && (
+                                  <p className="text-white/30 text-[10px] mt-1">
+                                    by {it.checked_by} · {new Date(it.checked_at).toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </motion.div>
               ))}
             </div>
@@ -378,6 +620,117 @@ export default function ActivitiesPage() {
               <button onClick={() => setAssignFor(null)}
                 className="px-4 py-2.5 rounded-lg bg-white/5 text-white/70 border border-white/10 text-sm">
                 Cancel
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Checklist editor modal (define items on a template) */}
+      {editItemsFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+             style={{ background: 'rgba(0,0,0,0.6)' }}
+             onClick={() => setEditItemsFor(null)}>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/10 p-5 space-y-4"
+            style={{ background: '#180a0a' }}
+            onClick={e => e.stopPropagation()}>
+            <div>
+              <h3 className="text-white font-black text-lg">
+                Checklist for: <span className="text-saffron-200">{editItemsFor.name}</span>
+              </h3>
+              <p className="text-white/40 text-xs mt-1">
+                Items here appear on every assignment of this activity.
+                Volunteer ticks them off, auto-completes the task when all required items are done.
+              </p>
+            </div>
+
+            {/* Add-item row */}
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
+              <div className="flex gap-2 flex-wrap">
+                <input value={newItemLabel} onChange={e => setNewItemLabel(e.target.value)}
+                  placeholder="New item (e.g. Degrease oven)"
+                  className="flex-1 min-w-[200px] bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm" />
+                <select value={newItemType} onChange={e => setNewItemType(e.target.value as ItemType)}
+                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm">
+                  <option value="checkbox">☑ Checkbox</option>
+                  <option value="text">📝 Text</option>
+                  <option value="number">🔢 Number</option>
+                  <option value="photo">📷 Photo</option>
+                  <option value="signature">✍️ Signature</option>
+                </select>
+                <label className="flex items-center gap-1 text-xs text-white/60">
+                  <input type="checkbox" checked={newItemRequired}
+                    onChange={e => setNewItemRequired(e.target.checked)}
+                    className="accent-saffron-400" />
+                  Required
+                </label>
+              </div>
+              <input value={newItemHelp} onChange={e => setNewItemHelp(e.target.value)}
+                placeholder="Optional help text (shown under the item)"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm" />
+              <button onClick={addItem} disabled={savingItem || !newItemLabel.trim()}
+                className="px-4 py-2 rounded-lg bg-saffron-500/20 text-saffron-200 border border-saffron-400/40 text-sm font-bold hover:bg-saffron-500/30 disabled:opacity-50">
+                {savingItem ? 'Adding…' : '+ Add item'}
+              </button>
+            </div>
+
+            {/* Items list */}
+            {items.length === 0 ? (
+              <div className="text-white/40 text-sm italic text-center py-6">
+                No items yet. Add your first item above.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {[...items].sort((a, b) => a.order_index - b.order_index).map((it, idx, arr) => (
+                  <div key={it.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex items-start gap-2">
+                    <div className="flex flex-col gap-0.5 text-white/40 text-xs">
+                      <button onClick={() => moveItem(it, -1)} disabled={idx === 0}
+                        className="hover:text-white disabled:opacity-20">▲</button>
+                      <button onClick={() => moveItem(it, 1)} disabled={idx === arr.length - 1}
+                        className="hover:text-white disabled:opacity-20">▼</button>
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <input value={it.label}
+                        onChange={e => setItems(prev => prev.map(x => x.id === it.id ? { ...x, label: e.target.value } : x))}
+                        onBlur={e => updateItem(it, { label: e.target.value })}
+                        className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-sm font-semibold" />
+                      <div className="flex gap-2 flex-wrap items-center text-xs">
+                        <select value={it.item_type}
+                          onChange={e => updateItem(it, { item_type: e.target.value as ItemType })}
+                          className="bg-white/5 border border-white/10 rounded px-2 py-1 text-white">
+                          <option value="checkbox">☑ Checkbox</option>
+                          <option value="text">📝 Text</option>
+                          <option value="number">🔢 Number</option>
+                          <option value="photo">📷 Photo</option>
+                          <option value="signature">✍️ Signature</option>
+                        </select>
+                        <label className="flex items-center gap-1 text-white/60">
+                          <input type="checkbox" checked={it.required}
+                            onChange={e => updateItem(it, { required: e.target.checked })}
+                            className="accent-saffron-400" />
+                          Required
+                        </label>
+                      </div>
+                      <input value={it.help_text || ''}
+                        onChange={e => setItems(prev => prev.map(x => x.id === it.id ? { ...x, help_text: e.target.value } : x))}
+                        onBlur={e => updateItem(it, { help_text: e.target.value })}
+                        placeholder="Help text (optional)"
+                        className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-white/70 text-xs" />
+                    </div>
+                    <button onClick={() => deleteItem(it)}
+                      className="px-2 py-1 rounded border bg-white/[0.03] text-rose-300/80 border-rose-500/20 hover:bg-rose-500/10 text-xs shrink-0">
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex pt-2">
+              <button onClick={() => setEditItemsFor(null)}
+                className="ml-auto px-4 py-2 rounded-lg bg-white/5 text-white/70 border border-white/10 text-sm">
+                Done
               </button>
             </div>
           </motion.div>
