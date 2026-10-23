@@ -95,6 +95,31 @@ class AssignmentStatusBody(BaseModel):
     status: str  # assigned | in_progress | done | skipped
 
 
+ITEM_TYPES = ("checkbox", "text", "number", "photo", "signature")
+
+
+class ChecklistItemBody(BaseModel):
+    label: str
+    item_type: str = "checkbox"
+    required: bool = True
+    help_text: str | None = None
+    order_index: int = 0
+
+
+class ChecklistItemsReorderBody(BaseModel):
+    # [{"id": "<uuid>", "order_index": 0}, …]
+    items: list[dict[str, Any]]
+
+
+class ChecklistStateBody(BaseModel):
+    # Whichever matches the item's type. Unused ones are ignored server-side.
+    is_checked: bool | None = None
+    value_text: str | None = None
+    value_number: float | None = None
+    photo_url: str | None = None
+    signature_data: str | None = None
+
+
 # ── Check-in / check-out ──────────────────────────────────────────────────────
 
 @router.post("/check-in")
@@ -426,3 +451,280 @@ async def delete_assignment(assignment_id: str, ctx: CurrentSpace) -> dict[str, 
     if not r:
         raise HTTPException(404, detail="Assignment not found")
     return {"id": r[0], "deleted": True}
+
+
+# ── Checklist items (phase 1 custom lists) ────────────────────────────────────
+
+async def _activity_belongs_to_branch(db, activity_id: str, branch_id: str) -> bool:
+    """Guard: block cross-branch mutation of someone else's template."""
+    r = (await db.execute(text("""
+        SELECT 1 FROM activities
+        WHERE id = CAST(:id AS uuid) AND branch_id = :bid LIMIT 1
+    """), {"id": activity_id, "bid": branch_id})).first()
+    return bool(r)
+
+
+@router.get("/activities/{activity_id}/checklist-items")
+async def list_checklist_items(activity_id: str, ctx: CurrentSpace) -> list[dict[str, Any]]:
+    async with SessionLocal() as db:
+        if not await _activity_belongs_to_branch(db, activity_id, ctx.branch_id):
+            raise HTTPException(404, detail="Activity not found")
+        rows = (await db.execute(text("""
+            SELECT id::text, label, item_type, required,
+                   COALESCE(help_text,'') AS help_text, order_index
+            FROM activity_checklist_items
+            WHERE activity_id = CAST(:aid AS uuid)
+            ORDER BY order_index, created_at
+        """), {"aid": activity_id})).mappings().all()
+    return [dict(r) for r in rows]
+
+
+@router.post("/activities/{activity_id}/checklist-items")
+async def create_checklist_item(activity_id: str, body: ChecklistItemBody,
+                                 ctx: CurrentSpace) -> dict[str, Any]:
+    if body.item_type not in ITEM_TYPES:
+        raise HTTPException(400, detail=f"item_type must be one of {ITEM_TYPES}")
+    label = (body.label or "").strip()
+    if not label:
+        raise HTTPException(400, detail="label is required")
+    async with SessionLocal() as db:
+        if not await _activity_belongs_to_branch(db, activity_id, ctx.branch_id):
+            raise HTTPException(404, detail="Activity not found")
+        # If no order_index provided, append at the end
+        order_index = body.order_index
+        if order_index <= 0:
+            next_r = (await db.execute(text("""
+                SELECT COALESCE(MAX(order_index), 0) + 1 AS n
+                FROM activity_checklist_items
+                WHERE activity_id = CAST(:aid AS uuid)
+            """), {"aid": activity_id})).first()
+            order_index = int(next_r[0]) if next_r else 1
+        r = (await db.execute(text("""
+            INSERT INTO activity_checklist_items
+                (activity_id, label, item_type, required, help_text, order_index)
+            VALUES
+                (CAST(:aid AS uuid), :label, :it, :req, :help, :ord)
+            RETURNING id::text, label, item_type, required,
+                      COALESCE(help_text,'') AS help_text, order_index
+        """), {
+            "aid": activity_id, "label": label, "it": body.item_type,
+            "req": body.required, "help": body.help_text, "ord": order_index,
+        })).mappings().first()
+        await db.commit()
+    return dict(r)
+
+
+@router.patch("/checklist-items/{item_id}")
+async def update_checklist_item(item_id: str, body: ChecklistItemBody,
+                                 ctx: CurrentSpace) -> dict[str, Any]:
+    if body.item_type not in ITEM_TYPES:
+        raise HTTPException(400, detail=f"item_type must be one of {ITEM_TYPES}")
+    label = (body.label or "").strip()
+    if not label:
+        raise HTTPException(400, detail="label is required")
+    async with SessionLocal() as db:
+        # Branch-scope the item via its parent activity
+        own = (await db.execute(text("""
+            SELECT 1 FROM activity_checklist_items ci
+            JOIN activities a ON a.id = ci.activity_id
+            WHERE ci.id = CAST(:id AS uuid) AND a.branch_id = :bid LIMIT 1
+        """), {"id": item_id, "bid": ctx.branch_id})).first()
+        if not own:
+            raise HTTPException(404, detail="Checklist item not found")
+        r = (await db.execute(text("""
+            UPDATE activity_checklist_items
+            SET label = :label, item_type = :it, required = :req,
+                help_text = :help, order_index = :ord, updated_at = NOW()
+            WHERE id = CAST(:id AS uuid)
+            RETURNING id::text, label, item_type, required,
+                      COALESCE(help_text,'') AS help_text, order_index
+        """), {
+            "id": item_id, "label": label, "it": body.item_type,
+            "req": body.required, "help": body.help_text,
+            "ord": body.order_index,
+        })).mappings().first()
+        await db.commit()
+    return dict(r)
+
+
+@router.delete("/checklist-items/{item_id}")
+async def delete_checklist_item(item_id: str, ctx: CurrentSpace) -> dict[str, Any]:
+    async with SessionLocal() as db:
+        r = await db.execute(text("""
+            DELETE FROM activity_checklist_items ci
+            USING activities a
+            WHERE ci.id = CAST(:id AS uuid)
+              AND ci.activity_id = a.id
+              AND a.branch_id = :bid
+            RETURNING ci.id::text
+        """), {"id": item_id, "bid": ctx.branch_id})
+        row = r.first()
+        await db.commit()
+    if not row:
+        raise HTTPException(404, detail="Checklist item not found")
+    return {"id": row[0], "deleted": True}
+
+
+@router.post("/activities/{activity_id}/checklist-items/reorder")
+async def reorder_checklist_items(activity_id: str, body: ChecklistItemsReorderBody,
+                                   ctx: CurrentSpace) -> dict[str, Any]:
+    """Bulk-set order_index values after a drag-and-drop reorder in the UI."""
+    async with SessionLocal() as db:
+        if not await _activity_belongs_to_branch(db, activity_id, ctx.branch_id):
+            raise HTTPException(404, detail="Activity not found")
+        for item in body.items:
+            iid = item.get("id") or ""
+            oidx = int(item.get("order_index") or 0)
+            if not iid:
+                continue
+            await db.execute(text("""
+                UPDATE activity_checklist_items
+                SET order_index = :ord, updated_at = NOW()
+                WHERE id = CAST(:id AS uuid)
+                  AND activity_id = CAST(:aid AS uuid)
+            """), {"id": iid, "ord": oidx, "aid": activity_id})
+        await db.commit()
+    return {"ok": True, "reordered": len(body.items)}
+
+
+# ── Checklist state (per-assignment tick-off) ─────────────────────────────────
+
+@router.get("/assignments/{assignment_id}/checklist")
+async def get_assignment_checklist(assignment_id: str,
+                                    ctx: CurrentSpace) -> dict[str, Any]:
+    """Full checklist for an assignment — template items joined with their
+    per-instance tick state. UI uses this to render the volunteer-facing
+    checklist. If the state row doesn't exist yet it's returned as blank
+    (is_checked=false, no values)."""
+    async with SessionLocal() as db:
+        a = (await db.execute(text("""
+            SELECT activity_id::text AS activity_id, status
+            FROM activity_assignments
+            WHERE id = CAST(:id AS uuid) AND branch_id = :bid LIMIT 1
+        """), {"id": assignment_id, "bid": ctx.branch_id})).mappings().first()
+        if not a:
+            raise HTTPException(404, detail="Assignment not found")
+        rows = (await db.execute(text("""
+            SELECT ci.id::text AS item_id, ci.label, ci.item_type, ci.required,
+                   COALESCE(ci.help_text,'') AS help_text, ci.order_index,
+                   COALESCE(st.is_checked, false) AS is_checked,
+                   COALESCE(st.value_text,'') AS value_text,
+                   st.value_number,
+                   COALESCE(st.photo_url,'') AS photo_url,
+                   COALESCE(st.signature_data,'') AS signature_data,
+                   COALESCE(st.checked_by,'') AS checked_by,
+                   st.checked_at
+            FROM activity_checklist_items ci
+            LEFT JOIN activity_assignment_checklist_state st
+                   ON st.item_id = ci.id
+                  AND st.assignment_id = CAST(:aid AS uuid)
+            WHERE ci.activity_id = CAST(:tid AS uuid)
+            ORDER BY ci.order_index, ci.id
+        """), {"aid": assignment_id, "tid": a["activity_id"]})).mappings().all()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("checked_at"):
+            d["checked_at"] = d["checked_at"].isoformat()
+        if d.get("value_number") is not None:
+            d["value_number"] = float(d["value_number"])
+        out.append(d)
+    return {"assignment_id": assignment_id, "status": a["status"], "items": out}
+
+
+@router.post("/assignments/{assignment_id}/checklist/{item_id}")
+async def set_assignment_checklist_item(assignment_id: str, item_id: str,
+                                         body: ChecklistStateBody,
+                                         ctx: CurrentSpace) -> dict[str, Any]:
+    """Toggle / set an item's state. UPSERT by (assignment, item). After the
+    write, if every REQUIRED item on the template is now satisfied (checked
+    for checkbox / non-null value for the others), auto-flip the assignment
+    status to 'done'."""
+    async with SessionLocal() as db:
+        own = (await db.execute(text("""
+            SELECT aa.activity_id::text AS activity_id, aa.id::text AS id
+            FROM activity_assignments aa
+            JOIN activity_checklist_items ci
+              ON ci.id = CAST(:item_id AS uuid)
+             AND ci.activity_id = aa.activity_id
+            WHERE aa.id = CAST(:aid AS uuid) AND aa.branch_id = :bid LIMIT 1
+        """), {"aid": assignment_id, "item_id": item_id,
+                "bid": ctx.branch_id})).mappings().first()
+        if not own:
+            raise HTTPException(404, detail="Assignment or item not found in branch")
+
+        await db.execute(text("""
+            INSERT INTO activity_assignment_checklist_state
+                (assignment_id, item_id, is_checked, value_text,
+                 value_number, photo_url, signature_data,
+                 checked_by, checked_at)
+            VALUES
+                (CAST(:aid AS uuid), CAST(:iid AS uuid),
+                 COALESCE(:is_checked, false), NULLIF(:value_text,''),
+                 :value_number, NULLIF(:photo_url,''),
+                 NULLIF(:signature_data,''),
+                 :actor, NOW())
+            ON CONFLICT (assignment_id, item_id) DO UPDATE SET
+                is_checked     = EXCLUDED.is_checked,
+                value_text     = COALESCE(EXCLUDED.value_text, activity_assignment_checklist_state.value_text),
+                value_number   = COALESCE(EXCLUDED.value_number, activity_assignment_checklist_state.value_number),
+                photo_url      = COALESCE(EXCLUDED.photo_url, activity_assignment_checklist_state.photo_url),
+                signature_data = COALESCE(EXCLUDED.signature_data, activity_assignment_checklist_state.signature_data),
+                checked_by     = EXCLUDED.checked_by,
+                checked_at     = NOW(),
+                updated_at     = NOW()
+        """), {
+            "aid": assignment_id, "iid": item_id,
+            "is_checked": body.is_checked,
+            "value_text": body.value_text or "",
+            "value_number": body.value_number,
+            "photo_url": body.photo_url or "",
+            "signature_data": body.signature_data or "",
+            "actor": _actor(ctx),
+        })
+
+        # Auto-complete: if every REQUIRED item on the template is satisfied,
+        # flip the assignment to 'done'. "Satisfied" means:
+        #   checkbox   → is_checked = true
+        #   text       → value_text non-empty
+        #   number     → value_number non-null
+        #   photo      → photo_url non-empty
+        #   signature  → signature_data non-empty
+        remaining = (await db.execute(text("""
+            SELECT COUNT(*) AS n
+            FROM activity_checklist_items ci
+            LEFT JOIN activity_assignment_checklist_state st
+                   ON st.item_id = ci.id
+                  AND st.assignment_id = CAST(:aid AS uuid)
+            WHERE ci.activity_id = CAST(:tid AS uuid)
+              AND ci.required = true
+              AND NOT (
+                     (ci.item_type = 'checkbox'  AND COALESCE(st.is_checked, false))
+                  OR (ci.item_type = 'text'      AND COALESCE(st.value_text,'') <> '')
+                  OR (ci.item_type = 'number'    AND st.value_number IS NOT NULL)
+                  OR (ci.item_type = 'photo'     AND COALESCE(st.photo_url,'') <> '')
+                  OR (ci.item_type = 'signature' AND COALESCE(st.signature_data,'') <> '')
+              )
+        """), {"aid": assignment_id, "tid": own["activity_id"]})).first()
+        remaining_count = int(remaining[0]) if remaining else 0
+
+        if remaining_count == 0:
+            await db.execute(text("""
+                UPDATE activity_assignments
+                SET status = 'done',
+                    completed_at = COALESCE(completed_at, NOW()),
+                    updated_at = NOW()
+                WHERE id = CAST(:aid AS uuid)
+                  AND status <> 'done'
+            """), {"aid": assignment_id})
+        else:
+            # Partial progress → bump status to in_progress if it was still 'assigned'
+            await db.execute(text("""
+                UPDATE activity_assignments
+                SET status = 'in_progress', updated_at = NOW()
+                WHERE id = CAST(:aid AS uuid)
+                  AND status = 'assigned'
+            """), {"aid": assignment_id})
+        await db.commit()
+    return {"ok": True, "remaining_required": remaining_count,
+            "status": "done" if remaining_count == 0 else "in_progress"}
