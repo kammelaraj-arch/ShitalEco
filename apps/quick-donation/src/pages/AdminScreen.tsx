@@ -4,9 +4,6 @@ import { useDonationStore } from '../store/donation.store'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
-interface Reader { id: string; label: string; device_type: string; status: string }
-interface SumUpReader { id: string; serial: string; name: string; status: string }
-
 interface LoginResponse {
   authenticated: boolean
   error?: string
@@ -34,8 +31,6 @@ interface LoginResponse {
 
 interface AzureConfig { client_id: string; authority: string }
 
-interface CloverDevice { id: string; name: string; model: string; serial: string; status: string }
-
 export function AdminScreen() {
   const {
     branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, cloverDeviceId,
@@ -46,20 +41,9 @@ export function AdminScreen() {
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<'idle' | 'ok' | 'fail'>('idle')
 
-  const [readers, setReaders] = useState<Reader[]>([])
-  const [loading, setLoading] = useState(false)
-
-  // SumUp state
-  const [sumupReaders, setSumupReaders]     = useState<SumUpReader[]>([])
-
-  // Clover state
-  const [cloverReaders, setCloverReaders]   = useState<CloverDevice[]>([])
-  const [cloverLoading, setCloverLoading]   = useState(false)
-  const [cloverError, setCloverError]       = useState('')
-  const [sumupSerial, setSumupSerial]       = useState(sumupReaderId || '')
-  const [sumupLoading, setSumupLoading]     = useState(false)
-  const [sumupTestResult, setSumupTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
-  const [sumupError, setSumupError]         = useState('')
+  // Reader pairing state was removed 23 Oct 2026 — pairings are now
+  // admin-only. The device only reads sumupReaderId (etc.) from the store,
+  // which is populated by handleSync / applyLogin from the server.
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -75,10 +59,9 @@ export function AdminScreen() {
       .catch(() => {})
   }, [])
 
-  // Auto-load readers when already logged in (e.g. after reboot)
-  useEffect(() => {
-    if (isDeviceLoggedIn) loadReaders()
-  }, [isDeviceLoggedIn]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Formerly auto-loaded the Stripe reader list for the pairing tab —
+  // removed when pairings moved admin-only (23 Oct). The device reads its
+  // reader from the login response and never fetches the full list.
 
   function applyLogin(data: LoginResponse, enteredUsername: string) {
     if (!data.branch) return
@@ -109,7 +92,6 @@ export function AdminScreen() {
     })
     // Persist login — survives reboots until explicit logout
     setDeviceLoggedIn(true, data.user?.name || enteredUsername, enteredUsername)
-    loadReaders()
     setScreen('donate')
   }
 
@@ -197,90 +179,21 @@ export function AdminScreen() {
     }, 500)
   }
 
-  async function loadReaders() {
-    setLoading(true)
-    try {
-      const res = await fetch(`${API_BASE}/kiosk/terminal/readers`)
-      const data = await res.json()
-      setReaders(data.readers || [])
-    } catch { setReaders([]) }
-    setLoading(false)
-  }
+  // Removed 23 Oct 2026: all client-side reader-pairing helpers
+  // (loadReaders, loadSumUpReaders, testSumUpReader, loadCloverDevices,
+  // assignClover) deleted when pairings moved admin-only. The device no
+  // longer discovers or picks readers — it reads its single paired
+  // reader from the login/refresh-config response and displays it
+  // read-only. See the "Card Reader (set by admin)" block below.
 
-  async function loadSumUpReaders() {
-    setSumupLoading(true); setSumupError(''); setSumupTestResult('idle')
-    try {
-      const res = await fetch(`${API_BASE}/kiosk/sumup/readers`)
-      const data = await res.json()
-      if (data.error) { setSumupError(data.error); setSumupReaders([]); return }
-      setSumupReaders(data.readers || [])
-    } catch { setSumupError('Could not reach server.') }
-    finally { setSumupLoading(false) }
-  }
 
-  async function testSumUpReader() {
-    const serial = sumupSerial.trim()
-    if (!serial) return
-    setSumupLoading(true); setSumupTestResult('idle'); setSumupError('')
-    try {
-      const res = await fetch(`${API_BASE}/kiosk/sumup/readers`)
-      const data = await res.json()
-      const found = (data.readers || []).some((r: SumUpReader) => r.serial === serial)
-      setSumupTestResult(found ? 'ok' : 'fail')
-      if (!found) setSumupError(`Serial ${serial} not found in your SumUp account.`)
-    } catch { setSumupTestResult('fail'); setSumupError('Test failed — check network.') }
-    finally { setSumupLoading(false) }
-  }
-
-  async function loadCloverDevices() {
-    setCloverLoading(true); setCloverError('')
-    try {
-      const res = await fetch(`${API_BASE}/kiosk/clover/devices`)
-      const data = await res.json()
-      if (data.error) { setCloverError(data.error); setCloverReaders([]); return }
-      setCloverReaders(data.devices || [])
-    } catch { setCloverError('Could not reach server.') }
-    finally { setCloverLoading(false) }
-  }
-
-  async function assignClover(device: CloverDevice) {
-    const lbl = device.name || `Clover ${device.model} ${device.serial}`
-    setReader('', lbl, 'clover', '', '', device.id)
-    await persistReaderToBackend('clover', '', '', '', lbl, device.id)
-  }
-
-  async function persistReaderToBackend(
-    provider: 'stripe_terminal' | 'sumup' | 'clover',
-    stripeId = '',
-    serial = '',
-    apiId = '',
-    lbl = '',
-    cloverId = '',
-  ) {
-    try {
-      await fetch(`${API_BASE}/kiosk/quick-donation/assign-reader`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          stripe_reader_id: stripeId,
-          sumup_reader_serial: serial,
-          sumup_reader_api_id: apiId,
-          clover_device_id: cloverId,
-          label: lbl,
-          device_username: loggedInUsername || '',
-        }),
-      })
-    } catch { /* non-fatal — localStorage already updated */ }
-  }
-
-  async function assignSumUp(apiId = '') {
-    const serial = sumupSerial.trim()
-    if (!serial) return
-    const lbl = `SumUp Solo ${serial}`
-    setReader('', lbl, 'sumup', serial, apiId)
-    await persistReaderToBackend('sumup', '', serial, apiId, lbl)
-  }
+  // Removed 23 Oct 2026: persistReaderToBackend() and assignSumUp() used
+  // to POST to /kiosk/quick-donation/assign-reader so the device itself
+  // could set its own paired reader. That endpoint is now retired (returns
+  // 410 Gone) because device-side writes were the root cause of the
+  // Wembley SumUp -> Stripe silent-flip incident. Pairings live in the
+  // admin DB and are the single source of truth; the device reads them
+  // on login via POST /kiosk/quick-donation/login and never writes them.
 
   function handleLogout() {
     setDeviceLoggedIn(false, '')
@@ -420,82 +333,43 @@ export function AdminScreen() {
           </div>
         )}
 
-        {/* ── SumUp Solo section ──────────────────────────────────────────── */}
-        <div className="mb-6">
-            <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(255,248,220,0.35)' }}>
-              💳 SumUp Solo Reader
-            </p>
-
-            {/* Serial input row */}
-            <div className="flex gap-2 mb-2">
-              <input
-                value={sumupSerial}
-                onChange={e => { setSumupSerial(e.target.value); setSumupTestResult('idle') }}
-                placeholder="Serial number e.g. 200101578509"
-                className="flex-1 px-3 py-2.5 rounded-xl text-xs font-mono outline-none"
-                style={{ background: 'rgba(255,255,255,0.07)', color: '#fff', border: '1px solid rgba(212,175,55,0.25)' }}
-              />
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex gap-2 mb-2">
-              <button onClick={testSumUpReader} disabled={sumupLoading || !sumupSerial.trim()}
-                className="flex-1 py-2.5 rounded-xl text-xs font-black disabled:opacity-40 transition-all active:scale-[0.97]"
-                style={{ background: 'rgba(96,165,250,0.15)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.25)' }}>
-                {sumupLoading ? '…' : '⚡ Test'}
-              </button>
-              <button onClick={loadSumUpReaders} disabled={sumupLoading}
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold disabled:opacity-40 transition-all active:scale-[0.97]"
-                style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                {sumupLoading ? '…' : 'Fetch List'}
-              </button>
-              <button onClick={() => assignSumUp()} disabled={!sumupSerial.trim()}
-                className="flex-1 py-2.5 rounded-xl text-xs font-black disabled:opacity-40 transition-all active:scale-[0.97]"
-                style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
-                Assign
-              </button>
-            </div>
-
-            {/* Test result */}
-            {sumupTestResult === 'ok' && (
-              <p className="text-xs px-3 py-2 rounded-lg font-bold" style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.25)' }}>
-                ✓ Reader found in your SumUp account
+        {/* ── Card Reader (READ-ONLY — admin-paired only) ───────────────────
+            Pairings are the admin's source of truth, never written from the
+            device. If no reader is paired yet, the device shows an
+            instruction to go to Admin → Devices. This closes the whole
+            class of "silent flip" bugs that caused the 23 Oct Wembley
+            incident: the device literally cannot overwrite its own pairing.
+            See /kiosk/quick-donation/assign-reader (now 410 Gone). */}
+        <div className="mb-6 px-4 py-3 rounded-xl"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,248,220,0.35)' }}>
+            💳 Card Reader (set by admin)
+          </p>
+          {sumupReaderId ? (
+            <>
+              <p className="font-black text-sm" style={{ color: '#D4AF37' }}>
+                SumUp Solo
               </p>
-            )}
-            {sumupTestResult === 'fail' && (
-              <p className="text-xs px-3 py-2 rounded-lg font-bold" style={{ background: 'rgba(198,40,40,0.12)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }}>
-                ✗ {sumupError || 'Reader not found'}
+              <p className="text-[11px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.45)' }}>
+                Serial: {sumupReaderId}
               </p>
-            )}
-            {sumupError && sumupTestResult === 'idle' && (
-              <p className="text-xs mt-1" style={{ color: '#f87171' }}>{sumupError}</p>
-            )}
-
-            {/* Reader list from API */}
-            {sumupReaders.length > 0 && (
-              <div className="space-y-1.5 mt-3">
-                {sumupReaders.map(r => (
-                  <button key={r.serial} onClick={() => { setSumupSerial(r.serial); setSumupTestResult('idle'); assignSumUp(r.id) }}
-                    className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
-                    style={{
-                      background: sumupSerial === r.serial ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
-                      border: `1px solid ${sumupSerial === r.serial ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                    }}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-sm" style={{ color: sumupSerial === r.serial ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{r.name || r.serial}</p>
-                        <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{r.serial} · ID: {r.id}</p>
-                      </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                        style={{ background: r.status === 'available' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
-                          color: r.status === 'available' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
-                        {r.status}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+              <p className="text-[10px] mt-2 italic" style={{ color: 'rgba(255,248,220,0.3)' }}>
+                To change the reader, ask an admin to update this device in
+                Admin → Devices. The device itself cannot pair readers.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-black text-sm" style={{ color: '#f87171' }}>
+                ⚠ No reader paired
+              </p>
+              <p className="text-[11px] mt-1" style={{ color: 'rgba(255,248,220,0.55)' }}>
+                This device has no card reader assigned. Ask an admin to
+                pair a SumUp Solo in Admin → Devices → Edit, then press
+                &quot;Sync from server&quot; above.
+              </p>
+            </>
+          )}
         </div>
 
         {/* Stripe + Clover pairing sections removed on 23 Oct 2026 — Quick

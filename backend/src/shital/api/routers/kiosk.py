@@ -2769,192 +2769,44 @@ class AssignReaderInput(BaseModel):
     branch_id: str = ""
 
 
-@router.post("/quick-donation/assign-reader")
+@router.post("/quick-donation/assign-reader", deprecated=True)
 async def assign_reader(body: AssignReaderInput):
+    """RETIRED 23 Oct 2026 — pairings are now admin-only.
+
+    Previously the Quick Donation device could POST here to pair its own
+    SumUp / Stripe / Clover reader. That architecture meant the device
+    (any client) could overwrite the saved DB config whenever a stale
+    frontend sent a request — which is how the Wembley SumUp rows got
+    rewritten as Stripe Terminal rows on 23 Oct with no audit trail.
+
+    New policy (one source of truth):
+        - Pairings live in the DB, written ONLY by Admin → Devices
+          (which audits via /api/v1/audit-log).
+        - The Quick Donation device READS its paired reader via
+          POST /kiosk/quick-donation/login (response includes
+          sumup_reader_serial + reader_label).
+        - Client apps NEVER mutate terminal_devices or
+          kiosk_devices.card_reader_id.
+
+    Any caller hitting this endpoint — in-house, stale frontend, cached
+    service-worker, anything — gets a 410 Gone with an explanatory
+    message pointing to the admin pairing flow. No DB write happens.
     """
-    Persist a card reader assignment for a kiosk device.
-    Works for both Stripe Terminal and SumUp readers.
-
-    Priority: if device_username is given, updates kiosk_devices → terminal_devices
-    (Path-1 device credentials).  If user_email is given, also updates kiosk_profiles
-    (Path-2 legacy accounts).  Both can be supplied to update both tables.
-    """
-
-
-    provider = body.provider.lower().strip()
-    # Quick Donation is a SumUp-only product (per operator decision 23 Oct —
-    # the Wembley silent-flip was triggered by stripe_terminal pairings
-    # arriving via this endpoint when there was no legitimate reason for
-    # Quick Donation to see a Stripe reader at all). Lock the endpoint
-    # to sumup only. Anything else is rejected before the upsert runs.
-    if provider != "sumup":
-        return {
-            "assigned": False,
-            "error": (
-                f"Quick Donation only accepts SumUp readers (got '{provider}'). "
-                "If you need a Stripe Terminal or Clover reader, register it "
-                "under Admin → Card Readers instead — Quick Donation devices "
-                "are SumUp-only by product rule."
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "error": "endpoint_retired",
+            "message": (
+                "/quick-donation/assign-reader is retired. "
+                "Card-reader pairings are admin-only and must be set in "
+                "Admin → Devices (or Admin → Card Readers). "
+                "The Quick Donation device reads its reader from the "
+                "login response and must never write it."
             ),
-        }
-
-    now = datetime.utcnow()
-    label = body.label or body.stripe_reader_id or body.sumup_reader_serial or provider
-    terminal_device_id: str | None = None
-
-    async with SessionLocal() as db:
-        # 1. Upsert terminal_devices record based on unique identifier.
-        #
-        # Hardened after the 23 Oct SumUp → Stripe silent-flip incident:
-        # the old query used `OR` across stripe_reader_id / sumup_reader_serial
-        # / clover_device_id with empty-string values, which could match the
-        # wrong row and then unconditionally overwrite its provider + label.
-        # New policy — match ONLY on the identifier that belongs to this
-        # provider, and REFUSE to change an existing row's provider.
-        if provider == "stripe_terminal":
-            unique_id = (body.stripe_reader_id or "").strip()
-            match_sql = "stripe_reader_id = :uid AND provider = 'stripe_terminal'"
-        elif provider == "clover":
-            unique_id = (body.clover_device_id or "").strip()
-            match_sql = "clover_device_id = :uid AND provider = 'clover'"
-        else:  # sumup
-            unique_id = (body.sumup_reader_serial or "").strip()
-            match_sql = "sumup_reader_serial = :uid AND provider = 'sumup'"
-        if not unique_id:
-            return {"assigned": False, "error": f"Missing identifier for provider {provider}"}
-
-        # Also look for a conflicting row — same identifier value but
-        # DIFFERENT provider — and refuse to touch it. That's the trap
-        # we fell into: a stale frontend sent provider=stripe + stripe_id,
-        # and the OR match flipped a sumup row. Now that path is impossible.
-        conflict = (await db.execute(
-            text("""
-                SELECT id::text AS id, provider, label
-                FROM terminal_devices
-                WHERE (stripe_reader_id    = :uid
-                    OR sumup_reader_serial = :uid
-                    OR clover_device_id    = :uid)
-                  AND provider <> :prov
-                  AND deleted_at IS NULL
-                LIMIT 1
-            """),
-            {"uid": unique_id, "prov": provider},
-        )).mappings().first()
-        if conflict:
-            return {
-                "assigned": False,
-                "error": (
-                    f"Identifier '{unique_id}' already belongs to a "
-                    f"{conflict['provider']} reader ('{conflict['label']}'). "
-                    f"Refusing to silently change its provider — delete / "
-                    f"re-create via Admin → Card Readers if that's intended."
-                ),
-            }
-
-        existing = (await db.execute(
-            text(f"SELECT * FROM terminal_devices WHERE {match_sql} AND deleted_at IS NULL LIMIT 1"),
-            {"uid": unique_id},
-        )).mappings().first()
-
-        audit_before: dict[str, Any] | None = None
-        audit_action = "assign_reader_create"
-        if existing:
-            terminal_device_id = str(existing["id"])
-            audit_before = dict(existing)
-            audit_action = "assign_reader_update"
-            # Narrower update: never touch provider (we already matched on it),
-            # never nuke an existing identifier with an empty string.
-            await db.execute(text("""
-                UPDATE terminal_devices SET
-                    label                = :label,
-                    updated_at           = :now
-                WHERE id = :id AND provider = :prov
-            """), {
-                "label": label, "now": now, "id": terminal_device_id,
-                "prov": provider,
-            })
-        else:
-            terminal_device_id = str(uuid.uuid4())
-            await db.execute(text("""
-                INSERT INTO terminal_devices
-                    (id, label, provider, stripe_reader_id, sumup_reader_serial, clover_device_id,
-                     branch_id, status, is_active, created_at, updated_at)
-                VALUES
-                    (:id, :label, :prov,
-                     NULLIF(:sid,''), NULLIF(:serial,''), NULLIF(:clover,''),
-                     :branch, 'offline', true, :now, :now)
-                ON CONFLICT DO NOTHING
-            """), {
-                "id": terminal_device_id, "label": label, "prov": provider,
-                "sid": body.stripe_reader_id or "", "serial": body.sumup_reader_serial or "",
-                "clover": body.clover_device_id or "",
-                "branch": body.branch_id or "main", "now": now,
-            })
-
-        # 2. Link terminal_devices to kiosk_device (Path-1: device credentials)
-        if body.device_username and terminal_device_id:
-            await db.execute(text("""
-                UPDATE kiosk_devices
-                SET card_reader_id = :td_id, updated_at = :now
-                WHERE LOWER(device_username) = :uname AND deleted_at IS NULL
-            """), {"td_id": terminal_device_id, "uname": body.device_username.lower().strip(), "now": now})
-
-        # 3. Update kiosk_profiles (Path-2: legacy email login)
-        if body.user_email:
-            email = body.user_email.strip().lower()
-            if provider == "stripe_terminal":
-                await db.execute(text("""
-                    UPDATE kiosk_profiles SET
-                        stripe_reader_id     = :rid,
-                        sumup_reader_serial  = '',
-                        sumup_reader_api_id  = '',
-                        device_provider      = 'stripe_terminal',
-                        device_label         = :label,
-                        updated_at           = :now
-                    WHERE user_email = :email AND deleted_at IS NULL
-                """), {"rid": body.stripe_reader_id or "", "label": label, "now": now, "email": email})
-            else:
-                await db.execute(text("""
-                    UPDATE kiosk_profiles SET
-                        sumup_reader_serial  = :serial,
-                        sumup_reader_api_id  = :api_id,
-                        stripe_reader_id     = '',
-                        device_provider      = :prov,
-                        device_label         = :label,
-                        updated_at           = :now
-                    WHERE user_email = :email AND deleted_at IS NULL
-                """), {
-                    "serial": body.sumup_reader_serial or "", "api_id": body.sumup_reader_api_id or "",
-                    "prov": provider, "label": label, "now": now, "email": email,
-                })
-
-        await db.commit()
-
-        # Audit — snapshot the final state (independent of transaction above)
-        from shital.services.audit import record_audit as _record_audit
-        from shital.services.audit import snapshot as _snapshot
-        audit_after = await _snapshot(db, "terminal_devices", terminal_device_id)
-    try:
-        await _record_audit(
-            actor_email=body.user_email or body.device_username or "quick-donation",
-            actor_role=None,
-            action=audit_action,
-            entity_type="terminal_devices",
-            entity_id=terminal_device_id,
-            branch_id=body.branch_id or "main",
-            source_endpoint="POST /kiosk/quick-donation/assign-reader",
-            before=audit_before, after=audit_after,
-            diff_summary=f"{provider} '{label}' paired (uid={unique_id})",
-        )
-    except Exception:  # noqa: BLE001
-        pass  # audit must never block the pairing
-
-    return {
-        "assigned": True,
-        "provider": provider,
-        "terminal_device_id": terminal_device_id,
-        "label": label,
-    }
+            "read_endpoint": "POST /api/v1/kiosk/quick-donation/login",
+            "admin_pairing_url": "https://admin.shital.org.uk/admin/devices",
+        },
+    )
 
 
 @router.get("/quick-donation/profiles")
