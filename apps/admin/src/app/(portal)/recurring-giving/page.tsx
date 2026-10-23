@@ -101,6 +101,36 @@ export default function RecurringGivingPage() {
     } finally { setSyncing(false) }
   }
 
+  // Recover PayPal rows that lost their paypal_subscription_id (donor
+  // approved the subscription on PayPal's side but our /approve or webhook
+  // never fired, so our row sits with no sub_id and gets reaped to EXPIRED).
+  // Pulls PayPal's webhook event HISTORY and matches by donor email.
+  async function recoverPayPalOrphans() {
+    const ok = confirm(
+      'Recover PayPal orphans from webhook history?\n\n' +
+      'For every EXPIRED PayPal row with a donor email, we look at PayPal\'s ' +
+      'last 90 days of subscription-activated events (even ones our webhook ' +
+      'originally dropped) and try to match them by email. Matches get ' +
+      'linked and flipped ACTIVE. Rows without a donor email cannot be ' +
+      'recovered this way.\n\n' +
+      'Safe to run — only touches orphan rows.'
+    )
+    if (!ok) return
+    setSyncing(true); setSyncNote('')
+    try {
+      const r = await fetch(`${API}/admin/giving/recover-paypal-orphans`, { method: 'POST', headers: authHeaders() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      const d = await r.json()
+      const x = d.result || {}
+      setSyncNote(x.skipped
+        ? `Skipped: ${x.skipped}`
+        : `PayPal recover · scanned ${x.scanned ?? 0} orphan rows · ${x.events_fetched ?? 0} PayPal events · ${x.matched_by_email ?? 0} email matches · ${x.linked ?? 0} linked + ACTIVE · ${x.unmatched_rows ?? 0} orphan rows left`)
+      await loadSubs()
+    } catch (e) {
+      setSyncNote(e instanceof Error ? e.message : 'Recovery failed')
+    } finally { setSyncing(false) }
+  }
+
   // Pull a side-by-side view of what Stripe actually knows about recent
   // Checkout sessions vs what our DB thinks happened. Returns a plain-
   // English verdict pointing at the specific break: "donors aren't
@@ -300,6 +330,16 @@ export default function RecurringGivingPage() {
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>
                 {syncing ? 'Rebuilding…' : '🔧 Rebuild PayPal plans'}
+              </button>
+              {/* Recover EXPIRED PayPal rows whose paypal_subscription_id was
+                  never captured (donor approved on PayPal but our /approve or
+                  webhook never fired). Pulls PayPal's event history and
+                  matches by donor email. */}
+              <button onClick={recoverPayPalOrphans} disabled={syncing}
+                title="Scans PayPal's webhook event history (last 90 days) and matches EXPIRED PayPal orphan rows to their real subscription by donor email."
+                className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#0070BA,#003087)' }}>
+                {syncing ? 'Recovering…' : '🩹 Recover PayPal orphans'}
               </button>
               {/* Diagnostic — compare what Stripe knows vs what our DB thinks.
                   Returns a verdict pointing at the specific failure. */}
