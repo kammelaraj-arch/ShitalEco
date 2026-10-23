@@ -620,13 +620,21 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
         if (mapped or r["status"]) == "ACTIVE":
             await _record_paid_invoices(r["sub_id"])
 
-    # ── Pass B · orphan PENDING rows (no subscription id) ─────────────────────
+    # ── Pass B · orphan rows with no subscription id ──────────────────────────
+    # Includes EXPIRED rows alongside PENDING_APPROVAL: the "reap after 2 days"
+    # logic at the end of a prior sync pass can mark a row EXPIRED before any
+    # link succeeded (classic chicken-and-egg when webhooks were being dropped
+    # pre-#226). The donor's Stripe sub is still live and still carries our
+    # rgs_id in metadata, so once the webhook situation is fixed we need to be
+    # able to RESURRECT those EXPIRED rows, not just skip them forever. We
+    # still exclude CANCELLED (donor-initiated end) because that's a terminal
+    # state we respect.
     async with SessionLocal() as db:
         orphans = (await db.execute(text("""
             SELECT id::text AS id FROM recurring_giving_subscriptions
             WHERE payment_provider = 'stripe'
               AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')
-              AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'
+              AND UPPER(COALESCE(status,'')) IN ('PENDING_APPROVAL','EXPIRED')
               AND created_at >= NOW() - (:days || ' days')::interval
         """), {"days": str(days)})).mappings().all()
     want = {o["id"] for o in orphans}
@@ -660,6 +668,10 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
                 await _record_paid_invoices(str(sub.get("id")))
 
         # Anything still unmatched and old → reap so it stops showing as pending.
+        # Only PENDING_APPROVAL rows get reaped — EXPIRED rows that stayed in
+        # `want` (because we scanned them above but Stripe has no matching
+        # metadata.rgs_id for them) are already in their terminal state, so
+        # re-expiring is a no-op but we leave them alone for clarity.
         # Per-id UPDATEs (CAST(:id AS uuid)) — avoids a fragile array bind that
         # could throw and 500 the whole sync.
         for rgs_id in want:
