@@ -285,7 +285,7 @@ function DeviceModal({
             Cancel
           </button>
           <button
-            onClick={save}
+            onClick={() => save()}
             disabled={saving}
             className="px-6 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white text-sm font-black shadow-lg disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
           >
