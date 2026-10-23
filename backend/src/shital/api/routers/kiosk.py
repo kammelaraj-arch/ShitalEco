@@ -2737,19 +2737,23 @@ class AssignDeviceInput(BaseModel):
 
 @router.post("/quick-donation/assign-device")
 async def assign_device_to_profile(body: AssignDeviceInput):
-    """Legacy endpoint — delegates to assign-reader with provider hardcoded
-    to stripe_terminal. **This was the vector of the 23 Oct silent-flip
-    incident** where SumUp readers got rewritten as Stripe Terminal rows.
-    The delegated assign_reader now has strict identity-based matching +
-    audit logging, so a legacy caller can no longer flip a different
-    provider's row by accident."""
-    return await assign_reader(AssignReaderInput(
-        provider="stripe_terminal",
-        stripe_reader_id=body.stripe_reader_id,
-        label=body.device_label or body.stripe_reader_id,
-        branch_id=body.branch_id,
-        user_email=body.user_email,
-    ))
+    """RETIRED. This legacy endpoint hardcoded provider=stripe_terminal
+    and was the vector of the 23 Oct Wembley silent-flip incident where
+    SumUp readers got rewritten as Stripe Terminal rows.
+
+    Quick Donation is SumUp-only (per operator rule), so an endpoint that
+    pairs Stripe readers to Quick Donation profiles has no legitimate use
+    case. We refuse any caller — in-house or stale frontend — rather than
+    silently accept something that will corrupt device state."""
+    return {
+        "assigned": False,
+        "error": (
+            "The /quick-donation/assign-device endpoint is retired. "
+            "Quick Donation uses SumUp only — pair via "
+            "/quick-donation/assign-reader with provider='sumup'. "
+            "Stripe readers register under Admin → Card Readers instead."
+        ),
+    }
 
 
 class AssignReaderInput(BaseModel):
@@ -2778,8 +2782,21 @@ async def assign_reader(body: AssignReaderInput):
 
 
     provider = body.provider.lower().strip()
-    if provider not in ("stripe_terminal", "sumup", "clover", "cash"):
-        return {"assigned": False, "error": f"Unknown provider: {provider}"}
+    # Quick Donation is a SumUp-only product (per operator decision 23 Oct —
+    # the Wembley silent-flip was triggered by stripe_terminal pairings
+    # arriving via this endpoint when there was no legitimate reason for
+    # Quick Donation to see a Stripe reader at all). Lock the endpoint
+    # to sumup only. Anything else is rejected before the upsert runs.
+    if provider != "sumup":
+        return {
+            "assigned": False,
+            "error": (
+                f"Quick Donation only accepts SumUp readers (got '{provider}'). "
+                "If you need a Stripe Terminal or Clover reader, register it "
+                "under Admin → Card Readers instead — Quick Donation devices "
+                "are SumUp-only by product rule."
+            ),
+        }
 
     now = datetime.utcnow()
     label = body.label or body.stripe_reader_id or body.sumup_reader_serial or provider
