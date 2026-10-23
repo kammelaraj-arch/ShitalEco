@@ -20,8 +20,18 @@ from pydantic import BaseModel
 
 from shital.api.deps import OptionalSpace, RequiredSpace
 from shital.core.space.branches import resolve_branch_code
+from shital.services.audit import record_audit, snapshot
 
 router = APIRouter(prefix="/terminal-devices", tags=["terminal-devices"])
+
+
+# Fields whose change we never want to let through silently without an
+# explicit "I know I'm changing this" acknowledgement. On a stealth change
+# (e.g. provider silently flipping from sumup → stripe_terminal because a
+# frontend sent a half-filled payload), the write is rejected with 409 and
+# the current state is returned so the operator can confirm.
+_PROTECTED_FIELDS = ("provider", "stripe_reader_id", "sumup_reader_serial",
+                     "clover_device_id", "branch_id")
 
 
 # ─── Pydantic models ──────────────────────────────────────────────────────────
@@ -239,6 +249,15 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
             },
         )
         await db.commit()
+        after = await snapshot(db, "terminal_devices", device_id)
+
+    await record_audit(
+        actor_email=ctx.user_email, actor_role=ctx.role,
+        action="create", entity_type="terminal_devices", entity_id=device_id,
+        branch_id=branch_code, source_endpoint="POST /terminal-devices",
+        before=None, after=after,
+        diff_summary=f"created {body.provider} reader '{body.label}'",
+    )
 
     return {"device_id": device_id, "created": True}
 
@@ -246,7 +265,20 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
 # ─── Update ───────────────────────────────────────────────────────────────────
 
 @router.put("/{device_id}")
-async def update_device(device_id: str, body: DeviceUpdate, ctx: RequiredSpace):
+async def update_device(
+    device_id: str, body: DeviceUpdate, ctx: RequiredSpace,
+    confirm_protected_change: bool = False,
+):
+    """Update a terminal_devices row.
+
+    Guards (added after the 23 Oct SumUp → Stripe silent-flip incident):
+      1. Snapshot before + after → written to audit_log with the diff.
+      2. If any PROTECTED field (provider / reader ids / branch) is about
+         to change, we return 409 unless the caller passed
+         `?confirm_protected_change=true`. That forces a deliberate click
+         ('I know I'm changing the reader') instead of a drive-by write
+         flipping provider.
+    """
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
@@ -274,6 +306,29 @@ async def update_device(device_id: str, body: DeviceUpdate, ctx: RequiredSpace):
     async with SessionLocal() as db:
         if "branch_id" in fields:
             fields["branch_id"] = await resolve_branch_code(db, fields["branch_id"])
+        before = await snapshot(db, "terminal_devices", device_id)
+        if not before:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        # Protected-field guard
+        if not confirm_protected_change:
+            protected_changes = []
+            for pf in _PROTECTED_FIELDS:
+                if pf in fields and (before.get(pf) or "") != (fields[pf] or ""):
+                    protected_changes.append(
+                        f"{pf}: '{before.get(pf) or '—'}' → '{fields[pf] or '—'}'"
+                    )
+            if protected_changes:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "protected_field_change_requires_confirmation",
+                        "message": "This update changes identity-critical fields. "
+                                   "Pass ?confirm_protected_change=true to proceed.",
+                        "changes": protected_changes,
+                    },
+                )
+
         result = await db.execute(
             text(f"""
                 UPDATE terminal_devices
@@ -285,9 +340,24 @@ async def update_device(device_id: str, body: DeviceUpdate, ctx: RequiredSpace):
         )
         row = result.first()
         await db.commit()
+        after = await snapshot(db, "terminal_devices", device_id)
 
     if not row:
         raise HTTPException(status_code=404, detail="Device not found")
+
+    await record_audit(
+        actor_email=ctx.user_email, actor_role=ctx.role,
+        action="update", entity_type="terminal_devices", entity_id=device_id,
+        branch_id=(after or {}).get("branch_id") if after else None,
+        source_endpoint="PUT /terminal-devices/{id}",
+        before=before, after=after,
+        diff_summary=(
+            "confirmed protected-field change: " + "; ".join(
+                f"{k}: '{(before or {}).get(k) or '—'}' → '{(after or {}).get(k) or '—'}'"
+                for k in _PROTECTED_FIELDS if k in fields
+            ) if confirm_protected_change and any(k in fields for k in _PROTECTED_FIELDS) else None
+        ),
+    )
 
     return {"device_id": device_id, "updated": True}
 
@@ -304,6 +374,7 @@ async def assign_user_to_device(device_id: str, body: AssignUserInput, ctx: Requ
     now = datetime.utcnow()
 
     async with SessionLocal() as db:
+        before = await snapshot(db, "terminal_devices", device_id)
         result = await db.execute(
             text("""
                 UPDATE terminal_devices
@@ -322,9 +393,19 @@ async def assign_user_to_device(device_id: str, body: AssignUserInput, ctx: Requ
         )
         row = result.first()
         await db.commit()
+        after = await snapshot(db, "terminal_devices", device_id)
 
     if not row:
         raise HTTPException(status_code=404, detail="Device not found")
+
+    await record_audit(
+        actor_email=ctx.user_email, actor_role=ctx.role,
+        action="assign_user", entity_type="terminal_devices", entity_id=device_id,
+        branch_id=(after or {}).get("branch_id") if after else None,
+        source_endpoint="POST /terminal-devices/{id}/assign",
+        before=before, after=after,
+        diff_summary=f"assigned to {body.user_email or body.user_id}",
+    )
 
     return {"device_id": device_id, "assigned_to": body.user_id}
 
@@ -340,6 +421,7 @@ async def delete_device(device_id: str, ctx: RequiredSpace):
     now = datetime.utcnow()
 
     async with SessionLocal() as db:
+        before = await snapshot(db, "terminal_devices", device_id)
         result = await db.execute(
             text("""
                 UPDATE terminal_devices
@@ -354,6 +436,19 @@ async def delete_device(device_id: str, ctx: RequiredSpace):
 
     if not row:
         raise HTTPException(status_code=404, detail="Device not found")
+
+    await record_audit(
+        actor_email=ctx.user_email, actor_role=ctx.role,
+        action="delete", entity_type="terminal_devices", entity_id=device_id,
+        branch_id=(before or {}).get("branch_id") if before else None,
+        source_endpoint="DELETE /terminal-devices/{id}",
+        before=before, after=None,
+        diff_summary=(
+            f"deleted {(before or {}).get('provider','?')} reader "
+            f"'{(before or {}).get('label','?')}'"
+            if before else None
+        ),
+    )
 
     return {"device_id": device_id, "deleted": True}
 

@@ -498,101 +498,14 @@ export function AdminScreen() {
             )}
         </div>
 
-        {/* ── Stripe Terminal section ──────────────────────────────────── */}
-        <div className="mb-6">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.35)' }}>⚡ Stripe Terminal Reader</p>
-              <button onClick={loadReaders} disabled={loading}
-                className="text-[10px] font-bold px-2 py-1 rounded-lg"
-                style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }}>
-                {loading ? '…' : 'Refresh'}
-              </button>
-            </div>
-            <div className="space-y-2">
-              {readers.map(r => (
-                <button key={r.id} onClick={async () => { setReader(r.id, r.label, 'stripe_terminal'); await persistReaderToBackend('stripe_terminal', r.id, '', '', r.label) }}
-                  className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
-                  style={{
-                    background: stripeReaderId === r.id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${stripeReaderId === r.id ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                  }}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-bold text-sm" style={{ color: stripeReaderId === r.id ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{r.label}</p>
-                      <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{r.id}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {stripeReaderId === r.id && (
-                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full"
-                          style={{ background: 'rgba(212,175,55,0.2)', color: '#D4AF37' }}>ACTIVE</span>
-                      )}
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                        style={{ background: r.status === 'online' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
-                          color: r.status === 'online' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
-                        {r.status}
-                      </span>
-                    </div>
-                  </div>
-                </button>
-              ))}
-              {!loading && readers.length === 0 && (
-                <p className="text-center text-xs py-4" style={{ color: 'rgba(255,248,220,0.25)' }}>
-                  No readers found. Ensure Stripe Terminal is configured.
-                </p>
-              )}
-            </div>
-          </div>
-
-        {/* ── Clover Flex section ──────────────────────────────────────── */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,248,220,0.35)' }}>🍀 Clover Flex Reader</p>
-            <button onClick={loadCloverDevices} disabled={cloverLoading}
-              className="text-[10px] font-bold px-2 py-1 rounded-lg"
-              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.4)' }}>
-              {cloverLoading ? '…' : 'Fetch List'}
-            </button>
-          </div>
-          {cloverError && (
-            <p className="text-xs px-3 py-2 rounded-lg mb-2 font-bold"
-              style={{ background: 'rgba(198,40,40,0.12)', color: '#f87171', border: '1px solid rgba(198,40,40,0.25)' }}>
-              {cloverError}
-            </p>
-          )}
-          <div className="space-y-2">
-            {cloverReaders.map(d => (
-              <button key={d.id} onClick={() => assignClover(d)}
-                className="w-full text-left px-4 py-3 rounded-xl transition-all active:scale-[0.98]"
-                style={{
-                  background: cloverDeviceId === d.id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
-                  border: `1px solid ${cloverDeviceId === d.id ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                }}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-sm" style={{ color: cloverDeviceId === d.id ? '#D4AF37' : 'rgba(255,248,220,0.7)' }}>{d.name || d.model}</p>
-                    <p className="text-[10px] font-mono mt-0.5" style={{ color: 'rgba(255,248,220,0.3)' }}>{d.id} · {d.model}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {cloverDeviceId === d.id && (
-                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full"
-                        style={{ background: 'rgba(212,175,55,0.2)', color: '#D4AF37' }}>ACTIVE</span>
-                    )}
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                      style={{ background: d.status === 'online' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
-                        color: d.status === 'online' ? '#4ade80' : 'rgba(255,248,220,0.3)' }}>
-                      {d.status}
-                    </span>
-                  </div>
-                </div>
-              </button>
-            ))}
-            {!cloverLoading && cloverReaders.length === 0 && (
-              <p className="text-center text-xs py-4" style={{ color: 'rgba(255,248,220,0.25)' }}>
-                Press "Fetch List" to load Clover devices. Requires CLOVER_ACCESS_TOKEN in API Keys.
-              </p>
-            )}
-          </div>
-        </div>
+        {/* Stripe + Clover pairing sections removed on 23 Oct 2026 — Quick
+            Donation is SumUp-only (per operator rule). Those sections were
+            the vector of the Wembley silent-flip incident where staff
+            tapping the Stripe tab inadvertently rewrote SumUp rows to
+            provider=stripe_terminal. The backend endpoint also now rejects
+            provider != 'sumup' so a stale frontend cannot re-introduce the
+            same bug. Stripe + Clover readers register under the Admin app's
+            Card Readers page, not here. */}
 
         {/* Branch info */}
         <div className="px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
