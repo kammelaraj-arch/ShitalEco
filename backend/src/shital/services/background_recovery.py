@@ -1098,7 +1098,7 @@ async def _paypal_recover_orphans_from_history(days: int = 90) -> dict[str, Any]
                     collected[email] = sub_id
             # Pagination: PayPal returns a "next" link in `links` when more pages exist.
             links = data.get("links", []) or []
-            next_link = next((l for l in links if (l.get("rel") or "").lower() == "next"), None)
+            next_link = next((lk for lk in links if (lk.get("rel") or "").lower() == "next"), None)
             if not next_link:
                 return
             # Extract page_token from the next URL
