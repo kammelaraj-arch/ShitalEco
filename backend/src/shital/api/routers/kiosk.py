@@ -1218,6 +1218,59 @@ async def stripe_webhook(request: Request):
         raise HTTPException(status_code=400, detail="invalid signature")
 
     etype = event.get("type", "")
+
+    # ── Fan-out to Monthly Giving handlers ──────────────────────────────────
+    # Stripe fires every subscribed event to the ONE registered webhook URL.
+    # In this deployment that URL is the kiosk one (it was set up first and
+    # the operator reused the same whsec_ for Monthly Giving), so
+    # checkout.session.completed / invoice.paid / customer.subscription.*
+    # ALL land here. Without this fan-out they'd get silently dropped and
+    # every Monthly Giving subscription would stay PENDING forever
+    # (symptom: "100% Stripe failure, 0 ACTIVE out of N").
+    # Routing happens before we return on non-payment_intent events so we
+    # keep the kiosk's own fast-path untouched for the terminal flow.
+    giving_events = {
+        "checkout.session.completed",
+        "invoice.paid", "invoice.payment_succeeded", "invoice.payment_failed",
+        "customer.subscription.updated", "customer.subscription.deleted",
+    }
+    if etype in giving_events:
+        try:
+            from shital.api.routers.stripe_giving import (
+                _handle_checkout_completed,
+                _handle_invoice_failed,
+                _handle_subscription_cancelled,
+                _record_invoice_donation,
+            )
+            obj = (event.get("data") or {}).get("object") or {}
+            if etype == "checkout.session.completed":
+                # Only route the Monthly Giving sessions. The kiosk's own
+                # payment flow uses PaymentIntents (not Checkout Sessions),
+                # so any session arriving here with mode=subscription is
+                # ours. mode=payment sessions (shouldn't exist in this
+                # deployment) are left alone.
+                if obj.get("mode") == "subscription":
+                    await _handle_checkout_completed(obj)
+            elif etype in ("invoice.paid", "invoice.payment_succeeded"):
+                if obj.get("subscription"):
+                    await _record_invoice_donation(obj)
+            elif etype == "invoice.payment_failed":
+                if obj.get("subscription"):
+                    await _handle_invoice_failed(obj)
+            elif etype == "customer.subscription.deleted":
+                await _handle_subscription_cancelled(obj)
+            # customer.subscription.updated is informational for us right
+            # now — the reconcile sweeper already picks it up; keep the
+            # return receipt accurate without duplicating state writes.
+            return {"ok": True, "routed_to": "monthly_giving", "type": etype}
+        except Exception as exc:  # noqa: BLE001
+            # Never 500 on Stripe — they'd retry forever. Log and 200.
+            import logging as _log
+            _log.getLogger("shital.giving.webhook_fanout").exception(
+                "monthly-giving fan-out failed for %s: %s", etype, exc)
+            return {"ok": True, "routed_to": "monthly_giving", "type": etype,
+                    "error": str(exc)[:200]}
+
     if not etype.startswith("payment_intent."):
         return {"ok": True, "ignored": etype}
 
