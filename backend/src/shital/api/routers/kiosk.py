@@ -2914,7 +2914,8 @@ async def assign_reader(body: AssignReaderInput):
         await db.commit()
 
         # Audit — snapshot the final state (independent of transaction above)
-        from shital.services.audit import record_audit as _record_audit, snapshot as _snapshot
+        from shital.services.audit import record_audit as _record_audit
+        from shital.services.audit import snapshot as _snapshot
         audit_after = await _snapshot(db, "terminal_devices", terminal_device_id)
     try:
         await _record_audit(
