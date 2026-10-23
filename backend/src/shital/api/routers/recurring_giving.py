@@ -944,6 +944,35 @@ async def admin_sync_paypal(space: CurrentSpace, days: int = 35) -> dict[str, An
     return {"ok": True, "result": result}
 
 
+@router.post("/admin/giving/recover-paypal-orphans")
+async def admin_recover_paypal_orphans(space: CurrentSpace, days: int = 90) -> dict[str, Any]:
+    """Recover PayPal rows that lost their paypal_subscription_id.
+
+    The failure shape: /approve never fired for a donor (popup closed, slow
+    network, or historically PAYPAL_WEBHOOK_ID unset so the ACTIVATED event
+    was dropped). The row sat as PENDING_APPROVAL with no sub_id, got reaped
+    to EXPIRED after 2 days, and is now invisible to the normal sync.
+
+    This endpoint pulls PayPal's webhook event HISTORY (last `days`, chunked
+    into 30-day slices per PayPal's API limit), extracts subscriber emails
+    from BILLING.SUBSCRIPTION.ACTIVATED / CREATED / PAYMENT.COMPLETED events,
+    and matches them to our orphan rows by `donor_email`. Each matched row
+    gets its paypal_subscription_id populated and flips to ACTIVE. The next
+    PayPal sync pass then records any paid transactions as donations.
+
+    SUPER_ADMIN / ADMIN only. Idempotent — safe to run repeatedly."""
+    if space.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(403, detail="SUPER_ADMIN or ADMIN required")
+    await _ensure_subscription_columns()
+    from shital.services.background_recovery import _paypal_recover_orphans_from_history
+    try:
+        result = await _paypal_recover_orphans_from_history(days=days)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recover_paypal_orphans_failed", error=str(exc))
+        return {"ok": False, "error": str(exc)[:300]}
+    return {"ok": True, "result": result}
+
+
 @router.post("/admin/giving/sync-stripe")
 async def admin_sync_stripe(space: CurrentSpace, days: int = 90) -> dict[str, Any]:
     """Reconcile Stripe monthly-giving subscriptions on demand — the mirror of

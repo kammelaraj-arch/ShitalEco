@@ -992,6 +992,169 @@ async def _paypal_reconcile_once(days: int = 35) -> dict[str, Any]:
     return summary
 
 
+async def _paypal_recover_orphans_from_history(days: int = 90) -> dict[str, Any]:
+    """Recover PayPal subscription rows that lost their paypal_subscription_id.
+
+    The failure shape this fixes: a donor completes the /monthly/ flow but our
+    ``/approve`` callback never fires (popup closed, slow network, or — the
+    historical cause — ``PAYPAL_WEBHOOK_ID`` was unset so the activation event
+    was silently dropped). The DB row sits as ``PENDING_APPROVAL`` with no
+    ``paypal_subscription_id``, gets reaped to ``EXPIRED`` after 2 days, and
+    becomes invisible to the normal sync (which filters on
+    ``paypal_subscription_id IS NOT NULL``).
+
+    Recovery leverages PayPal's webhook event HISTORY (``GET /v1/notifications/
+    webhooks-events``). PayPal retains ~30-90 days of events regardless of
+    whether our endpoint ever acked them — so even events we dropped are still
+    retrievable. For each ``BILLING.SUBSCRIPTION.ACTIVATED`` /
+    ``BILLING.SUBSCRIPTION.CREATED`` event we extract
+    ``resource.subscriber.email_address`` + ``resource.id``, and match the
+    email against orphan rows (``donor_email``). First match wins per sub id
+    (no row gets claimed twice). Linked rows flip to ``ACTIVE`` and the normal
+    sync then picks them up for payment reconciliation.
+
+    Returns a summary {scanned, events_fetched, matched_by_email, linked,
+    unmatched_rows, unmatched_events}. Idempotent and safe to run on demand.
+    """
+    summary: dict[str, Any] = {
+        "scanned": 0, "events_fetched": 0, "matched_by_email": 0,
+        "linked": 0, "unmatched_rows": 0, "unmatched_events": 0,
+        "days_window": days,
+    }
+    token, base = await _paypal_token_and_base()
+    if not token:
+        summary["skipped"] = "paypal_not_configured"
+        return summary
+
+    # 1) Pull orphan rows (EXPIRED or PENDING_APPROVAL, no paypal id, email set)
+    async with SessionLocal() as db:
+        orphans = (await db.execute(text("""
+            SELECT id::text AS id,
+                   LOWER(TRIM(COALESCE(donor_email,''))) AS email,
+                   COALESCE(donor_name,'') AS donor_name,
+                   amount, branch_id
+            FROM recurring_giving_subscriptions
+            WHERE (payment_provider IS NULL OR LOWER(payment_provider) = 'paypal')
+              AND (paypal_subscription_id IS NULL OR paypal_subscription_id = '')
+              AND UPPER(COALESCE(status,'')) IN ('PENDING_APPROVAL','EXPIRED')
+              AND LENGTH(TRIM(COALESCE(donor_email,''))) > 3
+              AND created_at >= NOW() - (:days || ' days')::interval
+            ORDER BY created_at
+        """), {"days": str(days)})).mappings().all()
+    summary["scanned"] = len(orphans)
+    if not orphans:
+        return summary
+
+    # Index: email_lower → [row ids]  (one email can have several attempts)
+    orphans_by_email: dict[str, list[str]] = {}
+    for o in orphans:
+        if o["email"]:
+            orphans_by_email.setdefault(o["email"], []).append(o["id"])
+
+    # 2) Pull PayPal webhook event history. 30-day max window per PayPal docs,
+    #    so chunk if the user asked for longer. For each chunk, iterate pages
+    #    until we exhaust next_page_token or hit a per-chunk safety cap.
+    now = datetime.utcnow()
+    event_types = (
+        "BILLING.SUBSCRIPTION.ACTIVATED",
+        "BILLING.SUBSCRIPTION.CREATED",
+        "BILLING.SUBSCRIPTION.PAYMENT.COMPLETED",
+    )
+    hdrs = {"Authorization": f"Bearer {token}"}
+    collected: dict[str, str] = {}  # email_lower → sub_id (first-seen wins)
+
+    async def _fetch_chunk(c: httpx.AsyncClient, etype: str,
+                           start_dt: datetime, end_dt: datetime) -> None:
+        start = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end   = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        page_token = ""
+        for _ in range(20):  # cap pages per chunk — safety against runaway loop
+            params: dict[str, Any] = {
+                "event_type": etype, "start_time": start,
+                "end_time": end, "page_size": 50,
+            }
+            if page_token:
+                params["page_token"] = page_token
+            try:
+                r = await c.get(f"{base}/v1/notifications/webhooks-events",
+                                headers=hdrs, params=params, timeout=20)
+                if r.status_code != 200:
+                    return
+                data = r.json()
+            except Exception:  # noqa: BLE001
+                return
+            events = data.get("events", []) or []
+            summary["events_fetched"] += len(events)
+            for ev in events:
+                resource = (ev.get("resource") or {})
+                sub_id = (resource.get("id") or "").strip()
+                if not sub_id:
+                    continue
+                subscriber = resource.get("subscriber") or {}
+                email = (subscriber.get("email_address") or "").strip().lower()
+                if not email:
+                    continue
+                if email not in collected:
+                    collected[email] = sub_id
+            # Pagination: PayPal returns a "next" link in `links` when more pages exist.
+            links = data.get("links", []) or []
+            next_link = next((lk for lk in links if (lk.get("rel") or "").lower() == "next"), None)
+            if not next_link:
+                return
+            # Extract page_token from the next URL
+            next_href = next_link.get("href", "")
+            if "page_token=" in next_href:
+                page_token = next_href.split("page_token=", 1)[1].split("&", 1)[0]
+            else:
+                return
+
+    # Chunk the window into 30-day slices (PayPal's limit)
+    async with httpx.AsyncClient(timeout=20) as c:
+        remaining = days
+        end_dt = now
+        while remaining > 0:
+            chunk_days = min(30, remaining)
+            start_dt = end_dt - timedelta(days=chunk_days)
+            for etype in event_types:
+                await _fetch_chunk(c, etype, start_dt, end_dt)
+            end_dt = start_dt
+            remaining -= chunk_days
+
+    summary["matched_by_email"] = sum(
+        1 for email in collected if email in orphans_by_email
+    )
+
+    # 3) Link oldest orphan per email → sub_id, flip ACTIVE. One sub id per row.
+    used_sub_ids: set[str] = set()
+    for email, sub_id in collected.items():
+        row_ids = orphans_by_email.get(email, [])
+        if not row_ids:
+            summary["unmatched_events"] += 1
+            continue
+        if sub_id in used_sub_ids:
+            continue
+        row_id = row_ids[0]  # oldest attempt wins
+        async with SessionLocal() as db:
+            r = await db.execute(text("""
+                UPDATE recurring_giving_subscriptions
+                SET paypal_subscription_id = :sub_id,
+                    status = 'ACTIVE',
+                    approved_at = COALESCE(approved_at, NOW()),
+                    updated_at = NOW()
+                WHERE id = CAST(:id AS uuid)
+                  AND (paypal_subscription_id IS NULL OR paypal_subscription_id = '')
+            """), {"sub_id": sub_id, "id": row_id})
+            await db.commit()
+            if (r.rowcount or 0) > 0:
+                summary["linked"] += 1
+                used_sub_ids.add(sub_id)
+                # Pop the claimed row so a later matching email can't double-link it
+                orphans_by_email[email] = row_ids[1:]
+
+    summary["unmatched_rows"] = sum(len(v) for v in orphans_by_email.values())
+    return summary
+
+
 async def recovery_loop() -> None:
     """Forever-loop. Sleeps RECOVERY_INTERVAL_SECONDS between passes.
     Each pass runs the SumUp sweep, the Stripe reconcile, the Stripe account-health
