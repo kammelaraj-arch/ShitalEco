@@ -1232,7 +1232,10 @@ async def _auto_heal_card_readers_once() -> dict[str, Any]:
     The caller tracks who did it: when the admin button fires, actor_email
     is the trustee; when the loop fires, actor_email is 'recovery_loop'.
     """
-    from shital.api.routers.card_reader_health import _classify_serial
+    from shital.api.routers.card_reader_health import (
+        _classify_serial,
+        _extract_sumup_serial_from_label,
+    )
     from shital.services.audit import record_audit, snapshot
     healed: list[dict[str, Any]] = []
     async with SessionLocal() as db:
@@ -1247,6 +1250,7 @@ async def _auto_heal_card_readers_once() -> dict[str, Any]:
     for r in rows:
         expected = _classify_serial(
             r["sumup_reader_serial"], r["stripe_reader_id"], r["clover_device_id"],
+            label=r["label"],
         )
         if expected == "unknown" or expected == (r["provider"] or "").lower():
             continue
@@ -1254,24 +1258,54 @@ async def _auto_heal_card_readers_once() -> dict[str, Any]:
             before = await snapshot(db, "terminal_devices", r["id"])
             if not before:
                 continue
-            upd = await db.execute(text("""
-                UPDATE terminal_devices
-                SET provider = :prov, updated_at = NOW()
-                WHERE id = CAST(:id AS uuid)
-                  AND deleted_at IS NULL
-                  AND provider = :old_prov
-                RETURNING id
-            """), {"id": r["id"], "prov": expected, "old_prov": r["provider"]})
+            label_serial = _extract_sumup_serial_from_label(r["label"] or "")
+            backfill = (
+                expected == "sumup"
+                and not (r["sumup_reader_serial"] or "").strip()
+                and label_serial
+            )
+            if backfill:
+                upd = await db.execute(text("""
+                    UPDATE terminal_devices
+                    SET provider            = :prov,
+                        sumup_reader_serial = :serial,
+                        stripe_reader_id    = NULL,
+                        clover_device_id    = NULL,
+                        updated_at          = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                      AND deleted_at IS NULL
+                      AND provider = :old_prov
+                    RETURNING id
+                """), {"id": r["id"], "prov": expected,
+                       "old_prov": r["provider"], "serial": label_serial})
+            else:
+                upd = await db.execute(text("""
+                    UPDATE terminal_devices
+                    SET provider = :prov, updated_at = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                      AND deleted_at IS NULL
+                      AND provider = :old_prov
+                    RETURNING id
+                """), {"id": r["id"], "prov": expected, "old_prov": r["provider"]})
             if not upd.first():
                 await db.commit()
                 continue
             await db.commit()
             after = await snapshot(db, "terminal_devices", r["id"])
-        evidence = (
-            f"sumup_reader_serial='{r['sumup_reader_serial']}'" if expected == "sumup"
-            else f"stripe_reader_id='{r['stripe_reader_id']}'" if expected == "stripe_terminal"
-            else f"clover_device_id='{r['clover_device_id']}'"
-        )
+        # Evidence string prefers the real column; falls back to the label
+        # extraction we just backfilled.
+        if expected == "sumup":
+            serial_evidence = (
+                r["sumup_reader_serial"] or label_serial
+            )
+            evidence = (
+                f"sumup_reader_serial='{serial_evidence}'" if serial_evidence
+                else f"label contains SumUp marker: '{r['label']}'"
+            )
+        elif expected == "stripe_terminal":
+            evidence = f"stripe_reader_id='{r['stripe_reader_id']}'"
+        else:
+            evidence = f"clover_device_id='{r['clover_device_id']}'"
         await record_audit(
             actor_email="recovery_loop",
             actor_role=None,
