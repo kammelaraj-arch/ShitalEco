@@ -1193,8 +1193,99 @@ async def recovery_loop() -> None:
         except Exception as exc:  # noqa: BLE001
             logger.error("recovery_stripe_giving_reconcile_failed", error=str(exc))
         try:
+            # PayPal orphan recovery — scans PayPal webhook event history for
+            # EXPIRED rows that lost their paypal_subscription_id, matches
+            # them back by donor email, flips ACTIVE. Added to the loop 23 Oct
+            # so operators don't have to click the admin button for stuck
+            # Tanika-shaped donors; the loop auto-heals them.
+            paypal_recover = await _paypal_recover_orphans_from_history()
+            logger.info("recovery_paypal_recover_orphans", result=paypal_recover)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("recovery_paypal_recover_orphans_failed", error=str(exc))
+        try:
+            # Card reader auto-heal — fixes terminal_devices rows whose
+            # provider column disagrees with the identifier format (SumUp
+            # Solo serials with provider='stripe_terminal', etc.). The
+            # classifier is deterministic so there's no judgement needed;
+            # same action as Admin → Card Readers → 🩺 Health Check →
+            # 🩹 Auto-heal. Running it on the loop means the fleet
+            # self-corrects within one RECOVERY_INTERVAL_SECONDS window
+            # of any new corruption (including stale pre-#231 rows).
+            card_reader_heal = await _auto_heal_card_readers_once()
+            logger.info("recovery_card_reader_heal", result=card_reader_heal)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("recovery_card_reader_heal_failed", error=str(exc))
+        try:
             digest = await _alert_digest_once()
             logger.info("recovery_alert_digest", result=digest)
         except Exception as exc:  # noqa: BLE001
             logger.error("recovery_alert_digest_failed", error=str(exc))
         await asyncio.sleep(RECOVERY_INTERVAL_SECONDS)
+
+
+async def _auto_heal_card_readers_once() -> dict[str, Any]:
+    """Idempotent card-reader provider heal, called from recovery_loop.
+
+    Delegates to the same classifier as the admin router — so a prod
+    operator reading audit_log sees identical diff_summary strings
+    regardless of whether a healing happened via the button or the loop.
+    The caller tracks who did it: when the admin button fires, actor_email
+    is the trustee; when the loop fires, actor_email is 'recovery_loop'.
+    """
+    from shital.api.routers.card_reader_health import _classify_serial
+    from shital.services.audit import record_audit, snapshot
+    healed: list[dict[str, Any]] = []
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT id::text AS id, label, provider, branch_id,
+                   COALESCE(stripe_reader_id,'')    AS stripe_reader_id,
+                   COALESCE(sumup_reader_serial,'') AS sumup_reader_serial,
+                   COALESCE(clover_device_id,'')    AS clover_device_id
+            FROM terminal_devices
+            WHERE deleted_at IS NULL
+        """))).mappings().all()
+    for r in rows:
+        expected = _classify_serial(
+            r["sumup_reader_serial"], r["stripe_reader_id"], r["clover_device_id"],
+        )
+        if expected == "unknown" or expected == (r["provider"] or "").lower():
+            continue
+        async with SessionLocal() as db:
+            before = await snapshot(db, "terminal_devices", r["id"])
+            if not before:
+                continue
+            upd = await db.execute(text("""
+                UPDATE terminal_devices
+                SET provider = :prov, updated_at = NOW()
+                WHERE id = CAST(:id AS uuid)
+                  AND deleted_at IS NULL
+                  AND provider = :old_prov
+                RETURNING id
+            """), {"id": r["id"], "prov": expected, "old_prov": r["provider"]})
+            if not upd.first():
+                await db.commit()
+                continue
+            await db.commit()
+            after = await snapshot(db, "terminal_devices", r["id"])
+        evidence = (
+            f"sumup_reader_serial='{r['sumup_reader_serial']}'" if expected == "sumup"
+            else f"stripe_reader_id='{r['stripe_reader_id']}'" if expected == "stripe_terminal"
+            else f"clover_device_id='{r['clover_device_id']}'"
+        )
+        await record_audit(
+            actor_email="recovery_loop",
+            actor_role=None,
+            action="auto_heal_misclassified",
+            entity_type="terminal_devices",
+            entity_id=r["id"],
+            branch_id=r.get("branch_id"),
+            source_endpoint="services.background_recovery.recovery_loop",
+            before=before, after=after,
+            diff_summary=(
+                f"auto-healed misclassified reader: provider "
+                f"'{r['provider']}' → '{expected}' (evidence: {evidence})"
+            ),
+        )
+        healed.append({"id": r["id"], "label": r["label"],
+                        "from": r["provider"], "to": expected})
+    return {"healed": healed, "healed_count": len(healed)}

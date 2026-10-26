@@ -121,6 +121,58 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     else:
         logger.info("recovery_loop_disabled_via_env")
 
+    # ── One-shot heals on boot ───────────────────────────────────────────
+    # Runs regardless of the recovery_loop flag — these are cheap,
+    # idempotent, bounded-time, and address the "stale-row self-heal"
+    # problem the recovery_loop was supposed to handle. Each is wrapped
+    # so a failure here can NEVER prevent the backend from booting.
+    async def _boot_heals() -> None:
+        import asyncio as _a
+        try:
+            # a) Card reader auto-heal — fixes terminal_devices rows whose
+            #    provider column disagrees with the identifier format (SumUp
+            #    Solo serials still flagged stripe_terminal, etc.). Added
+            #    26 Oct so the Wembley rows auto-fix on the next boot
+            #    without the operator having to click 🩹 Auto-heal.
+            from shital.services.background_recovery import (
+                _auto_heal_card_readers_once,
+            )
+            res = await _a.wait_for(_auto_heal_card_readers_once(), timeout=15)
+            logger.info("boot_heal_card_readers", result=res)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("boot_heal_card_readers_failed", error=str(exc))
+
+        try:
+            # b) PayPal orphan recovery from webhook event history —
+            #    heals EXPIRED PayPal rows that lost their
+            #    paypal_subscription_id by matching donor email against
+            #    PayPal's event history (last 90 days). Bounds at ~60s.
+            from shital.services.background_recovery import (
+                _paypal_recover_orphans_from_history,
+            )
+            res = await _a.wait_for(
+                _paypal_recover_orphans_from_history(), timeout=60,
+            )
+            logger.info("boot_heal_paypal_orphans", result=res)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("boot_heal_paypal_orphans_failed", error=str(exc))
+
+        try:
+            # c) Stripe giving reconcile — Pass B self-links orphan
+            #    paid subs whose metadata.rgs_id matches an existing
+            #    PENDING/EXPIRED row. From #227.
+            from shital.api.routers.stripe_giving import (
+                _stripe_giving_reconcile_once,
+            )
+            res = await _a.wait_for(_stripe_giving_reconcile_once(), timeout=60)
+            logger.info("boot_heal_stripe_giving", result=res)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("boot_heal_stripe_giving_failed", error=str(exc))
+
+    # Fire-and-forget — don't block app startup on the heals.
+    _asyncio.create_task(_boot_heals())
+    logger.info("boot_heals_scheduled")
+
     # ── Scheduled-deploy poller ──────────────────────────────────────────
     # Polls scheduled_deploys every 60 s; any pending row whose
     # scheduled_for is in the past gets fired via the deployer. We mark
