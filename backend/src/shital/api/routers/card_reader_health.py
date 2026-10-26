@@ -68,6 +68,10 @@ def _require_admin(ctx) -> None:
 # healed and the serial can be back-filled into the proper column.
 
 _SUMUP_SERIAL_RE = re.compile(r"\b(2001\d{7,8}|2002\d{7,8})\b")
+# SumUp assigns every Solo an auto-generated friendly name of three
+# hyphen-separated lowercase words (e.g. "honeydew-everyone-then",
+# "banana-sky-house"). No other provider in our fleet uses this pattern.
+_SUMUP_SOLO_FRIENDLY_RE = re.compile(r"^[a-z]+-[a-z]+-[a-z]+$")
 
 
 def _classify_serial(serial: str, stripe_id: str, clover_id: str,
@@ -85,8 +89,15 @@ def _classify_serial(serial: str, stripe_id: str, clover_id: str,
     # Second last-resort: if the human label clearly says "Solo" or "SumUp",
     # treat as SumUp even without a serial match (the backfill below will
     # populate the serial column from the label match when it finds one).
-    low = (label or "").lower()
+    low = (label or "").lower().strip()
     if "sumup" in low or re.search(r"\bsolo\b", low):
+        return "sumup"
+    # Third last-resort: SumUp Solo's auto-generated friendly-name convention
+    # — "honeydew-everyone-then" / "banana-sky-house". We only reach here when
+    # the row has NO stripe_reader_id (checked above), so a label matching
+    # this pattern on a non-stripe row is almost certainly a SumUp Solo whose
+    # operator never typed anything but SumUp's own assigned name.
+    if low and _SUMUP_SOLO_FRIENDLY_RE.match(low):
         return "sumup"
     return "unknown"
 
