@@ -38,6 +38,7 @@ by whom, when.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -54,8 +55,6 @@ def _require_admin(ctx) -> None:
     if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
         raise HTTPException(403, detail="SUPER_ADMIN or ADMIN required")
 
-
-import re
 
 # SumUp Solo / Air Plus serials start with 2001 / 2002 (observed in prod).
 # Stripe Terminal readers use IDs like `tmr_abcDEF...`.
