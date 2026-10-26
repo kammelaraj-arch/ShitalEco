@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { BranchSelect } from '@/components/ui/SearchSelect'
@@ -459,6 +459,247 @@ function SyncModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
   )
 }
 
+// ─── Health Check modal ───────────────────────────────────────────────────────
+// Scans the fleet for pairing anomalies and offers a one-click heal for the
+// serial-format misclassifications we can safely fix. Other categories are
+// reported for operator judgement.
+
+interface MisclassifiedRow {
+  id: string; label: string; branch_id: string;
+  current_provider: string; expected_provider: string; evidence: string;
+}
+interface WrongProviderRow {
+  kiosk_device_id: string; device_name: string; device_type: string;
+  branch_id: string; reader_label: string;
+  configured_provider: string; expected_provider: string; reason: string;
+}
+interface UnpairedRow {
+  kiosk_device_id: string; device_name: string; device_type: string;
+  branch_id: string; reason: string;
+}
+interface DanglingRow {
+  kiosk_device_id: string; device_name: string; device_type: string;
+  branch_id: string; stale_card_reader_id: string; reason: string;
+}
+interface HealthScan {
+  misclassified_terminal_devices: MisclassifiedRow[]
+  device_wrong_provider:          WrongProviderRow[]
+  device_unpaired:                UnpairedRow[]
+  device_dangling_pairing:        DanglingRow[]
+  summary: {
+    misclassified_terminal_devices: number
+    device_wrong_provider: number
+    device_unpaired: number
+    device_dangling_pairing: number
+    auto_healable: number
+  }
+}
+
+function HealthModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [scan, setScan] = useState<HealthScan | null>(null)
+  const [scanning, setScanning] = useState(true)
+  const [healing, setHealing] = useState(false)
+  const [error, setError] = useState('')
+  const [healResult, setHealResult] = useState<{ healed_count: number; skipped_count: number } | null>(null)
+
+  const runScan = useCallback(async () => {
+    setScanning(true); setError('')
+    try {
+      const r = await apiFetch<HealthScan>('/admin/card-reader-health/scan')
+      setScan(r)
+    } catch (e: any) {
+      setError(e.message || 'Scan failed')
+    } finally {
+      setScanning(false)
+    }
+  }, [])
+
+  useEffect(() => { runScan() }, [runScan])
+
+  async function heal() {
+    if (!scan) return
+    if (!confirm(
+      `Auto-heal ${scan.summary.auto_healable} misclassified reader row(s)?\n\n` +
+      "Only serial-format misclassifications are healed — the classifier is " +
+      "deterministic (SumUp Solos use serial format 20010XXXXXXX etc.). " +
+      "Device pairing issues are left for your judgement.\n\n" +
+      "Every change is recorded in Settings → System → Audit Log."
+    )) return
+    setHealing(true); setError(''); setHealResult(null)
+    try {
+      const r = await apiFetch<{ healed_count: number; skipped_count: number }>(
+        '/admin/card-reader-health/heal-misclassified', { method: 'POST' }
+      )
+      setHealResult(r)
+      await runScan()
+      onDone()
+    } catch (e: any) {
+      setError(e.message || 'Heal failed')
+    } finally {
+      setHealing(false)
+    }
+  }
+
+  const sum = scan?.summary
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed right-0 top-0 h-full w-full sm:max-w-xl z-50 flex flex-col overflow-hidden"
+        style={{ background: '#0f0008', borderLeft: '1px solid rgba(99,102,241,0.3)' }}>
+        <div className="px-5 py-4 border-b border-white/5">
+          <h2 className="text-white font-black">🩺 Card Reader Health Check</h2>
+          <p className="text-white/40 text-xs mt-0.5">
+            Scans the whole fleet for mis-paired devices, misclassified readers, and dangling pairings.
+          </p>
+        </div>
+
+        <div className="px-5 py-4 flex-1 overflow-y-auto space-y-4">
+          {error && <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>}
+          {healResult && (
+            <div className="bg-green-500/15 border border-green-500/20 text-green-400 text-sm px-4 py-3 rounded-xl">
+              ✓ Healed {healResult.healed_count} row(s)
+              {healResult.skipped_count > 0 && ` · skipped ${healResult.skipped_count} (changed since scan)`}
+            </div>
+          )}
+
+          {scanning ? (
+            <div className="text-white/40 text-sm">Scanning fleet…</div>
+          ) : sum ? (
+            <>
+              {/* Summary */}
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { label: 'Misclassified readers', n: sum.misclassified_terminal_devices, color: 'amber' },
+                  { label: 'Wrong-provider devices', n: sum.device_wrong_provider,        color: 'red' },
+                  { label: 'Unpaired devices',       n: sum.device_unpaired,               color: 'orange' },
+                  { label: 'Dangling pairings',      n: sum.device_dangling_pairing,       color: 'rose' },
+                ].map(c => (
+                  <div key={c.label} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-center">
+                    <div className={`text-2xl font-black ${c.n === 0 ? 'text-white/30' : c.color === 'amber' ? 'text-amber-300' : c.color === 'orange' ? 'text-orange-300' : 'text-rose-300'}`}>
+                      {c.n}
+                    </div>
+                    <div className="text-white/50 text-[10px] mt-1 leading-tight">{c.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {sum.auto_healable > 0 && (
+                <button onClick={heal} disabled={healing}
+                  className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white font-black text-sm shadow-lg disabled:opacity-50">
+                  {healing ? 'Healing…' : `🩹 Auto-heal ${sum.auto_healable} misclassified reader row(s)`}
+                </button>
+              )}
+
+              {/* Misclassified readers */}
+              {scan.misclassified_terminal_devices.length > 0 && (
+                <HealthSection title="Misclassified readers (serial format vs provider)">
+                  {scan.misclassified_terminal_devices.map(r => (
+                    <div key={r.id} className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-3">
+                      <div className="text-white font-bold text-sm">{r.label || '(no label)'}
+                        <span className="text-white/40 text-xs ml-2">· {r.branch_id}</span>
+                      </div>
+                      <div className="text-amber-200 text-xs mt-1">
+                        provider: <strong>{r.current_provider}</strong>
+                        <span className="text-white/40 mx-1">→</span>
+                        should be <strong>{r.expected_provider}</strong>
+                      </div>
+                      <div className="text-white/40 text-[11px] mt-1 font-mono">{r.evidence}</div>
+                    </div>
+                  ))}
+                </HealthSection>
+              )}
+
+              {/* Wrong provider */}
+              {scan.device_wrong_provider.length > 0 && (
+                <HealthSection title="Devices paired with wrong-provider reader">
+                  {scan.device_wrong_provider.map(r => (
+                    <div key={r.kiosk_device_id} className="rounded-lg border border-rose-400/20 bg-rose-500/5 p-3">
+                      <div className="text-white font-bold text-sm">
+                        {r.device_name} <span className="text-white/40 text-xs">· {r.device_type} · {r.branch_id}</span>
+                      </div>
+                      <div className="text-rose-200 text-xs mt-1">
+                        reader: <strong>{r.reader_label}</strong> ({r.configured_provider})
+                        <span className="text-white/40 mx-1">→</span>
+                        expected <strong>{r.expected_provider}</strong>
+                      </div>
+                      <div className="text-white/40 text-[11px] mt-1 italic">{r.reason}</div>
+                    </div>
+                  ))}
+                </HealthSection>
+              )}
+
+              {/* Unpaired */}
+              {scan.device_unpaired.length > 0 && (
+                <HealthSection title="Devices without any card reader paired">
+                  {scan.device_unpaired.map(r => (
+                    <div key={r.kiosk_device_id} className="rounded-lg border border-orange-400/20 bg-orange-500/5 p-3">
+                      <div className="text-white font-bold text-sm">
+                        {r.device_name} <span className="text-white/40 text-xs">· {r.device_type} · {r.branch_id}</span>
+                      </div>
+                      <div className="text-white/40 text-[11px] mt-1 italic">{r.reason}</div>
+                    </div>
+                  ))}
+                </HealthSection>
+              )}
+
+              {/* Dangling */}
+              {scan.device_dangling_pairing.length > 0 && (
+                <HealthSection title="Devices paired to deleted / missing reader rows">
+                  {scan.device_dangling_pairing.map(r => (
+                    <div key={r.kiosk_device_id} className="rounded-lg border border-rose-400/20 bg-rose-500/5 p-3">
+                      <div className="text-white font-bold text-sm">
+                        {r.device_name} <span className="text-white/40 text-xs">· {r.device_type} · {r.branch_id}</span>
+                      </div>
+                      <div className="text-rose-200 text-xs mt-1">
+                        stale card_reader_id: <code className="font-mono">{r.stale_card_reader_id.slice(0, 8)}…</code>
+                      </div>
+                      <div className="text-white/40 text-[11px] mt-1 italic">{r.reason}</div>
+                    </div>
+                  ))}
+                </HealthSection>
+              )}
+
+              {sum.misclassified_terminal_devices + sum.device_wrong_provider +
+               sum.device_unpaired + sum.device_dangling_pairing === 0 && (
+                <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-6 text-center">
+                  <div className="text-5xl mb-2">✓</div>
+                  <div className="text-green-300 font-bold text-sm">
+                    All kiosks and card readers look healthy.
+                  </div>
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
+
+        <div className="px-5 py-4 border-t border-white/5 flex gap-2">
+          <button onClick={runScan} disabled={scanning || healing}
+            className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 text-white/70 border border-white/10 text-sm font-bold disabled:opacity-50">
+            {scanning ? 'Scanning…' : '↻ Re-scan'}
+          </button>
+          <button onClick={onClose}
+            className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 text-white/70 border border-white/10 text-sm font-bold">
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </>
+  )
+}
+
+function HealthSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <h3 className="text-white/60 font-bold text-xs uppercase tracking-wider">{title}</h3>
+      {children}
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function TerminalDevicesPage() {
@@ -468,7 +709,7 @@ export default function TerminalDevicesPage() {
   const [filterProvider, setFilterProvider] = useState('')
   const [showInactive, setShowInactive] = useState(false)
 
-  const [modal, setModal] = useState<'create' | 'edit' | 'assign' | 'sync' | null>(null)
+  const [modal, setModal] = useState<'create' | 'edit' | 'assign' | 'sync' | 'health' | null>(null)
   const [selected, setSelected] = useState<TerminalDevice | null>(null)
   const [refreshing, setRefreshing] = useState<string | null>(null)
 
@@ -596,6 +837,11 @@ export default function TerminalDevicesPage() {
           </div>
           <span className="text-white/50 text-sm">Show inactive</span>
         </label>
+        <button onClick={() => setModal('health')}
+          className="px-4 py-1.5 rounded-xl bg-indigo-500/10 text-indigo-200 border border-indigo-400/30 text-sm hover:bg-indigo-500/20 transition-colors"
+          title="Scan the whole fleet for mis-paired devices, misclassified readers, and dangling pairings">
+          🩺 Health Check
+        </button>
         <button onClick={load} className="px-4 py-1.5 rounded-xl bg-white/5 text-white/50 text-sm hover:bg-white/10 transition-colors">
           ↻ Refresh
         </button>
@@ -809,6 +1055,9 @@ export default function TerminalDevicesPage() {
         )}
         {modal === 'sync' && (
           <SyncModal onClose={() => setModal(null)} onDone={load} />
+        )}
+        {modal === 'health' && (
+          <HealthModal onClose={() => setModal(null)} onDone={load} />
         )}
       </AnimatePresence>
     </div>
