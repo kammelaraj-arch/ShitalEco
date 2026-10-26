@@ -38,6 +38,7 @@ by whom, when.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -55,19 +56,46 @@ def _require_admin(ctx) -> None:
         raise HTTPException(403, detail="SUPER_ADMIN or ADMIN required")
 
 
-# SumUp Solo / Air Plus serials start with 2001 (observed in prod).
+# SumUp Solo / Air Plus serials start with 2001 / 2002 (observed in prod).
 # Stripe Terminal readers use IDs like `tmr_abcDEF...`.
 # This classifier is intentionally conservative — unknown formats stay
 # "unknown" and are not touched by the heal.
-def _classify_serial(serial: str, stripe_id: str, clover_id: str) -> str:
+#
+# IMPORTANT (26 Oct): some older rows have the SumUp serial baked into the
+# `label` string (e.g. "honeydew-everyone-then Solo 200101578509") without
+# the dedicated `sumup_reader_serial` column being populated. The classifier
+# ALSO parses the label as a last-resort evidence source so those rows get
+# healed and the serial can be back-filled into the proper column.
+
+_SUMUP_SERIAL_RE = re.compile(r"\b(2001\d{7,8}|2002\d{7,8})\b")
+
+
+def _classify_serial(serial: str, stripe_id: str, clover_id: str,
+                     label: str = "") -> str:
     s = (serial or "").strip()
-    if s.startswith("2001"):
+    if s.startswith("2001") or s.startswith("2002"):
         return "sumup"
-    if (stripe_id or "").strip().startswith("tmr_"):
-        return "stripe_terminal"
     if (clover_id or "").strip():
         return "clover"
+    if (stripe_id or "").strip().startswith("tmr_"):
+        return "stripe_terminal"
+    # Last-resort evidence: scan the label for a SumUp Solo serial pattern.
+    if label and _SUMUP_SERIAL_RE.search(label):
+        return "sumup"
+    # Second last-resort: if the human label clearly says "Solo" or "SumUp",
+    # treat as SumUp even without a serial match (the backfill below will
+    # populate the serial column from the label match when it finds one).
+    low = (label or "").lower()
+    if "sumup" in low or re.search(r"\bsolo\b", low):
+        return "sumup"
     return "unknown"
+
+
+def _extract_sumup_serial_from_label(label: str) -> str:
+    """Pull a SumUp Solo serial out of a label like
+    'honeydew-everyone-then Solo 200101578509'. Returns '' if not found."""
+    m = _SUMUP_SERIAL_RE.search(label or "")
+    return m.group(1) if m else ""
 
 
 @router.get("/scan")
@@ -97,21 +125,33 @@ async def scan_health(ctx: CurrentSpace) -> dict[str, Any]:
         for r in rows:
             expected = _classify_serial(
                 r["sumup_reader_serial"], r["stripe_reader_id"], r["clover_device_id"],
+                label=r["label"],
             )
             if expected != "unknown" and expected != (r["provider"] or "").lower():
+                # Build evidence string — prefer the dedicated column, fall
+                # back to the label-extracted serial for sumup when the
+                # column itself is blank.
+                if expected == "sumup":
+                    serial_evidence = (
+                        r["sumup_reader_serial"]
+                        or _extract_sumup_serial_from_label(r["label"] or "")
+                    )
+                    evidence = (
+                        f"sumup_reader_serial='{serial_evidence}'"
+                        if serial_evidence
+                        else f"label contains SumUp marker: '{r['label']}'"
+                    )
+                elif expected == "stripe_terminal":
+                    evidence = f"stripe_reader_id='{r['stripe_reader_id']}'"
+                else:
+                    evidence = f"clover_device_id='{r['clover_device_id']}'"
                 out["misclassified_terminal_devices"].append({
                     "id":              r["id"],
                     "label":           r["label"],
                     "branch_id":       r["branch_id"],
                     "current_provider": r["provider"],
                     "expected_provider": expected,
-                    "evidence": (
-                        f"sumup_reader_serial='{r['sumup_reader_serial']}'"
-                        if expected == "sumup"
-                        else f"stripe_reader_id='{r['stripe_reader_id']}'"
-                        if expected == "stripe_terminal"
-                        else f"clover_device_id='{r['clover_device_id']}'"
-                    ),
+                    "evidence":        evidence,
                 })
 
         # ── 2. kiosk_devices with wrong-provider pairing ────────────────────
@@ -223,18 +263,49 @@ async def heal_misclassified(ctx: CurrentSpace) -> dict[str, Any]:
             if not before:
                 skipped.append({**item, "reason": "row vanished between scan and heal"})
                 continue
-            result = await db.execute(text("""
-                UPDATE terminal_devices
-                SET provider = :prov, updated_at = NOW()
-                WHERE id = CAST(:id AS uuid)
-                  AND deleted_at IS NULL
-                  AND provider = :old_prov
-                RETURNING id
-            """), {
-                "id": item["id"],
-                "prov": item["expected_provider"],
-                "old_prov": item["current_provider"],
-            })
+            # When healing a SumUp row that had its serial trapped in the
+            # label field, backfill `sumup_reader_serial` so the Admin →
+            # Devices Card Reader dropdown + the kiosk's lookup join start
+            # finding the row by its proper key. Also wipe the stale
+            # `stripe_reader_id` so a future provider-match query doesn't
+            # cross-wire it with a real Stripe row.
+            label_serial = _extract_sumup_serial_from_label(before.get("label") or "")
+            backfill_sumup = (
+                item["expected_provider"] == "sumup"
+                and not (before.get("sumup_reader_serial") or "").strip()
+                and label_serial
+            )
+            if backfill_sumup:
+                result = await db.execute(text("""
+                    UPDATE terminal_devices
+                    SET provider            = :prov,
+                        sumup_reader_serial = :serial,
+                        stripe_reader_id    = NULL,
+                        clover_device_id    = NULL,
+                        updated_at          = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                      AND deleted_at IS NULL
+                      AND provider = :old_prov
+                    RETURNING id
+                """), {
+                    "id": item["id"],
+                    "prov": item["expected_provider"],
+                    "old_prov": item["current_provider"],
+                    "serial": label_serial,
+                })
+            else:
+                result = await db.execute(text("""
+                    UPDATE terminal_devices
+                    SET provider = :prov, updated_at = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                      AND deleted_at IS NULL
+                      AND provider = :old_prov
+                    RETURNING id
+                """), {
+                    "id": item["id"],
+                    "prov": item["expected_provider"],
+                    "old_prov": item["current_provider"],
+                })
             row = result.first()
             await db.commit()
             after = await snapshot(db, "terminal_devices", item["id"])
