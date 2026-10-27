@@ -282,6 +282,7 @@ async def _patch_schema() -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS azure_oid     VARCHAR(100)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS azure_upn     VARCHAR(255)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(30) NOT NULL DEFAULT 'local'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash      TEXT",
         # Migration 007 columns on catalog_items
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_from  TIMESTAMPTZ",
         "ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS available_until TIMESTAMPTZ",
@@ -4194,6 +4195,7 @@ def _mount(module: str, attr: str, prefix: str = "/api/v1") -> None:
 
 _mount("shital.api.routers.auth",             "router")
 _mount("shital.api.routers.auth_azure",       "router")
+_mount("shital.api.routers.me",               "router")
 _mount("shital.api.routers.donor_auth",       "router")
 _mount("shital.api.routers.kiosk",            "router")
 _mount("shital.api.routers.terminal_devices", "router")
