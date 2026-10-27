@@ -17,7 +17,7 @@ from typing import Any
 
 import bcrypt
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace
@@ -28,11 +28,12 @@ router = APIRouter(prefix="/me", tags=["me"])
 
 _PIN_RE = re.compile(r"^\d{4,8}$")
 _PHONE_RE = re.compile(r"^[\d +()\-]{5,30}$")
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 class ProfileIn(BaseModel):
     name: str | None = None            # display name
-    email: EmailStr | None = None
+    email: str | None = None           # validated with _EMAIL_RE in handler
     phone: str | None = None
 
 
@@ -93,6 +94,8 @@ async def update_profile(body: ProfileIn, ctx: CurrentSpace) -> dict[str, Any]:
 
     if body.email is not None:
         new_email = str(body.email).strip().lower()
+        if not _EMAIL_RE.match(new_email):
+            raise HTTPException(422, detail="email is not a valid address")
         async with SessionLocal() as db:
             clash = (await db.execute(text("""
                 SELECT 1 FROM users
