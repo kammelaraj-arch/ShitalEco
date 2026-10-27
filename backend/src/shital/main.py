@@ -169,6 +169,20 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
         except Exception as exc:  # noqa: BLE001
             logger.warning("boot_heal_stripe_giving_failed", error=str(exc))
 
+        try:
+            # d) SumUp reconcile — flips PENDING SumUp donations whose
+            #    checkout actually PAID at SumUp's side but whose webhook
+            #    never delivered (restart during webhook window, Redis
+            #    outage, etc.). From the reconcile sweep that normally
+            #    runs in recovery_loop (disabled on prod). Bounded at 60s.
+            from shital.services.background_recovery import (
+                _sumup_reconcile_once,
+            )
+            res = await _a.wait_for(_sumup_reconcile_once(), timeout=60)
+            logger.info("boot_heal_sumup_reconcile", result=res)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("boot_heal_sumup_reconcile_failed", error=str(exc))
+
     # Fire-and-forget — don't block app startup on the heals.
     _asyncio.create_task(_boot_heals())
     logger.info("boot_heals_scheduled")
