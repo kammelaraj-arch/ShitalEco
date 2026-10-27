@@ -304,16 +304,22 @@ export function Sidebar({ open = true, onClose }: SidebarProps) {
       {/* User profile footer */}
       <div className="px-4 py-4 flex-shrink-0" style={{ borderTop: '1px solid rgba(185,28,28,0.15)' }}>
         <div className="flex items-center gap-3 px-2">
-          <div
-            className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}
+          <Link
+            href="/my-profile"
+            className="flex items-center gap-3 flex-1 min-w-0 group"
+            title="Edit my profile"
           >
-            {initials}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-white text-sm font-semibold truncate">{displayName}</p>
-            <p className="text-white/30 text-xs truncate">{displayRole}</p>
-          </div>
+            <div
+              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0 group-hover:ring-2 group-hover:ring-amber-500/50 transition-all"
+              style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}
+            >
+              {initials}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-sm font-semibold truncate group-hover:text-amber-200 transition-colors">{displayName}</p>
+              <p className="text-white/30 text-xs truncate">{displayRole}</p>
+            </div>
+          </Link>
           <Link href="/settings/branding" className="text-white/30 hover:text-white/60 text-sm transition-colors" title="Branding Settings">
             🎨
           </Link>
