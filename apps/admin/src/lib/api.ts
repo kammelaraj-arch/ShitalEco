@@ -69,7 +69,11 @@ export async function apiFetch<T = unknown>(
     let msg = ''
     const ct = res.headers.get('content-type') || ''
     if (ct.includes('application/json')) {
-      try { const j = await res.json(); msg = j.detail || j.message || JSON.stringify(j) } catch { /* ignore */ }
+      try {
+        const j = await res.json()
+        const raw = j.detail ?? j.message ?? j
+        msg = typeof raw === 'string' ? raw : JSON.stringify(raw)
+      } catch { /* ignore */ }
     }
     if (!msg) {
       if (res.status === 502 || res.status === 503) msg = 'Server is temporarily unavailable — please try again in a moment'
