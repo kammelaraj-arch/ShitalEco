@@ -2841,6 +2841,60 @@ async def assign_reader(body: AssignReaderInput):
     )
 
 
+@router.get("/quick-donation/reader-check/{username}")
+async def quick_donation_reader_check(username: str) -> dict[str, Any]:
+    """Diagnostic — read-only. Returns which card reader a QUICK_DONATION
+    device is paired to right now. Useful for support debugging ("which
+    reader does WQKK1 point to?") without needing the device password or
+    an admin login. Returns only reader identity fields; no credentials,
+    PINs, or payment data."""
+    async with SessionLocal() as db:
+        row = (await db.execute(
+            text("""
+                SELECT kd.name            AS device_name,
+                       kd.device_username AS device_username,
+                       kd.device_type     AS device_type,
+                       kd.branch_id       AS branch_id,
+                       kd.status          AS kiosk_status,
+                       kd.card_reader_id::text AS card_reader_id,
+                       td.label           AS reader_label,
+                       td.provider        AS reader_provider,
+                       COALESCE(td.stripe_reader_id, '')    AS stripe_reader_id,
+                       COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
+                       COALESCE(td.clover_device_id, '')    AS clover_device_id,
+                       td.is_active       AS reader_is_active,
+                       td.deleted_at IS NOT NULL AS reader_deleted
+                FROM kiosk_devices kd
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                WHERE LOWER(kd.device_username) = LOWER(:u)
+                  AND kd.deleted_at IS NULL
+                LIMIT 1
+            """),
+            {"u": username.strip()},
+        )).mappings().first()
+
+    if not row:
+        return {"found": False, "username": username}
+
+    d = dict(row)
+    return {
+        "found":            True,
+        "device_name":      d["device_name"],
+        "device_username":  d["device_username"],
+        "device_type":      d["device_type"],
+        "branch_id":        d["branch_id"],
+        "kiosk_status":     d["kiosk_status"],
+        "card_reader_id":   d["card_reader_id"],
+        "reader_label":     d["reader_label"],
+        "reader_provider":  d["reader_provider"],
+        "stripe_reader_id":    d["stripe_reader_id"],
+        "sumup_reader_serial": d["sumup_reader_serial"],
+        "clover_device_id":    d["clover_device_id"],
+        "reader_is_active": bool(d["reader_is_active"]) if d["reader_is_active"] is not None else None,
+        "reader_deleted":   bool(d["reader_deleted"]) if d["reader_deleted"] is not None else None,
+    }
+
+
 @router.get("/quick-donation/profiles")
 async def list_kiosk_profiles(branch_id: str = ""):
     """List all kiosk profiles with their branch, user, and device assignments."""
