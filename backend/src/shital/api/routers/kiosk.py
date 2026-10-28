@@ -2896,18 +2896,28 @@ async def sumup_diagnostics(username: str = "", limit: int = 5) -> dict[str, Any
     except Exception as e:  # noqa: BLE001
         out["errors"].append(f"readers_api_exception: {type(e).__name__}")
 
-    # ── Last N transactions ──────────────────────────────────────────────────
+    # ── Last N transactions (newest first) ────────────────────────────────────
+    # SumUp's /transactions/history returns oldest-first by default. Pull
+    # a larger window and sort descending in Python to actually show the
+    # latest N. order=desc is the documented param; we also sort locally
+    # as a belt-and-braces in case it's ignored by this endpoint version.
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             tx = await client.get(
                 f"{base}/v2.1/merchants/{merchant_code}/transactions/history",
                 headers=headers,
-                params={"limit": max(1, min(limit, 50))},
+                params={"limit": 50, "order": "desc"},
             )
             if tx.is_success:
                 data = tx.json() or {}
                 items = data.get("items", data.get("transactions", []))
-                for t in items[:limit]:
+                # Sort by timestamp descending (newest first)
+                items_sorted = sorted(
+                    items,
+                    key=lambda t: t.get("timestamp") or "",
+                    reverse=True,
+                )
+                for t in items_sorted[:limit]:
                     out["recent_transactions"].append({
                         "transaction_code": t.get("transaction_code"),
                         "status":           t.get("status"),
