@@ -914,21 +914,21 @@ export function DonationScreen() {
 
       {/* ── Monthly Giving banner (admin-configured) ────────────────────────── */}
       {showMonthlyGiving && (
-        <div className="mx-5 mb-3 flex-shrink-0">
+        <div className="mx-5 mb-4 flex-shrink-0">
           <motion.button whileTap={{ scale: 0.98 }} onClick={() => setMonthlyOpen(true)}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-left"
+            className="w-full flex items-center gap-4 px-5 py-5 rounded-2xl text-left"
             style={{ background: 'linear-gradient(135deg,rgba(22,163,74,0.18),rgba(15,107,50,0.12))',
               border: '1px solid rgba(74,222,128,0.3)' }}>
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
               style={{ background: 'rgba(74,222,128,0.15)' }}>
-              <span className="text-lg">💚</span>
+              <span className="text-2xl">💚</span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: 'rgba(74,222,128,0.7)' }}>Monthly Giving</p>
-              <p className="text-sm font-black leading-snug" style={{ color: '#4ade80' }}>{monthlyGivingText || `Make a big impact from just £${monthlyGivingAmount}/month`}</p>
-              <p className="text-[10px]" style={{ color: 'rgba(74,222,128,0.55)' }}>Regular giving · Cancel anytime · Secure PayPal</p>
+              <p className="text-xs font-black uppercase tracking-widest mb-0.5" style={{ color: 'rgba(74,222,128,0.75)' }}>Monthly Giving</p>
+              <p className="text-lg font-black leading-tight" style={{ color: '#4ade80' }}>{monthlyGivingText || `Make a big impact from just £${monthlyGivingAmount}/month`}</p>
+              <p className="text-xs mt-0.5" style={{ color: 'rgba(74,222,128,0.6)' }}>Regular giving · Cancel anytime · Secure PayPal</p>
             </div>
-            <span className="text-green-400/60 text-lg flex-shrink-0">›</span>
+            <span className="text-green-400/70 text-2xl flex-shrink-0">›</span>
           </motion.button>
         </div>
       )}
@@ -955,26 +955,26 @@ export function DonationScreen() {
                   color: 'var(--qd-text-primary)',
                 }}
               >
-                <div className="flex items-baseline gap-0.5 leading-none">
-                  <span className="text-base font-semibold" style={{ color: 'var(--qd-text-dim)' }}>£</span>
-                  <span style={{ fontSize: tile.price >= 100 ? 32 : 38 }}>
+                <div className="flex items-baseline gap-1 leading-none">
+                  <span className="text-xl font-semibold" style={{ color: 'var(--qd-text-dim)' }}>£</span>
+                  <span style={{ fontSize: tile.price >= 100 ? 48 : 56, lineHeight: 1 }}>
                     {tile.price % 1 === 0 ? tile.price : tile.price.toFixed(2)}
                   </span>
                 </div>
                 {tile.name && (
-                  <span className="text-[11px] font-bold mt-1.5 leading-tight line-clamp-1"
+                  <span className="text-sm font-bold mt-2 leading-tight line-clamp-1"
                         style={{ color: 'var(--qd-text-muted)' }}>
                     {tile.name}
                   </span>
                 )}
                 {tile.description && (
-                  <span className="text-[10px] font-medium mt-0.5 leading-tight line-clamp-2 px-1"
+                  <span className="text-xs font-medium mt-1 leading-tight line-clamp-2 px-1"
                         style={{ color: 'var(--qd-text-faint)' }}>
                     {tile.description}
                   </span>
                 )}
                 {enableGiftAid && (
-                  <span className="text-green-700 text-[10px] font-semibold mt-1.5"
+                  <span className="text-xs font-semibold mt-2"
                         style={{ color: 'var(--qd-text-dim)' }}>
                     +GA £{(tile.price * 0.25).toFixed(2)}
                   </span>
