@@ -79,6 +79,14 @@ def _classify_serial(serial: str, stripe_id: str, clover_id: str,
     s = (serial or "").strip()
     if s.startswith("2001") or s.startswith("2002"):
         return "sumup"
+    # SumUp's API reader ID format is `rdr_XXXX`. Nothing else in the fleet
+    # uses this prefix. If the row has one, it's an intentionally-set SumUp
+    # reader — it wins over any `tmr_` placeholder in stripe_reader_id (we
+    # observed Wembley rows with a leftover tmr_Gcuz1QQB6nzqMs placeholder
+    # that was never a real Stripe terminal, blocking the auto-heal because
+    # the classifier matched the stripe branch below first).
+    if s.startswith("rdr_"):
+        return "sumup"
     if (clover_id or "").strip():
         return "clover"
     if (stripe_id or "").strip().startswith("tmr_"):
