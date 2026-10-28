@@ -19,6 +19,31 @@ const THEME_BG: Record<string, string> = {
   crimson: 'linear-gradient(160deg, #5C0000 0%, #8B0000 40%, #5C0000 100%)',
 }
 
+// Themes with light/cream backgrounds — the default white text is invisible
+// against these, so the DonationScreen / TapScreen read these CSS variables
+// to flip to dark text on light backgrounds and keep the original white on
+// dark ones. Keep lotus/jasmine in sync with the LIGHT_THEMES set.
+export const LIGHT_THEMES = new Set(['lotus', 'jasmine'])
+
+const THEME_TEXT = {
+  dark: {
+    primary:  '#ffffff',             // text-white equivalent
+    muted:    'rgba(255,255,255,0.75)',
+    dim:      'rgba(255,255,255,0.5)',
+    faint:    'rgba(255,255,255,0.35)',
+    tile_bg:  'rgba(255,255,255,0.08)',
+    tile_bd:  'rgba(255,255,255,0.12)',
+  },
+  light: {
+    primary:  '#2d1200',             // deep saffron-brown — readable on cream
+    muted:    'rgba(45,18,0,0.80)',
+    dim:      'rgba(45,18,0,0.55)',
+    faint:    'rgba(45,18,0,0.40)',
+    tile_bg:  'rgba(45,18,0,0.06)',
+    tile_bd:  'rgba(45,18,0,0.18)',
+  },
+}
+
 export function QuickDonationApp() {
   const { screen, setScreen, isDeviceLoggedIn, _hasHydrated, stripeReaderId, sumupReaderId, cloverDeviceId, kioskTheme, bgColor, loggedInUsername, kioskDeviceId, setDeviceFlags, setBranchId, setReader, setKioskDeviceId } = useDonationStore()
 
@@ -158,6 +183,21 @@ export function QuickDonationApp() {
     return THEME_BG[kioskTheme] ?? THEME_BG.saffron
   }, [kioskTheme, bgColor])
 
+  // Expose text-contrast tokens as CSS variables on the root. The donation /
+  // tap screens read these for amount tile text, labels, and borders so they
+  // stay readable when the operator picks a light theme like lotus/jasmine.
+  const themeVars = useMemo<React.CSSProperties>(() => {
+    const palette = LIGHT_THEMES.has(kioskTheme) ? THEME_TEXT.light : THEME_TEXT.dark
+    return {
+      '--qd-text-primary': palette.primary,
+      '--qd-text-muted':   palette.muted,
+      '--qd-text-dim':     palette.dim,
+      '--qd-text-faint':   palette.faint,
+      '--qd-tile-bg':      palette.tile_bg,
+      '--qd-tile-border':  palette.tile_bd,
+    } as React.CSSProperties
+  }, [kioskTheme])
+
   const pageVariants = {
     initial: { opacity: 0, scale: 0.96 },
     animate: { opacity: 1, scale: 1, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] } },
@@ -176,7 +216,7 @@ export function QuickDonationApp() {
   }
 
   return (
-    <div className="w-screen h-screen overflow-hidden" style={{ background }}>
+    <div className="w-screen h-screen overflow-hidden" style={{ background, ...themeVars }}>
       <AnimatePresence mode="wait">
         <motion.div
           key={screen}
