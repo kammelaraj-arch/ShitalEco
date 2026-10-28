@@ -2841,6 +2841,104 @@ async def assign_reader(body: AssignReaderInput):
     )
 
 
+@router.get("/sumup/diagnostics")
+async def sumup_diagnostics(username: str = "", limit: int = 5) -> dict[str, Any]:
+    """Live diagnostic — calls SumUp's own API to show what SumUp sees.
+
+    Returns:
+      - merchant configured (yes/no)
+      - the readers SumUp knows about for this merchant (incl. online/offline)
+      - last N transactions SumUp has for this merchant (status, amount, time)
+      - our side: PENDING-count in our donations table (SumUp only, last 7d)
+
+    Optional ?username= scopes the reader-match check to the paired reader
+    on that device.
+    """
+    out: dict[str, Any] = {
+        "merchant_configured": False,
+        "readers":              [],
+        "recent_transactions":  [],
+        "our_pending_count":    None,
+        "errors":               [],
+    }
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+    if not access_token or not merchant_code:
+        out["errors"].append("sumup_not_configured")
+        return out
+    out["merchant_configured"] = True
+    out["merchant_code"] = merchant_code
+
+    base = "https://api.sumup.com"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    # ── Live readers ─────────────────────────────────────────────────────────
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            rd = await client.get(
+                f"{base}/v0.1/merchants/{merchant_code}/readers",
+                headers=headers,
+            )
+            if rd.is_success:
+                data = rd.json()
+                rd_list = data if isinstance(data, list) else data.get("items", data.get("readers", []))
+                for r in rd_list:
+                    out["readers"].append({
+                        "id":       r.get("id"),
+                        "name":     r.get("name"),
+                        "status":   r.get("status"),
+                        "device":   (r.get("device") or {}).get("identifier"),
+                        "model":    (r.get("device") or {}).get("model"),
+                    })
+            else:
+                out["errors"].append(f"readers_api_{rd.status_code}: {rd.text[:120]}")
+    except Exception as e:  # noqa: BLE001
+        out["errors"].append(f"readers_api_exception: {type(e).__name__}")
+
+    # ── Last N transactions ──────────────────────────────────────────────────
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            tx = await client.get(
+                f"{base}/v2.1/merchants/{merchant_code}/transactions/history",
+                headers=headers,
+                params={"limit": max(1, min(limit, 50))},
+            )
+            if tx.is_success:
+                data = tx.json() or {}
+                items = data.get("items", data.get("transactions", []))
+                for t in items[:limit]:
+                    out["recent_transactions"].append({
+                        "transaction_code": t.get("transaction_code"),
+                        "status":           t.get("status"),
+                        "amount":           t.get("amount"),
+                        "currency":         t.get("currency"),
+                        "timestamp":        t.get("timestamp"),
+                        "foreign_tx_id":    t.get("foreign_transaction_id"),
+                    })
+            else:
+                out["errors"].append(f"tx_api_{tx.status_code}: {tx.text[:120]}")
+    except Exception as e:  # noqa: BLE001
+        out["errors"].append(f"tx_api_exception: {type(e).__name__}")
+
+    # ── Our side: PENDING donations count for SumUp in last 7 days ───────────
+    try:
+        async with SessionLocal() as db:
+            row = (await db.execute(text("""
+                SELECT COUNT(*) AS n
+                FROM donations
+                WHERE UPPER(COALESCE(payment_provider, '')) = 'SUMUP'
+                  AND UPPER(COALESCE(status, '')) = 'PENDING'
+                  AND created_at >= NOW() - INTERVAL '7 days'
+                  AND deleted_at IS NULL
+            """))).mappings().first()
+            out["our_pending_count"] = int(row["n"]) if row else 0
+    except Exception as e:  # noqa: BLE001
+        out["errors"].append(f"db_exception: {type(e).__name__}")
+
+    return out
+
+
 @router.get("/quick-donation/reader-check/{username}")
 async def quick_donation_reader_check(username: str) -> dict[str, Any]:
     """Diagnostic — read-only. Returns which card reader a QUICK_DONATION
