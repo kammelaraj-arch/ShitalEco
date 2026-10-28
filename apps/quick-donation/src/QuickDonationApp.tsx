@@ -185,9 +185,29 @@ export function QuickDonationApp() {
 
   // Expose text-contrast tokens as CSS variables on the root. The donation /
   // tap screens read these for amount tile text, labels, and borders so they
-  // stay readable when the operator picks a light theme like lotus/jasmine.
+  // stay readable when the operator picks a light theme like lotus/jasmine
+  // OR sets a custom bg_color to a cream / pale shade from the admin panel.
   const themeVars = useMemo<React.CSSProperties>(() => {
-    const palette = LIGHT_THEMES.has(kioskTheme) ? THEME_TEXT.light : THEME_TEXT.dark
+    // Detect whether the actual rendered background is light by sampling
+    // the first color stop from the gradient (THEME_BG) or the raw bgColor
+    // override. Rough HSP luminance threshold at 0.6.
+    const extractHex = (s: string): string | null => {
+      if (!s) return null
+      const m = s.match(/#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})/)
+      return m ? m[0] : null
+    }
+    const luminance = (hex: string): number => {
+      let h = hex.replace('#', '')
+      if (h.length === 3) h = h.split('').map(c => c + c).join('')
+      const r = parseInt(h.slice(0, 2), 16) / 255
+      const g = parseInt(h.slice(2, 4), 16) / 255
+      const b = parseInt(h.slice(4, 6), 16) / 255
+      return 0.299 * r + 0.587 * g + 0.114 * b
+    }
+    const bgSource = bgColor || THEME_BG[kioskTheme] || THEME_BG.saffron
+    const hex = extractHex(bgSource)
+    const isLight = (hex && luminance(hex) > 0.6) || LIGHT_THEMES.has(kioskTheme)
+    const palette = isLight ? THEME_TEXT.light : THEME_TEXT.dark
     return {
       '--qd-text-primary': palette.primary,
       '--qd-text-muted':   palette.muted,
@@ -196,7 +216,7 @@ export function QuickDonationApp() {
       '--qd-tile-bg':      palette.tile_bg,
       '--qd-tile-border':  palette.tile_bd,
     } as React.CSSProperties
-  }, [kioskTheme])
+  }, [kioskTheme, bgColor])
 
   const pageVariants = {
     initial: { opacity: 0, scale: 0.96 },
