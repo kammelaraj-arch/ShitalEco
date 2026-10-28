@@ -917,18 +917,17 @@ export function DonationScreen() {
         <div className="mx-5 mb-4 flex-shrink-0">
           <motion.button whileTap={{ scale: 0.98 }} onClick={() => setMonthlyOpen(true)}
             className="w-full flex items-center gap-4 px-5 py-5 rounded-2xl text-left"
-            style={{ background: 'linear-gradient(135deg,rgba(22,163,74,0.18),rgba(15,107,50,0.12))',
-              border: '1px solid rgba(74,222,128,0.3)' }}>
+            style={{ background: 'var(--qd-mg-bg)', border: '1px solid var(--qd-mg-border)' }}>
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'rgba(74,222,128,0.15)' }}>
+              style={{ background: 'var(--qd-mg-icon-bg)' }}>
               <span className="text-2xl">💚</span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-black uppercase tracking-widest mb-0.5" style={{ color: 'rgba(74,222,128,0.75)' }}>Monthly Giving</p>
-              <p className="text-lg font-black leading-tight" style={{ color: '#4ade80' }}>{monthlyGivingText || `Make a big impact from just £${monthlyGivingAmount}/month`}</p>
-              <p className="text-xs mt-0.5" style={{ color: 'rgba(74,222,128,0.6)' }}>Regular giving · Cancel anytime · Secure PayPal</p>
+              <p className="text-xs font-black uppercase tracking-widest mb-0.5" style={{ color: 'var(--qd-mg-tag)' }}>Monthly Giving</p>
+              <p className="text-lg font-black leading-tight" style={{ color: 'var(--qd-mg-headline)' }}>{monthlyGivingText || `Make a big impact from just £${monthlyGivingAmount}/month`}</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--qd-mg-helper)' }}>Regular giving · Cancel anytime · Secure PayPal</p>
             </div>
-            <span className="text-green-400/70 text-2xl flex-shrink-0">›</span>
+            <span className="text-2xl flex-shrink-0" style={{ color: 'var(--qd-mg-chev)' }}>›</span>
           </motion.button>
         </div>
       )}
