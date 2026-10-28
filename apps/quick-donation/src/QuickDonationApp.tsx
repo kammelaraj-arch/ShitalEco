@@ -33,6 +33,14 @@ const THEME_TEXT = {
     faint:    'rgba(255,255,255,0.35)',
     tile_bg:  'rgba(255,255,255,0.08)',
     tile_bd:  'rgba(255,255,255,0.12)',
+    // Monthly Giving banner greens — bright on dark bg
+    mg_bg:        'linear-gradient(135deg,rgba(22,163,74,0.18),rgba(15,107,50,0.12))',
+    mg_border:    'rgba(74,222,128,0.3)',
+    mg_icon_bg:   'rgba(74,222,128,0.15)',
+    mg_tag:       'rgba(74,222,128,0.75)',
+    mg_headline:  '#4ade80',
+    mg_helper:    'rgba(74,222,128,0.6)',
+    mg_chev:      'rgba(74,222,128,0.7)',
   },
   light: {
     primary:  '#2d1200',             // deep saffron-brown — readable on cream
@@ -41,6 +49,14 @@ const THEME_TEXT = {
     faint:    'rgba(45,18,0,0.40)',
     tile_bg:  'rgba(45,18,0,0.06)',
     tile_bd:  'rgba(45,18,0,0.18)',
+    // Monthly Giving banner greens — darker so they read on cream
+    mg_bg:        'linear-gradient(135deg,rgba(21,128,61,0.14),rgba(21,128,61,0.08))',
+    mg_border:    'rgba(21,128,61,0.45)',
+    mg_icon_bg:   'rgba(21,128,61,0.18)',
+    mg_tag:       '#15803d',
+    mg_headline:  '#166534',
+    mg_helper:    'rgba(21,101,52,0.85)',
+    mg_chev:      '#15803d',
   },
 }
 
@@ -215,6 +231,13 @@ export function QuickDonationApp() {
       '--qd-text-faint':   palette.faint,
       '--qd-tile-bg':      palette.tile_bg,
       '--qd-tile-border':  palette.tile_bd,
+      '--qd-mg-bg':         palette.mg_bg,
+      '--qd-mg-border':     palette.mg_border,
+      '--qd-mg-icon-bg':    palette.mg_icon_bg,
+      '--qd-mg-tag':        palette.mg_tag,
+      '--qd-mg-headline':   palette.mg_headline,
+      '--qd-mg-helper':     palette.mg_helper,
+      '--qd-mg-chev':       palette.mg_chev,
     } as React.CSSProperties
   }, [kioskTheme, bgColor])
 
