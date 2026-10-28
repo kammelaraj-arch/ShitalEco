@@ -1279,13 +1279,53 @@ async def _sumup_reader_status_sync_once() -> dict[str, Any]:
               AND LOWER(COALESCE(provider, '')) = 'sumup'
         """))).mappings().all()
 
-    our_reader_ids = {r["reader_id"] for r in rows if r["reader_id"]}
+        # For dedup we need the FULL set of rdr_... ids seen anywhere in
+        # terminal_devices.sumup_reader_serial — regardless of the row's
+        # provider column. A row with provider='stripe_terminal' but a
+        # populated rdr_ serial would otherwise cause the auto-import to
+        # insert a duplicate for the same physical reader.
+        all_rdr = (await db.execute(text("""
+            SELECT DISTINCT COALESCE(sumup_reader_serial, '') AS rdr
+            FROM terminal_devices
+            WHERE deleted_at IS NULL
+              AND sumup_reader_serial LIKE 'rdr\\_%' ESCAPE '\\'
+        """))).mappings().all()
+
+    our_reader_ids = {r["rdr"] for r in all_rdr if r["rdr"]}
+
+    # Also pull the full row data so we can detect misconfigured rows that
+    # shouldn't be marked "online" even if SumUp has them paired.
+    async with SessionLocal() as db:
+        full_rows = (await db.execute(text("""
+            SELECT id::text AS id,
+                   COALESCE(sumup_reader_serial, '') AS reader_id,
+                   COALESCE(stripe_reader_id, '')    AS stripe_reader_id,
+                   COALESCE(device_type, '')         AS device_type,
+                   COALESCE(status, '')              AS cur_status
+            FROM terminal_devices
+            WHERE deleted_at IS NULL
+              AND LOWER(COALESCE(provider, '')) = 'sumup'
+        """))).mappings().all()
+    full_by_id = {r["id"]: r for r in full_rows}
 
     for r in rows:
         out["checked"] += 1
+        full = full_by_id.get(r["id"]) or {}
         match = reader_by_id.get(r["reader_id"]) if r["reader_id"] else None
         raw = (match.get("status") if match else "unknown") or "unknown"
-        new_status = "online" if raw.lower() in {"paired", "processing"} else "offline"
+
+        # Only call a row "online" when SumUp has it paired/processing AND
+        # the row data is internally consistent. Misconfigured rows show
+        # offline so the operator spots them in Admin → Card Readers.
+        sumup_says_live = raw.lower() in {"paired", "processing", "online"}
+        has_stripe_conflict = bool((full.get("stripe_reader_id") or "").strip())
+        dev_type = (full.get("device_type") or "").lower()
+        # SumUp readers are 'solo' models; a bbpos_wisepos_e / wisepos_e
+        # device_type on a provider=sumup row is corrupted data.
+        dev_type_ok = dev_type in {"", "solo", "sumup_solo", "air", "solo_lite"}
+        consistent = (not has_stripe_conflict) and dev_type_ok
+
+        new_status = "online" if (sumup_says_live and consistent) else "offline"
 
         if (r["cur_status"] or "").lower() == new_status:
             out["unchanged"] += 1
