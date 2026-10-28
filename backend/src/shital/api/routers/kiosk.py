@@ -1113,12 +1113,44 @@ async def sumup_webhook(request: Request):
     except Exception:  # noqa: BLE001
         return {"ok": False}
 
-    # SumUp's webhook payload uses different keys depending on event type;
-    # accept all the variants we've seen in production.
-    checkout_id = (body.get("id") or body.get("checkout_id")
-                   or body.get("resource_id") or "")
-    status      = (body.get("status") or body.get("event_type") or "").upper()
-    payment_ref = (body.get("transaction_id") or body.get("transaction_code") or "")
+    # SumUp's webhook payload has evolved. Observed formats in prod:
+    #
+    #   { "id": "evt_...", "event_type": "checkout.updated",
+    #     "resource_id": "<checkout_id>",
+    #     "payload": { "status": "PAID",
+    #                  "transaction_code": "..." } }
+    #
+    # vs the older flat form:
+    #
+    #   { "id": "<checkout_id>", "status": "PAID",
+    #     "transaction_code": "..." }
+    #
+    # Match the nested shape FIRST (it's what SumUp sends today), and
+    # fall back to the flat shape. NEVER treat `event_type` as a status —
+    # "checkout.updated" is an event name, not a payment state, and
+    # mis-aliasing it meant the webhook silently no-op'd and left every
+    # donation PENDING.
+    payload = body.get("payload") or {}
+    checkout_id = (
+        body.get("resource_id")           # modern: resource_id is the checkout
+        or body.get("checkout_id")        # legacy
+        or (payload.get("id") if isinstance(payload, dict) else "")
+        or body.get("id")                 # oldest / flat
+        or ""
+    )
+    raw_status = (
+        (payload.get("status") if isinstance(payload, dict) else "")
+        or body.get("status")
+        or ""
+    )
+    status = raw_status.upper()
+    payment_ref = (
+        (payload.get("transaction_code") if isinstance(payload, dict) else "")
+        or (payload.get("transaction_id") if isinstance(payload, dict) else "")
+        or body.get("transaction_code")
+        or body.get("transaction_id")
+        or ""
+    )
 
     if not checkout_id or not status:
         return {"ok": False, "reason": "missing checkout_id or status"}
