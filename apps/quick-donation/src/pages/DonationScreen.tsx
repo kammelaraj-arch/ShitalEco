@@ -950,29 +950,32 @@ export function DonationScreen() {
                 onClick={() => handleTileTap(tile.price)}
                 className="rounded-3xl flex flex-col items-center justify-center font-black transition-all active:brightness-110 px-3 py-3 text-center"
                 style={{
-                  background: 'rgba(255,255,255,0.08)',
-                  border: '1.5px solid rgba(255,255,255,0.12)',
-                  color: '#fff',
+                  background: 'var(--qd-tile-bg)',
+                  border: '1.5px solid var(--qd-tile-border)',
+                  color: 'var(--qd-text-primary)',
                 }}
               >
                 <div className="flex items-baseline gap-0.5 leading-none">
-                  <span className="text-white/50 text-base font-semibold">£</span>
+                  <span className="text-base font-semibold" style={{ color: 'var(--qd-text-dim)' }}>£</span>
                   <span style={{ fontSize: tile.price >= 100 ? 32 : 38 }}>
                     {tile.price % 1 === 0 ? tile.price : tile.price.toFixed(2)}
                   </span>
                 </div>
                 {tile.name && (
-                  <span className="text-white/75 text-[11px] font-bold mt-1.5 leading-tight line-clamp-1">
+                  <span className="text-[11px] font-bold mt-1.5 leading-tight line-clamp-1"
+                        style={{ color: 'var(--qd-text-muted)' }}>
                     {tile.name}
                   </span>
                 )}
                 {tile.description && (
-                  <span className="text-white/40 text-[10px] font-medium mt-0.5 leading-tight line-clamp-2 px-1">
+                  <span className="text-[10px] font-medium mt-0.5 leading-tight line-clamp-2 px-1"
+                        style={{ color: 'var(--qd-text-faint)' }}>
                     {tile.description}
                   </span>
                 )}
                 {enableGiftAid && (
-                  <span className="text-green-400/60 text-[10px] font-semibold mt-1.5">
+                  <span className="text-green-700 text-[10px] font-semibold mt-1.5"
+                        style={{ color: 'var(--qd-text-dim)' }}>
                     +GA £{(tile.price * 0.25).toFixed(2)}
                   </span>
                 )}
@@ -985,9 +988,9 @@ export function DonationScreen() {
               onClick={() => { setOtherOpen(true); setOtherVal('') }}
               className="rounded-3xl flex flex-col items-center justify-center font-black col-span-2 transition-all"
               style={{
-                background: otherOpen ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)',
-                border: otherOpen ? '2px solid rgba(255,255,255,0.30)' : '1.5px solid rgba(255,255,255,0.10)',
-                color: '#fff',
+                background: 'var(--qd-tile-bg)',
+                border: otherOpen ? '2px solid var(--qd-text-dim)' : '1.5px solid var(--qd-tile-border)',
+                color: 'var(--qd-text-primary)',
               }}
             >
               <span className="text-2xl mb-1">✏️</span>
