@@ -1484,9 +1484,18 @@ async def _auto_heal_card_readers_once() -> dict[str, Any]:
                 """), {"id": r["id"], "prov": expected,
                        "old_prov": r["provider"], "serial": label_serial})
             else:
+                # When flipping to a new provider, wipe any identifier
+                # columns that belong to the OLD provider — otherwise a
+                # bogus tmr_ or similar placeholder stays on the row and
+                # future provider-match queries can cross-wire it.
                 upd = await db.execute(text("""
                     UPDATE terminal_devices
-                    SET provider = :prov, updated_at = NOW()
+                    SET provider         = :prov,
+                        stripe_reader_id = CASE WHEN :prov <> 'stripe_terminal'
+                                                 THEN NULL ELSE stripe_reader_id END,
+                        clover_device_id = CASE WHEN :prov <> 'clover'
+                                                 THEN NULL ELSE clover_device_id END,
+                        updated_at       = NOW()
                     WHERE id = CAST(:id AS uuid)
                       AND deleted_at IS NULL
                       AND provider = :old_prov
