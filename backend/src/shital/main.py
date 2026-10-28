@@ -183,6 +183,33 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
         except Exception as exc:  # noqa: BLE001
             logger.warning("boot_heal_sumup_reconcile_failed", error=str(exc))
 
+        try:
+            # e) SumUp reader status sync + auto-import.
+            #    One GET /readers call; updates stored status for every known
+            #    sumup row AND inserts a new terminal_devices row (branch
+            #    unassigned) for any reader on SumUp's side we don't have
+            #    yet, so operators don't have to type rdr_... IDs. 15s cap.
+            from shital.services.background_recovery import (
+                _sumup_reader_status_sync_once,
+            )
+            res = await _a.wait_for(_sumup_reader_status_sync_once(), timeout=15)
+            logger.info("boot_heal_sumup_reader_status", result=res)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("boot_heal_sumup_reader_status_failed", error=str(exc))
+
+        try:
+            # f) Stripe Terminal reader sync + auto-import. Mirror of (e)
+            #    for stripe.terminal.Reader.list — refreshes online/offline
+            #    for existing rows and INSERTs any Stripe reader we don't
+            #    have yet. 15s cap.
+            from shital.services.background_recovery import (
+                _stripe_readers_sync_once,
+            )
+            res = await _a.wait_for(_stripe_readers_sync_once(), timeout=15)
+            logger.info("boot_heal_stripe_readers", result=res)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("boot_heal_stripe_readers_failed", error=str(exc))
+
     # Fire-and-forget — don't block app startup on the heals.
     _asyncio.create_task(_boot_heals())
     logger.info("boot_heals_scheduled")

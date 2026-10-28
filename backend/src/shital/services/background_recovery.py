@@ -1223,6 +1223,211 @@ async def recovery_loop() -> None:
         await asyncio.sleep(RECOVERY_INTERVAL_SECONDS)
 
 
+async def _sumup_reader_status_sync_once() -> dict[str, Any]:
+    """Sync `terminal_devices.status` for every SumUp reader AND auto-import
+    any reader present on SumUp's side that we don't have a row for yet.
+
+    On every backend restart:
+      1. One GET /v0.1/merchants/{code}/readers call
+      2. For each reader SumUp knows about:
+           - if we already have a row (matched by sumup_reader_serial = rdr_id):
+               update status (paired/processing → online, else offline)
+           - if not:
+               INSERT a new terminal_devices row with provider=sumup,
+               label=reader name, sumup_reader_serial=rdr_id,
+               serial_number=device.identifier, status=derived. branch_id
+               stays empty; operator assigns via Admin UI.
+      3. Any sumup row in our DB whose rdr_id is NOT in SumUp's list gets
+         status='offline' (reader was unpaired on SumUp side).
+
+    Idempotent. Returns counts for observability.
+    """
+    import httpx
+
+    from shital.core.fabrics.secrets import SecretsManager
+    out: dict[str, Any] = {"checked": 0, "updated": 0, "unchanged": 0,
+                           "imported": 0, "errors": []}
+
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+    if not access_token or not merchant_code:
+        return {"skipped": "sumup_not_configured"}
+
+    # 1. Fetch all readers from SumUp API (one call, not one per row)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.sumup.com/v0.1/merchants/{merchant_code}/readers",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        if not resp.is_success:
+            return {"error": f"sumup_api_{resp.status_code}: {resp.text[:120]}"}
+        data = resp.json()
+        items = data if isinstance(data, list) else data.get("items", data.get("readers", []))
+        reader_by_id = {r.get("id"): r for r in items if r.get("id")}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"sumup_api_exception: {type(exc).__name__}"}
+
+    # 2. Walk our SumUp rows and update stored status
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT id::text AS id, label,
+                   COALESCE(sumup_reader_serial, '') AS reader_id,
+                   COALESCE(status, '') AS cur_status
+            FROM terminal_devices
+            WHERE deleted_at IS NULL
+              AND LOWER(COALESCE(provider, '')) = 'sumup'
+        """))).mappings().all()
+
+    our_reader_ids = {r["reader_id"] for r in rows if r["reader_id"]}
+
+    for r in rows:
+        out["checked"] += 1
+        match = reader_by_id.get(r["reader_id"]) if r["reader_id"] else None
+        raw = (match.get("status") if match else "unknown") or "unknown"
+        new_status = "online" if raw.lower() in {"paired", "processing"} else "offline"
+
+        if (r["cur_status"] or "").lower() == new_status:
+            out["unchanged"] += 1
+            continue
+
+        try:
+            async with SessionLocal() as db:
+                await db.execute(text("""
+                    UPDATE terminal_devices
+                    SET status = :st, last_seen_at = NOW(), updated_at = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                """), {"st": new_status, "id": r["id"]})
+                await db.commit()
+            out["updated"] += 1
+        except Exception as exc:  # noqa: BLE001
+            out["errors"].append(f"{r['id']}: {type(exc).__name__}")
+
+    # 3. Auto-import readers SumUp has but we don't. branch_id stays empty;
+    #    operator assigns via Admin UI. is_active=TRUE so it shows up.
+    for rdr_id, rdr in reader_by_id.items():
+        if rdr_id in our_reader_ids:
+            continue
+        try:
+            raw = (rdr.get("status") or "").lower()
+            new_status = "online" if raw in {"paired", "processing"} else "offline"
+            serial = (rdr.get("device") or {}).get("identifier") or ""
+            label = rdr.get("name") or rdr_id
+            async with SessionLocal() as db:
+                await db.execute(text("""
+                    INSERT INTO terminal_devices (
+                        provider, label, sumup_reader_serial,
+                        device_type, serial_number, status,
+                        is_active, branch_id, created_at, updated_at
+                    ) VALUES (
+                        'sumup', :label, :rdr_id,
+                        'solo', :serial, :status,
+                        TRUE, '', NOW(), NOW()
+                    )
+                """), {"label": label, "rdr_id": rdr_id,
+                       "serial": serial, "status": new_status})
+                await db.commit()
+            out["imported"] += 1
+        except Exception as exc:  # noqa: BLE001
+            out["errors"].append(f"import {rdr_id}: {type(exc).__name__}")
+
+    return out
+
+
+async def _stripe_readers_sync_once() -> dict[str, Any]:
+    """Mirror of _sumup_reader_status_sync_once for Stripe Terminal.
+
+    On every backend restart:
+      1. stripe.terminal.Reader.list(limit=100)
+      2. For each reader Stripe knows about:
+           - matched row (by stripe_reader_id): update status from reader.status
+           - new reader: INSERT provider=stripe_terminal, label=reader.label,
+             stripe_reader_id=id, serial_number=serial_number, status=derived
+      3. Rows whose tmr_ id is no longer in Stripe's list → status='offline'.
+
+    Idempotent.
+    """
+    import stripe as _stripe
+
+    from shital.core.fabrics.secrets import SecretsManager
+
+    out: dict[str, Any] = {"checked": 0, "updated": 0, "unchanged": 0,
+                           "imported": 0, "errors": []}
+
+    api_key = await SecretsManager.get("STRIPE_SECRET_KEY") or settings.STRIPE_SECRET_KEY
+    if not api_key:
+        return {"skipped": "stripe_not_configured"}
+    _stripe.api_key = api_key
+
+    try:
+        readers = _stripe.terminal.Reader.list(limit=100)
+        items = readers.data if hasattr(readers, "data") else []
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"stripe_api_exception: {type(exc).__name__}"}
+
+    reader_by_id = {r.id: r for r in items}
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT id::text AS id, label,
+                   COALESCE(stripe_reader_id, '') AS reader_id,
+                   COALESCE(status, '') AS cur_status
+            FROM terminal_devices
+            WHERE deleted_at IS NULL
+              AND LOWER(COALESCE(provider, '')) = 'stripe_terminal'
+        """))).mappings().all()
+
+    our_reader_ids = {r["reader_id"] for r in rows if r["reader_id"]}
+
+    for r in rows:
+        out["checked"] += 1
+        rdr = reader_by_id.get(r["reader_id"]) if r["reader_id"] else None
+        raw = (getattr(rdr, "status", None) if rdr else None) or "offline"
+        new_status = "online" if str(raw).lower() in {"online", "paired", "processing"} else "offline"
+        if (r["cur_status"] or "").lower() == new_status:
+            out["unchanged"] += 1
+            continue
+        try:
+            async with SessionLocal() as db:
+                await db.execute(text("""
+                    UPDATE terminal_devices
+                    SET status = :st, last_seen_at = NOW(), updated_at = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                """), {"st": new_status, "id": r["id"]})
+                await db.commit()
+            out["updated"] += 1
+        except Exception as exc:  # noqa: BLE001
+            out["errors"].append(f"{r['id']}: {type(exc).__name__}")
+
+    for rdr_id, rdr in reader_by_id.items():
+        if rdr_id in our_reader_ids:
+            continue
+        try:
+            raw = (getattr(rdr, "status", None) or "").lower()
+            new_status = "online" if raw in {"online", "paired", "processing"} else "offline"
+            label = getattr(rdr, "label", None) or rdr_id
+            serial = getattr(rdr, "serial_number", None) or ""
+            async with SessionLocal() as db:
+                await db.execute(text("""
+                    INSERT INTO terminal_devices (
+                        provider, label, stripe_reader_id,
+                        device_type, serial_number, status,
+                        is_active, branch_id, created_at, updated_at
+                    ) VALUES (
+                        'stripe_terminal', :label, :rdr_id,
+                        'wisepos_e', :serial, :status,
+                        TRUE, '', NOW(), NOW()
+                    )
+                """), {"label": label, "rdr_id": rdr_id,
+                       "serial": serial, "status": new_status})
+                await db.commit()
+            out["imported"] += 1
+        except Exception as exc:  # noqa: BLE001
+            out["errors"].append(f"import {rdr_id}: {type(exc).__name__}")
+
+    return out
+
+
 async def _auto_heal_card_readers_once() -> dict[str, Any]:
     """Idempotent card-reader provider heal, called from recovery_loop.
 
