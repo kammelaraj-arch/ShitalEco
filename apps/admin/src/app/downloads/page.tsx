@@ -161,31 +161,43 @@ const TILES: DownloadTile[] = [
   },
 ]
 
-function Tile({ tile }: { tile: DownloadTile }) {
+function Tile({ tile, onDelete }: { tile: DownloadTile & { id?: string }; onDelete?: () => void }) {
   const isInstaller = tile.category === 'installer'
   return (
-    <a
-      href={tile.href}
-      target={isInstaller ? '_blank' : '_self'}
-      rel={isInstaller ? 'noreferrer' : undefined}
-      className={`glass rounded-2xl p-5 border-l-4 ${tile.accent} hover:bg-white/5 transition-colors flex items-start gap-4 group`}
-    >
-      <span className="text-3xl flex-shrink-0">{tile.icon}</span>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h3 className="font-bold text-white">{tile.title}</h3>
-          {tile.badge && (
-            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-white/10 border border-white/10 text-white/60 font-mono">
-              {tile.badge}
-            </span>
-          )}
+    <div className={`relative glass rounded-2xl p-5 border-l-4 ${tile.accent} hover:bg-white/5 transition-colors flex items-start gap-4 group`}>
+      {onDelete && (
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete() }}
+          className="absolute top-2 right-2 text-white/30 hover:text-red-400 text-xs"
+          title="Delete this tile"
+        >
+          ✕
+        </button>
+      )}
+      <a
+        href={tile.href}
+        target={isInstaller ? '_blank' : '_self'}
+        rel={isInstaller ? 'noreferrer' : undefined}
+        className="flex items-start gap-4 flex-1 min-w-0"
+      >
+        <span className="text-3xl flex-shrink-0">{tile.icon}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-bold text-white">{tile.title}</h3>
+            {tile.badge && (
+              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-white/10 border border-white/10 text-white/60 font-mono">
+                {tile.badge}
+              </span>
+            )}
+          </div>
+          <p className="text-white/50 text-xs mt-1">{tile.subtitle}</p>
+          <p className="text-saffron-300 text-xs mt-2 font-mono truncate group-hover:underline">
+            {isInstaller ? '↓ Download' : '↗ Open'} {tile.href.replace(/^https?:\/\//, '')}
+          </p>
         </div>
-        <p className="text-white/50 text-xs mt-1">{tile.subtitle}</p>
-        <p className="text-saffron-300 text-xs mt-2 font-mono truncate group-hover:underline">
-          {isInstaller ? '↓ Download' : '↗ Open'} {tile.href.replace(/^https?:\/\//, '')}
-        </p>
-      </div>
-    </a>
+      </a>
+    </div>
   )
 }
 
@@ -340,9 +352,61 @@ function ShitalAppSection() {
   )
 }
 
+interface DbTile extends DownloadTile { id: string }
+
 export default function DownloadsPage() {
-  const installers = TILES.filter(t => t.category === 'installer')
-  const webApps    = TILES.filter(t => t.category === 'web')
+  const [dbTiles, setDbTiles] = useState<DbTile[]>([])
+  const [showAdd, setShowAdd] = useState(false)
+  const [form, setForm] = useState<Partial<DbTile>>({
+    title: '', subtitle: '', icon: '📦', href: '', badge: 'Link',
+    category: 'installer', accent: 'border-l-saffron-500/50',
+  })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/v1/admin/software-downloads')
+      const j = await r.json()
+      setDbTiles((j?.items as DbTile[]) || [])
+    } catch { /* keep whatever we have */ }
+  }
+  useEffect(() => { refresh() }, [])
+
+  async function addTile() {
+    setSaving(true); setErr('')
+    try {
+      const r = await fetch('/api/v1/admin/software-downloads', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', body: JSON.stringify(form),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        setErr(typeof j?.detail === 'string' ? j.detail : 'Could not add')
+        return
+      }
+      setShowAdd(false)
+      setForm({ title: '', subtitle: '', icon: '📦', href: '', badge: 'Link', category: 'installer', accent: 'border-l-saffron-500/50' })
+      refresh()
+    } catch { setErr('Network error') }
+    finally { setSaving(false) }
+  }
+
+  async function deleteTile(id: string) {
+    if (!confirm('Delete this tile? This cannot be undone.')) return
+    try {
+      await fetch(`/api/v1/admin/software-downloads/${encodeURIComponent(id)}`, {
+        method: 'DELETE', credentials: 'include',
+      })
+      refresh()
+    } catch { /* ignore */ }
+  }
+
+  // Merge: hardcoded defaults + any admin-added rows from the DB.
+  const dbInstallers = dbTiles.filter(t => t.category === 'installer')
+  const dbWebApps    = dbTiles.filter(t => t.category === 'web')
+  const installers = [...TILES.filter(t => t.category === 'installer'), ...dbInstallers]
+  const webApps    = [...TILES.filter(t => t.category === 'web'),       ...dbWebApps]
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -358,9 +422,72 @@ export default function DownloadsPage() {
       <ShitalAppSection />
 
       <section className="space-y-3">
-        <h2 className="text-white/70 font-bold text-sm uppercase tracking-wider">Kiosk app — installers</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-white/70 font-bold text-sm uppercase tracking-wider">Kiosk app — installers</h2>
+          <button
+            type="button"
+            onClick={() => setShowAdd(v => !v)}
+            className="text-xs px-3 py-1.5 rounded-lg bg-saffron-500/15 border border-saffron-500/40 text-saffron-200 hover:bg-saffron-500/25"
+          >
+            {showAdd ? '✕ Cancel' : '+ Add tile'}
+          </button>
+        </div>
+
+        {showAdd && (
+          <div className="glass rounded-2xl p-4 space-y-3 border border-white/10">
+            <p className="text-white/60 text-xs">
+              New tiles are stored in the database — they appear immediately with no deploy.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="block text-xs text-white/60">Title
+                <input value={form.title || ''} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                  className="w-full mt-1 px-3 py-2 rounded bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-saffron-400/60" />
+              </label>
+              <label className="block text-xs text-white/60">Icon (emoji)
+                <input value={form.icon || ''} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))}
+                  placeholder="📦"
+                  className="w-full mt-1 px-3 py-2 rounded bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-saffron-400/60" />
+              </label>
+              <label className="block text-xs text-white/60 md:col-span-2">Subtitle
+                <input value={form.subtitle || ''} onChange={e => setForm(f => ({ ...f, subtitle: e.target.value }))}
+                  className="w-full mt-1 px-3 py-2 rounded bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-saffron-400/60" />
+              </label>
+              <label className="block text-xs text-white/60 md:col-span-2">URL
+                <input value={form.href || ''} onChange={e => setForm(f => ({ ...f, href: e.target.value }))}
+                  placeholder="https://…"
+                  className="w-full mt-1 px-3 py-2 rounded bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-saffron-400/60" />
+              </label>
+              <label className="block text-xs text-white/60">Badge
+                <input value={form.badge || ''} onChange={e => setForm(f => ({ ...f, badge: e.target.value }))}
+                  placeholder="Link / Play Store / .apk / Web"
+                  className="w-full mt-1 px-3 py-2 rounded bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-saffron-400/60" />
+              </label>
+              <label className="block text-xs text-white/60">Category
+                <select value={form.category || 'installer'} onChange={e => setForm(f => ({ ...f, category: e.target.value as 'installer' | 'web' }))}
+                  className="w-full mt-1 px-3 py-2 rounded bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-saffron-400/60">
+                  <option value="installer">Installer (opens in new tab)</option>
+                  <option value="web">Web app (opens here)</option>
+                </select>
+              </label>
+            </div>
+            {err && <p className="text-xs text-red-300">{err}</p>}
+            <div className="flex gap-2">
+              <button onClick={addTile} disabled={saving || !form.title || !form.href}
+                className="px-4 py-2 rounded bg-saffron-500 hover:bg-saffron-400 text-black font-bold text-sm disabled:opacity-40">
+                {saving ? 'Adding…' : 'Add'}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {installers.map(t => <Tile key={t.href} tile={t} />)}
+          {installers.map((t, i) => (
+            <Tile
+              key={('id' in t && (t as DbTile).id) || t.href || `inst-${i}`}
+              tile={t}
+              onDelete={('id' in t && (t as DbTile).id) ? () => deleteTile((t as DbTile).id) : undefined}
+            />
+          ))}
         </div>
         <p className="text-white/30 text-xs">
           Windows installers are <strong>unsigned</strong> — Windows SmartScreen will warn on first install.
@@ -372,7 +499,13 @@ export default function DownloadsPage() {
       <section className="space-y-3">
         <h2 className="text-white/70 font-bold text-sm uppercase tracking-wider">Business apps — open in browser</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {webApps.map(t => <Tile key={t.href} tile={t} />)}
+          {webApps.map((t, i) => (
+            <Tile
+              key={('id' in t && (t as DbTile).id) || t.href || `web-${i}`}
+              tile={t}
+              onDelete={('id' in t && (t as DbTile).id) ? () => deleteTile((t as DbTile).id) : undefined}
+            />
+          ))}
         </div>
       </section>
 
