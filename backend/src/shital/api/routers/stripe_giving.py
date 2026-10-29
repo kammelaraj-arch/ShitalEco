@@ -260,7 +260,10 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
     # ui_mode branches: hosted uses success_url/cancel_url; embedded uses a
     # single return_url and will deliver `?session_id=...` back to the SPA.
     if body.ui_mode == "embedded":
-        base_kwargs["ui_mode"] = "embedded"
+        # Stripe renamed "embedded" → "embedded_page" (the old value now errors
+        # with "no longer supported"). The frontend contract stays as "embedded"
+        # — we just translate here.
+        base_kwargs["ui_mode"] = "embedded_page"
         base_kwargs["return_url"] = (
             f"{origin}/?screen=monthly-giving&status=approved&provider=stripe"
             f"&branch={body.branch_id}&amt={amount}&session_id={{CHECKOUT_SESSION_ID}}"
