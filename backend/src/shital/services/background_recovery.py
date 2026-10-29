@@ -1155,72 +1155,84 @@ async def _paypal_recover_orphans_from_history(days: int = 90) -> dict[str, Any]
     return summary
 
 
+async def _run_sweep(name: str, coro_factory: Any, timeout: int = 90) -> None:
+    """Run one sweep with a bounded wait_for + full exception shield.
+
+    The old recovery_loop guarded exceptions per-sweep but NOT the await
+    itself. If a sweep hung — SumUp API not responding, DB connection
+    stuck mid-query — the loop blocked indefinitely and never ran another
+    pass. That is the suspected cause of the "~5 min after start"
+    crash symptom (not an OOM; the loop just stopped making progress and
+    looked dead to the watchdog).
+
+    Wrapping in asyncio.wait_for gives a hard upper bound per sweep so no
+    one bad call can wedge the whole loop.
+    """
+    try:
+        res = await asyncio.wait_for(coro_factory(), timeout=timeout)
+        logger.info(f"recovery_{name}", result=res)
+    except TimeoutError:
+        logger.warning(f"recovery_{name}_timeout", seconds=timeout)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"recovery_{name}_failed", error=str(exc))
+
+
 async def recovery_loop() -> None:
     """Forever-loop. Sleeps RECOVERY_INTERVAL_SECONDS between passes.
     Each pass runs the SumUp sweep, the Stripe reconcile, the Stripe account-health
     check, then the alert digest, independently — a failure in one does not affect
-    the others."""
+    the others. Each call is bounded by a per-sweep timeout so a hung HTTP
+    call cannot block the whole loop (see _run_sweep)."""
     # Initial delay so the schema patch + Digital DNA load finish first.
     await asyncio.sleep(60)
     while True:
-        try:
-            sumup = await _sumup_reconcile_once()
-            logger.info("recovery_sumup_sweep", result=sumup)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("recovery_sumup_failed", error=str(exc))
-        try:
-            stripe_recon = await _stripe_reconcile_once()
-            logger.info("recovery_stripe_sweep", result=stripe_recon)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("recovery_stripe_sweep_failed", error=str(exc))
-        try:
-            stripe_health = await _stripe_account_health_once()
-            logger.info("recovery_stripe_health", result=stripe_health)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("recovery_stripe_health_failed", error=str(exc))
-        try:
-            paypal = await _paypal_reconcile_once()
-            logger.info("recovery_paypal_reconcile", result=paypal)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("recovery_paypal_reconcile_failed", error=str(exc))
+        await _run_sweep("sumup_sweep", _sumup_reconcile_once, timeout=120)
+        await _run_sweep("stripe_sweep", _stripe_reconcile_once, timeout=120)
+        await _run_sweep("stripe_health", _stripe_account_health_once, timeout=60)
+        await _run_sweep("paypal_reconcile", _paypal_reconcile_once, timeout=120)
         try:
             # Stripe monthly-giving reconcile — the mirror of the PayPal one, so
             # Stripe subscriptions self-heal to ACTIVE + record ongoing invoices
             # automatically (not only via the manual admin button).
             from shital.api.routers.stripe_giving import _stripe_giving_reconcile_once
-            stripe_giving = await _stripe_giving_reconcile_once()
-            logger.info("recovery_stripe_giving_reconcile", result=stripe_giving)
+            await _run_sweep(
+                "stripe_giving_reconcile",
+                _stripe_giving_reconcile_once,
+                timeout=120,
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.error("recovery_stripe_giving_reconcile_failed", error=str(exc))
-        try:
-            # PayPal orphan recovery — scans PayPal webhook event history for
-            # EXPIRED rows that lost their paypal_subscription_id, matches
-            # them back by donor email, flips ACTIVE. Added to the loop 23 Oct
-            # so operators don't have to click the admin button for stuck
-            # Tanika-shaped donors; the loop auto-heals them.
-            paypal_recover = await _paypal_recover_orphans_from_history()
-            logger.info("recovery_paypal_recover_orphans", result=paypal_recover)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("recovery_paypal_recover_orphans_failed", error=str(exc))
-        try:
-            # Card reader auto-heal — fixes terminal_devices rows whose
-            # provider column disagrees with the identifier format (SumUp
-            # Solo serials with provider='stripe_terminal', etc.). The
-            # classifier is deterministic so there's no judgement needed;
-            # same action as Admin → Card Readers → 🩺 Health Check →
-            # 🩹 Auto-heal. Running it on the loop means the fleet
-            # self-corrects within one RECOVERY_INTERVAL_SECONDS window
-            # of any new corruption (including stale pre-#231 rows).
-            card_reader_heal = await _auto_heal_card_readers_once()
-            logger.info("recovery_card_reader_heal", result=card_reader_heal)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("recovery_card_reader_heal_failed", error=str(exc))
-        try:
-            digest = await _alert_digest_once()
-            logger.info("recovery_alert_digest", result=digest)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("recovery_alert_digest_failed", error=str(exc))
+            logger.error("recovery_stripe_giving_import_failed", error=str(exc))
+        await _run_sweep(
+            "paypal_recover_orphans",
+            _paypal_recover_orphans_from_history,
+            timeout=120,
+        )
+        await _run_sweep("alert_digest", _alert_digest_once, timeout=60)
         await asyncio.sleep(RECOVERY_INTERVAL_SECONDS)
+
+
+async def recovery_loop_supervised() -> None:
+    """Supervisor that keeps recovery_loop alive even if it dies.
+
+    If the loop raises something fatal (e.g. an awaited task gets cancelled,
+    an outer context corrupts), we log it, back off a few seconds, and
+    restart. Exponential-ish backoff capped at 10 min so a persistent
+    failure doesn't spin.
+    """
+    delay = 10
+    while True:
+        try:
+            logger.info("recovery_loop_starting")
+            await recovery_loop()
+            logger.warning("recovery_loop_exited_normally")  # should never happen
+        except asyncio.CancelledError:
+            logger.info("recovery_loop_cancelled")
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.error("recovery_loop_crashed", error=str(exc))
+        delay = min(delay * 2, 600)
+        logger.info("recovery_loop_restart_in", seconds=delay)
+        await asyncio.sleep(delay)
 
 
 async def _sumup_reader_status_sync_once() -> dict[str, Any]:
