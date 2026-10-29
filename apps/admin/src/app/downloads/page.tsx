@@ -78,6 +78,15 @@ const TILES: DownloadTile[] = [
     accent:   'border-l-saffron-500/50',
   },
   {
+    title:    'Fully Kiosk Browser (third-party)',
+    subtitle: 'Free Play Store app — point at shital.org.uk/donate/ for lockdown kiosk, no ADB',
+    icon:     '🔒',
+    href:     'https://play.google.com/store/apps/details?id=de.ozerov.fully',
+    badge:    'Play Store',
+    category: 'installer',
+    accent:   'border-l-blue-500/50',
+  },
+  {
     title:    'Kiosk for Linux (portable)',
     subtitle: 'AppImage — runs without install on most x64 distros',
     icon:     '🐧',
