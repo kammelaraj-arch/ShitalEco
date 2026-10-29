@@ -12,8 +12,6 @@ const MONTHLY_TIERS = [
   { amount: 51, title: 'Festival Friend', desc: 'Helps cover special festival and event costs' },
 ]
 
-type MonthlyStep = 0 | 1 | 2 | 3
-
 function MonthlyGivingFlow({
   defaultAmount,
   branchId,
@@ -23,40 +21,9 @@ function MonthlyGivingFlow({
   branchId: string
   onClose: () => void
 }) {
-  const [step, setStep]             = useState<MonthlyStep>(0)
-  const [amount, setAmount]         = useState(defaultAmount || 11)
-  const [firstName, setFirstName]   = useState('')
-  const [surname, setSurname]       = useState('')
-  const [houseNum, setHouseNum]     = useState('')
-  const [postcode, setPostcode]     = useState('')
-  const [email, setEmail]           = useState('')
-  const [giftAid, setGiftAid]       = useState(false)
-  const [submitting, setSubmitting] = useState(false)
+  const [amount, setAmount]           = useState(defaultAmount || 11)
+  const [submitting, setSubmitting]   = useState(false)
   const [submitError, setSubmitError] = useState('')
-
-  // Ideal Postcodes address lookup
-  const [addrList, setAddrList]         = useState<string[]>([])
-  const [selectedAddr, setSelectedAddr] = useState('')
-  const [lookingUp, setLookingUp]       = useState(false)
-  const [addrError, setAddrError]       = useState('')
-
-  async function lookupAddress() {
-    if (!postcode.trim()) return
-    setLookingUp(true); setAddrError(''); setAddrList([]); setSelectedAddr('')
-    try {
-      const res = await fetch(`${API_BASE}/kiosk/postcode/${encodeURIComponent(postcode.trim())}`)
-      const data = await res.json()
-      const all: Array<{ formatted: string }> = data.addresses || []
-      const filtered = houseNum.trim()
-        ? all.filter(a => a.formatted.toLowerCase().includes(houseNum.trim().toLowerCase()))
-        : all
-      const list = (filtered.length > 0 ? filtered : all).map(a => a.formatted)
-      if (!list.length) { setAddrError('No addresses found — check the postcode.'); return }
-      setAddrList(list)
-      if (list.length === 1) setSelectedAddr(list[0])
-    } catch { setAddrError('Lookup failed — please try again.') }
-    finally { setLookingUp(false) }
-  }
 
   async function handleSubmit() {
     setSubmitting(true)
@@ -68,12 +35,6 @@ function MonthlyGivingFlow({
         body: JSON.stringify({
           amount,
           branch_id: branchId,
-          donor_first_name: firstName.trim(),
-          donor_surname: surname.trim(),
-          donor_email: email.trim(),
-          donor_postcode: postcode.trim(),
-          donor_address: selectedAddr || houseNum.trim(),
-          gift_aid_declared: giftAid,
           tier_id: 'custom',
           tier_label: 'Monthly Giving',
           return_origin: window.location.origin,
@@ -92,14 +53,6 @@ function MonthlyGivingFlow({
       setSubmitting(false)
     }
   }
-
-  const inputCls = "w-full px-4 py-3.5 rounded-2xl text-base font-semibold outline-none"
-  const inputStyle = {
-    background: 'rgba(255,255,255,0.07)', color: '#fff',
-    border: '1.5px solid rgba(212,175,55,0.3)', caretColor: '#D4AF37',
-  }
-  const labelCls = "block text-xs font-black uppercase tracking-widest mb-2"
-  const labelStyle = { color: 'rgba(212,175,55,0.7)' }
 
   return (
     <motion.div
@@ -120,181 +73,54 @@ function MonthlyGivingFlow({
         </p>
       </div>
 
-      {/* Step indicator */}
-      <div className="flex justify-center gap-2 py-3 flex-shrink-0">
-        {([0,1,2,3] as const).map(s => (
-          <div key={s} className="w-2 h-2 rounded-full transition-all"
-            style={{ background: step === s ? '#D4AF37' : 'rgba(212,175,55,0.2)', transform: step === s ? 'scale(1.3)' : 'scale(1)' }} />
-        ))}
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-5 pb-4">
-        <AnimatePresence mode="wait">
-
-          {/* Screen 0 — Amount picker */}
-          {step === 0 && (
-            <motion.div key="s0" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }}>
-              <p className="text-[10px] font-black uppercase tracking-widest text-center mb-4"
-                style={{ color: 'rgba(212,175,55,0.5)' }}>Choose your monthly amount</p>
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                {MONTHLY_TIERS.map(t => (
-                  <button key={t.amount} onClick={() => setAmount(t.amount)}
-                    className="relative text-left p-4 rounded-2xl transition-all active:scale-95"
-                    style={{
-                      background: amount === t.amount ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)',
-                      border: `1.5px solid ${amount === t.amount ? 'rgba(212,175,55,0.6)' : 'rgba(255,255,255,0.1)'}`,
-                      boxShadow: amount === t.amount ? '0 0 20px rgba(212,175,55,0.15)' : 'none',
-                    }}>
-                    {t.popular && (
-                      <span className="absolute top-2 right-2 text-[9px] font-black px-2 py-0.5 rounded-full"
-                        style={{ background: '#D4AF37', color: '#1a0000' }}>POPULAR</span>
-                    )}
-                    <p className="text-2xl font-black" style={{ color: amount === t.amount ? '#D4AF37' : '#fff' }}>
-                      £{t.amount}
-                    </p>
-                    <p className="text-xs font-bold mt-0.5" style={{ color: amount === t.amount ? '#D4AF37' : 'rgba(255,255,255,0.6)' }}>
-                      {t.title}
-                    </p>
-                    <p className="text-[10px] mt-1 leading-tight" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                      {t.desc}
-                    </p>
-                  </button>
-                ))}
-              </div>
-              <MonthlyNavButtons onBack={onClose} onNext={() => setStep(1)} canNext={true} nextLabel="Continue →" backLabel="← Close" />
-              <p className="text-center text-[10px] mt-3" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                Secure card payment · Cancel anytime
+      {/* Content — single screen, Continue goes straight to Stripe */}
+      <div className="flex-1 overflow-y-auto px-5 pb-4 pt-3">
+        <p className="text-[10px] font-black uppercase tracking-widest text-center mb-4"
+          style={{ color: 'rgba(212,175,55,0.5)' }}>Choose your monthly amount</p>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          {MONTHLY_TIERS.map(t => (
+            <button key={t.amount} onClick={() => setAmount(t.amount)}
+              className="relative text-left p-4 rounded-2xl transition-all active:scale-95"
+              style={{
+                background: amount === t.amount ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)',
+                border: `1.5px solid ${amount === t.amount ? 'rgba(212,175,55,0.6)' : 'rgba(255,255,255,0.1)'}`,
+                boxShadow: amount === t.amount ? '0 0 20px rgba(212,175,55,0.15)' : 'none',
+              }}>
+              {t.popular && (
+                <span className="absolute top-2 right-2 text-[9px] font-black px-2 py-0.5 rounded-full"
+                  style={{ background: '#D4AF37', color: '#1a0000' }}>POPULAR</span>
+              )}
+              <p className="text-2xl font-black" style={{ color: amount === t.amount ? '#D4AF37' : '#fff' }}>
+                £{t.amount}
               </p>
-            </motion.div>
-          )}
+              <p className="text-xs font-bold mt-0.5" style={{ color: amount === t.amount ? '#D4AF37' : 'rgba(255,255,255,0.6)' }}>
+                {t.title}
+              </p>
+              <p className="text-[10px] mt-1 leading-tight" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                {t.desc}
+              </p>
+            </button>
+          ))}
+        </div>
 
-          {/* Screen 1 — Name */}
-          {step === 1 && (
-            <motion.div key="s1" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
-              <div>
-                <label className={labelCls} style={labelStyle}>First Name *</label>
-                <input className={inputCls} style={inputStyle} placeholder="First name"
-                  value={firstName} onChange={e => setFirstName(e.target.value)} autoFocus />
-              </div>
-              <div>
-                <label className={labelCls} style={labelStyle}>Surname *</label>
-                <input className={inputCls} style={inputStyle} placeholder="Surname"
-                  value={surname} onChange={e => setSurname(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && firstName.trim() && surname.trim() && setStep(2)} />
-              </div>
-              <MonthlyNavButtons
-                onBack={() => setStep(0)}
-                onNext={() => setStep(2)}
-                canNext={!!firstName.trim() && !!surname.trim()}
-              />
-            </motion.div>
-          )}
+        {submitError && (
+          <p className="text-xs text-center mb-3 px-3 py-2 rounded-xl"
+            style={{ color: '#fca5a5', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}>
+            {submitError}
+          </p>
+        )}
 
-          {/* Screen 2 — Address with Ideal Postcodes lookup */}
-          {step === 2 && (
-            <motion.div key="s2" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-3 pt-2">
-              <label className={labelCls} style={labelStyle}>Address Lookup</label>
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-2">
-                  <input
-                    className="px-3 py-3.5 rounded-2xl text-base font-semibold outline-none w-24 flex-shrink-0"
-                    style={inputStyle} placeholder="No."
-                    value={houseNum} onChange={e => setHouseNum(e.target.value)} autoFocus
-                  />
-                  <input
-                    className="flex-1 px-3 py-3.5 rounded-2xl text-base font-semibold outline-none uppercase"
-                    style={inputStyle} placeholder="Postcode"
-                    value={postcode} onChange={e => setPostcode(e.target.value.toUpperCase())}
-                    onKeyDown={e => e.key === 'Enter' && lookupAddress()}
-                  />
-                </div>
-                <button
-                  onClick={lookupAddress} disabled={lookingUp || !postcode.trim()}
-                  className="w-full py-3.5 rounded-2xl font-black text-sm disabled:opacity-40 active:scale-[0.98] transition-all"
-                  style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}
-                >
-                  {lookingUp ? 'Looking up…' : '🔍 Find Address'}
-                </button>
-              </div>
-
-              {addrError && (
-                <p className="text-xs px-1" style={{ color: '#f87171' }}>{addrError}</p>
-              )}
-
-              {addrList.length > 0 && (
-                <div>
-                  <label className={labelCls} style={{ ...labelStyle, marginBottom: '6px' }}>Select Address</label>
-                  <select
-                    value={selectedAddr} onChange={e => setSelectedAddr(e.target.value)}
-                    className="w-full px-4 py-3.5 rounded-2xl text-sm font-semibold outline-none"
-                    style={{ ...inputStyle, color: selectedAddr ? '#fff' : 'rgba(255,255,255,0.4)' }}
-                  >
-                    <option value="">— Select your address —</option>
-                    {addrList.map((a, i) => <option key={i} value={a}>{a}</option>)}
-                  </select>
-                </div>
-              )}
-
-              {selectedAddr && (
-                <div className="px-4 py-2.5 rounded-xl text-xs font-semibold"
-                  style={{ background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.25)', color: '#4ade80' }}>
-                  ✓ {selectedAddr}
-                </div>
-              )}
-
-              <MonthlyNavButtons
-                onBack={() => setStep(1)}
-                onNext={() => setStep(3)}
-                canNext={!!postcode.trim()}
-              />
-            </motion.div>
-          )}
-
-          {/* Screen 3 — Email + Gift Aid */}
-          {step === 3 && (
-            <motion.div key="s3" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} className="space-y-4 pt-2">
-              <div>
-                <label className={labelCls} style={labelStyle}>Email *</label>
-                <input className={inputCls} style={inputStyle} placeholder="your@email.com"
-                  type="email" value={email} onChange={e => setEmail(e.target.value)} autoFocus />
-              </div>
-              <button onClick={() => setGiftAid(v => !v)}
-                className="w-full flex items-start gap-3 p-4 rounded-2xl text-left transition-all"
-                style={{
-                  background: giftAid ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.04)',
-                  border: `1.5px solid ${giftAid ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.1)'}`,
-                }}>
-                <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
-                  style={{ background: giftAid ? '#22c55e' : 'rgba(255,255,255,0.1)', border: giftAid ? 'none' : '2px solid rgba(255,255,255,0.25)' }}>
-                  {giftAid && <span className="text-white text-xs font-black">✓</span>}
-                </div>
-                <div>
-                  <p className="text-sm font-bold" style={{ color: giftAid ? '#4ade80' : 'rgba(255,255,255,0.7)' }}>
-                    Gift Aid declaration
-                  </p>
-                  <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                    I am a UK taxpayer. HMRC will add 25p to every £1 I donate at no cost to me.
-                  </p>
-                </div>
-              </button>
-              {submitError && (
-                <p className="text-xs text-center mt-3 px-3 py-2 rounded-xl"
-                  style={{ color: '#fca5a5', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}>
-                  {submitError}
-                </p>
-              )}
-              <MonthlyNavButtons
-                onBack={() => setStep(2)}
-                onNext={handleSubmit}
-                canNext={!!email.trim()}
-                nextLabel={submitting ? 'Opening checkout…' : 'Continue to Card →'}
-                disabled={submitting}
-              />
-            </motion.div>
-          )}
-
-        </AnimatePresence>
+        <MonthlyNavButtons
+          onBack={onClose}
+          onNext={handleSubmit}
+          canNext={!submitting}
+          nextLabel={submitting ? 'Opening checkout…' : 'Continue →'}
+          backLabel="← Close"
+          disabled={submitting}
+        />
+        <p className="text-center text-[10px] mt-3" style={{ color: 'rgba(255,255,255,0.2)' }}>
+          Secure card payment · Cancel anytime · Enter card on Stripe
+        </p>
       </div>
 
     </motion.div>
