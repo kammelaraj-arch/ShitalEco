@@ -87,6 +87,15 @@ const TILES: DownloadTile[] = [
     accent:   'border-l-blue-500/50',
   },
   {
+    title:    'Fully Single App Kiosk (third-party)',
+    subtitle: 'Free — locks the tablet to our Quick Donation APK instead of a URL',
+    icon:     '🔒',
+    href:     'https://www.fully-kiosk.com/en/#singleapp',
+    badge:    'External',
+    category: 'installer',
+    accent:   'border-l-blue-500/50',
+  },
+  {
     title:    'Kiosk for Linux (portable)',
     subtitle: 'AppImage — runs without install on most x64 distros',
     icon:     '🐧',
