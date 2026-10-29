@@ -320,9 +320,9 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
             ) from exc2
 
     if body.ui_mode == "embedded":
-        from shital.core.fabrics.config import settings as _settings
-        from shital.core.fabrics.secrets import SecretsManager as _SM
-        pk = await _SM.get("STRIPE_PUBLISHABLE_KEY", _settings.STRIPE_PUBLISHABLE_KEY) or ""
+        from shital.core.fabrics.config import settings
+        from shital.core.fabrics.secrets import SecretsManager
+        pk = await SecretsManager.get("STRIPE_PUBLISHABLE_KEY", settings.STRIPE_PUBLISHABLE_KEY) or ""
         return {
             "client_secret":    session.client_secret,
             "publishable_key":  pk,
