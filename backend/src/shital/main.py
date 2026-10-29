@@ -108,15 +108,15 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
                     mailboxes=settings.MAIL_AGENT_MAILBOXES)
 
     # ── Background recovery loop ─────────────────────────────────────────
-    # Runs forever inside the backend process. DISABLED via env var on prod
-    # while we diagnose a crash that happens ~5 min after the loop starts
-    # (suspected OOM during SumUp transactions-API pagination, or
-    # uncaught exception in _sumup_reconcile_once tearing down the asyncio
-    # event loop). Set RECOVERY_LOOP_ENABLED=1 to re-enable.
+    # Runs forever inside the backend process under a supervisor that
+    # restarts the loop if it crashes. Each per-pass sweep now has its
+    # own asyncio.wait_for() ceiling so a hanging SumUp / Stripe / PayPal
+    # call cannot block the next pass (the previous root cause of the
+    # "stops after ~5 min" symptom). Set RECOVERY_LOOP_ENABLED=0 to disable.
     _recovery_task: _asyncio.Task[None] | None = None
-    if os.environ.get("RECOVERY_LOOP_ENABLED", "0") == "1":
-        from shital.services.background_recovery import recovery_loop
-        _recovery_task = _asyncio.create_task(recovery_loop())
+    if os.environ.get("RECOVERY_LOOP_ENABLED", "1") == "1":
+        from shital.services.background_recovery import recovery_loop_supervised
+        _recovery_task = _asyncio.create_task(recovery_loop_supervised())
         logger.info("recovery_loop_started")
     else:
         logger.info("recovery_loop_disabled_via_env")

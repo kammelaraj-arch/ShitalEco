@@ -62,6 +62,58 @@ async def stripe_config() -> dict[str, Any]:
     return {"publishable_key": pk, "currency": "GBP", "enabled": bool(sk and whsec)}
 
 
+@router.get("/service/stripe/diagnostics")
+async def stripe_diagnostics() -> dict[str, Any]:
+    """Read-only diagnostic — one call to Stripe's API to sanity-check that
+    monthly giving (hosted Checkout, subscriptions) can actually run.
+
+    Returns:
+      * configured flags for secret key / publishable key / webhook secret
+      * stripe.Account.retrieve() result: charges_enabled, payouts_enabled,
+        details_submitted — the three fields that decide whether Stripe will
+        accept Checkout.Session.create at all
+      * last error if the API call itself fails
+
+    No sensitive data in the response (no key values, no customer data).
+    """
+    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
+
+    sk = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY) or ""
+    pk = await SecretsManager.get("STRIPE_PUBLISHABLE_KEY", settings.STRIPE_PUBLISHABLE_KEY) or ""
+    whsec = await SecretsManager.get("STRIPE_WEBHOOK_SECRET", settings.STRIPE_WEBHOOK_SECRET) or ""
+
+    out: dict[str, Any] = {
+        "secret_key_set":    bool(sk),
+        "secret_key_prefix": sk[:7] if sk else "",   # e.g. "sk_live" / "sk_test"
+        "publishable_set":   bool(pk),
+        "webhook_secret_set": bool(whsec),
+        "account":           None,
+        "errors":            [],
+    }
+    if not sk:
+        out["errors"].append("STRIPE_SECRET_KEY not configured")
+        return out
+
+    try:
+        stripe = await _stripe()
+        acct = stripe.Account.retrieve()
+        out["account"] = {
+            "id":                 getattr(acct, "id", None),
+            "country":            getattr(acct, "country", None),
+            "default_currency":   getattr(acct, "default_currency", None),
+            "charges_enabled":    getattr(acct, "charges_enabled", None),
+            "payouts_enabled":    getattr(acct, "payouts_enabled", None),
+            "details_submitted":  getattr(acct, "details_submitted", None),
+            "business_type":      getattr(acct, "business_type", None),
+            "email":              getattr(acct, "email", None),
+        }
+    except Exception as exc:  # noqa: BLE001
+        out["errors"].append(f"stripe_account_retrieve: {str(exc)[:300]}")
+
+    return out
+
+
 # ── Create Checkout Session ─────────────────────────────────────────────────────
 
 class CheckoutBody(BaseModel):
@@ -236,7 +288,16 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
             )
         except Exception as exc2:  # noqa: BLE001
             logger.error("stripe_checkout_create_failed", error=str(exc2), rgs_id=rgs_id)
-            raise HTTPException(502, detail="Could not start card checkout. Please try again.") from exc2
+            # Surface the real Stripe failure to the operator / support agent
+            # instead of a generic "please try again" so a config problem is
+            # fixable without server logs. Clipped to 200 chars so a huge
+            # Stripe error page doesn't leak into the UI.
+            err_detail = str(exc2)[:200] or "Could not start card checkout."
+            err_initial = str(exc)[:200]
+            raise HTTPException(
+                502,
+                detail=f"Stripe Checkout failed. Primary: {err_initial} | Retry: {err_detail}",
+            ) from exc2
 
     return {"url": session.url, "id": session.id, "rgs_id": rgs_id}
 
