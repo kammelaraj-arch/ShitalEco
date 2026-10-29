@@ -15,10 +15,12 @@ const MONTHLY_TIERS = [
 function MonthlyGivingFlow({
   defaultAmount,
   branchId,
+  stripeReaderId,
   onClose,
 }: {
   defaultAmount: number
   branchId: string
+  stripeReaderId: string
   onClose: () => void
 }) {
   const [amount, setAmount]           = useState(defaultAmount || 11)
@@ -29,6 +31,13 @@ function MonthlyGivingFlow({
   const [embeddedOpen, setEmbeddedOpen] = useState(false)
   const embeddedRef = React.useRef<HTMLDivElement | null>(null)
   const embeddedInstanceRef = React.useRef<{ destroy: () => void } | null>(null)
+
+  // Tap-to-subscribe (Stripe Terminal) state
+  const [tapOpen, setTapOpen] = useState(false)
+  const [tapStatus, setTapStatus] = useState<'starting' | 'awaiting_tap' | 'processing' | 'subscribed' | 'failed'>('starting')
+  const [tapError, setTapError] = useState('')
+  const tapPollRef = React.useRef<number | null>(null)
+  const canTap = !!stripeReaderId.trim()
 
   const effectiveAmount = customMode
     ? Math.max(1, Math.min(10000, Number(customAmount) || 0))
@@ -89,6 +98,78 @@ function MonthlyGivingFlow({
     embeddedInstanceRef.current = null
     setEmbeddedOpen(false)
   }
+
+  async function handleTap() {
+    if (!canTap) return
+    setTapOpen(true)
+    setTapStatus('starting')
+    setTapError('')
+    try {
+      const res = await fetch(`${API_BASE}/service/giving/stripe/reader/start-subscription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: effectiveAmount,
+          branch_id: branchId,
+          reader_id: stripeReaderId,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.setup_intent_id) {
+        setTapStatus('failed')
+        setTapError(typeof data?.detail === 'string' ? data.detail : 'Could not reach the card reader. Please try again.')
+        return
+      }
+      setTapStatus('awaiting_tap')
+      // Poll /reader/status/{si_id} every 2s until succeeded / failed / timeout
+      const siId = data.setup_intent_id as string
+      let elapsed = 0
+      const maxMs = 120_000
+      const stepMs = 2000
+      tapPollRef.current = window.setInterval(async () => {
+        elapsed += stepMs
+        if (elapsed > maxMs) {
+          window.clearInterval(tapPollRef.current!)
+          tapPollRef.current = null
+          setTapStatus('failed')
+          setTapError('No card tapped in time. Please try again.')
+          return
+        }
+        try {
+          const sres = await fetch(`${API_BASE}/service/giving/stripe/reader/status/${encodeURIComponent(siId)}`)
+          const sdata = await sres.json().catch(() => ({}))
+          if (sdata?.status === 'subscribed') {
+            window.clearInterval(tapPollRef.current!)
+            tapPollRef.current = null
+            setTapStatus('subscribed')
+          } else if (sdata?.status === 'canceled' || sdata?.status === 'failed') {
+            window.clearInterval(tapPollRef.current!)
+            tapPollRef.current = null
+            setTapStatus('failed')
+            setTapError('Payment was cancelled. Please try again.')
+          } else if (sdata?.status === 'succeeded') {
+            setTapStatus('processing')
+          }
+        } catch { /* keep polling */ }
+      }, stepMs)
+    } catch {
+      setTapStatus('failed')
+      setTapError('Network error — please check your connection and try again.')
+    }
+  }
+
+  function closeTap() {
+    if (tapPollRef.current) {
+      window.clearInterval(tapPollRef.current)
+      tapPollRef.current = null
+    }
+    setTapOpen(false)
+  }
+
+  useEffect(() => () => {
+    if (tapPollRef.current) window.clearInterval(tapPollRef.current)
+    try { embeddedInstanceRef.current?.destroy() } catch { /* ignore */ }
+  }, [])
 
   return (
     <motion.div
@@ -177,11 +258,21 @@ function MonthlyGivingFlow({
           </p>
         )}
 
+        {canTap && (
+          <button
+            onClick={handleTap}
+            disabled={!canContinue}
+            className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-40 active:scale-[0.97] transition-all mb-3 flex items-center justify-center gap-2"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000', boxShadow: '0 8px 24px rgba(212,175,55,0.35)' }}
+          >
+            📱 Tap Card on Reader · £{effectiveAmount}/mo
+          </button>
+        )}
         <MonthlyNavButtons
           onBack={onClose}
           onNext={handleSubmit}
           canNext={canContinue}
-          nextLabel={submitting ? 'Opening checkout…' : `Continue · £${effectiveAmount}/mo →`}
+          nextLabel={submitting ? 'Opening checkout…' : canTap ? `Enter card details instead` : `Continue · £${effectiveAmount}/mo →`}
           backLabel="← Back"
           disabled={submitting}
         />
@@ -189,6 +280,72 @@ function MonthlyGivingFlow({
           Secure card payment · Cancel anytime · Powered by Stripe
         </p>
       </div>
+
+      {/* Tap-to-subscribe overlay — Stripe Terminal reader flow */}
+      {tapOpen && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center px-6 text-center"
+          style={{ background: 'linear-gradient(160deg,#0d0500 0%,#1a0a00 60%,#0d0500 100%)' }}>
+          {tapStatus === 'starting' && (
+            <>
+              <div className="text-5xl mb-4 animate-pulse" style={{ color: '#D4AF37' }}>📶</div>
+              <p className="text-lg font-black" style={{ color: '#D4AF37' }}>Preparing the reader…</p>
+            </>
+          )}
+          {tapStatus === 'awaiting_tap' && (
+            <>
+              <div className="text-6xl mb-4 animate-pulse">💳</div>
+              <p className="text-xl font-black mb-2" style={{ color: '#D4AF37' }}>Tap your card on the reader</p>
+              <p className="text-sm" style={{ color: 'rgba(255,248,220,0.6)' }}>
+                £{effectiveAmount}/month · Cancel anytime
+              </p>
+              <p className="text-[11px] mt-6" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                Powered by Stripe · Secure PCI-DSS
+              </p>
+            </>
+          )}
+          {tapStatus === 'processing' && (
+            <>
+              <div className="text-5xl mb-4 animate-pulse">⏳</div>
+              <p className="text-lg font-black" style={{ color: '#D4AF37' }}>Setting up your subscription…</p>
+            </>
+          )}
+          {tapStatus === 'subscribed' && (
+            <>
+              <div className="text-6xl mb-4">✅</div>
+              <p className="text-xl font-black" style={{ color: '#4ade80' }}>Thank you — subscription active!</p>
+              <p className="text-sm mt-2" style={{ color: 'rgba(255,248,220,0.7)' }}>
+                £{effectiveAmount}/month will support the temple.
+              </p>
+              <button onClick={() => { closeTap(); onClose() }}
+                className="mt-6 py-3 px-8 rounded-2xl font-black text-sm active:scale-[0.97]"
+                style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#1a0000' }}>
+                Done
+              </button>
+            </>
+          )}
+          {tapStatus === 'failed' && (
+            <>
+              <div className="text-5xl mb-4">⚠️</div>
+              <p className="text-lg font-black mb-2" style={{ color: '#fca5a5' }}>Card reader error</p>
+              <p className="text-sm px-4" style={{ color: 'rgba(255,248,220,0.7)' }}>
+                {tapError || 'Please try again.'}
+              </p>
+              <button onClick={closeTap}
+                className="mt-6 py-3 px-8 rounded-2xl font-black text-sm active:scale-[0.97]"
+                style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,248,220,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}>
+                ← Back
+              </button>
+            </>
+          )}
+          {(tapStatus === 'starting' || tapStatus === 'awaiting_tap' || tapStatus === 'processing') && (
+            <button onClick={closeTap}
+              className="mt-10 py-2 px-5 rounded-xl font-bold text-xs active:scale-[0.97]"
+              style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,248,220,0.5)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Embedded Stripe Checkout overlay — stays inside the kiosk app */}
       {embeddedOpen && (
@@ -576,7 +733,7 @@ function NavButtons({ step, canNext, onBack, onNext, nextLabel = 'Next →' }: {
 }
 
 export function DonationScreen() {
-  const { setScreen, setAmount, branchId, showMonthlyGiving, enableGiftAid, donateTitle, monthlyGivingText, monthlyGivingAmount, setPendingGiftAid } = useDonationStore()
+  const { setScreen, setAmount, branchId, showMonthlyGiving, enableGiftAid, donateTitle, monthlyGivingText, monthlyGivingAmount, setPendingGiftAid, stripeReaderId, readerProvider } = useDonationStore()
 
   const [tiles, setTiles]         = useState<AmountTile[]>([])
   const [loading, setLoading]     = useState(true)
@@ -841,6 +998,7 @@ export function DonationScreen() {
           <MonthlyGivingFlow
             defaultAmount={monthlyGivingAmount || 11}
             branchId={branchId}
+            stripeReaderId={readerProvider === 'stripe_terminal' ? stripeReaderId : ''}
             onClose={() => setMonthlyOpen(false)}
           />
         )}
