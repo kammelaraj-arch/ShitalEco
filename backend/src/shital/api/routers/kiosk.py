@@ -1490,7 +1490,7 @@ async def list_sumup_configured_kiosks(ctx: CurrentSpace) -> dict[str, Any]:
                 td.provider                  AS current_reader_provider
             FROM donations d
             JOIN kiosk_devices kd ON kd.id = d.kiosk_device_id
-            LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+            LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id AND td.deleted_at IS NULL AND COALESCE(td.is_active, true) = true
             WHERE UPPER(COALESCE(d.payment_provider, '')) = 'SUMUP'
               AND d.deleted_at IS NULL
               AND kd.deleted_at IS NULL
@@ -3218,7 +3218,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(td.clover_device_id, '') AS clover_device_id,
                        b.name AS branch_name
                 FROM kiosk_devices kd
-                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id AND td.deleted_at IS NULL AND COALESCE(td.is_active, true) = true
                 LEFT JOIN branches b ON b.branch_id = kd.branch_id
                 WHERE LOWER(kd.device_username) = :uname
                   AND kd.deleted_at IS NULL
@@ -3374,7 +3374,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
                        COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial
                 FROM kiosk_devices kd
-                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id AND td.deleted_at IS NULL AND COALESCE(td.is_active, true) = true
                 WHERE kd.branch_id = :branch_id
                   AND kd.device_type = 'QUICK_DONATION'
                   AND kd.deleted_at IS NULL
@@ -3589,7 +3589,7 @@ async def quick_kiosk_refresh_config(username: str):
                        COALESCE(td.clover_device_id, '') AS clover_device_id,
                        b.name AS branch_name
                 FROM kiosk_devices kd
-                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id
+                LEFT JOIN terminal_devices td ON td.id = kd.card_reader_id AND td.deleted_at IS NULL AND COALESCE(td.is_active, true) = true
                 LEFT JOIN branches b ON b.branch_id = kd.branch_id
                 WHERE LOWER(kd.device_username) = :uname
                   AND kd.deleted_at IS NULL
