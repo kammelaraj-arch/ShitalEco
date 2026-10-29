@@ -223,6 +223,20 @@ jobs:
         env:
           QD_LIVE_URL: "https://donate.shital.org.uk/donate/"
         run: npx cap sync android --inline
+      - name: Apply fullscreen overlay
+        working-directory: apps/quick-donation
+        # Overwrites Capacitor's generated MainActivity.java with the
+        # fullscreen / immersive-sticky / keep-screen-on variant, then
+        # patches AndroidManifest.xml for singleTask + locked portrait +
+        # WAKE_LOCK. No boot receiver, no device-admin receiver — the APK
+        # is also installed on devotees' personal phones.
+        run: |
+          mkdir -p android/app/src/main/java/org/shital/quickdonation
+          cp android-kiosk-overlay/MainActivity.java \
+             android/app/src/main/java/org/shital/quickdonation/MainActivity.java
+          python3 scripts/patch-manifest.py \
+            --manifest android/app/src/main/AndroidManifest.xml \
+            --snippet  android-kiosk-overlay/AndroidManifest.kiosk-snippet.xml
       - name: Generate app icons (SHITAL logo)
         working-directory: apps/quick-donation
         run: |
