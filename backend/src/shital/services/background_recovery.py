@@ -1171,7 +1171,7 @@ async def _run_sweep(name: str, coro_factory: Any, timeout: int = 90) -> None:
     try:
         res = await asyncio.wait_for(coro_factory(), timeout=timeout)
         logger.info(f"recovery_{name}", result=res)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(f"recovery_{name}_timeout", seconds=timeout)
     except Exception as exc:  # noqa: BLE001
         logger.error(f"recovery_{name}_failed", error=str(exc))
