@@ -196,10 +196,12 @@ function GiftAidFlow({
   amount,
   onConfirm,
   onSkip,
+  onCancel,
 }: {
   amount: number
   onConfirm: (firstName: string, surname: string, houseNum: string, postcode: string, email: string) => void
   onSkip: () => void
+  onCancel: () => void
 }) {
   const [step, setStep]         = useState<GiftAidFlowStep>(0)
   const [firstName, setFirstName] = useState('')
@@ -323,6 +325,16 @@ function GiftAidFlow({
               <p className="text-[10px] text-center" style={{ color: 'rgba(255,248,220,0.25)' }}>
                 ✓ No extra payment &nbsp;·&nbsp; ✓ Takes 30 seconds &nbsp;·&nbsp; ✓ HMRC approved
               </p>
+
+              {/* Back to amount selection */}
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={onCancel}
+                className="w-full rounded-2xl py-3 font-black text-sm active:scale-[0.97] transition-all"
+                style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,248,220,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                ← Back
+              </motion.button>
             </motion.div>
           )}
 
@@ -725,6 +737,7 @@ export function DonationScreen() {
             amount={pendingAmount}
             onConfirm={(fn, sn, hn, pc, em) => proceedToPayment(pendingAmount, { firstName: fn, surname: sn, houseNum: hn, postcode: pc, email: em })}
             onSkip={() => proceedToPayment(pendingAmount, null)}
+            onCancel={() => setPendingAmount(null)}
           />
         )}
       </AnimatePresence>
