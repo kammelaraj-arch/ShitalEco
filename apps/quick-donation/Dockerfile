@@ -43,14 +43,24 @@ server {
     gzip_min_length 1024;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript image/svg+xml;
 
-    # Cache static assets
+    # Cache hashed static assets forever (filenames change on every build)
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
 
-    # SPA fallback
+    # Never cache the HTML shell — it points at the current bundle hashes
+    location = /index.html {
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        expires -1;
+    }
+
+    # SPA fallback — serve index.html for client-side routes
     location / {
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        expires -1;
         try_files $uri $uri/ /index.html;
     }
 
