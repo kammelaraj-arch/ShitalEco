@@ -281,45 +281,53 @@ function GiftAidFlow({
           {step === 0 && (
             <motion.div key="ga0" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
               className="flex flex-col gap-4 pt-4">
-              {/* Amount breakdown */}
-              <div className="rounded-2xl p-4 text-center" style={{ background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)' }}>
-                <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(74,222,128,0.6)' }}>
+              {/* Amount breakdown — informational header, NOT a button */}
+              <div className="text-center py-2">
+                <p className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: 'rgba(74,222,128,0.55)' }}>
                   Your donation: £{amount.toFixed(2)}
                 </p>
-                <p className="text-3xl font-black" style={{ color: '#4ade80' }}>
+                <p className="text-3xl font-black leading-tight" style={{ color: '#4ade80' }}>
                   Temple gets £{totalAmount}
                 </p>
-                <p className="text-sm mt-1" style={{ color: 'rgba(74,222,128,0.65)' }}>
+                <p className="text-xs mt-1" style={{ color: 'rgba(74,222,128,0.5)' }}>
                   +£{gaAmount} from HMRC at no cost to you
                 </p>
               </div>
 
-              {/* Boost with Gift Aid — recommended */}
+              {/* Boost with Gift Aid — primary action, obvious button */}
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={() => setStep(1)}
-                className="w-full rounded-2xl p-5 text-center"
-                style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', boxShadow: '0 8px 24px rgba(22,163,74,0.45)' }}
+                className="w-full rounded-2xl p-5 text-center relative"
+                style={{
+                  background: 'linear-gradient(135deg,#16a34a,#15803d)',
+                  boxShadow: '0 10px 28px rgba(22,163,74,0.55), inset 0 1px 0 rgba(255,255,255,0.25)',
+                  border: '2px solid rgba(255,255,255,0.25)',
+                }}
               >
-                <p className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: 'rgba(255,255,255,0.7)' }}>
-                  RECOMMENDED · UK TAXPAYERS
+                <p className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: 'rgba(255,255,255,0.85)' }}>
+                  ★ RECOMMENDED · UK TAXPAYERS
                 </p>
                 <p className="text-lg font-black text-white">
-                  Boost with Gift Aid (+£{gaAmount})
+                  Boost with Gift Aid (+£{gaAmount}) →
                 </p>
-                <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.8)' }}>
+                <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.9)' }}>
                   Temple gets £{totalAmount}
                 </p>
               </motion.button>
 
-              {/* Without Gift Aid */}
+              {/* Without Gift Aid — secondary action, outlined button */}
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={onSkip}
-                className="w-full rounded-2xl py-4 font-bold text-sm"
-                style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,248,220,0.45)', border: '1px solid rgba(255,255,255,0.1)' }}
+                className="w-full rounded-2xl py-4 font-black text-sm active:scale-[0.97] transition-all"
+                style={{
+                  background: 'transparent',
+                  color: 'rgba(255,248,220,0.75)',
+                  border: '1.5px dashed rgba(255,248,220,0.35)',
+                }}
               >
-                Without Gift Aid · Pay £{amount.toFixed(2)}
+                Skip Gift Aid · Pay £{amount.toFixed(2)} →
               </motion.button>
 
               <p className="text-[10px] text-center" style={{ color: 'rgba(255,248,220,0.25)' }}>
