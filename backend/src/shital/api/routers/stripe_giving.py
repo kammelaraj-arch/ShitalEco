@@ -129,6 +129,10 @@ class CheckoutBody(BaseModel):
     tier_id: str = "custom"
     tier_label: str = "Monthly Giving"
     return_origin: str = ""  # e.g. https://service.shital.org.uk (for success/cancel)
+    # "hosted" (default) → return a checkout.stripe.com URL for same-tab redirect.
+    # "embedded" → return a client_secret + publishable_key so the kiosk can mount
+    #              Stripe's embedded Checkout inside its own overlay (no tab switch).
+    ui_mode: str = "hosted"
 
 
 @router.post("/service/giving/stripe/create-checkout")
@@ -251,14 +255,26 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
         metadata=meta,
         subscription_data={"metadata": meta},
         allow_promotion_codes=False,
+        **prefill,
+    )
+    # ui_mode branches: hosted uses success_url/cancel_url; embedded uses a
+    # single return_url and will deliver `?session_id=...` back to the SPA.
+    if body.ui_mode == "embedded":
+        base_kwargs["ui_mode"] = "embedded"
+        base_kwargs["return_url"] = (
+            f"{origin}/?screen=monthly-giving&status=approved&provider=stripe"
+            f"&branch={body.branch_id}&amt={amount}&session_id={{CHECKOUT_SESSION_ID}}"
+        )
+    else:
         # Return to the SAME shape the PayPal flow uses, KEEPING the branch so the
         # donor lands back in their temple's context (not the default). NO bare
         # `amount` param — the SPA treats `?amount=` (without `status`) as a PayPal
         # quick-link and would bounce a just-paid Stripe donor into PayPal; pass `amt`.
-        success_url=f"{origin}/?screen=monthly-giving&status=approved&provider=stripe&branch={body.branch_id}&amt={amount}&session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{origin}/?screen=monthly-giving&status=cancelled&branch={body.branch_id}",
-        **prefill,
-    )
+        base_kwargs["success_url"] = (
+            f"{origin}/?screen=monthly-giving&status=approved&provider=stripe"
+            f"&branch={body.branch_id}&amt={amount}&session_id={{CHECKOUT_SESSION_ID}}"
+        )
+        base_kwargs["cancel_url"] = f"{origin}/?screen=monthly-giving&status=cancelled&branch={body.branch_id}"
     # Nice-to-haves that must never break the donation: full address (Gift Aid),
     # phone, and the Gift Aid question. If Stripe rejects any of these we retry
     # without them so the donor can still give.
@@ -303,6 +319,16 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
                 detail=f"Stripe Checkout failed. Primary: {err_initial} | Retry: {err_detail}",
             ) from exc2
 
+    if body.ui_mode == "embedded":
+        from shital.core.fabrics.config import settings
+        from shital.core.fabrics.secrets import SecretsManager
+        pk = await SecretsManager.get("STRIPE_PUBLISHABLE_KEY", settings.STRIPE_PUBLISHABLE_KEY) or ""
+        return {
+            "client_secret":    session.client_secret,
+            "publishable_key":  pk,
+            "id":               session.id,
+            "rgs_id":           rgs_id,
+        }
     return {"url": session.url, "id": session.id, "rgs_id": rgs_id}
 
 

@@ -26,6 +26,9 @@ function MonthlyGivingFlow({
   const [customAmount, setCustomAmount] = useState('')
   const [submitting, setSubmitting]   = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [embeddedOpen, setEmbeddedOpen] = useState(false)
+  const embeddedRef = React.useRef<HTMLDivElement | null>(null)
+  const embeddedInstanceRef = React.useRef<{ destroy: () => void } | null>(null)
 
   const effectiveAmount = customMode
     ? Math.max(1, Math.min(10000, Number(customAmount) || 0))
@@ -45,20 +48,46 @@ function MonthlyGivingFlow({
           tier_id: 'custom',
           tier_label: 'Monthly Giving',
           return_origin: window.location.origin,
+          ui_mode: 'embedded',
         }),
       })
       const data = await res.json().catch(() => ({}))
-      if (res.ok && data?.url) {
-        window.location.href = data.url
+      if (!res.ok || !data?.client_secret || !data?.publishable_key) {
+        const detail = typeof data?.detail === 'string' ? data.detail : 'Could not start card checkout. Please try again.'
+        setSubmitError(detail)
         return
       }
-      const detail = typeof data?.detail === 'string' ? data.detail : 'Could not start card checkout. Please try again.'
-      setSubmitError(detail)
+      setEmbeddedOpen(true)
+      // Mount Stripe's Embedded Checkout inside our overlay. loadStripe is
+      // tree-shaken from @stripe/stripe-js so the import cost is deferred to
+      // the first "Continue" tap.
+      const { loadStripe } = await import('@stripe/stripe-js')
+      const stripe = await loadStripe(data.publishable_key)
+      if (!stripe || !embeddedRef.current) {
+        setEmbeddedOpen(false)
+        setSubmitError('Stripe failed to load. Please try again.')
+        return
+      }
+      embeddedRef.current.innerHTML = ''
+      const checkout = await (stripe as unknown as {
+        initEmbeddedCheckout: (opts: { fetchClientSecret: () => Promise<string> }) => Promise<{ mount: (el: HTMLElement) => void; destroy: () => void }>
+      }).initEmbeddedCheckout({
+        fetchClientSecret: async () => data.client_secret as string,
+      })
+      embeddedInstanceRef.current = checkout
+      checkout.mount(embeddedRef.current)
     } catch {
+      setEmbeddedOpen(false)
       setSubmitError('Network error — please check your connection and try again.')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  function closeEmbedded() {
+    try { embeddedInstanceRef.current?.destroy() } catch { /* ignore */ }
+    embeddedInstanceRef.current = null
+    setEmbeddedOpen(false)
   }
 
   return (
@@ -157,9 +186,27 @@ function MonthlyGivingFlow({
           disabled={submitting}
         />
         <p className="text-center text-[10px] mt-3" style={{ color: 'rgba(255,255,255,0.2)' }}>
-          Secure card payment · Cancel anytime · Enter card on Stripe
+          Secure card payment · Cancel anytime · Powered by Stripe
         </p>
       </div>
+
+      {/* Embedded Stripe Checkout overlay — stays inside the kiosk app */}
+      {embeddedOpen && (
+        <div className="absolute inset-0 z-40 flex flex-col"
+          style={{ background: 'linear-gradient(160deg,#0d0500 0%,#1a0a00 60%,#0d0500 100%)' }}>
+          <div className="flex items-center justify-between px-5 pt-5 pb-3 flex-shrink-0">
+            <button onClick={closeEmbedded}
+              className="py-2 px-4 rounded-xl font-black text-sm active:scale-[0.97] transition-all"
+              style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,248,220,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}>
+              ← Back
+            </button>
+            <p className="text-xs font-black uppercase tracking-widest" style={{ color: '#D4AF37' }}>
+              £{effectiveAmount}/mo
+            </p>
+          </div>
+          <div className="flex-1 overflow-y-auto px-3 pb-5" ref={embeddedRef} />
+        </div>
+      )}
 
     </motion.div>
   )
