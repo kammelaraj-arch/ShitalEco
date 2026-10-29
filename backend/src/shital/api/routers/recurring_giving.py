@@ -340,12 +340,23 @@ async def get_plan_for_subscription(body: SubscribeBody) -> dict[str, str]:
             raise HTTPException(404, detail="Giving tier not found")
         tier = dict(row_obj)
 
-    plan_id = await _ensure_plan(
-        str(tier["id"]),
-        float(tier["amount"]),  # type: ignore[arg-type]
-        str(tier["label"]),
-        str(tier["frequency"]),
-    )
+    try:
+        plan_id = await _ensure_plan(
+            str(tier["id"]),
+            float(tier["amount"]),  # type: ignore[arg-type]
+            str(tier["label"]),
+            str(tier["frequency"]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Surface the real PayPal / plan-cache failure so the finance trustee
+        # can see what's wrong instead of a bare 500. Clipped to 300 chars so
+        # a huge PayPal error page doesn't leak into the UI.
+        logger.error(
+            "giving_subscribe_plan_failed",
+            error=str(exc), tier_id=body.tier_id, branch_id=body.branch_id,
+        )
+        err = str(exc)[:300] or "PayPal plan creation failed"
+        raise HTTPException(502, detail=f"PayPal plan creation failed: {err}") from exc
 
     # Persist donor info now (pre-PayPal) so we don't lose abandons. Email is
     # the dedup key — without it we have no recovery channel anyway, so skip
