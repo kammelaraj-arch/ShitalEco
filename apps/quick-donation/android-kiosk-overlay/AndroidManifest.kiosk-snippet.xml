@@ -2,14 +2,16 @@
   Fragments patched INTO apps/quick-donation/android/app/src/main/AndroidManifest.xml
   by scripts/patch-manifest.py after `npx cap add android` has generated it.
 
-  Unlike the main Kiosk overlay this is NOT a device-owner single-app
-  lockdown. The Quick Donation APK is also handed out to devotees for
-  their personal phones, so we deliberately avoid HOME intent-filters,
-  boot receivers, and the device admin receiver — just make the app
-  behave as a well-mannered full-screen donation kiosk when it is open.
+  Full kiosk pack: immersive fullscreen MainActivity + boot receiver +
+  device admin receiver so the APK can be provisioned as device owner
+  on a temple kiosk and start on reboot. On a devotee's phone the
+  device-owner call is a silent no-op; the HOME category is also
+  guarded by device-owner (phones that aren't device-owner keep their
+  system launcher).
 -->
 
 <!-- 1) PERMISSIONS — add inside <manifest> before <application> -->
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 <uses-permission android:name="android.permission.WAKE_LOCK" />
 <uses-permission android:name="android.permission.NFC" />
 
@@ -21,11 +23,38 @@
     android:launchMode="singleTask"
     android:resumeWhilePausing="true"
     android:screenOrientation="portrait"
+    android:showOnLockScreen="true"
     android:exported="true"
     android:theme="@style/AppTheme.NoActionBarLaunch">
 
     <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
+        <category android:name="android.intent.category.HOME" />
+        <category android:name="android.intent.category.DEFAULT" />
     </intent-filter>
 </activity>
+
+<!-- 4 + 5) RECEIVERS — add inside <application>, after <activity> -->
+<receiver
+    android:name=".KioskBootReceiver"
+    android:enabled="true"
+    android:exported="true"
+    android:directBootAware="true">
+    <intent-filter android:priority="999">
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+    </intent-filter>
+</receiver>
+
+<receiver
+    android:name=".KioskDeviceAdminReceiver"
+    android:permission="android.permission.BIND_DEVICE_ADMIN"
+    android:exported="true">
+    <meta-data
+        android:name="android.app.device_admin"
+        android:resource="@xml/device_admin" />
+    <intent-filter>
+        <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+    </intent-filter>
+</receiver>

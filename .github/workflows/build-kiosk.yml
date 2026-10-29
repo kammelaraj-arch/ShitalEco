@@ -223,17 +223,27 @@ jobs:
         env:
           QD_LIVE_URL: "https://donate.shital.org.uk/donate/"
         run: npx cap sync android --inline
-      - name: Apply fullscreen overlay
+      - name: Apply fullscreen + lockdown overlay
         working-directory: apps/quick-donation
         # Overwrites Capacitor's generated MainActivity.java with the
-        # fullscreen / immersive-sticky / keep-screen-on variant, then
-        # patches AndroidManifest.xml for singleTask + locked portrait +
-        # WAKE_LOCK. No boot receiver, no device-admin receiver — the APK
-        # is also installed on devotees' personal phones.
+        # fullscreen / immersive-sticky / keep-screen-on / lock-task
+        # variant, copies the boot + device-admin receivers, and patches
+        # AndroidManifest.xml for singleTask + locked portrait + HOME +
+        # BOOT_COMPLETED. On a devotee's phone the lock-task call is a
+        # silent no-op (not device-owner); on a temple kiosk provisioned
+        # via `adb shell dpm set-device-owner` the APK becomes a true
+        # single-app kiosk that auto-starts on reboot.
         run: |
           mkdir -p android/app/src/main/java/org/shital/quickdonation
+          mkdir -p android/app/src/main/res/xml
           cp android-kiosk-overlay/MainActivity.java \
              android/app/src/main/java/org/shital/quickdonation/MainActivity.java
+          cp android-kiosk-overlay/KioskBootReceiver.java \
+             android/app/src/main/java/org/shital/quickdonation/KioskBootReceiver.java
+          cp android-kiosk-overlay/KioskDeviceAdminReceiver.java \
+             android/app/src/main/java/org/shital/quickdonation/KioskDeviceAdminReceiver.java
+          cp android-kiosk-overlay/res/xml/device_admin.xml \
+             android/app/src/main/res/xml/device_admin.xml
           python3 scripts/patch-manifest.py \
             --manifest android/app/src/main/AndroidManifest.xml \
             --snippet  android-kiosk-overlay/AndroidManifest.kiosk-snippet.xml
