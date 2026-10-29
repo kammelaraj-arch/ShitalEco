@@ -35,9 +35,9 @@ def main() -> int:
     # this step the comment body would be matched as real elements.
     snippet_text = re.sub(r"<!--[\s\S]*?-->", "", snippet_text)
 
-    # Sentinel: the launchMode on our replacement MainActivity. If present,
-    # the manifest already carries the fullscreen tweaks.
-    if 'android:launchMode="singleTask"' in manifest_text:
+    # Sentinel: our boot receiver's class name. If present, the manifest
+    # already carries the fullscreen + lockdown tweaks.
+    if "KioskBootReceiver" in manifest_text:
         print("  manifest already patched — no changes")
         return 0
 
@@ -74,10 +74,21 @@ def main() -> int:
         + manifest_text[mainact_match.end() :]
     )
 
+    # 3) Insert any <receiver> blocks before </application>
+    receivers = re.findall(r"<receiver[\s\S]*?</receiver>", snippet_text)
+    if receivers:
+        receiver_xml = "\n\n        ".join(receivers)
+        manifest_text = manifest_text.replace(
+            "</application>",
+            f"        {receiver_xml}\n    </application>",
+            1,
+        )
+
     args.manifest.write_text(manifest_text)
     print(f"  patched {args.manifest}")
     print(f"    + {len(new_perm_lines)} permissions")
     print(f"    + replaced MainActivity with fullscreen block")
+    print(f"    + {len(receivers)} receivers")
     return 0
 
 
