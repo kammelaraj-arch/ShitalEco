@@ -115,7 +115,7 @@ function MonthlyGivingFlow({
           onNext={handleSubmit}
           canNext={!submitting}
           nextLabel={submitting ? 'Opening checkout…' : 'Continue →'}
-          backLabel="← Close"
+          backLabel="← Back"
           disabled={submitting}
         />
         <p className="text-center text-[10px] mt-3" style={{ color: 'rgba(255,255,255,0.2)' }}>
