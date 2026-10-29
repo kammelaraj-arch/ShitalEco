@@ -1,0 +1,31 @@
+<!--
+  Fragments patched INTO apps/quick-donation/android/app/src/main/AndroidManifest.xml
+  by scripts/patch-manifest.py after `npx cap add android` has generated it.
+
+  Unlike the main Kiosk overlay this is NOT a device-owner single-app
+  lockdown. The Quick Donation APK is also handed out to devotees for
+  their personal phones, so we deliberately avoid HOME intent-filters,
+  boot receivers, and the device admin receiver — just make the app
+  behave as a well-mannered full-screen donation kiosk when it is open.
+-->
+
+<!-- 1) PERMISSIONS — add inside <manifest> before <application> -->
+<uses-permission android:name="android.permission.WAKE_LOCK" />
+<uses-permission android:name="android.permission.NFC" />
+
+<!-- 3) MAIN ACTIVITY — REPLACE the existing <activity android:name=".MainActivity"> -->
+<activity
+    android:name=".MainActivity"
+    android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density"
+    android:label="@string/title_activity_main"
+    android:launchMode="singleTask"
+    android:resumeWhilePausing="true"
+    android:screenOrientation="portrait"
+    android:exported="true"
+    android:theme="@style/AppTheme.NoActionBarLaunch">
+
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+</activity>
