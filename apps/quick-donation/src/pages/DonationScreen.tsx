@@ -22,8 +22,15 @@ function MonthlyGivingFlow({
   onClose: () => void
 }) {
   const [amount, setAmount]           = useState(defaultAmount || 11)
+  const [customMode, setCustomMode]   = useState(false)
+  const [customAmount, setCustomAmount] = useState('')
   const [submitting, setSubmitting]   = useState(false)
   const [submitError, setSubmitError] = useState('')
+
+  const effectiveAmount = customMode
+    ? Math.max(1, Math.min(10000, Number(customAmount) || 0))
+    : amount
+  const canContinue = effectiveAmount >= 1 && !submitting
 
   async function handleSubmit() {
     setSubmitting(true)
@@ -33,7 +40,7 @@ function MonthlyGivingFlow({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amount,
+          amount: effectiveAmount,
           branch_id: branchId,
           tier_id: 'custom',
           tier_label: 'Monthly Giving',
@@ -77,31 +84,62 @@ function MonthlyGivingFlow({
       <div className="flex-1 overflow-y-auto px-5 pb-4 pt-3">
         <p className="text-[10px] font-black uppercase tracking-widest text-center mb-4"
           style={{ color: 'rgba(212,175,55,0.5)' }}>Choose your monthly amount</p>
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          {MONTHLY_TIERS.map(t => (
-            <button key={t.amount} onClick={() => setAmount(t.amount)}
-              className="relative text-left p-4 rounded-2xl transition-all active:scale-95"
-              style={{
-                background: amount === t.amount ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)',
-                border: `1.5px solid ${amount === t.amount ? 'rgba(212,175,55,0.6)' : 'rgba(255,255,255,0.1)'}`,
-                boxShadow: amount === t.amount ? '0 0 20px rgba(212,175,55,0.15)' : 'none',
-              }}>
-              {t.popular && (
-                <span className="absolute top-2 right-2 text-[9px] font-black px-2 py-0.5 rounded-full"
-                  style={{ background: '#D4AF37', color: '#1a0000' }}>POPULAR</span>
-              )}
-              <p className="text-2xl font-black" style={{ color: amount === t.amount ? '#D4AF37' : '#fff' }}>
-                £{t.amount}
-              </p>
-              <p className="text-xs font-bold mt-0.5" style={{ color: amount === t.amount ? '#D4AF37' : 'rgba(255,255,255,0.6)' }}>
-                {t.title}
-              </p>
-              <p className="text-[10px] mt-1 leading-tight" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                {t.desc}
-              </p>
-            </button>
-          ))}
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          {MONTHLY_TIERS.map(t => {
+            const selected = !customMode && amount === t.amount
+            return (
+              <button key={t.amount} onClick={() => { setCustomMode(false); setAmount(t.amount) }}
+                className="relative text-left p-4 rounded-2xl transition-all active:scale-95"
+                style={{
+                  background: selected ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)',
+                  border: `1.5px solid ${selected ? 'rgba(212,175,55,0.6)' : 'rgba(255,255,255,0.1)'}`,
+                  boxShadow: selected ? '0 0 20px rgba(212,175,55,0.15)' : 'none',
+                }}>
+                {t.popular && (
+                  <span className="absolute top-2 right-2 text-[9px] font-black px-2 py-0.5 rounded-full"
+                    style={{ background: '#D4AF37', color: '#1a0000' }}>POPULAR</span>
+                )}
+                <p className="text-2xl font-black" style={{ color: selected ? '#D4AF37' : '#fff' }}>
+                  £{t.amount}
+                </p>
+                <p className="text-xs font-bold mt-0.5" style={{ color: selected ? '#D4AF37' : 'rgba(255,255,255,0.6)' }}>
+                  {t.title}
+                </p>
+                <p className="text-[10px] mt-1 leading-tight" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                  {t.desc}
+                </p>
+              </button>
+            )
+          })}
         </div>
+
+        {/* Other amount — custom tile spanning both columns */}
+        <button onClick={() => setCustomMode(true)}
+          className="w-full p-4 rounded-2xl mb-4 flex items-center gap-3 transition-all active:scale-[0.98]"
+          style={{
+            background: customMode ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)',
+            border: `1.5px solid ${customMode ? 'rgba(212,175,55,0.6)' : 'rgba(255,255,255,0.1)'}`,
+            boxShadow: customMode ? '0 0 20px rgba(212,175,55,0.15)' : 'none',
+          }}>
+          <div className="flex-shrink-0">
+            <p className="text-xs font-black uppercase tracking-widest" style={{ color: customMode ? '#D4AF37' : 'rgba(212,175,55,0.6)' }}>Other</p>
+            <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>Any amount £1–£10,000</p>
+          </div>
+          <div className="flex-1 flex items-center gap-2">
+            <span className="text-2xl font-black" style={{ color: customMode ? '#D4AF37' : 'rgba(255,255,255,0.5)' }}>£</span>
+            <input
+              type="number" inputMode="decimal" min={1} max={10000} step={1}
+              placeholder="0"
+              value={customAmount}
+              onChange={e => { setCustomMode(true); setCustomAmount(e.target.value) }}
+              onFocus={() => setCustomMode(true)}
+              onClick={e => e.stopPropagation()}
+              className="w-full text-2xl font-black bg-transparent outline-none"
+              style={{ color: customMode ? '#D4AF37' : '#fff', caretColor: '#D4AF37' }}
+            />
+            <span className="text-xs font-bold" style={{ color: 'rgba(255,255,255,0.4)' }}>/mo</span>
+          </div>
+        </button>
 
         {submitError && (
           <p className="text-xs text-center mb-3 px-3 py-2 rounded-xl"
@@ -113,8 +151,8 @@ function MonthlyGivingFlow({
         <MonthlyNavButtons
           onBack={onClose}
           onNext={handleSubmit}
-          canNext={!submitting}
-          nextLabel={submitting ? 'Opening checkout…' : 'Continue →'}
+          canNext={canContinue}
+          nextLabel={submitting ? 'Opening checkout…' : `Continue · £${effectiveAmount}/mo →`}
           backLabel="← Back"
           disabled={submitting}
         />
