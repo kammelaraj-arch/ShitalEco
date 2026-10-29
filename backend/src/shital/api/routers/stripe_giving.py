@@ -332,6 +332,164 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
     return {"url": session.url, "id": session.id, "rgs_id": rgs_id}
 
 
+# ── Terminal (tap-to-subscribe) ─────────────────────────────────────────────────
+
+class TapStartBody(BaseModel):
+    amount: float
+    branch_id: str = "main"
+    reader_id: str  # Stripe Terminal reader id, e.g. "tmr_FsR..."
+    donor_email: str = ""
+    donor_first_name: str = ""
+    donor_surname: str = ""
+
+
+@router.post("/service/giving/stripe/reader/start-subscription")
+async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
+    """Push a SetupIntent to a Stripe Terminal reader so a donor can save a
+    card by tapping it. The reader prompts for the tap; once the SetupIntent
+    succeeds we attach the card to a Subscription (via /reader/status/...).
+
+    This keeps the kiosk donor in-flow — no browser redirect, no typed card.
+    """
+    amount = float(body.amount or 0)
+    if amount < 1 or amount > 10000:
+        raise HTTPException(400, detail="Amount must be between £1 and £10,000")
+    if not body.reader_id.strip():
+        raise HTTPException(400, detail="Reader id is required.")
+
+    stripe = await _stripe()
+    if not stripe.api_key:
+        raise HTTPException(503, detail="Card giving is not configured yet.")
+
+    rgs_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    full_name = f"{body.donor_first_name} {body.donor_surname}".strip()
+    email = (body.donor_email or "").strip()
+
+    # Pre-insert the PENDING subscription row (linked later by rgs_id metadata).
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    try:
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                INSERT INTO recurring_giving_subscriptions
+                    (id, payment_provider, amount, frequency, status, branch_id,
+                     donor_name, donor_email, donor_first_name, donor_surname,
+                     created_at, updated_at)
+                VALUES
+                    (:id, 'stripe', :amount, 'MONTH', 'PENDING_APPROVAL', :branch,
+                     :name, :email, :first, :surname, :now, :now)
+            """), {
+                "id": rgs_id, "amount": amount, "branch": body.branch_id,
+                "name": full_name, "email": email,
+                "first": body.donor_first_name or "", "surname": body.donor_surname or "",
+                "now": now,
+            })
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tap_prerow_failed", error=str(exc), rgs_id=rgs_id)
+
+    meta = {"rgs_id": rgs_id, "branch_id": body.branch_id, "source": "monthly-giving-tap"}
+
+    try:
+        # Customer first — SetupIntent must be scoped to a Customer so we can
+        # reuse the saved pm on the Subscription.
+        cust = stripe.Customer.create(
+            email=(email or None), name=(full_name or None), metadata=meta,
+            idempotency_key=f"rgs-tap-cust-{rgs_id}",
+        )
+        si = stripe.SetupIntent.create(
+            customer=cust.id,
+            payment_method_types=["card_present"],
+            usage="off_session",
+            metadata={**meta, "amount": str(amount)},
+            idempotency_key=f"rgs-tap-si-{rgs_id}",
+        )
+        action = stripe.terminal.Reader.process_setup_intent(
+            body.reader_id.strip(),
+            setup_intent=si.id,
+            customer_consent_collected=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("tap_start_failed", error=str(exc), rgs_id=rgs_id, reader=body.reader_id)
+        raise HTTPException(502, detail=f"Reader push failed: {str(exc)[:200]}") from exc
+
+    return {
+        "rgs_id":            rgs_id,
+        "customer_id":       cust.id,
+        "setup_intent_id":   si.id,
+        "reader_action":     getattr(action, "action", None),
+        "status":            "awaiting_tap",
+    }
+
+
+@router.get("/service/giving/stripe/reader/status/{setup_intent_id}")
+async def tap_setup_status(setup_intent_id: str) -> dict[str, Any]:
+    """Poll a tap SetupIntent. Once it succeeds we create the Subscription
+    with the just-saved card and return `status=subscribed` so the kiosk can
+    close its "tap your card" screen. Idempotent — calling after creation is
+    cheap because we check for an existing subscription by metadata.rgs_id.
+    """
+    stripe = await _stripe()
+    if not stripe.api_key:
+        raise HTTPException(503, detail="Card giving is not configured yet.")
+
+    try:
+        si = stripe.SetupIntent.retrieve(setup_intent_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, detail=f"SetupIntent not found: {str(exc)[:200]}") from exc
+
+    status = getattr(si, "status", "unknown")
+    rgs_id = (si.metadata or {}).get("rgs_id", "")
+    amount_s = (si.metadata or {}).get("amount", "0")
+    branch_id = (si.metadata or {}).get("branch_id", "main")
+
+    if status != "succeeded":
+        # Still waiting (requires_payment_method / requires_action /
+        # processing) or already canceled. Hand it back to the UI.
+        return {"status": status, "rgs_id": rgs_id}
+
+    # SetupIntent succeeded → create the Subscription (or return the existing
+    # one on retry). We look up any Subscription already attached to this
+    # Customer with the matching rgs_id to stay idempotent.
+    cust_id = si.customer
+    pm_id = si.payment_method
+    if not cust_id or not pm_id:
+        return {"status": "incomplete", "rgs_id": rgs_id}
+
+    try:
+        existing = stripe.Subscription.list(customer=cust_id, limit=5)
+        for s in existing.auto_paging_iter():
+            if (s.metadata or {}).get("rgs_id") == rgs_id:
+                return {"status": "subscribed", "rgs_id": rgs_id, "subscription_id": s.id}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tap_sub_lookup_failed", error=str(exc), rgs_id=rgs_id)
+
+    try:
+        amount = float(amount_s or 0)
+        meta = {"rgs_id": rgs_id, "branch_id": branch_id, "source": "monthly-giving-tap"}
+        sub = stripe.Subscription.create(
+            customer=cust_id,
+            items=[{
+                "price_data": {
+                    "currency": "gbp",
+                    "product_data": {"name": "Monthly Temple Support"},
+                    "unit_amount": int(round(amount * 100)),
+                    "recurring": {"interval": "month"},
+                },
+            }],
+            default_payment_method=pm_id,
+            metadata=meta,
+            idempotency_key=f"rgs-tap-sub-{rgs_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("tap_sub_create_failed", error=str(exc), rgs_id=rgs_id)
+        raise HTTPException(502, detail=f"Subscription create failed: {str(exc)[:200]}") from exc
+
+    return {"status": "subscribed", "rgs_id": rgs_id, "subscription_id": sub.id}
+
+
 # ── Recording helpers ───────────────────────────────────────────────────────────
 
 async def _link_subscription_row(*, rgs_id: str | None, stripe_sub_id: str,
