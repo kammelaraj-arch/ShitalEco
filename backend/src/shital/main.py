@@ -128,25 +128,25 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     # so a failure here can NEVER prevent the backend from booting.
     async def _boot_heals() -> None:
         import asyncio as _a
-        try:
-            # a) Card reader auto-heal — fixes terminal_devices rows whose
-            #    provider column disagrees with the identifier format (SumUp
-            #    Solo serials still flagged stripe_terminal, etc.). Added
-            #    26 Oct so the Wembley rows auto-fix on the next boot
-            #    without the operator having to click 🩹 Auto-heal.
-            from shital.services.background_recovery import (
-                _auto_heal_card_readers_once,
-            )
-            res = await _a.wait_for(_auto_heal_card_readers_once(), timeout=15)
-            logger.info("boot_heal_card_readers", result=res)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("boot_heal_card_readers_failed", error=str(exc))
+
+        # NOTE — reader auto-heals / auto-imports removed. The previous
+        # (a) `_auto_heal_card_readers_once`, (e) `_sumup_reader_status_sync_once`,
+        # and (f) `_stripe_readers_sync_once` sweeps classified terminal
+        # devices by identifier format and could silently flip the provider
+        # column + clear/populate the wrong identity column, which is how
+        # KK1's row at wembley_main ended up with
+        # `provider='stripe_terminal'` + `sumup_reader_serial='rdr_...'`
+        # + empty `stripe_reader_id`. The admin UI is the only source of
+        # truth for reader identity now (per CLAUDE.md: "user enters the
+        # details and saves and assigns to device the device to use, no
+        # automatic"), and migration 040 enforces that invariant with a
+        # Postgres CHECK constraint so the next regression fails loudly.
 
         try:
-            # b) PayPal orphan recovery from webhook event history —
-            #    heals EXPIRED PayPal rows that lost their
-            #    paypal_subscription_id by matching donor email against
-            #    PayPal's event history (last 90 days). Bounds at ~60s.
+            # PayPal orphan recovery from webhook event history —
+            # heals EXPIRED PayPal rows that lost their
+            # paypal_subscription_id by matching donor email against
+            # PayPal's event history (last 90 days). Bounded at ~60s.
             from shital.services.background_recovery import (
                 _paypal_recover_orphans_from_history,
             )
@@ -158,9 +158,9 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             logger.warning("boot_heal_paypal_orphans_failed", error=str(exc))
 
         try:
-            # c) Stripe giving reconcile — Pass B self-links orphan
-            #    paid subs whose metadata.rgs_id matches an existing
-            #    PENDING/EXPIRED row. From #227.
+            # Stripe giving reconcile — Pass B self-links orphan paid
+            # subs whose metadata.rgs_id matches an existing
+            # PENDING/EXPIRED row. From #227.
             from shital.api.routers.stripe_giving import (
                 _stripe_giving_reconcile_once,
             )
@@ -170,11 +170,11 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             logger.warning("boot_heal_stripe_giving_failed", error=str(exc))
 
         try:
-            # d) SumUp reconcile — flips PENDING SumUp donations whose
-            #    checkout actually PAID at SumUp's side but whose webhook
-            #    never delivered (restart during webhook window, Redis
-            #    outage, etc.). From the reconcile sweep that normally
-            #    runs in recovery_loop (disabled on prod). Bounded at 60s.
+            # SumUp reconcile — flips PENDING SumUp donations whose
+            # checkout actually PAID at SumUp's side but whose webhook
+            # never delivered (restart during webhook window, Redis
+            # outage, etc.). Does NOT touch reader identity columns.
+            # Bounded at 60s.
             from shital.services.background_recovery import (
                 _sumup_reconcile_once,
             )
@@ -182,33 +182,6 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             logger.info("boot_heal_sumup_reconcile", result=res)
         except Exception as exc:  # noqa: BLE001
             logger.warning("boot_heal_sumup_reconcile_failed", error=str(exc))
-
-        try:
-            # e) SumUp reader status sync + auto-import.
-            #    One GET /readers call; updates stored status for every known
-            #    sumup row AND inserts a new terminal_devices row (branch
-            #    unassigned) for any reader on SumUp's side we don't have
-            #    yet, so operators don't have to type rdr_... IDs. 15s cap.
-            from shital.services.background_recovery import (
-                _sumup_reader_status_sync_once,
-            )
-            res = await _a.wait_for(_sumup_reader_status_sync_once(), timeout=15)
-            logger.info("boot_heal_sumup_reader_status", result=res)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("boot_heal_sumup_reader_status_failed", error=str(exc))
-
-        try:
-            # f) Stripe Terminal reader sync + auto-import. Mirror of (e)
-            #    for stripe.terminal.Reader.list — refreshes online/offline
-            #    for existing rows and INSERTs any Stripe reader we don't
-            #    have yet. 15s cap.
-            from shital.services.background_recovery import (
-                _stripe_readers_sync_once,
-            )
-            res = await _a.wait_for(_stripe_readers_sync_once(), timeout=15)
-            logger.info("boot_heal_stripe_readers", result=res)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("boot_heal_stripe_readers_failed", error=str(exc))
 
     # Fire-and-forget — don't block app startup on the heals.
     _asyncio.create_task(_boot_heals())
