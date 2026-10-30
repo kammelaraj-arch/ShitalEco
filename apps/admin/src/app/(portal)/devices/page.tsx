@@ -291,11 +291,29 @@ export default function DevicesPage() {
   const branchName = (id: string) => branches.find(b => b.branch_id === id || b.id === id)?.name || id
 
   const branchOptions = branches.map(b => ({ value: b.branch_id || b.id, label: `${b.name} — ${b.city}` }))
+  // Show every active reader — including the auto-imported ones that have
+  // no branch assigned yet (branch_id === ''). Previously the dropdown
+  // filtered to r.branch_id === form.branch_id which hid newly imported
+  // SumUp/Stripe readers from the list. If a reader IS pinned to a
+  // specific branch, we still show it but tag mismatched ones so the
+  // operator can see what they're picking.
   const cardReaderOptions = [
     { value: '', label: '— None (no card reader) —' },
     ...cardReaders
-      .filter(r => r.is_active && (!form.branch_id || r.branch_id === form.branch_id))
-      .map(r => ({ value: r.id, label: `${r.label} (${r.provider.replace('_', ' ')})` })),
+      .filter(r => r.is_active)
+      .map(r => {
+        const sameBranch = !r.branch_id || !form.branch_id || r.branch_id === form.branch_id
+        const branchTag = r.branch_id && r.branch_id !== form.branch_id
+          ? ` — at ${r.branch_id}`
+          : (!r.branch_id ? ' — unassigned' : '')
+        return {
+          value: r.id,
+          label: `${r.label} (${r.provider.replace('_', ' ')})${branchTag}`,
+          _sameBranch: sameBranch,
+        }
+      })
+      // Prefer same-branch readers at the top of the list
+      .sort((a, b) => (a._sameBranch === b._sameBranch ? 0 : a._sameBranch ? -1 : 1)),
   ]
   const profileOptions = [
     { value: '', label: '— None —' },
