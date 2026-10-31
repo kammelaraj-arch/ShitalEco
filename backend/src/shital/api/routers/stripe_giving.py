@@ -409,16 +409,15 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
         # allow_redirects="never" disables the online fallback that would
         # otherwise be auto-selected from the Dashboard config.
         #
-        # `allow_redisplay="always"` sits *inside* payment_method_options.
-        # card_present — Stripe rejects it at the top level
-        # ("Received unknown parameter: allow_redisplay", #278) but still
-        # requires it for off_session SetupIntents so the saved PM can be
-        # shown back to the donor on their self-service subscription portal.
+        # `allow_redisplay` is deliberately omitted — Stripe rejected it at
+        # the top level (#276, #278), at process_setup_intent (#277), and
+        # inside payment_method_options.card_present (#279). The parameter
+        # does not apply to card_present Terminal SetupIntents at creation
+        # time; Stripe infers the redisplay rules from the Customer / the
+        # Dashboard config.
         si = stripe.SetupIntent.create(
             customer=cust.id,
-            payment_method_options={
-                "card_present": {"allow_redisplay": "always"},
-            },
+            payment_method_options={"card_present": {}},
             automatic_payment_methods={"enabled": True, "allow_redirects": "never"},
             usage="off_session",
             metadata={**meta, "amount": str(amount)},
