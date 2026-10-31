@@ -416,10 +416,14 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
             metadata={**meta, "amount": str(amount)},
             idempotency_key=f"rgs-tap-si-{rgs_id}",
         )
+        # Stripe accepts `customer_consent_collected` only on
+        # terminal.Reader.process_payment_intent (SCA capture). For
+        # process_setup_intent the consent is implicit in the kiosk tap
+        # itself — the parameter is rejected ("Received unknown parameter:
+        # customer_consent_collected"). Pass only setup_intent.
         action = stripe.terminal.Reader.process_setup_intent(
             body.reader_id.strip(),
             setup_intent=si.id,
-            customer_consent_collected=True,
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("tap_start_failed", error=str(exc), rgs_id=rgs_id, reader=body.reader_id)
