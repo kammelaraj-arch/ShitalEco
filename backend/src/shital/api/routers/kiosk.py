@@ -599,9 +599,16 @@ async def create_terminal_payment_intent(body: TerminalPaymentInput):
 
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
+        # Stripe deprecated `payment_method_types` across SetupIntent /
+        # PaymentIntent / Checkout.Session the same way (#264, #274).
+        # `payment_method_options={"card_present": {}}` tells Stripe this
+        # intent is for a Terminal reader; `automatic_payment_methods` with
+        # allow_redirects="never" keeps the online methods out.
         intent = stripe.PaymentIntent.create(
             amount=body.amount_pence, currency=body.currency.lower(),
-            payment_method_types=["card_present"], capture_method="automatic",
+            payment_method_options={"card_present": {}},
+            automatic_payment_methods={"enabled": True, "allow_redirects": "never"},
+            capture_method="automatic",
             description=body.description, metadata={"order_id": body.order_id, "reader_id": body.reader_id},
         )
         return {"payment_intent_id": intent.id, "client_secret": intent.client_secret, "status": intent.status}
