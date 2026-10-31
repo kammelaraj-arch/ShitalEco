@@ -422,16 +422,14 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
             metadata={**meta, "amount": str(amount)},
             idempotency_key=f"rgs-tap-si-{rgs_id}",
         )
-        # terminal.Reader.process_setup_intent itself now also requires
-        # `allow_redisplay` because the payment method is created inline
-        # by the reader at tap time, so Stripe needs the redisplay choice
-        # at that moment too (not just on the SetupIntent). "always" matches
-        # the SetupIntent create above and lets the donor's self-service
-        # subscription portal show their saved card.
+        # Stripe rejects `allow_redisplay` on process_setup_intent (#277
+        # revert): "Received unknown parameter: allow_redisplay". The
+        # redisplay choice set on the SetupIntent at create-time is
+        # propagated through confirmation — the reader call just takes
+        # the SetupIntent id.
         action = stripe.terminal.Reader.process_setup_intent(
             body.reader_id.strip(),
             setup_intent=si.id,
-            allow_redisplay="always",
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("tap_start_failed", error=str(exc), rgs_id=rgs_id, reader=body.reader_id)
