@@ -419,7 +419,7 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
         si = stripe.SetupIntent.create(
             customer=cust.id,
             payment_method_options={"card_present": {}},
-            payment_method_data={"allow_redisplay": "always"},
+            payment_method_data={"type": "card_present", "allow_redisplay": "always"},
             automatic_payment_methods={"enabled": True, "allow_redirects": "never"},
             usage="off_session",
             metadata={**meta, "amount": str(amount)},
