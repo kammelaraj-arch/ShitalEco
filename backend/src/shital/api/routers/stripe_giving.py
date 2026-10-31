@@ -423,14 +423,14 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
             metadata={**meta, "amount": str(amount)},
             idempotency_key=f"rgs-tap-si-{rgs_id}",
         )
-        # Stripe rejects `allow_redisplay` on process_setup_intent (#277
-        # revert): "Received unknown parameter: allow_redisplay". The
-        # redisplay choice set on the SetupIntent at create-time is
-        # propagated through confirmation — the reader call just takes
-        # the SetupIntent id.
+        # The reader-process call has its own required `allow_redisplay`.
+        # Top-level there is "unknown parameter" (#277), but Stripe exposes
+        # a nested `process_config` dict on this endpoint — allow_redisplay
+        # belongs inside it.
         action = stripe.terminal.Reader.process_setup_intent(
             body.reader_id.strip(),
             setup_intent=si.id,
+            process_config={"allow_redisplay": "always"},
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("tap_start_failed", error=str(exc), rgs_id=rgs_id, reader=body.reader_id)
