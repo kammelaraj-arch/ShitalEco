@@ -404,21 +404,23 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
         )
         # Stripe deprecated `payment_method_types` on SetupIntent.create the
         # same way it did on Checkout.Session (#264). For a Terminal tap we
-        # swap in `payment_method_options={"card_present": {}}` so Stripe
-        # still routes this to Terminal; `automatic_payment_methods` with
+        # swap in `payment_method_options.card_present` so Stripe routes
+        # this to Terminal; `automatic_payment_methods` with
         # allow_redirects="never" disables the online fallback that would
         # otherwise be auto-selected from the Dashboard config.
-        # `allow_redisplay="always"` tells Stripe the saved payment method can
-        # be shown back to the donor on their self-service subscription portal
-        # (so they can update the card). Required by Stripe for off_session
-        # SetupIntents under GDPR / consumer-protection rules — the error
-        # "Missing required param: allow_redisplay" appears when it's omitted.
+        #
+        # `allow_redisplay="always"` sits *inside* payment_method_options.
+        # card_present — Stripe rejects it at the top level
+        # ("Received unknown parameter: allow_redisplay", #278) but still
+        # requires it for off_session SetupIntents so the saved PM can be
+        # shown back to the donor on their self-service subscription portal.
         si = stripe.SetupIntent.create(
             customer=cust.id,
-            payment_method_options={"card_present": {}},
+            payment_method_options={
+                "card_present": {"allow_redisplay": "always"},
+            },
             automatic_payment_methods={"enabled": True, "allow_redirects": "never"},
             usage="off_session",
-            allow_redisplay="always",
             metadata={**meta, "amount": str(amount)},
             idempotency_key=f"rgs-tap-si-{rgs_id}",
         )
