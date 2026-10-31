@@ -402,9 +402,16 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
             email=(email or None), name=(full_name or None), metadata=meta,
             idempotency_key=f"rgs-tap-cust-{rgs_id}",
         )
+        # Stripe deprecated `payment_method_types` on SetupIntent.create the
+        # same way it did on Checkout.Session (#264). For a Terminal tap we
+        # swap in `payment_method_options={"card_present": {}}` so Stripe
+        # still routes this to Terminal; `automatic_payment_methods` with
+        # allow_redirects="never" disables the online fallback that would
+        # otherwise be auto-selected from the Dashboard config.
         si = stripe.SetupIntent.create(
             customer=cust.id,
-            payment_method_types=["card_present"],
+            payment_method_options={"card_present": {}},
+            automatic_payment_methods={"enabled": True, "allow_redirects": "never"},
             usage="off_session",
             metadata={**meta, "amount": str(amount)},
             idempotency_key=f"rgs-tap-si-{rgs_id}",
