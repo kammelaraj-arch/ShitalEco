@@ -409,16 +409,20 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
         # allow_redirects="never" disables the online fallback that would
         # otherwise be auto-selected from the Dashboard config.
         #
-        # SetupIntent for Terminal needs an explicit payment_method_types =
-        # ["card_present"]. #283's minimal form (no payment_method_types)
-        # fired "SetupIntent must accept an in-person payment method"
-        # on process_setup_intent. The deprecation of payment_method_types
-        # in #264 was for Checkout.Session.create only — SetupIntent and
-        # PaymentIntent still accept it (and PaymentIntent in-person flows
-        # keep using it per Stripe Terminal docs).
+        # Stripe fully deprecated `payment_method_types` across all
+        # creation APIs (Checkout.Session, SetupIntent, PaymentIntent) and
+        # moved payment-method selection into Dashboard-managed Payment
+        # Method Configurations. Until the Shital Stripe account enables
+        # "card_present" at
+        # https://dashboard.stripe.com/settings/payment_methods, this
+        # SetupIntent will succeed in creation but the subsequent
+        # terminal.Reader.process_setup_intent call will reject with
+        # "SetupIntent must accept an in-person payment method".
+        #
+        # Once the Dashboard toggle is on, `card_present` is inherited
+        # automatically and the tap flow works end to end.
         si = stripe.SetupIntent.create(
             customer=cust.id,
-            payment_method_types=["card_present"],
             usage="off_session",
             metadata={**meta, "amount": str(amount)},
             idempotency_key=f"rgs-tap-si-{rgs_id}",
