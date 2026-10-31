@@ -422,14 +422,16 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
             metadata={**meta, "amount": str(amount)},
             idempotency_key=f"rgs-tap-si-{rgs_id}",
         )
-        # Stripe accepts `customer_consent_collected` only on
-        # terminal.Reader.process_payment_intent (SCA capture). For
-        # process_setup_intent the consent is implicit in the kiosk tap
-        # itself — the parameter is rejected ("Received unknown parameter:
-        # customer_consent_collected"). Pass only setup_intent.
+        # terminal.Reader.process_setup_intent itself now also requires
+        # `allow_redisplay` because the payment method is created inline
+        # by the reader at tap time, so Stripe needs the redisplay choice
+        # at that moment too (not just on the SetupIntent). "always" matches
+        # the SetupIntent create above and lets the donor's self-service
+        # subscription portal show their saved card.
         action = stripe.terminal.Reader.process_setup_intent(
             body.reader_id.strip(),
             setup_intent=si.id,
+            allow_redisplay="always",
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("tap_start_failed", error=str(exc), rgs_id=rgs_id, reader=body.reader_id)
