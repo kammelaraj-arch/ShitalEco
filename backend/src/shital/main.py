@@ -1674,6 +1674,7 @@ _mount("shital.api.routers.menus",                 "router")
 _mount("shital.api.routers.system",                "router")
 _mount("shital.api.routers.compliance",            "router")
 _mount("shital.api.routers.board_resolution_extras", "router")
+_mount("shital.api.routers.payment_sync",            "router")
 
 
 @app.get("/health", tags=["system"])

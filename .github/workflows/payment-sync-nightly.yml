@@ -1,0 +1,55 @@
+# Nightly sync of Stripe + SumUp transactions into the unified
+# payment_transactions ledger. Hits the backend's header-token-gated
+# cron endpoint.
+#
+# Prerequisites in GitHub secrets:
+#   API_BASE_URL       — e.g. https://api.shital.org.uk
+#   PAYMENT_SYNC_TOKEN — matches the PAYMENT_SYNC_TOKEN set in
+#                        Admin → API Keys on the running backend
+#
+# Idempotent: the backend upserts on (provider, external_id). Rerunning
+# this workflow can only reconcile missed rows, never duplicate them.
+name: Payment sync — nightly
+
+on:
+  schedule:
+    # 02:15 UTC every day = ~02:15 GMT / 03:15 BST — well after the
+    # charity's day's trading is settled but before any morning staff.
+    - cron: '15 2 * * *'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Look-back window in days (default 2)'
+        required: false
+        default: '2'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Call /admin/finance/sync/all/cron
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          PAYMENT_SYNC_TOKEN: ${{ secrets.PAYMENT_SYNC_TOKEN }}
+          DAYS: ${{ github.event.inputs.days || '2' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_BASE_URL:-}" ] || [ -z "${PAYMENT_SYNC_TOKEN:-}" ]; then
+            echo "::error::API_BASE_URL and PAYMENT_SYNC_TOKEN must be set as repo secrets"
+            exit 1
+          fi
+          echo "Starting payment sync for last ${DAYS} day(s)…"
+          RESPONSE=$(curl --fail-with-body -sS -X POST \
+            "${API_BASE_URL%/}/api/v1/admin/finance/sync/all/cron" \
+            -H "Content-Type: application/json" \
+            -H "X-Sync-Token: ${PAYMENT_SYNC_TOKEN}" \
+            -d "{\"days\": ${DAYS}}")
+          echo "$RESPONSE" | tee /tmp/sync.json
+          # Fail loud if any provider returned "error"; "skipped" is fine
+          # (credentials simply not configured for that provider).
+          if echo "$RESPONSE" | grep -q '"status":"error"'; then
+            echo "::error::Sync reported an error — see response above"
+            exit 1
+          fi
+          echo "Payment sync complete."
