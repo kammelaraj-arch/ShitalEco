@@ -10,7 +10,7 @@ export function BasketPage() {
 
   if (items.length === 0) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-20 text-center">
+      <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 py-20 text-center">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -32,7 +32,7 @@ export function BasketPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-5 pb-32">
+    <div className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto px-4 py-5 pb-32">
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="font-display font-bold text-xl text-gold-400">{t('basket', language)}</h1>

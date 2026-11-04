@@ -180,7 +180,7 @@ export function VolunteerRegistrationPage() {
   // ── Signup (Stage 0) ──────────────────────────────────────────────────────
   if (phase === 'signup') {
     return (
-      <div className="max-w-lg mx-auto px-4 py-6 pb-28">
+      <div className="max-w-lg sm:max-w-xl md:max-w-2xl mx-auto px-4 py-6 pb-28">
         <button onClick={() => setScreen('browse')} className="text-sm font-medium mb-4" style={{ color: 'rgba(255,248,220,0.4)' }}>← Back</button>
         <div className="text-center mb-5">
           <div className="text-4xl mb-2">🤝</div>
@@ -328,7 +328,7 @@ function LadderPhase({ reference, email, name, stage, setStage, setScreen }: {
   }
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-8 pb-28">
+    <div className="max-w-lg sm:max-w-xl md:max-w-2xl mx-auto px-4 py-8 pb-28">
       <div className="text-center mb-6">
         <div className="text-5xl mb-3">🙏</div>
         <h1 className="font-display font-bold text-2xl text-gold-400 mb-1">Sairam! Welcome to the family{name ? `, ${name}` : ''} 🌸</h1>

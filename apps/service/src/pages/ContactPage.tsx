@@ -79,7 +79,7 @@ export function ContactPage() {
   }
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6 pb-32">
+    <div className="max-w-lg sm:max-w-xl md:max-w-2xl mx-auto px-4 py-6 pb-32">
       <button
         onClick={() => setScreen('basket')}
         className="flex items-center gap-2 text-sm font-medium mb-6 transition-colors"

@@ -91,7 +91,7 @@ export function BrowsePage() {
         {/* Gold shimmer bottom edge */}
         <div className="absolute bottom-0 left-0 right-0 h-px"
           style={{ background: 'linear-gradient(90deg, transparent, #D4AF37, #FFD700, #D4AF37, transparent)' }} />
-        <div className="max-w-5xl mx-auto relative z-10 flex items-center justify-between gap-4">
+        <div className="max-w-5xl 2xl:max-w-6xl mx-auto relative z-10 flex items-center justify-between gap-4">
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-widest uppercase mb-1"
               style={{ color: 'rgba(100,60,10,0.7)' }}>🕉 Jai Sai Baba</p>
@@ -114,7 +114,7 @@ export function BrowsePage() {
           Side-by-side at md+, stacked on mobile. All three cards target
           roughly the same vertical height — `h-full` + `flex-col` on each
           inner card lets the grid stretch them. */}
-      <div className="max-w-5xl mx-auto px-4 mt-5">
+      <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 mt-5">
 
         {/* Future Legacy Appeal — Sponsor a Square Foot (dedicated page) */}
         <button
@@ -225,7 +225,7 @@ export function BrowsePage() {
       <div className="sticky top-16 z-30 px-3 py-2">
         <div
           ref={tabsRef}
-          className="max-w-5xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1.5 py-2 rounded-2xl"
+          className="max-w-5xl 2xl:max-w-6xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1.5 py-2 rounded-2xl"
           style={{ background: 'var(--bg-sticky)', border: '1px solid rgba(212,175,55,0.22)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', boxShadow: '0 6px 20px rgba(0,0,0,0.25)' }}
         >
           {TABS.map((tab) => (
@@ -252,7 +252,7 @@ export function BrowsePage() {
 
       {/* Project filter */}
       {activeTab === 'project' && projects.length > 0 && (
-        <div className="max-w-5xl mx-auto px-4 pt-4">
+        <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 pt-4">
           <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
             <button
               onClick={() => setSelectedProject('')}
@@ -276,7 +276,7 @@ export function BrowsePage() {
       )}
 
       {/* Items Grid */}
-      <div className="max-w-5xl mx-auto px-4 pt-5">
+      <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 pt-5">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <motion.div
@@ -300,7 +300,7 @@ export function BrowsePage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"
+              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3"
             >
               {filteredItems.map((item) => (
                 <ItemCard key={item.id} item={item} category={item.category || activeTab.toUpperCase()} />
@@ -320,7 +320,7 @@ export function BrowsePage() {
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             className="fixed bottom-0 left-0 right-0 z-50 safe-bottom"
           >
-            <div className="max-w-5xl mx-auto px-4 pb-4 pt-2">
+            <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 pb-4 pt-2">
               <button
                 onClick={() => setScreen('basket')}
                 className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-between px-5 shadow-2xl active:scale-[0.99] transition-transform"

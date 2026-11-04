@@ -115,7 +115,7 @@ export function GiftAidPage() {
   const backTarget = step === 'choice' ? 'basket' : 'choice'
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6 pb-32">
+    <div className="max-w-lg sm:max-w-xl md:max-w-2xl mx-auto px-4 py-6 pb-32">
       <button
         onClick={() => step === 'choice' ? setScreen('basket') : setStep('choice')}
         className="flex items-center gap-2 text-sm font-medium mb-5 transition-colors"

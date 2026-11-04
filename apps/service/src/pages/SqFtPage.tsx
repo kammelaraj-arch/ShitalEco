@@ -197,7 +197,7 @@ export function SqFtPage() {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-      className="max-w-3xl mx-auto px-4 py-6"
+      className="max-w-3xl md:max-w-4xl lg:max-w-5xl mx-auto px-4 py-6"
     >
       <button onClick={() => setScreen('browse')}
         className="text-sm font-semibold mb-4 opacity-75 hover:opacity-100 transition-opacity"
@@ -225,7 +225,7 @@ export function SqFtPage() {
       </div>
 
       {/* Sponsorship options */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {PRODUCTS.map(p => <SponsorCard key={p.key} p={p} />)}
 
         {/* Any-amount card — custom amount input + add to basket */}
