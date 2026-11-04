@@ -1002,6 +1002,47 @@ async def admin_sync_stripe(space: CurrentSpace, days: int = 90) -> dict[str, An
     return {"ok": True, "result": result}
 
 
+@router.post("/admin/giving/reap-stale-stripe")
+async def admin_reap_stale_stripe(
+    space: CurrentSpace, older_than_days: int = 2,
+) -> dict[str, Any]:
+    """Mark Stripe monthly-giving rows that have been stuck in PENDING_APPROVAL
+    (no ``stripe_subscription_id``) for more than ``older_than_days`` as
+    EXPIRED. Time-only — no Stripe calls — so it clears OLD pending piles
+    that fall outside the sync-stripe 90-day window.
+
+    Rationale: when a donor opens Checkout we pre-insert a PENDING row with
+    a fresh rgs_id, then redirect to Stripe. If the donor leaves the Stripe
+    page without paying, nothing ever links that row back. ``sync-stripe``
+    (Pass B) reaps these at 2 days but ONLY when the row sits within the
+    90-day window; anything older sat PENDING forever. This endpoint fixes
+    the pile the admin is seeing right now.
+
+    SUPER_ADMIN / ADMIN only. Idempotent. Returns the number of rows marked
+    EXPIRED. Does not touch rows with a populated subscription id or rows
+    the donor already cancelled.
+    """
+    if space.role not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(403, detail="SUPER_ADMIN or ADMIN required")
+    await _ensure_subscription_columns()
+    older_than_days = max(1, min(int(older_than_days), 3650))
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        res = await db.execute(text(f"""
+            UPDATE recurring_giving_subscriptions
+            SET status = 'EXPIRED', updated_at = NOW()
+            WHERE payment_provider = 'stripe'
+              AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')
+              AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'
+              AND created_at < NOW() - INTERVAL '{older_than_days} days'
+        """))
+        await db.commit()
+    return {"ok": True, "reaped": res.rowcount or 0, "older_than_days": older_than_days}
+
+
 @router.post("/admin/giving/rebuild-paypal-plans")
 async def admin_rebuild_paypal_plans(space: CurrentSpace) -> dict[str, Any]:
     """Wipe the cached PayPal product + plan IDs and recreate them against
