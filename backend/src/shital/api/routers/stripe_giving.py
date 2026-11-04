@@ -826,10 +826,31 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "scanned": 0, "status_updated": 0, "activated": 0, "cancelled": 0,
         "payments_recorded": 0, "linked_orphans": 0, "orphans_expired": 0,
+        "stale_reaped": 0,
         "errors": 0, "days_window": days,
     }
     now = datetime.utcnow()
     since = int((now - timedelta(days=days)).timestamp())
+
+    # ── Pass 0 · unconditional stale-row reap ─────────────────────────────────
+    # The old code only reaped PENDING_APPROVAL rows that happened to fall into
+    # Pass B's rgs_id lookup (which is scoped by ``days``). Any row older than
+    # the window sat in PENDING forever, cluttering the admin page even though
+    # it had no chance of ever being paid (the Checkout session had long
+    # since expired on Stripe's side). This pass is time-only — no Stripe
+    # calls — and clears anything that's been stuck > 2 days regardless of
+    # the sync window. 2 days matches the existing reap threshold in Pass B.
+    async with SessionLocal() as db:
+        reaped = await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET status = 'EXPIRED', updated_at = NOW()
+            WHERE payment_provider = 'stripe'
+              AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')
+              AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'
+              AND created_at < NOW() - INTERVAL '2 days'
+        """))
+        await db.commit()
+        summary["stale_reaped"] = reaped.rowcount or 0
 
     async def _record_paid_invoices(sub_id: str) -> None:
         try:

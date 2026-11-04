@@ -62,7 +62,7 @@ export default function RecurringGivingPage() {
       const x = d.result || {}
       setSyncNote(x.skipped
         ? `Skipped: ${x.skipped}`
-        : `Stripe · scanned ${x.scanned ?? 0} · ${x.status_updated ?? 0} status updates · ${x.activated ?? 0} activated · ${x.linked_orphans ?? 0} linked · ${x.payments_recorded ?? 0} payments recorded`)
+        : `Stripe · scanned ${x.scanned ?? 0} · ${x.status_updated ?? 0} status updates · ${x.activated ?? 0} activated · ${x.linked_orphans ?? 0} linked · ${x.payments_recorded ?? 0} payments recorded · ${(x.stale_reaped ?? 0) + (x.orphans_expired ?? 0)} stale expired${x.errors ? ` · ${x.errors} errors` : ''}`)
       await loadSubs()
     } catch (e) {
       setSyncNote(e instanceof Error ? e.message : 'Sync failed')
@@ -149,6 +149,23 @@ export default function RecurringGivingPage() {
       )
     } catch (e) {
       setSyncNote(e instanceof Error ? e.message : 'Diagnostic failed')
+    } finally { setSyncing(false) }
+  }
+
+  // Time-only reap — marks any Stripe row stuck in PENDING_APPROVAL for
+  // more than 2 days as EXPIRED. Used to clear the historical pile that
+  // Pass B's windowed reap missed. No Stripe calls, safe to repeat.
+  async function reapStaleStripe() {
+    if (!confirm('Mark every Stripe row stuck in PENDING_APPROVAL for more than 2 days as EXPIRED?\n\nThis is for donors who opened Checkout and never paid. Safe and reversible by an admin editing the row.')) return
+    setSyncing(true); setSyncNote('')
+    try {
+      const r = await fetch(`${API}/admin/giving/reap-stale-stripe`, { method: 'POST', headers: authHeaders() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      const d = await r.json()
+      setSyncNote(`Cleaned up ${d.reaped ?? 0} stale Stripe PENDING_APPROVAL rows (older than ${d.older_than_days ?? 2} days).`)
+      await loadSubs()
+    } catch (e) {
+      setSyncNote(e instanceof Error ? e.message : 'Reap failed')
     } finally { setSyncing(false) }
   }
 
@@ -348,6 +365,14 @@ export default function RecurringGivingPage() {
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#0ea5e9,#0369a1)' }}>
                 {syncing ? 'Checking…' : '🔍 Stripe diagnostic'}
+              </button>
+              {/* Time-only reap of stale PENDING Stripe rows. Clears the
+                  historical pile that Pass B's windowed reap missed. */}
+              <button onClick={reapStaleStripe} disabled={syncing}
+                title="Marks every Stripe row stuck in PENDING_APPROVAL for more than 2 days as EXPIRED. Donors that never finished Checkout stop cluttering the list. Safe, idempotent, no Stripe calls."
+                className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#f59e0b,#b45309)' }}>
+                {syncing ? 'Reaping…' : '🧹 Clean up stale pending'}
               </button>
             </div>
           </div>
