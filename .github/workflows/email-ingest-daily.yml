@@ -1,6 +1,12 @@
-# Hourly poll of the finance inbox. Pulls UNSEEN mail, lets the
-# AI classify each message, and writes supplier_documents rows
-# (invoices, purchase orders, receipts, statements).
+# Daily poll of the finance inbox. Pulls UNSEEN mail, lets the
+# AI classify each message, and writes invoices rows (doc_type
+# INVOICE / PURCHASE_ORDER / RECEIPT / STATEMENT).
+#
+# Once a day keeps Azure OpenAI inference spend minimal — the
+# charity typically sees a handful of supplier emails per day, so
+# one pass in the morning covers them. Admins can also hit
+# "Run ingest now" on the Invoices page or dispatch this workflow
+# manually for an ad-hoc refresh.
 #
 # Prerequisites in GitHub secrets:
 #   API_BASE_URL        — e.g. https://api.shital.org.uk
@@ -20,13 +26,12 @@
 #   # ANTHROPIC key is needed. Anthropic stays as a fallback only.
 #
 # Idempotent: skips any email whose Message-ID is already stored.
-name: Email ingest — hourly
+name: Email ingest — daily
 
 on:
   schedule:
-    # Every hour on the quarter — avoids piling on top of the top-of-hour
-    # scheduling spike GitHub's cron runner routinely hits.
-    - cron: '15 * * * *'
+    # 06:30 UTC every day — after overnight batches, before UK office start.
+    - cron: '30 6 * * *'
   workflow_dispatch:
     inputs:
       since:

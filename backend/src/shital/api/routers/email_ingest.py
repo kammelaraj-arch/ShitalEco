@@ -28,7 +28,7 @@ Pipeline per run:
        d. INSERT email_ingest_messages row (idempotent via unique
           message_id).
        e. If classification is INVOICE / PURCHASE_ORDER / RECEIPT /
-          STATEMENT, upsert a supplier_documents row (unique on
+          STATEMENT, upsert a invoices row (unique on
           supplier_email + doc_number) and copy attachments.
        f. Mark email read; optionally move to the processed folder.
 
@@ -37,8 +37,8 @@ Endpoints:
    POST /admin/finance/email-ingest/run/cron    X-Sync-Token header
    GET  /admin/finance/email-ingest/messages    admin JWT
    POST /admin/finance/email-ingest/messages/{id}/reprocess
-   GET  /admin/finance/supplier-documents       admin JWT
-   GET  /admin/finance/supplier-documents/{id}  admin JWT
+   GET  /admin/finance/invoices       admin JWT
+   GET  /admin/finance/invoices/{id}  admin JWT
 
 The cron endpoint shares the PAYMENT_SYNC_TOKEN secret with the
 nightly transaction sync so operators manage one token, not two.
@@ -300,7 +300,7 @@ async def _insert_email_row(db: Any, row: dict[str, Any]) -> str:
 async def _upsert_supplier_document(
     db: Any, email_id: str, classification: str, extracted: dict[str, Any],
 ) -> str | None:
-    """Return the supplier_documents id (newly created or merged into existing)."""
+    """Return the invoices id (newly created or merged into existing)."""
     if classification not in {"INVOICE", "PURCHASE_ORDER", "RECEIPT", "STATEMENT"}:
         return None
 
@@ -335,7 +335,7 @@ async def _upsert_supplier_document(
     # and leave finance to merge by hand.
     if doc_number and supplier_email:
         existing = (await db.execute(text("""
-            SELECT id FROM supplier_documents
+            SELECT id FROM invoices
              WHERE doc_type = :doc_type
                AND supplier_email = :supplier_email
                AND doc_number = :doc_number
@@ -344,7 +344,7 @@ async def _upsert_supplier_document(
         if existing:
             doc_id = str(existing[0])
             await db.execute(text("""
-                UPDATE supplier_documents SET
+                UPDATE invoices SET
                   supplier_name   = CASE WHEN :supplier_name <> '' THEN :supplier_name ELSE supplier_name END,
                   supplier_vat_id = CASE WHEN :supplier_vat_id <> '' THEN :supplier_vat_id ELSE supplier_vat_id END,
                   issued_date     = COALESCE(:issued_date, issued_date),
@@ -363,7 +363,7 @@ async def _upsert_supplier_document(
 
     new_id = str(uuid.uuid4())
     await db.execute(text("""
-        INSERT INTO supplier_documents (
+        INSERT INTO invoices (
             id, doc_type, doc_number, supplier_name, supplier_email, supplier_vat_id,
             issued_date, due_date, total_amount, net_amount, vat_amount, currency,
             source, source_email_id, notes, raw_fields
@@ -381,7 +381,7 @@ async def _save_attachments(db: Any, doc_id: str | None, attachments: list[dict[
         return
     for a in attachments:
         await db.execute(text("""
-            INSERT INTO supplier_document_attachments
+            INSERT INTO invoice_attachments
               (id, document_id, filename, content_type, size_bytes, data)
             VALUES (gen_random_uuid(), :did, :fn, :ct, :sz, :data)
         """), {
@@ -669,8 +669,8 @@ async def reprocess_message(ctx: CurrentSpace, mid: str) -> dict[str, Any]:
     return {"ok": True, "classification": classification, "document_id": doc_id}
 
 
-@router.get("/supplier-documents")
-async def list_supplier_documents(
+@router.get("/invoices")
+async def list_invoices(
     ctx: CurrentSpace,
     doc_type: str = "",
     status: str = "",
@@ -697,14 +697,14 @@ async def list_supplier_documents(
             SELECT id, doc_type, doc_number, supplier_name, supplier_email,
                    issued_date, due_date, total_amount, vat_amount, currency,
                    status, source, created_at,
-                   (SELECT COUNT(*) FROM supplier_document_attachments a WHERE a.document_id = supplier_documents.id) AS attachment_count
-              FROM supplier_documents
+                   (SELECT COUNT(*) FROM invoice_attachments a WHERE a.document_id = invoices.id) AS attachment_count
+              FROM invoices
              WHERE {clause}
              ORDER BY COALESCE(issued_date, created_at::date) DESC, created_at DESC
              LIMIT :lim OFFSET :off
         """), params)).mappings().all()
         total = (await db.execute(text(f"""
-            SELECT COUNT(*) FROM supplier_documents WHERE {clause}
+            SELECT COUNT(*) FROM invoices WHERE {clause}
         """), params)).scalar()
     def _iso(v: Any) -> str:
         return v.isoformat() if v and hasattr(v, "isoformat") else ""
@@ -732,7 +732,7 @@ async def list_supplier_documents(
     }
 
 
-@router.get("/supplier-documents/{did}")
+@router.get("/invoices/{did}")
 async def get_supplier_document(ctx: CurrentSpace, did: str) -> dict[str, Any]:
     _only_admin(ctx)
     try:
@@ -741,13 +741,13 @@ async def get_supplier_document(ctx: CurrentSpace, did: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Not found")
     async with SessionLocal() as db:
         d = (await db.execute(text("""
-            SELECT * FROM supplier_documents WHERE id = :id AND deleted_at IS NULL
+            SELECT * FROM invoices WHERE id = :id AND deleted_at IS NULL
         """), {"id": did})).mappings().first()
         if not d:
             raise HTTPException(status_code=404, detail="Not found")
         atts = (await db.execute(text("""
             SELECT id, filename, content_type, size_bytes, created_at
-              FROM supplier_document_attachments
+              FROM invoice_attachments
              WHERE document_id = :did ORDER BY created_at
         """), {"did": did})).mappings().all()
     def _iso(v: Any) -> str:
@@ -766,7 +766,7 @@ async def get_supplier_document(ctx: CurrentSpace, did: str) -> dict[str, Any]:
                 "filename":     a["filename"],
                 "content_type": a["content_type"],
                 "size_bytes":   int(a["size_bytes"] or 0),
-                "download_url": f"/api/v1/admin/finance/supplier-documents/{did}/attachments/{a['id']}/download",
+                "download_url": f"/api/v1/admin/finance/invoices/{did}/attachments/{a['id']}/download",
                 "created_at":   _iso(a["created_at"]),
             }
             for a in atts
@@ -774,7 +774,7 @@ async def get_supplier_document(ctx: CurrentSpace, did: str) -> dict[str, Any]:
     }
 
 
-@router.get("/supplier-documents/{did}/attachments/{aid}/download")
+@router.get("/invoices/{did}/attachments/{aid}/download")
 async def download_supplier_attachment(ctx: CurrentSpace, did: str, aid: str):
     _only_admin(ctx)
     from fastapi.responses import Response
@@ -786,7 +786,7 @@ async def download_supplier_attachment(ctx: CurrentSpace, did: str, aid: str):
     async with SessionLocal() as db:
         row = (await db.execute(text("""
             SELECT filename, content_type, data
-              FROM supplier_document_attachments
+              FROM invoice_attachments
              WHERE id = :aid AND document_id = :did
         """), {"aid": aid, "did": did})).mappings().first()
     if not row:
