@@ -24,6 +24,8 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Finance',
     items: [
       { href: '/finance',                 icon: '💰', label: 'Accounts' },
+      { href: '/finance/invoices',        icon: '🧾', label: 'Invoices & Supplier Docs' },
+      { href: '/finance/transactions',    icon: '💳', label: 'Stripe + SumUp' },
       { href: '/finance/incoming-funds',  icon: '💸', label: 'Incoming Funds' },
       { href: '/finance/reimbursements',  icon: '🧾', label: 'Reimbursements' },
       { href: '/finance/purchase-orders',   icon: '📦', label: 'Purchase Orders' },

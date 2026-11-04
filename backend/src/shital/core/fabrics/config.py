@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
 
+    # Azure OpenAI — charity's M365/Azure tenancy (covered by Azure for
+    # Nonprofits grant). Preferred backend for the finance email-ingest
+    # classifier and any other server-side AI. Anthropic above is a
+    # fallback only when these aren't configured.
+    AZURE_OPENAI_ENDPOINT: str = ""
+    AZURE_OPENAI_API_KEY: str = ""
+    AZURE_OPENAI_DEPLOYMENT: str = ""
+    AZURE_OPENAI_API_VERSION: str = "2024-10-21"
+
     # Mail Agent — agentic triage of shared mailboxes
     # Comma-separated list of mailbox UPNs the agent should poll. Empty → agent disabled.
     # Service account in Azure AD must have ApplicationAccessPolicy granting access to each.
