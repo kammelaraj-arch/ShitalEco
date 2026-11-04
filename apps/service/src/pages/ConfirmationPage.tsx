@@ -45,7 +45,7 @@ export function ConfirmationPage() {
   }, [countdown, showAccountPrompt])
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-10 text-center">
+    <div className="max-w-lg sm:max-w-xl md:max-w-2xl mx-auto px-4 py-10 text-center">
       {/* Animated Om */}
       <motion.div
         initial={{ scale: 0, rotate: -90 }}

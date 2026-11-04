@@ -6,6 +6,9 @@
   html {
     -webkit-tap-highlight-color: transparent;
     scroll-behavior: smooth;
+    /* Stop stray wide content (long email strings, over-wide absolute
+       overlays) from causing horizontal scroll on narrow screens. */
+    overflow-x: hidden;
   }
 
   body {
@@ -15,6 +18,7 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     min-height: 100vh;
+    overflow-x: hidden;
     /* --bg-image carries the crimson paisley (crimson theme) or 'none' (others),
        layered over the two ambient radial glows. cover/fixed keeps it full-bleed. */
     background-image:

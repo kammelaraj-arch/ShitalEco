@@ -122,7 +122,7 @@ export function SevaPage() {
   }
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6 pb-28">
+    <div className="max-w-lg sm:max-w-xl md:max-w-2xl mx-auto px-4 py-6 pb-28">
       <button onClick={() => setScreen('browse')} className="text-sm font-medium mb-4" style={{ color: 'rgba(255,248,220,0.4)' }}>← Back</button>
       <div className="text-center mb-5">
         <div className="text-4xl mb-2">🤝</div>

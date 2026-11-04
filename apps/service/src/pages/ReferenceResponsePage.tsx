@@ -122,7 +122,7 @@ export function ReferenceResponsePage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 pb-32">
+    <div className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto px-4 py-8 pb-32">
       <div className="text-center mb-6">
         <div className="w-16 h-16 rounded-2xl overflow-hidden mx-auto mb-3"
           style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)' }}>
