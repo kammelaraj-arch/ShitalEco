@@ -150,10 +150,13 @@ async def list_donations(
                 d.created_at,
                 d.updated_at,
                 d.project_id::text                AS project_id,
-                pr.name                           AS project_name
+                pr.name                           AS project_name,
+                d.kiosk_device_id::text           AS kiosk_device_id,
+                COALESCE(kd.name, '')             AS device_name
             FROM donations d
-            LEFT JOIN contacts c  ON c.id  = d.contact_id
-            LEFT JOIN projects pr ON pr.id = d.project_id
+            LEFT JOIN contacts c       ON c.id  = d.contact_id
+            LEFT JOIN projects pr      ON pr.id = d.project_id
+            LEFT JOIN kiosk_devices kd ON kd.id = d.kiosk_device_id
             WHERE d.deleted_at IS NULL
               AND d.created_at >= :from_dt
               AND d.created_at < :to_dt
@@ -186,7 +189,9 @@ async def list_donations(
                 rgs.created_at,
                 rgs.updated_at,
                 NULL::text                                AS project_id,
-                NULL::varchar                             AS project_name
+                NULL::varchar                             AS project_name,
+                NULL::text                                AS kiosk_device_id,
+                ''::varchar                               AS device_name
             FROM recurring_giving_subscriptions rgs
             LEFT JOIN recurring_giving_tiers t  ON t.id  = rgs.tier_id
             LEFT JOIN contacts              c2  ON c2.id = rgs.contact_id
