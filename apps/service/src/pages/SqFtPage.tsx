@@ -118,6 +118,79 @@ function SponsorCard({ p }: { p: Product }) {
   )
 }
 
+function AnyAmountCard() {
+  const addItem = useStore(s => s.addItem)
+  const setScreen = useStore(s => s.setScreen)
+  const [raw, setRaw] = useState('')
+
+  // Only the digits + one dot survive — avoids NaN/negative/scientific-notation paste.
+  function onChange(v: string) {
+    const cleaned = v.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1')
+    setRaw(cleaned)
+  }
+
+  const amount = Number(raw)
+  const valid = Number.isFinite(amount) && amount >= 1
+
+  function add() {
+    if (!valid) return
+    // Round to pennies so basket / payment maths doesn't drift on float input.
+    const price = Math.round(amount * 100) / 100
+    addItem({
+      type: 'DONATION',
+      name: `Future Legacy Appeal — any-amount gift`,
+      quantity: 1,
+      unitPrice: price,
+      totalPrice: price,
+      referenceId: `anyamt-${Date.now()}`,
+      giftAidEligible: true,
+      category: 'SPONSORSHIP',
+    })
+    setRaw('')
+    setScreen('basket')
+  }
+
+  return (
+    <div className="temple-card p-4 flex flex-col"
+      style={{ borderLeft: '4px solid #D4AF37', borderStyle: 'dashed' }}>
+      <div className="flex items-center gap-3">
+        <div className="w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0 text-xl"
+          style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)',
+                   border: '1px solid rgba(255,255,255,0.25)', boxShadow: '0 2px 12px rgba(212,175,55,0.4)' }}>
+          💛
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-black text-sm leading-tight" style={{ color: 'var(--text)' }}>Give any amount</p>
+          <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Every gift helps.</p>
+        </div>
+      </div>
+
+      <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+        Donate whatever your heart allows — still part of the Future Legacy Appeal.
+      </p>
+
+      {/* Amount input */}
+      <div className="flex items-center gap-2 mt-3">
+        <span className="text-xl font-black price-display"
+          style={{ color: 'rgba(212,175,55,0.95)' }}>£</span>
+        <input
+          type="text" inputMode="decimal" placeholder="Amount"
+          value={raw}
+          onChange={e => onChange(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && valid) add() }}
+          className="flex-1 text-center py-2 rounded-lg text-lg font-black outline-none price-display"
+          style={{ background: 'rgba(0,0,0,0.30)', border: '1.5px solid rgba(212,175,55,0.35)', color: 'var(--text)' }} />
+      </div>
+
+      <button onClick={add} disabled={!valid}
+        className="w-full mt-3 py-2.5 rounded-xl font-black text-sm transition-all active:scale-[0.98] disabled:opacity-50"
+        style={valid ? goldBtn : { background: 'rgba(0,0,0,0.3)', color: 'var(--text-muted)', border: '1.5px solid rgba(212,175,55,0.4)' }}>
+        {valid ? `Add ${gbp(Math.round(amount * 100) / 100)} to basket →` : 'Enter an amount →'}
+      </button>
+    </div>
+  )
+}
+
 export function SqFtPage() {
   const setScreen = useStore(s => s.setScreen)
 
@@ -155,14 +228,8 @@ export function SqFtPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {PRODUCTS.map(p => <SponsorCard key={p.key} p={p} />)}
 
-        {/* Any-amount fallback */}
-        <button onClick={() => setScreen('browse')}
-          className="temple-card p-4 flex flex-col items-center justify-center text-center min-h-[140px] transition-all hover:brightness-110 active:scale-[0.99]"
-          style={{ borderStyle: 'dashed' }}>
-          <div className="text-2xl mb-1">💛</div>
-          <p className="font-black text-sm" style={{ color: 'var(--text)' }}>Give any amount</p>
-          <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>Every gift helps — donate whatever your heart allows.</p>
-        </button>
+        {/* Any-amount card — custom amount input + add to basket */}
+        <AnyAmountCard />
       </div>
 
       <p className="text-[11px] mt-5 text-center" style={{ color: 'rgba(74,222,128,0.75)' }}>
