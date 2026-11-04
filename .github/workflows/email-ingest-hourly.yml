@@ -13,7 +13,11 @@
 #   INBOX_IMAP_PASSWORD   app password for that mailbox
 #   INBOX_IMAP_HOST       (optional) default outlook.office365.com
 #   INBOX_IMAP_FOLDER     (optional) default INBOX
-#   ANTHROPIC_API_KEY     to let the AI classify each email
+#   AZURE_OPENAI_ENDPOINT   charity's Azure OpenAI resource URL
+#   AZURE_OPENAI_API_KEY    Azure OpenAI key
+#   AZURE_OPENAI_DEPLOYMENT deployment name (e.g. "gpt-4o-mini")
+#   # Covered by the charity's Azure for Nonprofits grant — no
+#   # ANTHROPIC key is needed. Anthropic stays as a fallback only.
 #
 # Idempotent: skips any email whose Message-ID is already stored.
 name: Email ingest — hourly

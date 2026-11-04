@@ -11,10 +11,11 @@ Context step needs:
   POST   /admin/board/resolutions/{rid}/ai-draft
   GET    /admin/board/resolutions/{rid}/attachments/{att_id}/download
 
-AI model: we use the backend's existing Anthropic client (same key the
-Digital Brain uses) and expose it to trustees as "Copilot" — the
-drafting agent. The model only ever returns a JSON object; the human
-edits it before publishing. Every run is logged to
+AI model: calls the unified ai_json_object helper, which prefers
+Azure OpenAI (charity's Microsoft org tenancy — covered by the Azure
+for Nonprofits grant, no per-call cost). Falls back to Anthropic only
+if Azure isn't configured. The model only ever returns a JSON object;
+the human edits it before publishing. Every run is logged to
 board_resolution_ai_drafts so there is a paper trail of what the AI
 saw and what it produced.
 
@@ -33,6 +34,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace
+from shital.core.fabrics.ai import AIProviderError, AIProviderUnavailable, ai_json_object
 from shital.core.fabrics.database import SessionLocal
 
 router = APIRouter(tags=["board", "board-resolutions"])
@@ -408,23 +410,8 @@ def _ai_prompt(mode: str, instruction: str, current: _AiCurrent | None, context_
     return sys, user
 
 
-def _coerce_output(raw: str) -> dict[str, Any]:
-    """Pull the JSON object out of the model's reply."""
-    s = raw.strip()
-    # Strip accidental code-fences.
-    if s.startswith("```"):
-        s = s.strip("`")
-        if s.lower().startswith("json"):
-            s = s[4:].strip()
-    # Find the outermost {...}.
-    start = s.find("{")
-    end = s.rfind("}")
-    if start < 0 or end < 0 or end < start:
-        return {}
-    try:
-        parsed = json.loads(s[start:end + 1])
-    except json.JSONDecodeError:
-        return {}
+def _validate_draft(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the fields we know about; validate category / decision_type."""
     if not isinstance(parsed, dict):
         return {}
     out: dict[str, Any] = {}
@@ -448,11 +435,6 @@ async def ai_draft(ctx: CurrentSpace, rid: str, body: _AiDraftIn, request: Reque
     if mode not in ("draft", "finalise"):
         raise HTTPException(status_code=400, detail="mode must be 'draft' or 'finalise'")
 
-    from shital.core.fabrics.config import settings
-    api_key = getattr(settings, "ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="AI assistant not configured (ANTHROPIC_API_KEY missing)")
-
     async with SessionLocal() as db:
         res = await _ensure_resolution(db, rid)
         if res["status"] != "DRAFT":
@@ -466,31 +448,14 @@ async def ai_draft(ctx: CurrentSpace, rid: str, body: _AiDraftIn, request: Reque
             context_block=context_block,
         )
 
-        # Call the model synchronously via the Anthropic SDK (same pattern as
-        # the Digital Brain). Keep the request small and bounded.
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        model = getattr(settings, "ANTHROPIC_MODEL", "") or "claude-3-5-sonnet-latest"
         try:
-            msg = client.messages.create(
-                model=model,
-                max_tokens=1500,
-                system=sys_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"AI call failed: {exc}") from exc
+            parsed, model = await ai_json_object(sys_prompt, user_prompt, max_tokens=1500)
+        except AIProviderUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except AIProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        # Join all text blocks.
-        raw_parts: list[str] = []
-        for block in msg.content:
-            # TextBlock has .text; tool_use blocks don't.
-            text_val = getattr(block, "text", None)
-            if isinstance(text_val, str):
-                raw_parts.append(text_val)
-        raw = "".join(raw_parts)
-
-        draft = _coerce_output(raw)
+        draft = _validate_draft(parsed)
         if not draft:
             raise HTTPException(status_code=502, detail="AI returned an unparseable response")
 

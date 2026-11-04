@@ -35,9 +35,17 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
-    # Anthropic
+    # Anthropic (fallback only — new work uses Azure OpenAI below)
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+
+    # Azure OpenAI — the charity's M365/Azure tenancy covers this via
+    # the Azure for Nonprofits grant, so this is the preferred backend
+    # for all server-side AI (board resolution drafts, email ingest).
+    AZURE_OPENAI_ENDPOINT: str = ""        # e.g. https://shital.openai.azure.com
+    AZURE_OPENAI_API_KEY: str = ""
+    AZURE_OPENAI_DEPLOYMENT: str = ""      # the deployment name in the Azure portal
+    AZURE_OPENAI_API_VERSION: str = "2024-10-21"
 
     # SendGrid (legacy fallback)
     SENDGRID_API_KEY: str = ""

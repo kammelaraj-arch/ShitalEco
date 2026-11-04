@@ -22,9 +22,9 @@ Pipeline per run:
   3. For each message:
        a. Parse headers, text body, attachments (PDF / image / text).
        b. Skip if Message-ID already in email_ingest_messages.
-       c. Ask the AI assistant (Anthropic client; same key as the Brain)
-          to classify + extract fields as JSON — invoice number, total,
-          VAT, dates, supplier name/email.
+       c. Ask the AI assistant (Azure OpenAI via Microsoft org tenancy —
+          see shital.core.fabrics.ai) to classify + extract fields as
+          JSON — invoice number, total, VAT, dates, supplier name/email.
        d. INSERT email_ingest_messages row (idempotent via unique
           message_id).
        e. If classification is INVOICE / PURCHASE_ORDER / RECEIPT /
@@ -46,7 +46,7 @@ nightly transaction sync so operators manage one token, not two.
 Guardrails:
    - Hard cap MAX_MESSAGES_PER_RUN on each call so a stuck IMAP cursor
      can't blow the server up.
-   - Skips AI altogether if ANTHROPIC_API_KEY is absent (records the
+   - Skips AI altogether if no provider is configured (records the
      message with classification=UNCLASSIFIED so a human can label it).
 """
 from __future__ import annotations
@@ -68,6 +68,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace
+from shital.core.fabrics.ai import AIProviderError, AIProviderUnavailable, ai_json_object
 from shital.core.fabrics.config import settings
 from shital.core.fabrics.database import SessionLocal
 from shital.core.fabrics.secrets import SecretsManager
@@ -227,48 +228,17 @@ def _parse_date(s: str | None) -> date | None:
     return None
 
 
-def _coerce_ai_json(raw: str) -> dict[str, Any]:
-    s = raw.strip()
-    if s.startswith("```"):
-        s = s.strip("`")
-        if s.lower().startswith("json"):
-            s = s[4:].strip()
-    start = s.find("{")
-    end = s.rfind("}")
-    if start < 0 or end < 0 or end < start:
-        return {}
-    try:
-        parsed = json.loads(s[start:end + 1])
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
 async def _classify_with_ai(from_addr: str, subject: str, body: str) -> dict[str, Any]:
-    api_key = getattr(settings, "ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return {"classification": "UNCLASSIFIED", "confidence": 0.0, "model": ""}
-
-    import anthropic
-    client = anthropic.Anthropic(api_key=api_key)
-    model = getattr(settings, "ANTHROPIC_MODEL", "") or "claude-3-5-sonnet-latest"
-
     body_trimmed = body[:MAX_BODY_BYTES_FOR_AI]
-    user = (
-        f"FROM: {from_addr}\nSUBJECT: {subject}\n\nBODY:\n{body_trimmed}\n"
-    )
-    try:
-        msg = client.messages.create(
-            model=model,
-            max_tokens=1000,
-            system=_CLASSIFY_SYS,
-            messages=[{"role": "user", "content": user}],
-        )
-    except Exception as exc:
-        return {"classification": "UNCLASSIFIED", "confidence": 0.0, "error": str(exc), "model": model}
+    user = f"FROM: {from_addr}\nSUBJECT: {subject}\n\nBODY:\n{body_trimmed}\n"
 
-    raw = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "text", None))
-    parsed = _coerce_ai_json(raw)
+    try:
+        parsed, model = await ai_json_object(_CLASSIFY_SYS, user, max_tokens=1000)
+    except AIProviderUnavailable:
+        return {"classification": "UNCLASSIFIED", "confidence": 0.0, "model": ""}
+    except AIProviderError as exc:
+        return {"classification": "UNCLASSIFIED", "confidence": 0.0, "error": str(exc), "model": ""}
+
     if not parsed:
         return {"classification": "UNCLASSIFIED", "confidence": 0.0, "error": "unparseable AI response", "model": model}
 
