@@ -855,6 +855,7 @@ async def transactions_summary(
     account_id: str = "",
     since: str | None = None,
     until: str | None = None,
+    search: str = "",
 ) -> dict[str, Any]:
     """Totals matching the same filters list_transactions uses. Used by the
     admin page to show how much is being lost to processor fees.
@@ -893,6 +894,21 @@ async def transactions_summary(
     if until_dt:
         where.append("provider_created_at <= :ud")
         params["ud"] = until_dt
+    if search.strip():
+        q = search.strip()
+        where.append("""(
+             LOWER(customer_name)  LIKE :q
+          OR LOWER(customer_email) LIKE :q
+          OR LOWER(customer_phone) LIKE :q
+          OR LOWER(description)    LIKE :q
+          OR LOWER(external_id)    LIKE :q
+          OR LOWER(source_ref)     LIKE :q
+          OR LOWER(payout_ref)     LIKE :q
+          OR UPPER(card_last4)       = :q_up
+          OR UPPER(billing_postcode) LIKE :q_up
+        )""")
+        params["q"] = f"%{q.lower()}%"
+        params["q_up"] = q.upper().replace(" ", "")
 
     clause = " AND ".join(where)
     async with SessionLocal() as db:
@@ -939,6 +955,7 @@ async def export_transactions_csv(
     account_id: str = "",
     since: str | None = None,
     until: str | None = None,
+    search: str = "",
 ) -> Any:
     """CSV export using the same filter set as /transactions. Returns up to
     50 000 rows ordered newest-first — suitable for monthly/yearly reports."""
@@ -975,6 +992,21 @@ async def export_transactions_csv(
     if until_dt:
         where.append("pt.provider_created_at <= :ud")
         params["ud"] = until_dt
+    if search.strip():
+        q = search.strip()
+        where.append("""(
+             LOWER(pt.customer_name)  LIKE :q
+          OR LOWER(pt.customer_email) LIKE :q
+          OR LOWER(pt.customer_phone) LIKE :q
+          OR LOWER(pt.description)    LIKE :q
+          OR LOWER(pt.external_id)    LIKE :q
+          OR LOWER(pt.source_ref)     LIKE :q
+          OR LOWER(pt.payout_ref)     LIKE :q
+          OR UPPER(pt.card_last4)        = :q_up
+          OR UPPER(pt.billing_postcode)  LIKE :q_up
+        )""")
+        params["q"] = f"%{q.lower()}%"
+        params["q_up"] = q.upper().replace(" ", "")
 
     clause = " AND ".join(where)
     async with SessionLocal() as db:
@@ -1076,6 +1108,7 @@ async def list_transactions(
     account_id: str = "",
     since: str | None = None,
     until: str | None = None,
+    search: str = "",
     limit: int = 100,
     offset: int = 0,
     sort: str = "date",
@@ -1111,6 +1144,25 @@ async def list_transactions(
     if until_dt:
         where.append("pt.provider_created_at <= :ud")
         params["ud"] = until_dt
+    if search.strip():
+        # Case-insensitive match across donor identity + the common ref
+        # fields. Postcode and last4 are exact (uppercased) so a 4-digit
+        # search for a card number works without false positives.
+        q = search.strip()
+        where.append("""(
+             LOWER(pt.customer_name)     LIKE :q
+          OR LOWER(pt.customer_email)    LIKE :q
+          OR LOWER(pt.customer_phone)    LIKE :q
+          OR LOWER(pt.description)       LIKE :q
+          OR LOWER(pt.external_id)       LIKE :q
+          OR LOWER(pt.source_ref)        LIKE :q
+          OR LOWER(pt.payout_ref)        LIKE :q
+          OR LOWER(pt.statement_descriptor) LIKE :q
+          OR UPPER(pt.card_last4)        = :q_up
+          OR UPPER(pt.billing_postcode)  LIKE :q_up
+        )""")
+        params["q"] = f"%{q.lower()}%"
+        params["q_up"] = q.upper().replace(" ", "")
 
     sort_col = _SORT_WHITELIST.get(sort.lower(), "pt.provider_created_at")
     sort_dir = "ASC" if order.lower() == "asc" else "DESC"
