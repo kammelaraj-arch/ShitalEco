@@ -31,6 +31,23 @@ interface Txn {
   contact_id: string
   contact_name: string
   contact_email: string
+  // Rich detail
+  customer_name: string
+  customer_email: string
+  customer_phone: string
+  billing_country: string
+  billing_postcode: string
+  payment_method_type: string
+  card_brand: string
+  card_last4: string
+  card_country: string
+  card_funding: string
+  receipt_url: string
+  statement_descriptor: string
+  available_at: string
+  refunded: boolean
+  refund_amount_pence: number
+  disputed: boolean
 }
 
 interface FinanceAccount {
@@ -108,6 +125,8 @@ export default function TransactionsPage() {
 
   interface ProviderBucket { provider: string; count: number; gross: number; fee: number; net: number; currency: string }
   const [summary, setSummary] = useState<{ providers: ProviderBucket[]; total: { count: number; gross: number; fee: number; net: number; currency: string } } | null>(null)
+
+  const [detail, setDetail] = useState<Txn | null>(null)
 
   useEffect(() => {
     apiFetch<{ items: FinanceAccount[] }>(`/admin/finance/accounts`).then(d => setAccounts(d.items || [])).catch(() => {})
@@ -348,7 +367,8 @@ export default function TransactionsPage() {
                 </td></tr>
               )}
               {items.map(t => (
-                <tr key={t.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                <tr key={t.id} onClick={() => setDetail(t)}
+                    className="border-b border-white/5 hover:bg-white/5 transition-colors cursor-pointer">
                   <td className="px-4 py-3 text-white/80 text-xs whitespace-nowrap">{fmtDateTime(t.provider_created_at)}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold border capitalize ${PROVIDER_BADGE[t.provider] || 'bg-white/10 text-white/60 border-white/20'}`}>
@@ -476,6 +496,103 @@ export default function TransactionsPage() {
           )}
         </div>
       )}
+
+      {/* Detail slide-over — all the fields the processors give us */}
+      {detail && <TxnDetail txn={detail} onClose={() => setDetail(null)} />}
+    </div>
+  )
+}
+
+function TxnDetail({ txn, onClose }: { txn: Txn; onClose: () => void }) {
+  function money(pence: number): string {
+    try { return new Intl.NumberFormat('en-GB', { style: 'currency', currency: txn.currency || 'GBP' }).format((pence || 0) / 100) }
+    catch { return `${((pence || 0) / 100).toFixed(2)} ${txn.currency || 'GBP'}` }
+  }
+  function when(iso: string): string {
+    if (!iso) return '—'
+    try { return new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) } catch { return iso }
+  }
+  return (
+    <>
+      <div onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
+      <div className="fixed right-0 top-0 h-full w-full sm:max-w-xl bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+        <div className="px-6 py-5 border-b border-white/5 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-white/40 text-xs uppercase tracking-widest font-bold">{txn.provider} · {txn.kind || '—'}</p>
+            <h2 className="text-white font-black text-2xl mt-1 font-mono">{money(txn.amount_pence)}</h2>
+            <p className="text-white/50 text-xs mt-1">{when(txn.provider_created_at)}</p>
+          </div>
+          <button onClick={onClose} className="text-white/40 hover:text-white text-xl p-1">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 text-sm">
+          <Section title="Money">
+            <KV label="Gross" value={money(txn.amount_pence)} />
+            <KV label="Fee"   value={txn.fee_pence ? money(txn.fee_pence) : '—'} tone={txn.fee_pence ? 'red' : undefined} />
+            <KV label="Net"   value={money(txn.net_pence)} tone="green" />
+            <KV label="Status" value={txn.status || '—'} />
+            {txn.refunded && <KV label="Refunded" value={money(txn.refund_amount_pence)} tone="red" />}
+            {txn.disputed && <KV label="Disputed" value="⚠ Yes" tone="red" />}
+          </Section>
+
+          <Section title="Donor">
+            <KV label="Name"  value={txn.customer_name || txn.contact_name || '—'} />
+            <KV label="Email" value={txn.customer_email || txn.contact_email || '—'} />
+            <KV label="Phone" value={txn.customer_phone || '—'} />
+            <KV label="Billing postcode" value={txn.billing_postcode || '—'} />
+            <KV label="Billing country"  value={txn.billing_country || '—'} />
+          </Section>
+
+          <Section title="Payment method">
+            <KV label="Type"    value={txn.payment_method_type || '—'} />
+            <KV label="Card"    value={txn.card_brand ? `${txn.card_brand} ${txn.card_last4 ? '•••• ' + txn.card_last4 : ''}` : '—'} />
+            <KV label="Card country" value={txn.card_country || '—'} />
+            <KV label="Card funding" value={txn.card_funding || '—'} />
+          </Section>
+
+          <Section title="Account & settlement">
+            <KV label="Finance account" value={txn.account_name ? `🏦 ${txn.account_name}` : '—'} />
+            <KV label="Funds available" value={when(txn.available_at)} />
+            <KV label="Payout ref"      value={txn.payout_ref || '—'} />
+            <KV label="Statement descriptor" value={txn.statement_descriptor || '—'} />
+          </Section>
+
+          <Section title="Linked donation">
+            <KV label="Donation"  value={txn.donation_id ? txn.donation_id.slice(0, 8) + '…' : '—'} />
+            <KV label="Purpose"   value={txn.donation_purpose || '—'} />
+            <KV label="Gift Aid"  value={txn.gift_aid_eligible ? `🇬🇧 Yes +${money(Math.round(txn.gift_aid_amount * 100))}` : 'No'} tone={txn.gift_aid_eligible ? 'blue' : undefined} />
+          </Section>
+
+          <Section title="References">
+            <KV label="External id" value={txn.external_id} mono />
+            <KV label="Source ref"  value={txn.source_ref || '—'} mono />
+            <KV label="Description" value={txn.description || '—'} />
+            {txn.receipt_url && (
+              <KV label="Receipt" value={
+                <a href={txn.receipt_url} target="_blank" rel="noreferrer" className="text-saffron-300 hover:underline">Open in provider ↗</a>
+              } />
+            )}
+          </Section>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/3 p-4">
+      <p className="text-white/50 text-[10px] uppercase tracking-widest font-bold mb-3">{title}</p>
+      <div className="space-y-2">{children}</div>
+    </div>
+  )
+}
+
+function KV({ label, value, tone, mono }: { label: string; value: React.ReactNode; tone?: 'red' | 'green' | 'blue'; mono?: boolean }) {
+  const toneCls = tone === 'red' ? 'text-red-300' : tone === 'green' ? 'text-green-300' : tone === 'blue' ? 'text-blue-300' : 'text-white/90'
+  return (
+    <div className="flex items-start justify-between gap-3 text-sm">
+      <span className="text-white/50">{label}</span>
+      <span className={`${toneCls} text-right max-w-[60%] break-words ${mono ? 'font-mono text-xs' : ''}`}>{value}</span>
     </div>
   )
 }

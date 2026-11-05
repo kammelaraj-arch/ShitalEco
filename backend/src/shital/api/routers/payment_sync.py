@@ -182,6 +182,23 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
         "payout":     (row.get("payout_ref") or "")[:120],
         "pca":        row["provider_created_at"],
         "raw":        json.dumps(row.get("raw", {})),
+        # Rich detail (migration 046) — all tolerant of absence.
+        "cust_name":      (row.get("customer_name") or "")[:200],
+        "cust_email":     (row.get("customer_email") or "")[:200].lower(),
+        "cust_phone":     (row.get("customer_phone") or "")[:50],
+        "bill_country":   (row.get("billing_country") or "")[:4].upper(),
+        "bill_postcode":  (row.get("billing_postcode") or "")[:20],
+        "pm_type":        (row.get("payment_method_type") or "")[:40],
+        "card_brand":     (row.get("card_brand") or "")[:30],
+        "card_last4":     (row.get("card_last4") or "")[:4],
+        "card_country":   (row.get("card_country") or "")[:4].upper(),
+        "card_funding":   (row.get("card_funding") or "")[:20],
+        "receipt_url":    (row.get("receipt_url") or "")[:500],
+        "stmt_desc":      (row.get("statement_descriptor") or "")[:200],
+        "available_at":   row.get("available_at"),
+        "refunded":       bool(row.get("refunded", False)),
+        "refund_amount":  int(row.get("refund_amount_pence", 0) or 0),
+        "disputed":       bool(row.get("disputed", False)),
     }
     if existed:
         await db.execute(text("""
@@ -193,7 +210,23 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
               payment_method_hint = :pmh, source_ref = :src,
               payout_ref = :payout, provider_created_at = :pca,
               raw = CAST(:raw AS JSONB), synced_at = NOW(),
-              account_id = COALESCE(account_id, :account)
+              account_id = COALESCE(account_id, :account),
+              customer_name     = CASE WHEN :cust_name <> ''     THEN :cust_name     ELSE customer_name     END,
+              customer_email    = CASE WHEN :cust_email <> ''    THEN :cust_email    ELSE customer_email    END,
+              customer_phone    = CASE WHEN :cust_phone <> ''    THEN :cust_phone    ELSE customer_phone    END,
+              billing_country   = CASE WHEN :bill_country <> ''  THEN :bill_country  ELSE billing_country   END,
+              billing_postcode  = CASE WHEN :bill_postcode <> '' THEN :bill_postcode ELSE billing_postcode  END,
+              payment_method_type = CASE WHEN :pm_type <> ''     THEN :pm_type       ELSE payment_method_type END,
+              card_brand        = CASE WHEN :card_brand <> ''    THEN :card_brand    ELSE card_brand        END,
+              card_last4        = CASE WHEN :card_last4 <> ''    THEN :card_last4    ELSE card_last4        END,
+              card_country      = CASE WHEN :card_country <> ''  THEN :card_country  ELSE card_country      END,
+              card_funding      = CASE WHEN :card_funding <> ''  THEN :card_funding  ELSE card_funding      END,
+              receipt_url       = CASE WHEN :receipt_url <> ''   THEN :receipt_url   ELSE receipt_url       END,
+              statement_descriptor = CASE WHEN :stmt_desc <> ''  THEN :stmt_desc     ELSE statement_descriptor END,
+              available_at      = COALESCE(:available_at, available_at),
+              refunded          = CASE WHEN :refunded THEN true ELSE refunded END,
+              refund_amount_pence = GREATEST(refund_amount_pence, :refund_amount),
+              disputed          = CASE WHEN :disputed THEN true ELSE disputed END
             WHERE provider = :provider AND external_id = :eid
         """), params)
         return "updated"
@@ -202,12 +235,22 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
           (provider, external_id, kind, status, amount_pence, currency,
            fee_pence, net_pence, description, customer_hint,
            payment_method_hint, source_ref, payout_ref,
-           provider_created_at, raw, account_id)
+           provider_created_at, raw, account_id,
+           customer_name, customer_email, customer_phone,
+           billing_country, billing_postcode,
+           payment_method_type, card_brand, card_last4, card_country, card_funding,
+           receipt_url, statement_descriptor, available_at,
+           refunded, refund_amount_pence, disputed)
         VALUES
           (:provider, :eid, :kind, :status, :amount, :currency,
            :fee, :net, :desc, :cust,
            :pmh, :src, :payout,
-           :pca, CAST(:raw AS JSONB), :account)
+           :pca, CAST(:raw AS JSONB), :account,
+           :cust_name, :cust_email, :cust_phone,
+           :bill_country, :bill_postcode,
+           :pm_type, :card_brand, :card_last4, :card_country, :card_funding,
+           :receipt_url, :stmt_desc, :available_at,
+           :refunded, :refund_amount, :disputed)
     """), params)
     return "inserted"
 
@@ -250,10 +293,6 @@ async def _sync_stripe(since: datetime, until: datetime | None, triggered_by: st
                 has_more = bool(getattr(page, "has_more", False))
                 for bt_obj in data:
                     counts["fetched"] += 1
-                    # Stripe SDK: individual resources (BalanceTransaction,
-                    # Charge, …) don't expose .get() any more — call .to_dict()
-                    # first and work on a plain dict. Keeps the rest of the
-                    # loop readable.
                     bt = bt_obj.to_dict() if hasattr(bt_obj, "to_dict") else dict(bt_obj)
                     created_at = datetime.fromtimestamp(bt.get("created") or 0, tz=UTC)
                     src = bt.get("source") or ""
@@ -262,6 +301,51 @@ async def _sync_stripe(since: datetime, until: datetime | None, triggered_by: st
                     payout_ref = ""
                     if bt.get("type") == "payout":
                         payout_ref = src
+
+                    # For charge-type transactions, fetch the Charge for the
+                    # rich detail (billing details, payment-method details,
+                    # receipt URL, refund / dispute flags). Skip for payouts
+                    # and non-charge movements — those don't carry customer
+                    # information. Failures on the detail call must not fail
+                    # the sync — the base row still goes in without them.
+                    extra: dict[str, Any] = {}
+                    if bt.get("type") == "charge" and src and src.startswith("ch_"):
+                        try:
+                            ch_obj = stripe.Charge.retrieve(
+                                src,
+                                expand=["payment_method_details", "billing_details"],
+                            )
+                            ch = ch_obj.to_dict() if hasattr(ch_obj, "to_dict") else dict(ch_obj)
+                            bd = ch.get("billing_details") or {}
+                            bd_addr = bd.get("address") or {}
+                            pmd = ch.get("payment_method_details") or {}
+                            card = pmd.get("card") or {}
+                            extra = {
+                                "customer_name":        bd.get("name") or "",
+                                "customer_email":       bd.get("email") or ch.get("receipt_email") or "",
+                                "customer_phone":       bd.get("phone") or "",
+                                "billing_country":      bd_addr.get("country") or "",
+                                "billing_postcode":     bd_addr.get("postal_code") or "",
+                                "payment_method_type":  pmd.get("type") or "",
+                                "card_brand":           card.get("brand") or "",
+                                "card_last4":           card.get("last4") or "",
+                                "card_country":         card.get("country") or "",
+                                "card_funding":         card.get("funding") or "",
+                                "receipt_url":          ch.get("receipt_url") or "",
+                                "statement_descriptor": ch.get("statement_descriptor") or "",
+                                "refunded":             bool(ch.get("refunded")),
+                                "refund_amount_pence":  ch.get("amount_refunded") or 0,
+                                "disputed":             bool(ch.get("disputed")),
+                            }
+                        except Exception:
+                            extra = {}
+                    available_at = None
+                    if bt.get("available_on"):
+                        try:
+                            available_at = datetime.fromtimestamp(int(bt["available_on"]), tz=UTC)
+                        except (TypeError, ValueError):
+                            available_at = None
+
                     outcome = await _upsert_tx(db, "stripe", bt["id"], {
                         "kind":                bt.get("type", ""),
                         "status":              bt.get("status", ""),
@@ -270,17 +354,19 @@ async def _sync_stripe(since: datetime, until: datetime | None, triggered_by: st
                         "fee_pence":           bt.get("fee", 0),
                         "net_pence":           bt.get("net", 0),
                         "description":         bt.get("description", "") or "",
-                        "customer_hint":       "",
-                        "payment_method_hint": "",
+                        "customer_hint":       extra.get("customer_email") or extra.get("customer_name") or "",
+                        "payment_method_hint": extra.get("card_brand", "") + (" •••• " + extra.get("card_last4", "") if extra.get("card_last4") else ""),
                         "source_ref":          src or "",
                         "payout_ref":          payout_ref,
                         "provider_created_at": created_at,
+                        "available_at":        available_at,
                         "raw": {
                             "type":          bt.get("type"),
                             "available_on":  bt.get("available_on"),
                             "reporting_category": bt.get("reporting_category"),
                             "exchange_rate": bt.get("exchange_rate"),
                         },
+                        **extra,
                     })
                     counts[outcome] += 1
                 if not has_more or not data:
@@ -356,6 +442,10 @@ async def _sync_sumup(since: datetime, until: datetime | None, triggered_by: str
                         fee_pence = 0
                         card_type = (it.get("card_type") or "") or ""
                         entry_mode = (it.get("entry_mode") or "") or ""
+                        card_brand = ""
+                        card_last4 = ""
+                        card_country = ""
+                        payout_date: datetime | None = None
                         try:
                             det_resp = await client.get(
                                 detail_url,
@@ -389,6 +479,21 @@ async def _sync_sumup(since: datetime, until: datetime | None, triggered_by: str
                                                 pass
                                 card_type = card_type or det.get("card", {}).get("type", "") or det.get("card_type", "")
                                 entry_mode = entry_mode or det.get("entry_mode", "")
+                                card_obj = det.get("card") or {}
+                                card_brand = card_obj.get("type", "") or card_type
+                                card_last4 = card_obj.get("last_4_digits") or card_obj.get("last4") or ""
+                                card_country = card_obj.get("country") or ""
+                                # Payout/available date — use the latest
+                                # PAYOUT event timestamp if present.
+                                for ev in det.get("events") or []:
+                                    if isinstance(ev, dict) and (ev.get("type") or "").upper() == "PAYOUT":
+                                        ts_val = ev.get("timestamp") or ev.get("payout_date") or ""
+                                        try:
+                                            payout_date = datetime.fromisoformat(str(ts_val).replace("Z", "+00:00"))
+                                            if payout_date.tzinfo is None:
+                                                payout_date = payout_date.replace(tzinfo=UTC)
+                                        except (ValueError, AttributeError, TypeError):
+                                            pass
                         except httpx.HTTPError:
                             # Network blip on the detail call must not fail
                             # the whole sync — fee just stays 0 for this row.
@@ -399,6 +504,7 @@ async def _sync_sumup(since: datetime, until: datetime | None, triggered_by: str
                         # positive integer here.
                         net_pence = amount_pence - abs(fee_pence) if amount_pence > 0 else amount_pence + abs(fee_pence)
 
+                        is_refund = (it.get("status") or "").upper() in ("REFUNDED", "REFUND") or amount_pence < 0
                         outcome = await _upsert_tx(db, "sumup", ext, {
                             "kind":                (it.get("type") or "transaction").lower(),
                             "status":              (it.get("status") or "").upper(),
@@ -408,10 +514,18 @@ async def _sync_sumup(since: datetime, until: datetime | None, triggered_by: str
                             "net_pence":           net_pence,
                             "description":         it.get("product_summary", "") or it.get("description", ""),
                             "customer_hint":       it.get("payment_type", "") or "",
-                            "payment_method_hint": card_type,
+                            "payment_method_hint": (card_brand or card_type) + (" •••• " + card_last4 if card_last4 else ""),
                             "source_ref":          it.get("merchant_code", "") or "",
                             "payout_ref":          it.get("payout_plan", "") or "",
                             "provider_created_at": created_at,
+                            # Rich detail
+                            "payment_method_type": "card",
+                            "card_brand":          card_brand or card_type,
+                            "card_last4":          card_last4,
+                            "card_country":        card_country,
+                            "available_at":        payout_date,
+                            "refunded":            is_refund,
+                            "refund_amount_pence": abs(amount_pence) if is_refund else 0,
                             "raw": {
                                 "payment_type":  it.get("payment_type"),
                                 "entry_mode":    entry_mode,
@@ -548,9 +662,20 @@ async def _sync_paypal(since: datetime, until: datetime | None, triggered_by: st
                                 or (payer.get("payer_name") or {}).get("given_name") or ""
                             ) + (" " + ((payer.get("payer_name") or {}).get("surname") or "")).rstrip()
                             email = (payer.get("email_address") or "").strip()
+                            # Rich shipping address — PayPal only exposes
+                            # address at the payer/shipping level, not the
+                            # payment method, so use whichever is available.
+                            ship_addr = ship.get("address") or {}
+                            payer_addr = (payer.get("address") or {}) if isinstance(payer.get("address"), dict) else {}
+                            bill_country = (ship_addr.get("country_code") or payer_addr.get("country_code") or "")
+                            bill_postcode = (ship_addr.get("postal_code") or payer_addr.get("postal_code") or "")
+                            # Refund / dispute state when PayPal exposes it.
+                            status_code = (tx.get("transaction_status") or "").upper()
+                            is_refund = status_code in ("P", "RETURNED", "REFUNDED", "R") or amount_pence < 0
+                            pm_type_val = tx.get("payment_method_type") or ("paypal" if email else "")
                             outcome = await _upsert_tx(db, "paypal", txn_id, {
                                 "kind":                (tx.get("transaction_event_code") or "")[:40],
-                                "status":              (tx.get("transaction_status") or "").upper(),
+                                "status":              status_code,
                                 "amount_pence":        amount_pence,
                                 "currency":            (amount.get("currency_code") or "GBP").upper(),
                                 "fee_pence":           fee_pence_abs,
@@ -559,10 +684,20 @@ async def _sync_paypal(since: datetime, until: datetime | None, triggered_by: st
                                                        or tx.get("transaction_note")
                                                        or ship.get("name", "") or "")[:500],
                                 "customer_hint":       (cust or email)[:200],
-                                "payment_method_hint": (tx.get("payment_method_type") or tx.get("protection_eligibility") or "")[:120],
+                                "payment_method_hint": pm_type_val[:120],
                                 "source_ref":          (tx.get("invoice_id") or tx.get("custom_field") or "")[:120],
                                 "payout_ref":          "",
                                 "provider_created_at": created_at,
+                                # Rich detail
+                                "customer_name":       cust,
+                                "customer_email":      email,
+                                "customer_phone":      (payer.get("phone_number") or {}).get("national_number", "") if isinstance(payer.get("phone_number"), dict) else "",
+                                "billing_country":     bill_country,
+                                "billing_postcode":    bill_postcode,
+                                "payment_method_type": pm_type_val,
+                                "statement_descriptor": tx.get("bank_reference_id") or "",
+                                "refunded":            is_refund,
+                                "refund_amount_pence": abs(amount_pence) if is_refund else 0,
                                 "raw": {
                                     "event_code":   tx.get("transaction_event_code"),
                                     "payer_email":  email,
@@ -853,6 +988,12 @@ async def list_transactions(
                    pt.account_id::text AS account_id,
                    fa.name          AS account_name,
                    fa.account_type  AS account_type,
+                   pt.customer_name, pt.customer_email, pt.customer_phone,
+                   pt.billing_country, pt.billing_postcode,
+                   pt.payment_method_type, pt.card_brand, pt.card_last4,
+                   pt.card_country, pt.card_funding,
+                   pt.receipt_url, pt.statement_descriptor, pt.available_at,
+                   pt.refunded, pt.refund_amount_pence, pt.disputed,
                    d.id::text       AS donation_id,
                    COALESCE(d.gift_aid_eligible, false) AS gift_aid_eligible,
                    d.gift_aid_amount::numeric            AS gift_aid_amount,
@@ -911,6 +1052,23 @@ async def list_transactions(
                 "contact_id":           r["contact_id"] or "",
                 "contact_name":         r["contact_name"] or "",
                 "contact_email":        r["contact_email"] or "",
+                # Rich detail
+                "customer_name":        r["customer_name"] or "",
+                "customer_email":       r["customer_email"] or "",
+                "customer_phone":       r["customer_phone"] or "",
+                "billing_country":      r["billing_country"] or "",
+                "billing_postcode":     r["billing_postcode"] or "",
+                "payment_method_type":  r["payment_method_type"] or "",
+                "card_brand":           r["card_brand"] or "",
+                "card_last4":           r["card_last4"] or "",
+                "card_country":         r["card_country"] or "",
+                "card_funding":         r["card_funding"] or "",
+                "receipt_url":          r["receipt_url"] or "",
+                "statement_descriptor": r["statement_descriptor"] or "",
+                "available_at":         _iso(r["available_at"]),
+                "refunded":             bool(r["refunded"]),
+                "refund_amount_pence":  int(r["refund_amount_pence"] or 0),
+                "disputed":             bool(r["disputed"]),
             }
             for r in rows
         ],
