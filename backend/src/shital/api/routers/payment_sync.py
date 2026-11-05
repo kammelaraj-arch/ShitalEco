@@ -154,6 +154,30 @@ async def _primary_account_id_for_provider(db: Any, provider: str) -> str | None
     return str(row[0]) if row else None
 
 
+async def _backfill_account_ids(db: Any, provider: str) -> int:
+    """Link every orphan row (account_id IS NULL) for this provider to the
+    provider's primary finance_account. Returns the count linked.
+
+    Called at the start of every provider sync so the "No transactions"
+    view with a specific account selected doesn't hide historical rows
+    that were synced before that account entry was created.
+    """
+    account_id = await _primary_account_id_for_provider(db, provider)
+    if not account_id:
+        return 0
+    result = await db.execute(text("""
+        UPDATE payment_transactions
+           SET account_id = :aid
+         WHERE provider = :p
+           AND account_id IS NULL
+    """), {"aid": account_id, "p": provider})
+    # SQLAlchemy returns .rowcount for UPDATE under asyncpg.
+    linked = int(getattr(result, "rowcount", 0) or 0)
+    if linked:
+        await db.commit()
+    return linked
+
+
 async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, Any]) -> str:
     """Return 'inserted' or 'updated'. Links new rows to the provider's primary
     finance_account; existing rows have their account_id backfilled only when
@@ -268,6 +292,7 @@ async def _sync_stripe(since: datetime, until: datetime | None, triggered_by: st
     counts = {"fetched": 0, "inserted": 0, "updated": 0}
     async with SessionLocal() as db:
         run_id = await _start_run(db, "stripe", triggered_by, since, until)
+        counts["backfilled"] = await _backfill_account_ids(db, "stripe")
         try:
             params: dict[str, Any] = {
                 "limit": STRIPE_PAGE_SIZE,
@@ -395,6 +420,7 @@ async def _sync_sumup(since: datetime, until: datetime | None, triggered_by: str
     counts = {"fetched": 0, "inserted": 0, "updated": 0}
     async with SessionLocal() as db:
         run_id = await _start_run(db, "sumup", triggered_by, since, until)
+        counts["backfilled"] = await _backfill_account_ids(db, "sumup")
         try:
             base = "https://api.sumup.com"
             url = f"{base}/v2.1/merchants/{merchant}/transactions/history"
@@ -604,6 +630,7 @@ async def _sync_paypal(since: datetime, until: datetime | None, triggered_by: st
     counts = {"fetched": 0, "inserted": 0, "updated": 0}
     async with SessionLocal() as db:
         run_id = await _start_run(db, "paypal", triggered_by, final_since, final_until)
+        counts["backfilled"] = await _backfill_account_ids(db, "paypal")
         try:
             cur_from = final_since
             async with httpx.AsyncClient(timeout=40) as client:
@@ -745,6 +772,25 @@ class _SyncAllIn(BaseModel):
     days: int | None = None
 
 
+@router.post("/transactions/backfill-accounts")
+async def backfill_accounts(ctx: CurrentSpace) -> dict[str, Any]:
+    """Link every orphan payment_transactions row to its provider's primary
+    finance_account.
+
+    Operator-triggered — no sync is performed, no external APIs are hit.
+    Safe to call repeatedly: rows already linked are untouched.
+    """
+    _only_admin(ctx)
+    per_provider: dict[str, int] = {}
+    async with SessionLocal() as db:
+        for provider in ("stripe", "sumup", "paypal"):
+            per_provider[provider] = await _backfill_account_ids(db, provider)
+    return {
+        "linked": sum(per_provider.values()),
+        "per_provider": per_provider,
+    }
+
+
 @router.post("/sync/stripe")
 async def sync_stripe(ctx: CurrentSpace, body: _SyncIn) -> dict[str, Any]:
     _only_admin(ctx)
@@ -880,12 +926,15 @@ async def transactions_summary(
         where.append("status = :s")
         params["s"] = status
     if account_id:
-        try:
-            uuid.UUID(account_id)
-        except (ValueError, TypeError) as exc:
-            raise HTTPException(status_code=400, detail="account_id must be a UUID") from exc
-        where.append("account_id = :aid")
-        params["aid"] = account_id
+        if account_id == "__unlinked__":
+            where.append("account_id IS NULL")
+        else:
+            try:
+                uuid.UUID(account_id)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(status_code=400, detail="account_id must be a UUID") from exc
+            where.append("account_id = :aid")
+            params["aid"] = account_id
     since_dt = _parse_iso(since)
     until_dt = _parse_iso(until)
     if since_dt:
@@ -978,12 +1027,15 @@ async def export_transactions_csv(
         where.append("pt.status = :s")
         params["s"] = status
     if account_id:
-        try:
-            uuid.UUID(account_id)
-        except (ValueError, TypeError) as exc:
-            raise HTTPException(status_code=400, detail="account_id must be a UUID") from exc
-        where.append("pt.account_id = :aid")
-        params["aid"] = account_id
+        if account_id == "__unlinked__":
+            where.append("pt.account_id IS NULL")
+        else:
+            try:
+                uuid.UUID(account_id)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(status_code=400, detail="account_id must be a UUID") from exc
+            where.append("pt.account_id = :aid")
+            params["aid"] = account_id
     since_dt = _parse_iso(since)
     until_dt = _parse_iso(until)
     if since_dt:
@@ -1130,12 +1182,15 @@ async def list_transactions(
         where.append("pt.status = :s")
         params["s"] = status
     if account_id:
-        try:
-            uuid.UUID(account_id)
-        except (ValueError, TypeError) as exc:
-            raise HTTPException(status_code=400, detail="account_id must be a UUID") from exc
-        where.append("pt.account_id = :aid")
-        params["aid"] = account_id
+        if account_id == "__unlinked__":
+            where.append("pt.account_id IS NULL")
+        else:
+            try:
+                uuid.UUID(account_id)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(status_code=400, detail="account_id must be a UUID") from exc
+            where.append("pt.account_id = :aid")
+            params["aid"] = account_id
     since_dt = _parse_iso(since)
     until_dt = _parse_iso(until)
     if since_dt:
