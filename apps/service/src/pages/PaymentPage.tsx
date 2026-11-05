@@ -97,6 +97,19 @@ export function PaymentPage() {
         gift_aid_postcode:  s.giftAidDeclaration?.postcode || s.contactInfo?.postcode || '',
         gift_aid_address:   s.giftAidDeclaration?.address  || s.contactInfo?.address  || '',
         contact_uprn:       s.giftAidDeclaration?.uprn     || s.contactInfo?.uprn     || '',
+        // Basket item breakdown, so the backend can bucket Square Foot vs
+        // brick totals AND populate the donor wall with per-unit dedications.
+        items:              s.items.map((it: any) => ({
+          name:        it.name,
+          quantity:    it.quantity,
+          unitPrice:   it.unitPrice,
+          totalPrice:  it.totalPrice,
+          referenceId: it.referenceId,
+          category:    it.category,
+          giftAidEligible: it.giftAidEligible,
+          dedication:  it.dedication || '',
+          prefix:      it.prefix || '',
+        })),
       })
       if (result.success) {
         // Snapshot items + Gift Aid totals into the order result BEFORE we

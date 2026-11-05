@@ -57,6 +57,8 @@ function SponsorCard({ p }: { p: Product }) {
   const addItem = useStore(s => s.addItem)
   const setScreen = useStore(s => s.setScreen)
   const [qty, setQty] = useState(1)
+  const [dedication, setDedication] = useState('')
+  const [prefix, setPrefix] = useState('')
 
   const valid = Number.isFinite(qty) && qty >= 1
   const total = (valid ? qty : 0) * p.price
@@ -72,6 +74,8 @@ function SponsorCard({ p }: { p: Product }) {
       referenceId: `${p.key}-${Date.now()}`,
       giftAidEligible: true,
       category: 'SPONSORSHIP',
+      dedication: dedication.trim(),
+      prefix: prefix,
     })
     setScreen('basket')
   }
@@ -94,6 +98,32 @@ function SponsorCard({ p }: { p: Product }) {
 
       <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{p.blurb}</p>
       <p className="text-[11px] mt-1.5 font-semibold" style={{ color: 'rgba(212,175,55,0.85)' }}>🏛 {p.wall}</p>
+
+      {/* Dedication for the donor wall */}
+      <div className="mt-3 p-3 rounded-lg space-y-2"
+        style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(212,175,55,0.2)' }}>
+        <div className="text-[10px] font-black uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.85)' }}>
+          Name on the wall (optional)
+        </div>
+        <select value={prefix} onChange={e => setPrefix(e.target.value)}
+          className="w-full px-2 py-1.5 rounded-md text-xs font-semibold outline-none"
+          style={{ background: 'rgba(0,0,0,0.35)', color: 'var(--text)', border: '1px solid rgba(212,175,55,0.3)' }}>
+          <option value="">— Dedication prefix —</option>
+          <option value="In memory of">In memory of</option>
+          <option value="In honour of">In honour of</option>
+          <option value="Dedicated by">Dedicated by</option>
+          <option value="With gratitude from">With gratitude from</option>
+        </select>
+        <input value={dedication} onChange={e => setDedication(e.target.value.slice(0, 80))}
+          placeholder="e.g. Smt Hansaben Patel · leave blank to skip"
+          className="w-full px-2 py-1.5 rounded-md text-xs outline-none"
+          style={{ background: 'rgba(0,0,0,0.35)', color: 'var(--text)', border: '1px solid rgba(212,175,55,0.3)' }} />
+        {qty > 1 && dedication.trim() && (
+          <div className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            Same dedication will appear on all {qty} {p.tier.toLowerCase()}s.
+          </div>
+        )}
+      </div>
 
       {/* Quantity stepper */}
       <div className="flex items-center justify-center gap-3 mt-3">

@@ -138,6 +138,7 @@ export const api = {
     contact_email: string; contact_phone: string
     gift_aid: boolean; gift_aid_postcode: string; gift_aid_address: string
     contact_uprn?: string
+    items?: Array<Record<string, unknown>>
   }) {
     const r = await fetch(`${API}/service/paypal/capture`, {
       method: 'POST',

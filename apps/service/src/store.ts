@@ -8,7 +8,7 @@ export const SHITAL_LOGO_URL = '/logo.png'
 
 export type Screen =
   | 'browse' | 'basket' | 'contact' | 'gift-aid' | 'payment' | 'confirmation' | 'monthly-giving' | 'volunteer' | 'reference'
-  | 'donor-login' | 'my-giving' | 'seva' | 'sqft'
+  | 'donor-login' | 'my-giving' | 'seva' | 'sqft' | 'donor-wall'
 
 export type Language = 'en' | 'gu' | 'hi' | 'te' | 'ta' | 'pa' | 'mr' | 'bn' | 'kn'
 
@@ -42,6 +42,11 @@ export interface BasketItem {
   referenceId?: string
   giftAidEligible?: boolean
   category?: string
+  // Donor-wall recognition (Future Legacy Appeal tiers). Captured on the
+  // tier card and passed through PayPal /capture so the backend can
+  // populate donor_wall_entries — one row per unit (quantity).
+  dedication?: string
+  prefix?: string   // '' | 'In memory of' | 'In honour of' | 'Dedicated by'
 }
 
 export interface GiftAidDeclaration {

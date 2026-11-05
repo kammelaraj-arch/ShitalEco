@@ -27,6 +27,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/finance/accounts',        icon: '🏦', label: 'Accounts (Bank / Safe / Hundi)' },
       { href: '/finance/invoices',        icon: '🧾', label: 'Invoices & Supplier Docs' },
       { href: '/finance/transactions',    icon: '💳', label: 'Transactions (Stripe + SumUp)' },
+      { href: '/finance/donor-wall',      icon: '🏛', label: 'Donor Wall (Future Legacy)' },
       { href: '/finance/incoming-funds',  icon: '💸', label: 'Incoming Funds' },
       { href: '/finance/reimbursements',  icon: '🧾', label: 'Reimbursements' },
       { href: '/finance/purchase-orders',   icon: '📦', label: 'Purchase Orders' },
