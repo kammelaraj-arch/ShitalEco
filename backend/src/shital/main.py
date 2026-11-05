@@ -4279,6 +4279,7 @@ _mount("shital.api.routers.mail_agent",            "router")
 _mount("shital.api.routers.compliance",            "router")
 _mount("shital.api.routers.payment_sync",          "router")
 _mount("shital.api.routers.email_ingest",          "router")
+_mount("shital.api.routers.finance_accounts",      "router")
 
 
 @app.get("/health", tags=["system"])
