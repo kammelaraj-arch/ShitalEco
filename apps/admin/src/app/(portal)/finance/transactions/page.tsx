@@ -106,6 +106,9 @@ export default function TransactionsPage() {
   const [running, setRunning] = useState<Provider | 'all' | ''>('')
   const [runSummary, setRunSummary] = useState('')
 
+  interface ProviderBucket { provider: string; count: number; gross: number; fee: number; net: number; currency: string }
+  const [summary, setSummary] = useState<{ providers: ProviderBucket[]; total: { count: number; gross: number; fee: number; net: number; currency: string } } | null>(null)
+
   useEffect(() => {
     apiFetch<{ items: FinanceAccount[] }>(`/admin/finance/accounts`).then(d => setAccounts(d.items || [])).catch(() => {})
   }, [])
@@ -125,6 +128,22 @@ export default function TransactionsPage() {
       const data = await apiFetch<{ total: number; items: Txn[] }>(`/admin/finance/transactions?${qs}`)
       setItems(data.items || [])
       setTotal(data.total || 0)
+
+      // Summary totals match the filter set but ignore pagination so finance
+      // can see the WHOLE picture (not just the current page). Separate call
+      // so the ledger table and the totals card refresh together.
+      const sumQs = new URLSearchParams()
+      if (provider) sumQs.set('provider', provider)
+      if (kind) sumQs.set('kind', kind)
+      if (accountFilter) sumQs.set('account_id', accountFilter)
+      if (since) sumQs.set('since', since)
+      if (until) sumQs.set('until', until)
+      try {
+        const s = await apiFetch<{ providers: ProviderBucket[]; total: { count: number; gross: number; fee: number; net: number; currency: string } }>(
+          `/admin/finance/transactions/summary?${sumQs}`,
+        )
+        setSummary(s)
+      } catch { /* summary optional — table still works */ }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally { setLoading(false) }
@@ -231,6 +250,36 @@ export default function TransactionsPage() {
         <div className="bg-white/5 border border-white/10 text-white/80 px-4 py-3 rounded-xl text-sm">
           <span className="text-white/50 text-xs uppercase tracking-widest font-bold mr-2">Last sync</span>
           {runSummary}
+        </div>
+      )}
+
+      {/* Totals card — what we bank vs what the processors take */}
+      {summary && summary.total.count > 0 && (
+        <div className="glass rounded-2xl p-5">
+          <div className="flex items-start justify-between flex-wrap gap-4 mb-4">
+            <div>
+              <p className="text-white/50 text-xs uppercase tracking-widest font-bold">Totals for the current filter</p>
+              <p className="text-white/40 text-xs mt-1">
+                {summary.total.count} transaction{summary.total.count === 1 ? '' : 's'} across {summary.providers.length} provider{summary.providers.length === 1 ? '' : 's'}.
+                Fees eat into what the charity actually receives — the Net column is what hits the bank.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <TotalsTile label="Gross"         pence={summary.total.gross} ccy={summary.total.currency} tone="white" />
+            <TotalsTile label="Processor fee" pence={-Math.abs(summary.total.fee)} ccy={summary.total.currency} tone="red" />
+            <TotalsTile label="Net (banked)"  pence={summary.total.net} ccy={summary.total.currency} tone="green" />
+            {summary.providers.map(p => (
+              <TotalsTile
+                key={p.provider}
+                label={`${p.provider.toUpperCase()} fee`}
+                pence={-Math.abs(p.fee)}
+                ccy={p.currency}
+                tone="red"
+                sub={`${p.count} tx · gross ${new Intl.NumberFormat('en-GB',{style:'currency',currency:p.currency||'GBP'}).format(p.gross/100)}`}
+              />
+            ))}
+          </div>
         </div>
       )}
 
@@ -427,6 +476,26 @@ export default function TransactionsPage() {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function TotalsTile({ label, pence, ccy, tone, sub }: { label: string; pence: number; ccy: string; tone: 'white' | 'red' | 'green'; sub?: string }) {
+  const amount = (pence || 0) / 100
+  let formatted: string
+  try {
+    formatted = new Intl.NumberFormat('en-GB', { style: 'currency', currency: ccy || 'GBP' }).format(amount)
+  } catch {
+    formatted = `${amount.toFixed(2)} ${ccy || 'GBP'}`
+  }
+  const toneCls = tone === 'red'   ? 'text-red-400'
+                : tone === 'green' ? 'text-green-400'
+                : 'text-white'
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/3 px-4 py-3">
+      <p className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1">{label}</p>
+      <p className={`font-mono text-xl font-black ${toneCls}`}>{formatted}</p>
+      {sub && <p className="text-white/40 text-[10px] mt-0.5 truncate" title={sub}>{sub}</p>}
     </div>
   )
 }
