@@ -43,6 +43,58 @@ async def list_templates():
 
 # ── Admin: outgoing email audit + resend ─────────────────────────────────────
 
+_SENT_EMAILS_DDL = """
+CREATE TABLE IF NOT EXISTS sent_emails (
+    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_key    VARCHAR(100) NOT NULL DEFAULT '',
+    to_email        VARCHAR(255) NOT NULL,
+    from_email      VARCHAR(255) NOT NULL DEFAULT '',
+    subject         TEXT         NOT NULL DEFAULT '',
+    html_body       TEXT         NOT NULL DEFAULT '',
+    text_body       TEXT         NOT NULL DEFAULT '',
+    variables       JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+    error           TEXT         NOT NULL DEFAULT '',
+    attempts        INTEGER      NOT NULL DEFAULT 0,
+    last_attempt_at TIMESTAMPTZ,
+    sent_at         TIMESTAMPTZ,
+    related_type    VARCHAR(50)  NOT NULL DEFAULT '',
+    related_id      VARCHAR(100) NOT NULL DEFAULT '',
+    triggered_by    VARCHAR(255) NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+)
+"""
+
+
+async def _ensure_sent_emails_table() -> None:
+    """Idempotent creation of sent_emails. Runs on every /sent read so an
+    instance where _patch_schema hadn't managed to create the table (stale
+    DB, aborted transaction, …) still serves the admin page.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        await db.execute(text(_SENT_EMAILS_DDL))
+        # Belt-and-braces ALTER … ADD COLUMN IF NOT EXISTS for the columns the
+        # list query references. Covers the "old table, missing column" case.
+        for col in (
+            "related_type    VARCHAR(50)  NOT NULL DEFAULT ''",
+            "related_id      VARCHAR(100) NOT NULL DEFAULT ''",
+            "last_attempt_at TIMESTAMPTZ",
+            "sent_at         TIMESTAMPTZ",
+            "attempts        INTEGER      NOT NULL DEFAULT 0",
+            "status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING'",
+            "error           TEXT         NOT NULL DEFAULT ''",
+            "triggered_by    VARCHAR(255) NOT NULL DEFAULT ''",
+        ):
+            name = col.split()[0]
+            await db.execute(text(f"ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS {col}"))  # noqa: S608
+            _ = name
+        await db.commit()
+
+
 @router.get("/sent")
 async def admin_list_sent_emails(
     status_filter: str = "", template_key: str = "", search: str = "",
@@ -57,6 +109,12 @@ async def admin_list_sent_emails(
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
+
+    # Self-heal if the table or its columns are missing. This runs once per
+    # request (cheap — CREATE TABLE IF NOT EXISTS is a few catalog reads
+    # when the table is present) so the Sent Emails page never 500s with
+    # "relation does not exist" on fresh deploys.
+    await _ensure_sent_emails_table()
 
     where: list[str] = []
     params: dict[str, Any] = {
