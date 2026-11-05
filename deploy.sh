@@ -173,8 +173,7 @@ STRIPE_PUBLISHABLE_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_TERMINAL_LOCATION_ID=
 
-# ── Email / Notifications ──────────────────────────────────────────────────────
-SENDGRID_API_KEY=
+# ── Email / Notifications — Microsoft 365 SMTP only ───────────────────────────
 OFFICE365_EMAIL=
 OFFICE365_PASSWORD=
 META_WHATSAPP_TOKEN=

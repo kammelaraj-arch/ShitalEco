@@ -72,7 +72,8 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          OFFICE365_EMAIL: ${{ secrets.OFFICE365_EMAIL }}
+          OFFICE365_PASSWORD: ${{ secrets.OFFICE365_PASSWORD }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
@@ -87,7 +88,7 @@ jobs:
           password: ${{ secrets.VULTR_ROOT_PASSWORD }}
           port: 22
           timeout: 600s
-          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,DEPLOY_SECRET,DEPLOY_REF,IMAGE_MATCHED,IMAGE_SHA,TARGET_SHA
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,OFFICE365_EMAIL,OFFICE365_PASSWORD,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,DEPLOY_SECRET,DEPLOY_REF,IMAGE_MATCHED,IMAGE_SHA,TARGET_SHA
           script: |
             set -eu
             if [ "${IMAGE_MATCHED:-false}" = "true" ]; then
@@ -101,7 +102,7 @@ jobs:
 
             # ── Pre-flight: every required secret must be present.
             # Required = without it the dev stack cannot come up at all.
-            # MS_*/STRIPE_*/SENDGRID/ANTHROPIC are *optional* — empty values
+            # MS_*/STRIPE_*/OFFICE365/ANTHROPIC are *optional* — empty values
             # are fine; they just disable the corresponding feature on dev.
             require() {
               local var=$1
@@ -144,7 +145,8 @@ jobs:
             inject .env.dev STRIPE_SECRET_KEY      "$STRIPE_SECRET_KEY"
             inject .env.dev STRIPE_PUBLISHABLE_KEY "$STRIPE_PUBLISHABLE_KEY"
             inject .env.dev ANTHROPIC_API_KEY      "$ANTHROPIC_API_KEY"
-            inject .env.dev SENDGRID_API_KEY       "$SENDGRID_API_KEY"
+            inject .env.dev OFFICE365_EMAIL        "$OFFICE365_EMAIL"
+            inject .env.dev OFFICE365_PASSWORD     "$OFFICE365_PASSWORD"
             inject .env.dev MS_CLIENT_ID           "$MS_CLIENT_ID"
             inject .env.dev MS_TENANT_ID           "$MS_TENANT_ID"
             inject .env.dev MS_CLIENT_SECRET       "$MS_CLIENT_SECRET"

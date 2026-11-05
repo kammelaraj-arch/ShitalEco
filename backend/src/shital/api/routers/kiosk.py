@@ -2259,8 +2259,9 @@ class ReceiptInput(BaseModel):
 @router.post("/receipt")
 async def send_receipt(body: ReceiptInput):
     """Send email or WhatsApp receipt after payment.
-    Email priority: Office 365 SMTP (OFFICE365_PASSWORD set) → SendGrid fallback.
-    Credentials are loaded from the encrypted API Keys store (Admin → Settings → API Keys).
+
+    Email is sent via Microsoft 365 SMTP only — OFFICE365_PASSWORD must be
+    set in Admin → Settings → API Keys. There is no SendGrid fallback.
     """
     import logging
     from datetime import date as _date
@@ -2363,13 +2364,11 @@ async def send_receipt(body: ReceiptInput):
     # ── Email ─────────────────────────────────────────────────────────────────
     if body.type == "email":
         # Credentials loaded from API Keys DB store (Admin → Settings → API Keys)
-        office365_email    = await SecretsManager.get("OFFICE365_EMAIL",    fallback="noreply@shital.org.uk")
         office365_password = await SecretsManager.get("OFFICE365_PASSWORD", fallback="")
-        sendgrid_key       = await SecretsManager.get("SENDGRID_API_KEY",   fallback="")
 
-        if not office365_password and not sendgrid_key:
-            _log.warning("receipt_skipped: no email provider configured")
-            return {"sent": False, "error": "Email not configured — add OFFICE365_PASSWORD (or SENDGRID_API_KEY) in Admin → Settings → API Keys"}
+        if not office365_password:
+            _log.warning("receipt_skipped: Microsoft 365 not configured")
+            return {"sent": False, "error": "Email not configured — add OFFICE365_PASSWORD in Admin → Settings → API Keys"}
 
         # Build content
         try:
@@ -2383,83 +2382,29 @@ async def send_receipt(body: ReceiptInput):
             _log.error("receipt_render_failed: %s", e)
             subject, html_body, text_body = _build_fallback_email()
 
-        # ── Office 365 SMTP (primary) — audited via sent_emails ───────────────
-        from shital.api.routers.email_templates import (
-            RELATED_DONATION,
-            _record_pending,
-            _record_result,
-            send_raw_email,
+        # ── Microsoft 365 SMTP — audited via sent_emails ─────────────────────
+        from shital.api.routers.email_templates import RELATED_DONATION, send_raw_email
+
+        result = await send_raw_email(
+            to_email=body.destination,
+            subject=subject,
+            html_body=html_body,
+            text_body=text_body,
+            template_key="donation_receipt",
+            related_type=RELATED_DONATION,
+            related_id=body.order_ref or "",
+            triggered_by="kiosk_receipt",
         )
-
-        if office365_password:
-            result = await send_raw_email(
-                to_email=body.destination,
-                subject=subject,
-                html_body=html_body,
-                text_body=text_body,
-                template_key="donation_receipt",
-                related_type=RELATED_DONATION,
-                related_id=body.order_ref or "",
-                triggered_by="kiosk_receipt",
-            )
-            if result.get("sent"):
-                _log.info("receipt_sent_office365 to=%s ref=%s", body.destination, body.order_ref)
-                return {"sent": True, "method": "office365", "sent_email_id": result.get("sent_email_id")}
-            _log.error("office365_smtp_error: %s", result.get("error") or result.get("reason"))
-            return {
-                "sent": False,
-                "method": "office365",
-                "error": result.get("error") or result.get("reason") or "SMTP failed",
-                "sent_email_id": result.get("sent_email_id"),
-            }
-
-        # ── SendGrid fallback — audited manually around the HTTP call ────────
-        row_id = ""
-        try:
-            row_id = await _record_pending(
-                "donation_receipt", body.destination, office365_email,
-                subject, html_body, text_body, dict(variables),
-                related_type=RELATED_DONATION, related_id=body.order_ref or "",
-                triggered_by="kiosk_receipt_sendgrid",
-            )
-        except Exception as exc:
-            _log.warning("sendgrid_record_pending_failed: %s", exc)
-
-        try:
-            content = [{"type": "text/html", "value": html_body}]
-            if text_body:
-                content.append({"type": "text/plain", "value": text_body})
-            resp = await httpx.AsyncClient().post(
-                "https://api.sendgrid.com/v3/mail/send",
-                headers={"Authorization": f"Bearer {sendgrid_key}"},
-                json={
-                    "personalizations": [{"to": [{"email": body.destination}]}],
-                    "from": {"email": office365_email, "name": body.branch_name},
-                    "subject": subject,
-                    "content": content,
-                },
-                timeout=10,
-            )
-            sent = resp.status_code in (200, 202)
-            if row_id:
-                try:
-                    await _record_result(
-                        row_id, sent,
-                        "" if sent else f"SendGrid {resp.status_code}: {resp.text[:400]}",
-                    )
-                except Exception as exc:
-                    _log.warning("sendgrid_record_result_failed: %s", exc)
-            if not sent:
-                _log.error("sendgrid_error: %s %s", resp.status_code, resp.text[:200])
-            return {"sent": sent, "method": "sendgrid", "status_code": resp.status_code, "sent_email_id": row_id}
-        except Exception as e:
-            if row_id:
-                try:
-                    await _record_result(row_id, False, str(e))
-                except Exception:
-                    pass
-            _log.error("sendgrid_exception: %s", e)
-            return {"sent": False, "error": str(e), "sent_email_id": row_id}
+        if result.get("sent"):
+            _log.info("receipt_sent_office365 to=%s ref=%s", body.destination, body.order_ref)
+            return {"sent": True, "method": "office365", "sent_email_id": result.get("sent_email_id")}
+        _log.error("office365_smtp_error: %s", result.get("error") or result.get("reason"))
+        return {
+            "sent": False,
+            "method": "office365",
+            "error": result.get("error") or result.get("reason") or "SMTP failed",
+            "sent_email_id": result.get("sent_email_id"),
+        }
 
     # ── WhatsApp via Meta Cloud API ───────────────────────────────────────────
     if body.type in ("sms", "whatsapp"):

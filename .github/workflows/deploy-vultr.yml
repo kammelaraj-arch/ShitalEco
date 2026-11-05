@@ -37,7 +37,8 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          OFFICE365_EMAIL: ${{ secrets.OFFICE365_EMAIL }}
+          OFFICE365_PASSWORD: ${{ secrets.OFFICE365_PASSWORD }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
@@ -58,7 +59,7 @@ jobs:
           # killed before doing frontends/nginx, leaving the stack
           # inconsistent. 25m gives full headroom.
           command_timeout: 25m
-          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,SENDGRID_API_KEY,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,PAYPAL_CLIENT_ID,PAYPAL_CLIENT_SECRET,GITHUB_SHA
+          envs: GH_PAT,STRIPE_SECRET_KEY,STRIPE_PUBLISHABLE_KEY,ANTHROPIC_API_KEY,OFFICE365_EMAIL,OFFICE365_PASSWORD,MS_CLIENT_ID,MS_TENANT_ID,MS_CLIENT_SECRET,PAYPAL_CLIENT_ID,PAYPAL_CLIENT_SECRET,GITHUB_SHA
           script: |
             set -e
 
@@ -103,7 +104,8 @@ jobs:
             inject STRIPE_SECRET_KEY      "$STRIPE_SECRET_KEY"
             inject STRIPE_PUBLISHABLE_KEY "$STRIPE_PUBLISHABLE_KEY"
             inject ANTHROPIC_API_KEY      "$ANTHROPIC_API_KEY"
-            inject SENDGRID_API_KEY       "$SENDGRID_API_KEY"
+            inject OFFICE365_EMAIL        "$OFFICE365_EMAIL"
+            inject OFFICE365_PASSWORD     "$OFFICE365_PASSWORD"
             inject MS_CLIENT_ID           "$MS_CLIENT_ID"
             inject MS_TENANT_ID           "$MS_TENANT_ID"
             inject MS_CLIENT_SECRET       "$MS_CLIENT_SECRET"
