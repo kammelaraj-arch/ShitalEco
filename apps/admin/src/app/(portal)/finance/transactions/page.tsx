@@ -217,6 +217,30 @@ export default function TransactionsPage() {
     URL.revokeObjectURL(url)
   }
 
+  async function backfillAccounts() {
+    setError('')
+    try {
+      const r = await apiFetch<{ linked: number; per_provider: Record<string, number> }>(
+        `/admin/finance/transactions/backfill-accounts`,
+        { method: 'POST' },
+      )
+      const total = r.linked ?? 0
+      const breakdown = Object.entries(r.per_provider || {})
+        .filter(([, n]) => n > 0)
+        .map(([p, n]) => `${p}:${n}`)
+        .join(', ')
+      setError(
+        total > 0
+          ? `✓ Linked ${total} orphan transaction${total === 1 ? '' : 's'} to accounts${breakdown ? ` (${breakdown})` : ''}.`
+          : '✓ Nothing to link — every transaction already has an account.',
+      )
+      // Re-fetch the list so the operator sees the new linkage.
+      setPage(0)
+    } catch (e: any) {
+      setError(`Backfill failed: ${e?.message || e}`)
+    }
+  }
+
   async function runSync(which: Provider | 'all') {
     if (!confirm(
       which === 'all'
@@ -343,6 +367,7 @@ export default function TransactionsPage() {
         <select value={accountFilter} onChange={e => { setAccountFilter(e.target.value); setPage(0) }}
           className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-saffron-400/50 min-w-[200px]">
           <option value="">All accounts</option>
+          <option value="__unlinked__">— Unlinked / no account —</option>
           {accounts.map(a => (
             <option key={a.id} value={a.id}>{a.account_type}: {a.name}</option>
           ))}
@@ -396,8 +421,13 @@ export default function TransactionsPage() {
           </button>
         ))}
         <MonthPicker onPick={(s, e) => { setSince(s); setUntil(e); setPage(0) }} />
+        <button onClick={backfillAccounts}
+          title="Link every orphan transaction (account_id IS NULL) to its provider's primary finance account"
+          className="ml-auto px-3 py-1.5 rounded-lg border border-emerald-400/40 text-emerald-300 text-xs font-bold hover:bg-emerald-400/10">
+          🔗 Link to accounts
+        </button>
         <button onClick={downloadCsv}
-          className="ml-auto px-3 py-1.5 rounded-lg border border-saffron-400/40 text-saffron-300 text-xs font-bold hover:bg-saffron-400/10">
+          className="px-3 py-1.5 rounded-lg border border-saffron-400/40 text-saffron-300 text-xs font-bold hover:bg-saffron-400/10">
           ⬇ Download CSV
         </button>
       </div>
