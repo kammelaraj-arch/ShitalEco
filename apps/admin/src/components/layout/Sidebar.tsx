@@ -38,6 +38,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/finance/recurring',       icon: '🔄', label: 'Recurring Payments' },
       { href: '/finance/hosting',         icon: '🖥️', label: 'Hosting Costs' },
       { href: '/recurring-giving',  icon: '💝', label: 'Monthly Giving' },
+      { href: '/recurring-giving?tab=tiers', icon: '🎚️', label: 'Monthly Giving Tiers' },
       { href: '/donations',         icon: '🙏', label: 'Donations' },
       { href: '/gift-aid',          icon: '🇬🇧', label: 'Gift Aid' },
       { href: '/budgets',           icon: '📊', label: 'Budgets' },

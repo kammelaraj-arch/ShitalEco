@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api'
 
-type Provider = 'stripe' | 'sumup'
+type Provider = 'stripe' | 'sumup' | 'paypal'
 
 interface Txn {
   id: string
@@ -24,6 +24,13 @@ interface Txn {
   account_id: string
   account_name: string
   account_type: string
+  donation_id: string
+  gift_aid_eligible: boolean
+  gift_aid_amount: number
+  donation_purpose: string
+  contact_id: string
+  contact_name: string
+  contact_email: string
 }
 
 interface FinanceAccount {
@@ -68,6 +75,7 @@ function fmtMoney(pence: number, ccy: string): string {
 const PROVIDER_BADGE: Record<string, string> = {
   stripe: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
   sumup:  'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  paypal: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
 }
 
 const STATUS_RUN_BADGE: Record<string, string> = {
@@ -207,6 +215,10 @@ export default function TransactionsPage() {
             className="px-3 py-2 rounded-xl border border-emerald-400/40 text-emerald-300 text-sm font-bold hover:bg-emerald-500/10 disabled:opacity-40">
             {running === 'sumup' ? 'Syncing…' : '🔄 Sync SumUp'}
           </button>
+          <button onClick={() => runSync('paypal')} disabled={!!running}
+            className="px-3 py-2 rounded-xl border border-sky-400/40 text-sky-300 text-sm font-bold hover:bg-sky-500/10 disabled:opacity-40">
+            {running === 'paypal' ? 'Syncing…' : '🔄 Sync PayPal'}
+          </button>
           <button onClick={() => runSync('all')} disabled={!!running}
             className="px-3 py-2 rounded-xl bg-saffron-gradient text-white text-sm font-black shadow-saffron disabled:opacity-40">
             {running === 'all' ? 'Syncing…' : '⚡ Sync both now'}
@@ -225,7 +237,7 @@ export default function TransactionsPage() {
       {/* Filters */}
       <div className="flex gap-3 flex-wrap">
         <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1">
-          {(['', 'stripe', 'sumup'] as const).map(p => (
+          {(['', 'stripe', 'sumup', 'paypal'] as const).map(p => (
             <button key={p || 'ALL'} onClick={() => { setProvider(p); setPage(0) }}
               className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all capitalize ${
                 provider === p ? 'bg-saffron-gradient text-white' : 'text-white/40 hover:text-white/70'
@@ -273,15 +285,17 @@ export default function TransactionsPage() {
                 <th className="px-4 py-3 text-right font-semibold">Fee</th>
                 <th onClick={() => toggleSort('net')}        className="px-4 py-3 text-right font-semibold cursor-pointer select-none hover:text-white/80">Net {sortArrow('net')}</th>
                 <th onClick={() => toggleSort('status')}     className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">Status {sortArrow('status')}</th>
+                <th className="px-4 py-3 text-left font-semibold">Donor / Purpose</th>
+                <th className="px-4 py-3 text-center font-semibold">🇬🇧 Gift Aid</th>
                 <th className="px-4 py-3 text-left font-semibold">Description</th>
                 <th className="px-4 py-3 text-left font-semibold">Ref</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={10} className="px-4 py-12 text-center text-white/40">Loading…</td></tr>}
+              {loading && <tr><td colSpan={12} className="px-4 py-12 text-center text-white/40">Loading…</td></tr>}
               {!loading && items.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-12 text-center text-white/40">
-                  No transactions. Hit &quot;Sync both now&quot; to pull from Stripe + SumUp.
+                <tr><td colSpan={12} className="px-4 py-12 text-center text-white/40">
+                  No transactions. Hit a Sync button to pull from Stripe, SumUp or PayPal.
                 </td></tr>
               )}
               {items.map(t => (
@@ -308,7 +322,25 @@ export default function TransactionsPage() {
                     {fmtMoney(t.net_pence, t.currency)}
                   </td>
                   <td className="px-4 py-3 text-white/60 text-xs">{t.status || '—'}</td>
-                  <td className="px-4 py-3 text-white/70 text-xs max-w-[220px] truncate" title={t.description}>
+                  <td className="px-4 py-3 text-white/80 text-xs max-w-[220px] truncate" title={`${t.contact_name} <${t.contact_email}>`}>
+                    {t.contact_name || t.contact_email || t.customer_hint || <em className="text-white/30">—</em>}
+                    {t.donation_purpose && <div className="text-[10px] text-white/40 truncate">{t.donation_purpose}</div>}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {t.gift_aid_eligible ? (
+                      <div className="inline-flex flex-col items-center">
+                        <span className="text-blue-300 font-bold text-xs">🇬🇧 Yes</span>
+                        {t.gift_aid_amount > 0 && (
+                          <span className="text-[10px] text-blue-300/70 font-mono">+{fmtMoney(Math.round(t.gift_aid_amount * 100), t.currency)}</span>
+                        )}
+                      </div>
+                    ) : t.donation_id ? (
+                      <span className="text-white/30 text-xs">No</span>
+                    ) : (
+                      <span className="text-white/15 text-xs">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-white/70 text-xs max-w-[200px] truncate" title={t.description}>
                     {t.description || <em className="text-white/30">(none)</em>}
                   </td>
                   <td className="px-4 py-3 text-white/40 text-[10px] font-mono" title={t.external_id}>
@@ -326,7 +358,7 @@ export default function TransactionsPage() {
                   <td className="px-4 py-3 text-right font-mono font-bold text-green-400">
                     Page net: {fmtMoney(pageTotalPence, items[0]?.currency || 'GBP')}
                   </td>
-                  <td colSpan={3} />
+                  <td colSpan={5} />
                 </tr>
               </tfoot>
             )}
