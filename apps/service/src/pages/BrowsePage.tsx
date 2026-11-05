@@ -24,6 +24,42 @@ interface CatalogItem {
 
 interface Project { id: string; name: string }
 
+// Small Ganesh badge for the hero. Tries /public/ganesh.png first; on
+// error swaps in an inline gold Om disc so the corner is always visible,
+// even before anyone uploads a real Ganesh image.
+function GaneshBadge() {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <div
+        className="w-12 h-12 sm:w-14 sm:h-14 rounded-full flex-shrink-0 flex items-center justify-center"
+        title="Jai Ganesh"
+        style={{
+          background: 'radial-gradient(circle at 35% 35%, #FFF2BE 0%, #E8C65F 35%, #B8892C 100%)',
+          border: '2px solid rgba(80,40,10,0.45)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3), inset 0 0 8px rgba(255,220,130,0.4)',
+          color: '#3D1A00',
+          fontWeight: 900,
+          fontSize: '1.9rem',
+          lineHeight: 1,
+          fontFamily: 'serif',
+        }}
+      >
+        🕉
+      </div>
+    )
+  }
+  return (
+    <img
+      src="/ganesh.png"
+      alt="Shri Ganesh"
+      onError={() => setFailed(true)}
+      className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover flex-shrink-0"
+      style={{ border: '2px solid rgba(212,175,55,0.75)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}
+    />
+  )
+}
+
 export function BrowsePage() {
   const { language, branchId, setScreen } = useStore()
   const total = useTotal()
@@ -91,21 +127,28 @@ export function BrowsePage() {
         {/* Gold shimmer bottom edge */}
         <div className="absolute bottom-0 left-0 right-0 h-px"
           style={{ background: 'linear-gradient(90deg, transparent, #D4AF37, #FFD700, #D4AF37, transparent)' }} />
-        <div className="max-w-5xl 2xl:max-w-6xl mx-auto relative z-10 flex items-center justify-between gap-4">
-          <div className="min-w-0">
+        <div className="max-w-screen-2xl mx-auto relative z-10 flex items-center justify-between gap-4">
+          {/* Small Ganesh (left) — tradition is to open any auspicious work
+              with Ganesha's blessing. Tries /ganesh.png first; if the asset
+              isn't there yet, the onError swap shows a gold Om disc so the
+              corner never looks empty. */}
+          <GaneshBadge />
+
+          <div className="min-w-0 flex-1 text-center sm:text-left">
             <p className="text-xs font-semibold tracking-widest uppercase mb-1"
-              style={{ color: 'rgba(100,60,10,0.7)' }}>🕉 Jai Sai Baba</p>
-            <h1 className="font-display font-bold text-2xl tracking-wide mb-1"
+              style={{ color: 'rgba(100,60,10,0.7)' }}>🕉 Jai Ganesh · Jai Sai Baba</p>
+            <h1 className="font-display font-bold text-2xl sm:text-3xl lg:text-4xl tracking-wide mb-1"
               style={{ color: '#3D1A00', textShadow: '0 1px 0 rgba(255,240,180,0.6)' }}>
               Donate &amp; Support
             </h1>
-            <p className="text-sm" style={{ color: 'rgba(80,40,5,0.65)' }}>
+            <p className="text-sm sm:text-base" style={{ color: 'rgba(80,40,5,0.65)' }}>
               Make a donation, book services &amp; support our temple
             </p>
           </div>
+          {/* Baba (right) — same slot, scaled up a touch on larger viewports. */}
           <img src="/baba.jpg" alt="Shri Shirdi Sai Baba"
             onError={(e) => { e.currentTarget.style.display = 'none' }}
-            className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover flex-shrink-0"
+            className="w-20 h-20 sm:w-24 sm:h-24 lg:w-28 lg:h-28 rounded-full object-cover flex-shrink-0"
             style={{ border: '3px solid rgba(212,175,55,0.8)', boxShadow: '0 6px 18px rgba(0,0,0,0.35)' }} />
         </div>
       </div>
@@ -114,7 +157,7 @@ export function BrowsePage() {
           Side-by-side at md+, stacked on mobile. All three cards target
           roughly the same vertical height — `h-full` + `flex-col` on each
           inner card lets the grid stretch them. */}
-      <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 mt-5">
+      <div className="max-w-screen-2xl mx-auto px-4 mt-5">
 
         {/* Future Legacy Appeal — Sponsor a Square Foot (dedicated page) */}
         <button
@@ -225,7 +268,7 @@ export function BrowsePage() {
       <div className="sticky top-16 z-30 px-3 py-2">
         <div
           ref={tabsRef}
-          className="max-w-5xl 2xl:max-w-6xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1.5 py-2 rounded-2xl"
+          className="max-w-screen-2xl mx-auto flex overflow-x-auto scrollbar-hide px-2 gap-1.5 py-2 rounded-2xl"
           style={{ background: 'var(--bg-sticky)', border: '1px solid rgba(212,175,55,0.22)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', boxShadow: '0 6px 20px rgba(0,0,0,0.25)' }}
         >
           {TABS.map((tab) => (
@@ -252,7 +295,7 @@ export function BrowsePage() {
 
       {/* Project filter */}
       {activeTab === 'project' && projects.length > 0 && (
-        <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 pt-4">
+        <div className="max-w-screen-2xl mx-auto px-4 pt-4">
           <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
             <button
               onClick={() => setSelectedProject('')}
@@ -276,7 +319,7 @@ export function BrowsePage() {
       )}
 
       {/* Items Grid */}
-      <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 pt-5">
+      <div className="max-w-screen-2xl mx-auto px-4 pt-5">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <motion.div
@@ -320,7 +363,7 @@ export function BrowsePage() {
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             className="fixed bottom-0 left-0 right-0 z-50 safe-bottom"
           >
-            <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 pb-4 pt-2">
+            <div className="max-w-screen-2xl mx-auto px-4 pb-4 pt-2">
               <button
                 onClick={() => setScreen('basket')}
                 className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-between px-5 shadow-2xl active:scale-[0.99] transition-transform"
