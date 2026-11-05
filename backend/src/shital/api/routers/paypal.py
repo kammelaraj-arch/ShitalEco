@@ -453,6 +453,26 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
                 "idem": f"paypal-order-{body.paypal_order_id}", "now": now,
             })
 
+            # ── Donor Wall dedications ──────────────────────────────────────
+            # Any basket item with a `dedication` field becomes one
+            # donor_wall_entries row per unit. Under £101 auto-approves,
+            # £101+ lands in PENDING.
+            try:
+                from shital.api.routers.donor_wall import record_order_dedications
+                await record_order_dedications(
+                    db, order_id=order_id, donation_id=None,
+                    items=list(body.items or []),
+                )
+            except Exception as dw_exc:
+                # Don't fail the capture — the donor already paid. Log so an
+                # admin can backfill the wall from the admin UI.
+                import structlog
+                structlog.get_logger().exception(
+                    "paypal_capture_donor_wall_failed",
+                    error=str(dw_exc),
+                    paypal_order_id=body.paypal_order_id,
+                )
+
             # ── GL posting (Phase 2): DR Bank CR Donation income ────────────
             # Idempotency key matches the donation idempotency_key so a
             # retried /capture (or the webhook backstop) only posts once.

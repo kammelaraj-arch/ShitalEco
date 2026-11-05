@@ -2002,6 +2002,32 @@ async def _patch_schema() -> None:
         # already compute from the eligible total at checkout time.
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_aid_eligible BOOLEAN       NOT NULL DEFAULT false",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_aid_amount   NUMERIC(12,2) NOT NULL DEFAULT 0",
+        # ── Donor Wall — Future Legacy Appeal recognition ────────────────────────
+        # One row per unit (quantity 3 of Red Brick = 3 rows). Populated by the
+        # PayPal capture when the basket item carries a dedication. status is
+        # PENDING for amounts >= DONOR_WALL_AUTO_APPROVE_THRESHOLD (£101 at time
+        # of writing) and APPROVED for everything smaller so small gifts don't
+        # queue up awaiting review.
+        """CREATE TABLE IF NOT EXISTS donor_wall_entries (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            order_id         VARCHAR(36)  NOT NULL DEFAULT '',
+            donation_id      UUID         DEFAULT NULL,
+            tier_key         VARCHAR(32)  NOT NULL,  -- sqft|red|bronze|gold|founder|anyamt
+            tier_label       VARCHAR(64)  NOT NULL,  -- "Red Brick" etc.
+            amount           NUMERIC(10,2) NOT NULL,
+            prefix           VARCHAR(40)  NOT NULL DEFAULT '',  -- "In memory of" etc.
+            dedication       VARCHAR(200) NOT NULL,
+            status           VARCHAR(16)  NOT NULL DEFAULT 'PENDING',
+            display_order    INTEGER      NOT NULL DEFAULT 0,
+            approved_by      VARCHAR(200) NOT NULL DEFAULT '',
+            approved_at      TIMESTAMPTZ  DEFAULT NULL,
+            created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_donor_wall_status      ON donor_wall_entries(status)",
+        "CREATE INDEX IF NOT EXISTS idx_donor_wall_tier        ON donor_wall_entries(tier_key)",
+        "CREATE INDEX IF NOT EXISTS idx_donor_wall_display     ON donor_wall_entries(display_order DESC, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_donor_wall_order       ON donor_wall_entries(order_id)",
         "ALTER TABLE basket_items ADD COLUMN IF NOT EXISTS gift_aid_amount NUMERIC(12,2) NOT NULL DEFAULT 0",
         # Source channel on donations (kiosk, quick-donation, service, paypal, etc.)
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'kiosk'",
@@ -4308,6 +4334,8 @@ _mount("shital.api.routers.email_ingest",          "router")
 _mount("shital.api.routers.finance_accounts",      "router")
 _mount("shital.api.routers.board_resolution_extras", "router")
 _mount("shital.api.routers.public_campaigns",      "router")
+_mount("shital.api.routers.donor_wall",            "public_router")
+_mount("shital.api.routers.donor_wall",            "admin_router")
 
 
 @app.get("/health", tags=["system"])

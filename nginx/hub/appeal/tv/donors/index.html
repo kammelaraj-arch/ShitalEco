@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shital Temple — Donor Wall (TV)</title>
+<meta name="description" content="Digital-signage donor wall. Cycles through Founder / Gold / Square Foot / Bronze / Red dedications for display on a temple TV.">
+<style>
+  :root{
+    --maroon:#48101c; --maroon-2:#340a15;
+    --gold:#d7b25a; --gold-br:#f0d488; --gold-deep:#b1863a;
+    --cream:#f6ecd6; --ink:#f4ead6; --ink-soft:#d8c298;
+    --line:rgba(215,178,90,.30);
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; overflow:hidden}
+  html{background:#340a15}
+  body{
+    color:var(--ink);
+    background:
+      radial-gradient(120% 80% at 50% -8%, #6a1a2c 0%, transparent 55%),
+      linear-gradient(180deg,var(--maroon) 0%, var(--maroon-2) 100%);
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .sans{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .num{font-variant-numeric:tabular-nums lining-nums}
+
+  /* Fixed 16:9 stage that scales to fill any TV without scrolling */
+  .stage{
+    width:100vw; height:56.25vw;
+    max-height:100vh; max-width:177.78vh;
+    padding:3.4vh 4vh 3vh;
+    display:flex; flex-direction:column;
+    border:0.28vh solid var(--line);
+    outline:1.4vh solid rgba(0,0,0,.18); outline-offset:-1.7vh;
+    position:relative; overflow:hidden;
+  }
+
+  .om{ text-align:center; color:var(--gold); letter-spacing:.5em;
+    font:600 1.9vh/1 ui-sans-serif,system-ui,sans-serif; text-transform:uppercase;}
+
+  header{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    padding-bottom:1.4vh; border-bottom:0.2vh solid var(--line); margin-bottom:2.2vh;
+  }
+  header .titles h1{
+    font-size:5.2vh; font-weight:700; color:var(--gold-br); line-height:1;
+    letter-spacing:-0.01em;
+  }
+  header .titles .subttl{
+    font-size:1.9vh; color:var(--ink-soft); letter-spacing:.28em; text-transform:uppercase;
+    margin-top:0.9vh;
+  }
+  header .tier-card{
+    text-align:right;
+  }
+  header .tier-card .emoji{ font-size:5.5vh; line-height:1; }
+  header .tier-card .name{
+    font-size:2.8vh; color:var(--gold-br); letter-spacing:.04em; margin-top:0.3vh;
+  }
+  header .tier-card .amount{
+    font-size:1.8vh; color:var(--ink-soft); margin-top:0.2vh;
+  }
+
+  .wall{ flex:1; display:grid; gap:1.4vh; align-content:start;
+    grid-template-columns:repeat(4, 1fr); grid-auto-rows:min-content; }
+  .card{
+    padding:1.6vh 2vh; border-left:0.4vh solid var(--gold);
+    background:rgba(0,0,0,0.25); border-radius:0 0.8vh 0.8vh 0;
+    overflow:hidden;
+  }
+  .card .pref{ font-size:1.5vh; color:var(--ink-soft); font-style:italic; }
+  .card .ded{ font-size:2.4vh; font-weight:700; color:var(--cream); line-height:1.2;
+    margin-top:0.4vh; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+
+  footer{
+    display:flex; justify-content:space-between; align-items:baseline;
+    padding-top:1.4vh; margin-top:auto; border-top:0.2vh solid var(--line);
+  }
+  footer .stat{ font-size:1.8vh; color:var(--ink-soft); }
+  footer .stat b{ color:var(--gold-br); font-weight:700; }
+  footer .cta{ font-size:2vh; color:var(--gold-br); letter-spacing:.06em;
+    text-transform:uppercase; font-weight:700; }
+
+  .empty{
+    display:flex; align-items:center; justify-content:center; height:100%;
+    text-align:center; color:var(--ink-soft); font-size:2.6vh;
+  }
+
+  @keyframes fade {
+    from { opacity:0; transform:translateY(1vh); }
+    to   { opacity:1; transform:none; }
+  }
+  .wall > .card { animation: fade 0.6s ease both; }
+  .wall > .card:nth-child(1){ animation-delay:0.00s }
+  .wall > .card:nth-child(2){ animation-delay:0.05s }
+  .wall > .card:nth-child(3){ animation-delay:0.10s }
+  .wall > .card:nth-child(4){ animation-delay:0.15s }
+  .wall > .card:nth-child(5){ animation-delay:0.20s }
+  .wall > .card:nth-child(6){ animation-delay:0.25s }
+  .wall > .card:nth-child(7){ animation-delay:0.30s }
+  .wall > .card:nth-child(8){ animation-delay:0.35s }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="om">॥ Om Sai Ram ॥</div>
+  <header>
+    <div class="titles">
+      <h1>Digital Donor Wall</h1>
+      <div class="subttl">Future Legacy Appeal · with gratitude</div>
+    </div>
+    <div class="tier-card" id="tierCard">
+      <div class="emoji" id="tierEmoji">🏛</div>
+      <div class="name" id="tierName">Loading…</div>
+      <div class="amount" id="tierAmount">—</div>
+    </div>
+  </header>
+
+  <main class="wall" id="wall">
+    <div class="empty">Loading dedications…</div>
+  </main>
+
+  <footer>
+    <div class="stat"><b id="statCount">0</b> dedications across all tiers</div>
+    <div class="cta">shital.org.uk/donate</div>
+  </footer>
+</div>
+
+<script>
+  // Cycle through tiers (big first) with a page of names per tier.
+  // Pulls from the same public endpoint the web donor wall uses.
+  const ENDPOINT = '/api/v1/public/donor-wall'
+  const PAGE_SIZE = 12       // rows shown per tier page
+  const TIER_MS = 7000       // dwell per tier page
+  const RELOAD_MS = 120000   // re-fetch every 2 minutes
+
+  const TIER_META = {
+    founder: { emoji: '💠', name: 'Founder Panel' },
+    gold:    { emoji: '🪔', name: 'Gold Brick' },
+    sqft:    { emoji: '🏛', name: 'Square Foot' },
+    bronze:  { emoji: '🧱', name: 'Bronze Brick' },
+    red:     { emoji: '🧱', name: 'Red Brick' },
+    anyamt:  { emoji: '🌼', name: 'Dedications' },
+  }
+
+  const el = {
+    wall:       document.getElementById('wall'),
+    tierEmoji:  document.getElementById('tierEmoji'),
+    tierName:   document.getElementById('tierName'),
+    tierAmount: document.getElementById('tierAmount'),
+    statCount:  document.getElementById('statCount'),
+  }
+
+  let flattened = []   // [{ tierKey, tierName, amount, prefix, dedication }]
+  let cursor = 0
+
+  async function fetchWall() {
+    try {
+      const r = await fetch(ENDPOINT, { cache: 'no-store' })
+      const d = await r.json()
+      el.statCount.textContent = (d.total_entries || 0).toLocaleString('en-GB')
+      // Build a page-by-tier stream so each tier gets at least one page.
+      const pages = []
+      for (const t of (d.tiers || [])) {
+        if (!t.items || !t.items.length) continue
+        // Chunk this tier's dedications into pages of PAGE_SIZE.
+        for (let i = 0; i < t.items.length; i += PAGE_SIZE) {
+          pages.push({
+            key:    t.key,
+            name:   t.name,
+            amount: t.amount,
+            items:  t.items.slice(i, i + PAGE_SIZE),
+          })
+        }
+      }
+      flattened = pages
+      if (flattened.length === 0) {
+        el.wall.innerHTML = `<div class="empty">Be the first — sponsor a brick at <b style="color:var(--gold-br)">shital.org.uk/donate</b> and leave a name for the wall.</div>`
+        el.tierName.textContent = 'Shital Temple'
+        el.tierAmount.textContent = 'Future Legacy Appeal'
+        el.tierEmoji.textContent = '🏛'
+        return
+      }
+      if (cursor >= flattened.length) cursor = 0
+      renderPage()
+    } catch (err) {
+      el.wall.innerHTML = `<div class="empty">Could not load the wall. Retrying…</div>`
+      console.warn('[DonorWallTV]', err)
+    }
+  }
+
+  function renderPage() {
+    if (!flattened.length) return
+    const page = flattened[cursor]
+    const meta = TIER_META[page.key] || { emoji: '🏛', name: page.name }
+    el.tierEmoji.textContent = meta.emoji
+    el.tierName.textContent  = page.name
+    el.tierAmount.textContent = '£' + Math.round(page.amount).toLocaleString('en-GB')
+    el.wall.innerHTML = page.items.map(it => `
+      <div class="card">
+        ${it.prefix ? `<div class="pref">${escape(it.prefix)}</div>` : ''}
+        <div class="ded">${escape(it.dedication)}</div>
+      </div>
+    `).join('')
+  }
+
+  function escape(s) {
+    return String(s || '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))
+  }
+
+  fetchWall()
+  setInterval(() => {
+    if (!flattened.length) return
+    cursor = (cursor + 1) % flattened.length
+    renderPage()
+  }, TIER_MS)
+  setInterval(fetchWall, RELOAD_MS)
+</script>
+</body>
+</html>
