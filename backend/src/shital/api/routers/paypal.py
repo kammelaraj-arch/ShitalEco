@@ -434,21 +434,23 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
                 "cid": contact_id, "idem": f"paypal-{body.paypal_order_id}", "now": now,
             })
 
+            import json as _json
             await db.execute(text("""
                 INSERT INTO orders
                     (id, branch_id, reference, status, total_amount, currency,
                      payment_provider, payment_ref, paypal_capture_id,
                      customer_name, customer_email, customer_phone,
-                     contact_id, idempotency_key, created_at, updated_at)
+                     contact_id, items, idempotency_key, created_at, updated_at)
                 VALUES (:id,:branch,:ref,'COMPLETED',:amount,'GBP',
                         'paypal',:paypal_id,:capture_id,:name,:email,:phone,
-                        :cid,:idem,:now,:now)
+                        :cid, CAST(:items AS jsonb), :idem,:now,:now)
                 ON CONFLICT (idempotency_key) DO NOTHING
             """), {
                 "id": order_id, "branch": body.branch_id, "ref": order_ref, "amount": captured_amount,
                 "paypal_id": body.paypal_order_id, "capture_id": capture_id,
                 "name": body.contact_name, "email": body.contact_email, "phone": body.contact_phone,
-                "cid": contact_id, "idem": f"paypal-order-{body.paypal_order_id}", "now": now,
+                "cid": contact_id, "items": _json.dumps(body.items or []),
+                "idem": f"paypal-order-{body.paypal_order_id}", "now": now,
             })
 
             # ── GL posting (Phase 2): DR Bank CR Donation income ────────────
