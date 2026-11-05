@@ -190,6 +190,29 @@ export default function TransactionsPage() {
     }
   }
 
+  async function downloadCsv() {
+    const qs = new URLSearchParams()
+    if (provider) qs.set('provider', provider)
+    if (kind) qs.set('kind', kind)
+    if (accountFilter) qs.set('account_id', accountFilter)
+    if (since) qs.set('since', since)
+    if (until) qs.set('until', until)
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('shital_access_token') || '') : ''
+    const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
+    const resp = await fetch(`${API}/admin/finance/transactions/export.csv?${qs}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!resp.ok) { setError(`CSV download failed: HTTP ${resp.status}`); return }
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const stamp = since && until ? `${since}_to_${until}` : since ? `from-${since}` : until ? `to-${until}` : 'all-time'
+    a.download = `transactions-${provider || 'all'}-${stamp}.csv`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   async function runSync(which: Provider | 'all') {
     if (!confirm(
       which === 'all'
@@ -340,6 +363,29 @@ export default function TransactionsPage() {
         </select>
       </div>
 
+      {/* Quick-range chips + CSV download */}
+      <div className="flex gap-2 flex-wrap items-center text-sm">
+        <span className="text-white/40 text-xs uppercase tracking-widest font-bold">Quick range:</span>
+        {([
+          { label: 'This month',  fn: () => { const d = new Date(); const s = new Date(d.getFullYear(), d.getMonth(), 1); setSince(ymd(s)); setUntil(ymd(d)); setPage(0) } },
+          { label: 'Last month',  fn: () => { const d = new Date(); const s = new Date(d.getFullYear(), d.getMonth() - 1, 1); const e = new Date(d.getFullYear(), d.getMonth(), 0); setSince(ymd(s)); setUntil(ymd(e)); setPage(0) } },
+          { label: 'Last 7 days', fn: () => { const d = new Date(); const s = new Date(d); s.setDate(d.getDate() - 6); setSince(ymd(s)); setUntil(ymd(d)); setPage(0) } },
+          { label: 'This year',   fn: () => { const d = new Date(); const s = new Date(d.getFullYear(), 0, 1); setSince(ymd(s)); setUntil(ymd(d)); setPage(0) } },
+          { label: 'Last year',   fn: () => { const d = new Date(); const s = new Date(d.getFullYear() - 1, 0, 1); const e = new Date(d.getFullYear() - 1, 11, 31); setSince(ymd(s)); setUntil(ymd(e)); setPage(0) } },
+          { label: 'All time',    fn: () => { setSince(''); setUntil(''); setPage(0) } },
+        ] as const).map(r => (
+          <button key={r.label} onClick={r.fn}
+            className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 text-xs font-semibold hover:bg-white/5">
+            {r.label}
+          </button>
+        ))}
+        <MonthPicker onPick={(s, e) => { setSince(s); setUntil(e); setPage(0) }} />
+        <button onClick={downloadCsv}
+          className="ml-auto px-3 py-1.5 rounded-lg border border-saffron-400/40 text-saffron-300 text-xs font-bold hover:bg-saffron-400/10">
+          ⬇ Download CSV
+        </button>
+      </div>
+
       <div className="glass rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -435,13 +481,19 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {pages > 1 && (
+      {total > 0 && (
         <div className="flex items-center gap-2 justify-end text-sm">
+          <button onClick={() => setPage(0)} disabled={page === 0}
+            className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 disabled:opacity-30">« First</button>
           <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
             className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 disabled:opacity-30">← Prev</button>
-          <span className="text-white/50">Page {page + 1} / {pages}</span>
+          <span className="text-white/50">
+            Page {page + 1} / {pages} · {total} total
+          </span>
           <button onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}
             className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 disabled:opacity-30">Next →</button>
+          <button onClick={() => setPage(pages - 1)} disabled={page >= pages - 1}
+            className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 disabled:opacity-30">Last »</button>
         </div>
       )}
 
@@ -593,6 +645,30 @@ function KV({ label, value, tone, mono }: { label: string; value: React.ReactNod
     <div className="flex items-start justify-between gap-3 text-sm">
       <span className="text-white/50">{label}</span>
       <span className={`${toneCls} text-right max-w-[60%] break-words ${mono ? 'font-mono text-xs' : ''}`}>{value}</span>
+    </div>
+  )
+}
+
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function MonthPicker({ onPick }: { onPick: (since: string, until: string) => void }) {
+  const [value, setValue] = useState('')
+  return (
+    <div className="flex gap-1 items-center">
+      <label className="text-white/40 text-xs">Jump to month:</label>
+      <input type="month" value={value}
+        onChange={e => {
+          const v = e.target.value
+          setValue(v)
+          if (!v) return
+          const [y, m] = v.split('-').map(Number)
+          const s = new Date(y, m - 1, 1)
+          const en = new Date(y, m, 0)
+          onPick(ymd(s), ymd(en))
+        }}
+        className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-saffron-400/50" />
     </div>
   )
 }

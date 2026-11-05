@@ -930,6 +930,132 @@ async def transactions_summary(
     return {"providers": buckets, "total": total}
 
 
+@router.get("/transactions/export.csv")
+async def export_transactions_csv(
+    ctx: CurrentSpace,
+    provider: str = "",
+    kind: str = "",
+    status: str = "",
+    account_id: str = "",
+    since: str | None = None,
+    until: str | None = None,
+) -> Any:
+    """CSV export using the same filter set as /transactions. Returns up to
+    50 000 rows ordered newest-first — suitable for monthly/yearly reports."""
+    _only_admin(ctx)
+    import csv
+    import io
+
+    from fastapi.responses import StreamingResponse
+    where = ["1=1"]
+    params: dict[str, Any] = {}
+    if provider:
+        if provider not in ("stripe", "sumup", "paypal"):
+            raise HTTPException(status_code=400, detail="provider must be 'stripe', 'sumup' or 'paypal'")
+        where.append("pt.provider = :p")
+        params["p"] = provider
+    if kind:
+        where.append("pt.kind = :k")
+        params["k"] = kind
+    if status:
+        where.append("pt.status = :s")
+        params["s"] = status
+    if account_id:
+        try:
+            uuid.UUID(account_id)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail="account_id must be a UUID") from exc
+        where.append("pt.account_id = :aid")
+        params["aid"] = account_id
+    since_dt = _parse_iso(since)
+    until_dt = _parse_iso(until)
+    if since_dt:
+        where.append("pt.provider_created_at >= :sd")
+        params["sd"] = since_dt
+    if until_dt:
+        where.append("pt.provider_created_at <= :ud")
+        params["ud"] = until_dt
+
+    clause = " AND ".join(where)
+    async with SessionLocal() as db:
+        rows = (await db.execute(text(f"""
+            SELECT pt.provider_created_at, pt.provider, pt.external_id, pt.kind,
+                   pt.status, pt.currency,
+                   pt.amount_pence, pt.fee_pence, pt.net_pence,
+                   fa.name          AS account_name,
+                   pt.customer_name, pt.customer_email, pt.customer_phone,
+                   pt.billing_country, pt.billing_postcode,
+                   pt.card_brand, pt.card_last4,
+                   pt.description, pt.source_ref, pt.payout_ref,
+                   pt.refunded, pt.refund_amount_pence, pt.disputed,
+                   pt.receipt_url, pt.statement_descriptor, pt.available_at,
+                   d.gift_aid_eligible, d.gift_aid_amount::numeric AS gift_aid_amount,
+                   d.purpose AS donation_purpose
+              FROM payment_transactions pt
+              LEFT JOIN finance_accounts fa ON fa.id = pt.account_id
+              LEFT JOIN donations       d  ON d.deleted_at IS NULL
+                                           AND (
+                                             d.payment_ref = pt.external_id
+                                             OR (pt.source_ref <> '' AND d.payment_ref = pt.source_ref)
+                                           )
+             WHERE {clause}
+             ORDER BY pt.provider_created_at DESC
+             LIMIT 50000
+        """), params)).mappings().all()
+
+    buf = io.StringIO()
+    buf.write("﻿")  # UTF-8 BOM so Excel reads non-ASCII correctly
+    w = csv.writer(buf)
+    w.writerow([
+        "date", "provider", "external_id", "kind", "status", "currency",
+        "gross", "fee", "net", "account",
+        "donor_name", "donor_email", "donor_phone",
+        "billing_country", "billing_postcode",
+        "card_brand", "card_last4",
+        "description", "source_ref", "payout_ref",
+        "refunded", "refund_amount", "disputed",
+        "receipt_url", "statement_descriptor", "available_at",
+        "gift_aid_eligible", "gift_aid_amount", "donation_purpose",
+    ])
+    for r in rows:
+        dt = r["provider_created_at"]
+        w.writerow([
+            dt.strftime("%Y-%m-%d %H:%M:%S") if dt else "",
+            r["provider"], r["external_id"], r["kind"], r["status"], r["currency"],
+            f"{(r['amount_pence'] or 0) / 100:.2f}",
+            f"{(r['fee_pence'] or 0) / 100:.2f}",
+            f"{(r['net_pence'] or 0) / 100:.2f}",
+            r["account_name"] or "",
+            r["customer_name"] or "", r["customer_email"] or "", r["customer_phone"] or "",
+            r["billing_country"] or "", r["billing_postcode"] or "",
+            r["card_brand"] or "", r["card_last4"] or "",
+            (r["description"] or "").replace("\n", " "),
+            r["source_ref"] or "", r["payout_ref"] or "",
+            "true" if r["refunded"] else "false",
+            f"{(r['refund_amount_pence'] or 0) / 100:.2f}",
+            "true" if r["disputed"] else "false",
+            r["receipt_url"] or "", r["statement_descriptor"] or "",
+            r["available_at"].isoformat() if r["available_at"] else "",
+            "true" if r["gift_aid_eligible"] else "false",
+            f"{float(r['gift_aid_amount'] or 0):.2f}",
+            r["donation_purpose"] or "",
+        ])
+
+    fname_parts = ["transactions"]
+    if provider:
+        fname_parts.append(provider)
+    if since:
+        fname_parts.append(f"from-{since}")
+    if until:
+        fname_parts.append(f"to-{until}")
+    fname = "-".join(fname_parts) + ".csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 _SORT_WHITELIST = {
     "date":        "pt.provider_created_at",
     "amount":      "pt.amount_pence",

@@ -3155,6 +3155,29 @@ async def _patch_schema() -> None:
         # Poller's hot query is "find pending rows that are due". Partial
         # index keeps it O(1) regardless of total history size.
         "CREATE INDEX IF NOT EXISTS idx_scheduled_deploys_pending ON scheduled_deploys(scheduled_for) WHERE status = 'pending'",
+
+        # ── payment_transactions rich-detail columns (migration 046) ─────────
+        # Belt-and-braces so the admin's /finance/transactions list query —
+        # which SELECTs these columns — never 500s with
+        # "column … does not exist" if Alembic lags behind a deploy. All
+        # idempotent ALTER … ADD COLUMN IF NOT EXISTS, matching migration
+        # 046 exactly so running both is safe.
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_email TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_phone TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS billing_country TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS billing_postcode TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS payment_method_type TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS card_brand TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS card_last4 TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS card_country TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS card_funding TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS receipt_url TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS statement_descriptor TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS refunded BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS refund_amount_pence BIGINT NOT NULL DEFAULT 0",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS disputed BOOLEAN NOT NULL DEFAULT false",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
