@@ -128,13 +128,45 @@ async def _finish_run(db: Any, run_id: str, status: str, counts: dict[str, int],
     await db.commit()
 
 
+async def _primary_account_id_for_provider(db: Any, provider: str) -> str | None:
+    """Pick the account every row of this provider should link to.
+
+    Chooses the lowest-sort_order active, non-deleted account whose type
+    matches the provider. Returns None if no match (e.g. the operator
+    deleted all their Stripe accounts) — the row still inserts with
+    account_id NULL and the admin UI shows "—".
+    """
+    has_table = bool((await db.execute(text("""
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables WHERE table_name = 'finance_accounts'
+        )
+    """))).scalar())
+    if not has_table:
+        return None
+    row = (await db.execute(text("""
+        SELECT id::text AS id FROM finance_accounts
+         WHERE deleted_at IS NULL
+           AND is_active = true
+           AND UPPER(account_type) = :t
+         ORDER BY sort_order ASC, name ASC
+         LIMIT 1
+    """), {"t": provider.upper()})).first()
+    return str(row[0]) if row else None
+
+
 async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, Any]) -> str:
-    """Return 'inserted' or 'updated'."""
+    """Return 'inserted' or 'updated'. Links new rows to the provider's primary
+    finance_account; existing rows have their account_id backfilled only when
+    it is still NULL (so operators can retag a specific row without the sync
+    stomping on it)."""
     existed = (await db.execute(text("""
         SELECT id FROM payment_transactions WHERE provider = :p AND external_id = :eid
     """), {"p": provider, "eid": external_id})).first()
 
+    account_id = await _primary_account_id_for_provider(db, provider)
+
     params = {
+        "account":    account_id,
         "provider":   provider,
         "eid":        external_id,
         "kind":       row.get("kind", ""),
@@ -160,7 +192,8 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
               description = :desc, customer_hint = :cust,
               payment_method_hint = :pmh, source_ref = :src,
               payout_ref = :payout, provider_created_at = :pca,
-              raw = CAST(:raw AS JSONB), synced_at = NOW()
+              raw = CAST(:raw AS JSONB), synced_at = NOW(),
+              account_id = COALESCE(account_id, :account)
             WHERE provider = :provider AND external_id = :eid
         """), params)
         return "updated"
@@ -169,12 +202,12 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
           (provider, external_id, kind, status, amount_pence, currency,
            fee_pence, net_pence, description, customer_hint,
            payment_method_hint, source_ref, payout_ref,
-           provider_created_at, raw)
+           provider_created_at, raw, account_id)
         VALUES
           (:provider, :eid, :kind, :status, :amount, :currency,
            :fee, :net, :desc, :cust,
            :pmh, :src, :payout,
-           :pca, CAST(:raw AS JSONB))
+           :pca, CAST(:raw AS JSONB), :account)
     """), params)
     return "inserted"
 
@@ -441,16 +474,30 @@ async def sync_history(ctx: CurrentSpace, limit: int = 50) -> dict[str, Any]:
     }
 
 
+_SORT_WHITELIST = {
+    "date":        "pt.provider_created_at",
+    "amount":      "pt.amount_pence",
+    "net":         "pt.net_pence",
+    "status":      "pt.status",
+    "kind":        "pt.kind",
+    "provider":    "pt.provider",
+    "account":     "fa.name",
+}
+
+
 @router.get("/transactions")
 async def list_transactions(
     ctx: CurrentSpace,
     provider: str = "",
     kind: str = "",
     status: str = "",
+    account_id: str = "",
     since: str | None = None,
     until: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    sort: str = "date",
+    order: str = "desc",
 ) -> dict[str, Any]:
     _only_admin(ctx)
     limit = max(1, min(limit, 1000))
@@ -459,38 +506,52 @@ async def list_transactions(
     if provider:
         if provider not in ("stripe", "sumup"):
             raise HTTPException(status_code=400, detail="provider must be 'stripe' or 'sumup'")
-        where.append("provider = :p")
+        where.append("pt.provider = :p")
         params["p"] = provider
     if kind:
-        where.append("kind = :k")
+        where.append("pt.kind = :k")
         params["k"] = kind
     if status:
-        where.append("status = :s")
+        where.append("pt.status = :s")
         params["s"] = status
+    if account_id:
+        try:
+            uuid.UUID(account_id)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail="account_id must be a UUID") from exc
+        where.append("pt.account_id = :aid")
+        params["aid"] = account_id
     since_dt = _parse_iso(since)
     until_dt = _parse_iso(until)
     if since_dt:
-        where.append("provider_created_at >= :sd")
+        where.append("pt.provider_created_at >= :sd")
         params["sd"] = since_dt
     if until_dt:
-        where.append("provider_created_at <= :ud")
+        where.append("pt.provider_created_at <= :ud")
         params["ud"] = until_dt
+
+    sort_col = _SORT_WHITELIST.get(sort.lower(), "pt.provider_created_at")
+    sort_dir = "ASC" if order.lower() == "asc" else "DESC"
 
     clause = " AND ".join(where)
     async with SessionLocal() as db:
         rows = (await db.execute(text(f"""
-            SELECT id, provider, external_id, kind, status,
-                   amount_pence, currency, fee_pence, net_pence,
-                   description, customer_hint, payment_method_hint,
-                   source_ref, payout_ref,
-                   provider_created_at, synced_at
-              FROM payment_transactions
+            SELECT pt.id, pt.provider, pt.external_id, pt.kind, pt.status,
+                   pt.amount_pence, pt.currency, pt.fee_pence, pt.net_pence,
+                   pt.description, pt.customer_hint, pt.payment_method_hint,
+                   pt.source_ref, pt.payout_ref,
+                   pt.provider_created_at, pt.synced_at,
+                   pt.account_id::text AS account_id,
+                   fa.name          AS account_name,
+                   fa.account_type  AS account_type
+              FROM payment_transactions pt
+              LEFT JOIN finance_accounts fa ON fa.id = pt.account_id
              WHERE {clause}
-             ORDER BY provider_created_at DESC
+             ORDER BY {sort_col} {sort_dir} NULLS LAST, pt.provider_created_at DESC
              LIMIT :lim OFFSET :off
         """), params)).mappings().all()
         total = (await db.execute(text(f"""
-            SELECT COUNT(*) FROM payment_transactions WHERE {clause}
+            SELECT COUNT(*) FROM payment_transactions pt WHERE {clause}
         """), params)).scalar()
 
     def _iso(v: Any) -> str:
@@ -518,6 +579,9 @@ async def list_transactions(
                 "payout_ref":           r["payout_ref"] or "",
                 "provider_created_at":  _iso(r["provider_created_at"]),
                 "synced_at":            _iso(r["synced_at"]),
+                "account_id":           r["account_id"] or "",
+                "account_name":         r["account_name"] or "",
+                "account_type":         r["account_type"] or "",
             }
             for r in rows
         ],

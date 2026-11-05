@@ -21,7 +21,20 @@ interface Txn {
   payout_ref: string
   provider_created_at: string
   synced_at: string
+  account_id: string
+  account_name: string
+  account_type: string
 }
+
+interface FinanceAccount {
+  id: string
+  name: string
+  account_type: string
+  branch_id: string
+  is_active: boolean
+}
+
+type SortKey = 'date' | 'amount' | 'net' | 'status' | 'kind' | 'provider' | 'account'
 
 interface SyncRun {
   id: string
@@ -66,27 +79,39 @@ const STATUS_RUN_BADGE: Record<string, string> = {
 
 export default function TransactionsPage() {
   const [items, setItems] = useState<Txn[]>([])
+  const [accounts, setAccounts] = useState<FinanceAccount[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [provider, setProvider] = useState<Provider | ''>('')
   const [kind, setKind] = useState('')
+  const [accountFilter, setAccountFilter] = useState('')
   const [since, setSince] = useState('')
   const [until, setUntil] = useState('')
   const [page, setPage] = useState(0)
-  const pageSize = 100
+  const [pageSize, setPageSize] = useState(50)
+  const [sort, setSort] = useState<SortKey>('date')
+  const [order, setOrder] = useState<'asc' | 'desc'>('desc')
 
   const [history, setHistory] = useState<SyncRun[]>([])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [running, setRunning] = useState<Provider | 'all' | ''>('')
   const [runSummary, setRunSummary] = useState('')
 
+  useEffect(() => {
+    apiFetch<{ items: FinanceAccount[] }>(`/admin/finance/accounts`).then(d => setAccounts(d.items || [])).catch(() => {})
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const qs = new URLSearchParams({ limit: String(pageSize), offset: String(page * pageSize) })
+      const qs = new URLSearchParams({
+        limit: String(pageSize), offset: String(page * pageSize),
+        sort, order,
+      })
       if (provider) qs.set('provider', provider)
       if (kind) qs.set('kind', kind)
+      if (accountFilter) qs.set('account_id', accountFilter)
       if (since) qs.set('since', since)
       if (until) qs.set('until', until)
       const data = await apiFetch<{ total: number; items: Txn[] }>(`/admin/finance/transactions?${qs}`)
@@ -95,7 +120,17 @@ export default function TransactionsPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally { setLoading(false) }
-  }, [provider, kind, since, until, page])
+  }, [provider, kind, accountFilter, since, until, page, pageSize, sort, order])
+
+  function toggleSort(col: SortKey) {
+    if (sort === col) setOrder(o => o === 'asc' ? 'desc' : 'asc')
+    else { setSort(col); setOrder(col === 'date' ? 'desc' : 'asc') }
+    setPage(0)
+  }
+  function sortArrow(col: SortKey) {
+    if (sort !== col) return <span className="text-white/20">↕</span>
+    return <span className="text-saffron-400">{order === 'asc' ? '↑' : '↓'}</span>
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -198,9 +233,17 @@ export default function TransactionsPage() {
           ))}
         </div>
 
+        <select value={accountFilter} onChange={e => { setAccountFilter(e.target.value); setPage(0) }}
+          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-saffron-400/50 min-w-[200px]">
+          <option value="">All accounts</option>
+          {accounts.map(a => (
+            <option key={a.id} value={a.id}>{a.account_type}: {a.name}</option>
+          ))}
+        </select>
+
         <input value={kind} onChange={e => { setKind(e.target.value); setPage(0) }}
           placeholder="Kind (charge, refund, payout, …)"
-          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-saffron-400/50 w-[260px]" />
+          className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-saffron-400/50 w-[200px]" />
 
         <div className="flex gap-2 items-center">
           <label className="text-white/50 text-xs font-bold uppercase tracking-wide">Since</label>
@@ -210,6 +253,11 @@ export default function TransactionsPage() {
           <input type="date" value={until} onChange={e => { setUntil(e.target.value); setPage(0) }}
             className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-saffron-400/50" />
         </div>
+
+        <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
+          className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-saffron-400/50">
+          {[25, 50, 100, 200, 500].map(n => <option key={n} value={n}>{n} / page</option>)}
+        </select>
       </div>
 
       <div className="glass rounded-2xl overflow-hidden">
@@ -217,21 +265,22 @@ export default function TransactionsPage() {
           <table className="w-full text-sm">
             <thead className="bg-white/5 border-b border-white/10">
               <tr className="text-white/60 text-xs uppercase tracking-wide">
-                <th className="px-4 py-3 text-left font-semibold">Date / Time</th>
-                <th className="px-4 py-3 text-left font-semibold">Provider</th>
-                <th className="px-4 py-3 text-left font-semibold">Kind</th>
-                <th className="px-4 py-3 text-right font-semibold">Gross</th>
+                <th onClick={() => toggleSort('date')}       className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">Date / Time {sortArrow('date')}</th>
+                <th onClick={() => toggleSort('provider')}   className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">Provider {sortArrow('provider')}</th>
+                <th onClick={() => toggleSort('account')}    className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">Account {sortArrow('account')}</th>
+                <th onClick={() => toggleSort('kind')}       className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">Kind {sortArrow('kind')}</th>
+                <th onClick={() => toggleSort('amount')}     className="px-4 py-3 text-right font-semibold cursor-pointer select-none hover:text-white/80">Gross {sortArrow('amount')}</th>
                 <th className="px-4 py-3 text-right font-semibold">Fee</th>
-                <th className="px-4 py-3 text-right font-semibold">Net</th>
-                <th className="px-4 py-3 text-left font-semibold">Status</th>
+                <th onClick={() => toggleSort('net')}        className="px-4 py-3 text-right font-semibold cursor-pointer select-none hover:text-white/80">Net {sortArrow('net')}</th>
+                <th onClick={() => toggleSort('status')}     className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">Status {sortArrow('status')}</th>
                 <th className="px-4 py-3 text-left font-semibold">Description</th>
                 <th className="px-4 py-3 text-left font-semibold">Ref</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={9} className="px-4 py-12 text-center text-white/40">Loading…</td></tr>}
+              {loading && <tr><td colSpan={10} className="px-4 py-12 text-center text-white/40">Loading…</td></tr>}
               {!loading && items.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-12 text-center text-white/40">
+                <tr><td colSpan={10} className="px-4 py-12 text-center text-white/40">
                   No transactions. Hit &quot;Sync both now&quot; to pull from Stripe + SumUp.
                 </td></tr>
               )}
@@ -242,6 +291,11 @@ export default function TransactionsPage() {
                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold border capitalize ${PROVIDER_BADGE[t.provider] || 'bg-white/10 text-white/60 border-white/20'}`}>
                       {t.provider}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-white/80 text-xs whitespace-nowrap" title={t.account_id || ''}>
+                    {t.account_name
+                      ? <span>🏦 {t.account_name}</span>
+                      : <span className="text-white/25">—</span>}
                   </td>
                   <td className="px-4 py-3 text-white/70 text-xs capitalize">{t.kind.replace(/_/g, ' ') || '—'}</td>
                   <td className={`px-4 py-3 text-right font-mono text-sm ${(t.amount_pence || 0) < 0 ? 'text-red-400' : 'text-white'}`}>
@@ -254,7 +308,7 @@ export default function TransactionsPage() {
                     {fmtMoney(t.net_pence, t.currency)}
                   </td>
                   <td className="px-4 py-3 text-white/60 text-xs">{t.status || '—'}</td>
-                  <td className="px-4 py-3 text-white/70 text-xs max-w-[260px] truncate" title={t.description}>
+                  <td className="px-4 py-3 text-white/70 text-xs max-w-[220px] truncate" title={t.description}>
                     {t.description || <em className="text-white/30">(none)</em>}
                   </td>
                   <td className="px-4 py-3 text-white/40 text-[10px] font-mono" title={t.external_id}>
@@ -266,7 +320,7 @@ export default function TransactionsPage() {
             {!loading && items.length > 0 && (
               <tfoot className="bg-white/5 border-t border-white/10 text-white/70 text-xs">
                 <tr>
-                  <td colSpan={5} className="px-4 py-3 font-semibold">
+                  <td colSpan={6} className="px-4 py-3 font-semibold">
                     Page {page + 1} of {pages} — {total} total
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-bold text-green-400">
