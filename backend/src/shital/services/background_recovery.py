@@ -529,10 +529,7 @@ async def _sumup_daily_digest(target_date: datetime | None = None) -> dict[str, 
     recipients = os.environ.get("MONITOR_ALERT_RECIPIENTS", "").strip() \
         or "rajk@shirdisai.org.uk,it@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
     try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            _send_smtp,
+        await _send_alert_digest_email(
             recipients,
             f"[ShitalEco] SumUp daily report — {day_start.strftime('%a %d %b')} — £{completed_gross:.2f} paid, {failed_count} failed",
             html,
