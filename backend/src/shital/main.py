@@ -2128,6 +2128,10 @@ async def _patch_schema() -> None:
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS device_id    VARCHAR(200) NOT NULL DEFAULT ''",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS device_label VARCHAR(200) NOT NULL DEFAULT ''",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS source       VARCHAR(64)  NOT NULL DEFAULT 'kiosk'",
+        # Per-line-item breakdown of the basket, written by payment captures so
+        # public campaign counters (Future Legacy Appeal) can bucket each gift
+        # into the right tier (Square Foot / Red / Bronze / Gold / Founder).
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS items        JSONB        NOT NULL DEFAULT '[]'",
         # Store UPRN on gift_aid_declarations for HMRC record-keeping
         "ALTER TABLE gift_aid_declarations ADD COLUMN IF NOT EXISTS uprn VARCHAR(20) NOT NULL DEFAULT ''",
         # Seed default tiers if none exist
@@ -4303,6 +4307,7 @@ _mount("shital.api.routers.payment_sync",          "router")
 _mount("shital.api.routers.email_ingest",          "router")
 _mount("shital.api.routers.finance_accounts",      "router")
 _mount("shital.api.routers.board_resolution_extras", "router")
+_mount("shital.api.routers.public_campaigns",      "router")
 
 
 @app.get("/health", tags=["system"])
