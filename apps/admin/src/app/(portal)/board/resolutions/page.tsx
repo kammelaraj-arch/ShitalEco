@@ -520,59 +520,96 @@ export default function ResolutionsPage() {
               transition={{ type: 'spring', damping: 26, stiffness: 240 }}
               className="fixed inset-0 z-50 flex flex-col
                          bg-temple-deep border-0 overflow-hidden shadow-2xl">
-              {/* Header */}
-              <div className="px-6 py-4 border-b border-white/5 flex items-start justify-between gap-4 flex-wrap">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <h2 className="text-white font-black text-lg truncate">
-                      {editing ? editing.title || 'Untitled resolution' : 'New resolution'}
-                    </h2>
-                    {editing && <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${STATUS_BADGE[editing.status]}`}>{editing.status}</span>}
-                    {editing?.outcome && (
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${OUTCOME_BADGE[editing.outcome] || 'bg-white/10 text-white/60 border-white/20'}`}>
-                        {editing.outcome.replace(/_/g, ' ')}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-white/40 text-xs">{STEPS[currentStepIdx]?.hint}</p>
+              {/* Top app-bar */}
+              <div className="px-6 py-3 bg-[#0b1220] border-b border-white/5 flex items-center gap-3">
+                <button className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 text-white/70 flex items-center justify-center" title="Menu">
+                  <span className="text-base leading-none">☰</span>
+                </button>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-white font-black text-base truncate leading-tight">
+                    {editing ? editing.title || 'Untitled resolution' : 'New resolution'}
+                  </h2>
+                  <p className="text-white/40 text-[11px]">Board Resolution · {editing ? `Ref ${editing.id.slice(0, 8)}` : 'draft'}</p>
                 </div>
-                <button onClick={closeWizard} className="text-white/40 hover:text-white text-xl p-1 leading-none">✕</button>
+                <button onClick={closeWizard} title="Close wizard"
+                  className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 text-white/50 hover:text-white hover:bg-white/10 flex items-center justify-center leading-none">✕</button>
               </div>
 
-              {/* Stepper */}
-              <div className="px-6 py-4 border-b border-white/5 overflow-x-auto">
-                <div className="flex items-center gap-2 min-w-max">
+              {/* Numbered stepper */}
+              <div className="px-6 py-3 bg-[#0b1220] border-b border-white/5 overflow-x-auto">
+                <div className="flex items-center gap-1 min-w-max">
                   {STEPS.map((s, i) => {
                     const active = s.key === wizStep
                     const done = i < currentStepIdx
                     const unlocked = i === 0 || Boolean(editing) || done
                     return (
-                      <div key={s.key} className="flex items-center gap-2">
+                      <div key={s.key} className="flex items-center">
                         <button onClick={() => unlocked && setWizStep(s.key)} disabled={!unlocked}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                            active ? 'bg-saffron-gradient text-white shadow-saffron'
-                              : done ? 'bg-green-500/15 text-green-300 border border-green-500/30 hover:bg-green-500/25'
-                              : unlocked ? 'bg-white/5 text-white/70 border border-white/10 hover:bg-white/10'
-                              : 'bg-white/3 text-white/30 border border-white/5 cursor-not-allowed'
+                          className={`flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full text-xs font-bold transition-all group ${
+                            active ? 'bg-red-600 text-white shadow-lg shadow-red-900/40'
+                              : done ? 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30'
+                              : unlocked ? 'text-white/60 hover:bg-white/5'
+                              : 'text-white/25 cursor-not-allowed'
                           }`}>
-                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
-                            active ? 'bg-white/20' : done ? 'bg-green-500/30' : 'bg-white/10'
+                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-black ${
+                            active ? 'bg-white text-red-600'
+                              : done ? 'bg-emerald-500 text-white'
+                              : 'bg-white/10 text-white/60'
                           }`}>{done ? '✓' : i + 1}</span>
-                          <span>{s.title}</span>
+                          <span className="uppercase tracking-wide">{s.title}</span>
+                          <span title={s.hint}
+                            className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold ${
+                              active ? 'bg-white/25 text-white' : 'bg-white/10 text-white/50 group-hover:bg-white/20'
+                            }`}>?</span>
                         </button>
-                        {i < STEPS.length - 1 && <span className="text-white/20 text-xs">›</span>}
+                        {i < STEPS.length - 1 && <span className="text-white/20 text-sm px-1">›</span>}
                       </div>
                     )
                   })}
                 </div>
               </div>
 
+              {/* Info strip (always-visible context) */}
+              <div className="px-6 py-3 bg-[#0e1626] border-b border-white/5 flex flex-wrap gap-x-10 gap-y-3 text-[11px]">
+                {[
+                  { label: 'Status', value: editing ? editing.status : 'NEW', accent: 'text-emerald-300' },
+                  { label: 'Category', value: (form.category || '—').replace(/_/g, ' ') },
+                  { label: 'Decision Type', value: (form.decision_type || '—').replace(/_/g, ' ') },
+                  { label: 'Decision Date', value: fmtDate(editing?.decision_date ?? form.decision_date) },
+                  { label: 'Attachments', value: `${attachments.length} file${attachments.length === 1 ? '' : 's'}` },
+                  { label: 'Tally', value: editing ? `FOR ${editing.tally_for} · AGAINST ${editing.tally_against} · ABSTAIN ${editing.tally_abstain}` : '—' },
+                  { label: 'Outcome', value: editing?.outcome ? editing.outcome.replace(/_/g, ' ') : 'Pending vote', accent: editing?.outcome === 'CARRIED' ? 'text-emerald-300' : editing?.outcome === 'NOT_CARRIED' ? 'text-red-300' : 'text-amber-300' },
+                ].map(it => (
+                  <div key={it.label} className="min-w-0">
+                    <div className="text-white/40 font-bold uppercase tracking-wider">{it.label}</div>
+                    <div className={`font-black ${it.accent || 'text-white'} truncate`}>{it.value}</div>
+                  </div>
+                ))}
+              </div>
+
               {error && <div className="mx-6 mt-4 bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
 
-              {/* Body */}
-              <div className="flex-1 overflow-y-auto px-6 py-6">
+              {/* Body: main form + right rail */}
+              <div className="flex-1 overflow-y-auto">
+                <div className="px-6 py-6 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-6 max-w-[1600px] mx-auto">
+                  <div className="min-w-0 space-y-6">
+                    {/* Step title bar — matches "SELECTED ASSET / Change asset" row */}
+                    <div className="rounded-2xl border border-white/10 bg-white/3 px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
+                      <div className="min-w-0">
+                        <p className="text-white/40 text-[11px] font-bold uppercase tracking-widest">Step {currentStepIdx + 1} of {STEPS.length}</p>
+                        <p className="text-white font-black text-base">{STEPS[currentStepIdx]?.title}</p>
+                        <p className="text-white/50 text-xs mt-0.5">{STEPS[currentStepIdx]?.hint}</p>
+                      </div>
+                      {editing && wizStep !== 'basics' && (
+                        <button onClick={() => setWizStep('basics')}
+                          className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-white/80 text-xs font-bold hover:bg-white/10">
+                          Change basics
+                        </button>
+                      )}
+                    </div>
+
                 {wizStep === 'basics' && (
-                  <div className="max-w-5xl mx-auto w-full space-y-4">
+                  <div className="w-full space-y-4">
                     <div>
                       <label className={lbl}>Title *</label>
                       <input disabled={locked} value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} className={inp}
@@ -630,7 +667,7 @@ export default function ResolutionsPage() {
                 )}
 
                 {wizStep === 'context' && (
-                  <div className="max-w-5xl mx-auto w-full space-y-5">
+                  <div className="w-full space-y-5">
                     {/* AI draft */}
                     <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4">
                       <div className="flex items-center gap-2 mb-2">
@@ -709,7 +746,7 @@ export default function ResolutionsPage() {
                 )}
 
                 {wizStep === 'impact' && (
-                  <div className="max-w-5xl mx-auto w-full space-y-4">
+                  <div className="w-full space-y-4">
                     <div>
                       <label className={lbl}>Risk / Impact</label>
                       <textarea disabled={locked} value={form.risk_impact} onChange={e => setForm(p => ({ ...p, risk_impact: e.target.value }))} rows={4} className={inp + ' resize-none'}
@@ -725,7 +762,7 @@ export default function ResolutionsPage() {
                 )}
 
                 {wizStep === 'review' && (
-                  <div className="max-w-6xl mx-auto w-full space-y-4">
+                  <div className="w-full space-y-4">
                     <p className="text-white/50 text-xs uppercase tracking-widest font-bold">Preview — this is what trustees will see</p>
                     <div className="rounded-2xl border border-white/10 bg-white/3 p-5 space-y-4">
                       <div>
@@ -793,7 +830,7 @@ export default function ResolutionsPage() {
                 )}
 
                 {wizStep === 'vote' && (
-                  <div className="max-w-6xl mx-auto w-full space-y-4">
+                  <div className="w-full space-y-4">
                     {!editing && (
                       <div className="rounded-xl border border-white/10 bg-white/3 p-4 text-white/60 text-sm">
                         Save and publish the resolution first. The Review step has the buttons.
@@ -906,30 +943,132 @@ export default function ResolutionsPage() {
                     )}
                   </div>
                 )}
+                  </div>
+                  {/* Right rail */}
+                  <aside className="min-w-0 space-y-4">
+                    <div className="rounded-2xl border border-white/10 bg-[#0e1626] p-4">
+                      <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mb-2">Resolution record</p>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-white font-black text-sm truncate">{editing ? `RES-${editing.id.slice(0, 8).toUpperCase()}` : 'Not saved yet'}</p>
+                          <p className="text-white/50 text-xs mt-0.5">
+                            {editing
+                              ? `${(editing.category || '').replace(/_/g, ' ')} · ${(editing.decision_type || '').replace(/_/g, ' ')}`
+                              : 'Save a draft to assign a reference.'}
+                          </p>
+                        </div>
+                        {editing && (
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black border ${STATUS_BADGE[editing.status]}`}>
+                            {editing.status}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-[#0e1626] p-4">
+                      <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mb-2">Linked meeting</p>
+                      {(() => {
+                        const m = meetings.find(mm => mm.id === form.meeting_id)
+                        if (!m) return <p className="text-white/50 text-xs">No meeting linked. Pick one in the Basics step for AI draft context.</p>
+                        return (
+                          <div>
+                            <p className="text-white font-bold text-sm">{m.title || m.meeting_type.replace(/_/g, ' ')}</p>
+                            <p className="text-white/50 text-xs mt-0.5">{fmtDate(m.scheduled_at)}</p>
+                          </div>
+                        )
+                      })()}
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-[#0e1626] p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Supporting files</p>
+                        <span className="text-white/60 text-xs font-bold">{attachments.length}</span>
+                      </div>
+                      {attachments.length === 0 ? (
+                        <p className="text-white/50 text-xs">No files attached yet.</p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {attachments.slice(0, 4).map(a => (
+                            <li key={a.id} className="flex items-center gap-2 text-xs">
+                              <span className="text-white/40">{a.source === 'meeting' ? '📅' : a.source === 'ai' ? '✨' : '📎'}</span>
+                              <a href={a.url} target="_blank" rel="noreferrer" className="text-saffron-300 hover:underline truncate flex-1">{a.filename}</a>
+                            </li>
+                          ))}
+                          {attachments.length > 4 && <li className="text-white/40 text-xs">+ {attachments.length - 4} more…</li>}
+                        </ul>
+                      )}
+                    </div>
+
+                    {editing && (editing.status === 'OPEN' || editing.status === 'CLOSED') && (
+                      <div className="rounded-2xl border border-white/10 bg-[#0e1626] p-4">
+                        <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mb-3">Vote tally</p>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className="rounded-lg bg-emerald-600/15 border border-emerald-600/30 py-2">
+                            <div className="text-emerald-300 font-black text-lg">{editing.tally_for}</div>
+                            <div className="text-emerald-300/70 text-[10px] font-bold uppercase">For</div>
+                          </div>
+                          <div className="rounded-lg bg-red-600/15 border border-red-600/30 py-2">
+                            <div className="text-red-300 font-black text-lg">{editing.tally_against}</div>
+                            <div className="text-red-300/70 text-[10px] font-bold uppercase">Against</div>
+                          </div>
+                          <div className="rounded-lg bg-amber-600/15 border border-amber-600/30 py-2">
+                            <div className="text-amber-300 font-black text-lg">{editing.tally_abstain}</div>
+                            <div className="text-amber-300/70 text-[10px] font-bold uppercase">Abstain</div>
+                          </div>
+                        </div>
+                        {editing.outcome && (
+                          <div className="mt-3 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-black border ${OUTCOME_BADGE[editing.outcome] || 'bg-white/10 text-white/60 border-white/20'}`}>
+                              {editing.outcome.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </aside>
+                </div>
               </div>
 
-              {/* Footer nav */}
-              <div className="px-6 py-4 border-t border-white/5 flex items-center justify-between gap-3 flex-wrap">
-                <button onClick={closeWizard} className="text-white/50 hover:text-white text-sm">Close</button>
-                <div className="flex items-center gap-2">
-                  <button onClick={goPrev} disabled={currentStepIdx === 0}
-                    className="px-4 py-2 rounded-xl border border-white/10 text-white/70 text-sm font-bold hover:bg-white/5 disabled:opacity-30">← Back</button>
-                  {wizStep !== 'review' && wizStep !== 'vote' && (
-                    <button onClick={goNext} disabled={!stepValid[wizStep]}
-                      className="px-5 py-2 rounded-xl bg-saffron-gradient text-white text-sm font-black shadow-saffron disabled:opacity-40">Next →</button>
-                  )}
-                  {wizStep === 'review' && editing && editing.status !== 'DRAFT' && (
-                    <button onClick={() => setWizStep('vote')}
-                      className="px-5 py-2 rounded-xl bg-saffron-gradient text-white text-sm font-black shadow-saffron">
-                      Go to Vote &amp; Close →
-                    </button>
-                  )}
-                  {wizStep === 'review' && (!editing || editing.status === 'DRAFT') && !locked && (
+              {/* Footer: Back / progress circle + Save draft + Continue */}
+              <div className="px-6 py-4 bg-[#0b1220] border-t border-white/5 flex items-center justify-between gap-3 flex-wrap">
+                <button onClick={goPrev} disabled={currentStepIdx === 0}
+                  className="px-5 py-2.5 rounded-xl border border-white/15 text-white/80 text-sm font-bold hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed">
+                  ← Back
+                </button>
+                <div className="flex items-center gap-3">
+                  {/* Progress ring */}
+                  {(() => {
+                    const pct = Math.round(((currentStepIdx + 1) / STEPS.length) * 100)
+                    const circ = 2 * Math.PI * 18
+                    const dash = (pct / 100) * circ
+                    return (
+                      <div className="relative w-12 h-12" title={`${pct}% complete`}>
+                        <svg viewBox="0 0 44 44" className="w-12 h-12 -rotate-90">
+                          <circle cx="22" cy="22" r="18" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="4" />
+                          <circle cx="22" cy="22" r="18" fill="none" stroke="#dc2626" strokeWidth="4" strokeLinecap="round"
+                            strokeDasharray={`${dash} ${circ}`} />
+                        </svg>
+                        <span className="absolute inset-0 flex items-center justify-center text-white text-[11px] font-black">{pct}%</span>
+                      </div>
+                    )
+                  })()}
+                  {!locked && (
                     <button onClick={() => saveDraft()} disabled={saving || !form.title.trim()}
-                      className="px-5 py-2 rounded-xl border border-white/10 text-white/80 text-sm font-bold hover:bg-white/5 disabled:opacity-40">
-                      {saving ? 'Saving…' : '💾 Save draft'}
+                      className="px-5 py-2.5 rounded-xl border border-white/15 text-white text-sm font-bold hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed">
+                      {saving ? 'Saving…' : 'Save draft'}
                     </button>
                   )}
+                  {wizStep !== 'review' && wizStep !== 'vote' ? (
+                    <button onClick={goNext} disabled={!stepValid[wizStep]}
+                      className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-black shadow-lg shadow-red-900/40 disabled:opacity-40 disabled:cursor-not-allowed">
+                      Continue
+                    </button>
+                  ) : wizStep === 'review' && editing && editing.status !== 'DRAFT' ? (
+                    <button onClick={() => setWizStep('vote')}
+                      className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-black shadow-lg shadow-red-900/40">
+                      Go to Vote &amp; Close
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </motion.div>
