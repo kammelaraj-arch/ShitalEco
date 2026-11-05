@@ -646,6 +646,90 @@ async def sync_history(ctx: CurrentSpace, limit: int = 50) -> dict[str, Any]:
     }
 
 
+@router.get("/transactions/summary")
+async def transactions_summary(
+    ctx: CurrentSpace,
+    provider: str = "",
+    kind: str = "",
+    status: str = "",
+    account_id: str = "",
+    since: str | None = None,
+    until: str | None = None,
+) -> dict[str, Any]:
+    """Totals matching the same filters list_transactions uses. Used by the
+    admin page to show how much is being lost to processor fees.
+
+    Returns per-provider gross/fee/net pennies and an overall row. Money
+    movements that are inherently negative from our POV (refunds, chargebacks)
+    are counted into the respective buckets as-is so finance can see the
+    whole picture.
+    """
+    _only_admin(ctx)
+    where = ["1=1"]
+    params: dict[str, Any] = {}
+    if provider:
+        if provider not in ("stripe", "sumup", "paypal"):
+            raise HTTPException(status_code=400, detail="provider must be 'stripe', 'sumup' or 'paypal'")
+        where.append("provider = :p")
+        params["p"] = provider
+    if kind:
+        where.append("kind = :k")
+        params["k"] = kind
+    if status:
+        where.append("status = :s")
+        params["s"] = status
+    if account_id:
+        try:
+            uuid.UUID(account_id)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail="account_id must be a UUID") from exc
+        where.append("account_id = :aid")
+        params["aid"] = account_id
+    since_dt = _parse_iso(since)
+    until_dt = _parse_iso(until)
+    if since_dt:
+        where.append("provider_created_at >= :sd")
+        params["sd"] = since_dt
+    if until_dt:
+        where.append("provider_created_at <= :ud")
+        params["ud"] = until_dt
+
+    clause = " AND ".join(where)
+    async with SessionLocal() as db:
+        rows = (await db.execute(text(f"""
+            SELECT provider,
+                   COUNT(*)                     AS tx_count,
+                   SUM(amount_pence)            AS gross,
+                   SUM(fee_pence)               AS fee,
+                   SUM(net_pence)               AS net,
+                   COALESCE(MIN(currency), 'GBP') AS currency
+              FROM payment_transactions
+             WHERE {clause}
+             GROUP BY provider
+             ORDER BY provider
+        """), params)).mappings().all()
+
+    def _bucket(r: Any) -> dict[str, Any]:
+        return {
+            "provider": r["provider"],
+            "count":    int(r["tx_count"] or 0),
+            "gross":    int(r["gross"] or 0),
+            "fee":      int(r["fee"] or 0),
+            "net":      int(r["net"] or 0),
+            "currency": r["currency"] or "GBP",
+        }
+
+    buckets = [_bucket(r) for r in rows]
+    total = {
+        "count":    sum(b["count"] for b in buckets),
+        "gross":    sum(b["gross"] for b in buckets),
+        "fee":      sum(b["fee"]   for b in buckets),
+        "net":      sum(b["net"]   for b in buckets),
+        "currency": (buckets[0]["currency"] if buckets else "GBP"),
+    }
+    return {"providers": buckets, "total": total}
+
+
 _SORT_WHITELIST = {
     "date":        "pt.provider_created_at",
     "amount":      "pt.amount_pence",
