@@ -2262,13 +2262,8 @@ async def send_receipt(body: ReceiptInput):
     Email priority: Office 365 SMTP (OFFICE365_PASSWORD set) → SendGrid fallback.
     Credentials are loaded from the encrypted API Keys store (Admin → Settings → API Keys).
     """
-    import asyncio
     import logging
-    import smtplib
-    import ssl
     from datetime import date as _date
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
 
 
     _log = logging.getLogger("shital.receipt")
@@ -2388,33 +2383,48 @@ async def send_receipt(body: ReceiptInput):
             _log.error("receipt_render_failed: %s", e)
             subject, html_body, text_body = _build_fallback_email()
 
-        # ── Office 365 SMTP (primary) ─────────────────────────────────────────
+        # ── Office 365 SMTP (primary) — audited via sent_emails ───────────────
+        from shital.api.routers.email_templates import (
+            RELATED_DONATION,
+            _record_pending,
+            _record_result,
+            send_raw_email,
+        )
+
         if office365_password:
-            def _smtp_send() -> None:
-                msg = MIMEMultipart("alternative")
-                msg["Subject"] = subject
-                msg["From"]    = f"Shital Temple <{office365_email}>"
-                msg["To"]      = body.destination
-                if text_body:
-                    msg.attach(MIMEText(text_body, "plain", "utf-8"))
-                msg.attach(MIMEText(html_body, "html", "utf-8"))
-                ctx = ssl.create_default_context()
-                with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
-                    srv.ehlo()
-                    srv.starttls(context=ctx)
-                    srv.login(office365_email, office365_password)
-                    srv.sendmail(office365_email, body.destination, msg.as_string())
-
-            try:
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, _smtp_send)
+            result = await send_raw_email(
+                to_email=body.destination,
+                subject=subject,
+                html_body=html_body,
+                text_body=text_body,
+                template_key="donation_receipt",
+                related_type=RELATED_DONATION,
+                related_id=body.order_ref or "",
+                triggered_by="kiosk_receipt",
+            )
+            if result.get("sent"):
                 _log.info("receipt_sent_office365 to=%s ref=%s", body.destination, body.order_ref)
-                return {"sent": True, "method": "office365"}
-            except Exception as e:
-                _log.error("office365_smtp_error: %s", e)
-                return {"sent": False, "error": f"Office 365 SMTP error: {e}"}
+                return {"sent": True, "method": "office365", "sent_email_id": result.get("sent_email_id")}
+            _log.error("office365_smtp_error: %s", result.get("error") or result.get("reason"))
+            return {
+                "sent": False,
+                "method": "office365",
+                "error": result.get("error") or result.get("reason") or "SMTP failed",
+                "sent_email_id": result.get("sent_email_id"),
+            }
 
-        # ── SendGrid fallback ─────────────────────────────────────────────────
+        # ── SendGrid fallback — audited manually around the HTTP call ────────
+        row_id = ""
+        try:
+            row_id = await _record_pending(
+                "donation_receipt", body.destination, office365_email,
+                subject, html_body, text_body, dict(variables),
+                related_type=RELATED_DONATION, related_id=body.order_ref or "",
+                triggered_by="kiosk_receipt_sendgrid",
+            )
+        except Exception as exc:
+            _log.warning("sendgrid_record_pending_failed: %s", exc)
+
         try:
             content = [{"type": "text/html", "value": html_body}]
             if text_body:
@@ -2431,12 +2441,25 @@ async def send_receipt(body: ReceiptInput):
                 timeout=10,
             )
             sent = resp.status_code in (200, 202)
+            if row_id:
+                try:
+                    await _record_result(
+                        row_id, sent,
+                        "" if sent else f"SendGrid {resp.status_code}: {resp.text[:400]}",
+                    )
+                except Exception as exc:
+                    _log.warning("sendgrid_record_result_failed: %s", exc)
             if not sent:
                 _log.error("sendgrid_error: %s %s", resp.status_code, resp.text[:200])
-            return {"sent": sent, "method": "sendgrid", "status_code": resp.status_code}
+            return {"sent": sent, "method": "sendgrid", "status_code": resp.status_code, "sent_email_id": row_id}
         except Exception as e:
+            if row_id:
+                try:
+                    await _record_result(row_id, False, str(e))
+                except Exception:
+                    pass
             _log.error("sendgrid_exception: %s", e)
-            return {"sent": False, "error": str(e)}
+            return {"sent": False, "error": str(e), "sent_email_id": row_id}
 
     # ── WhatsApp via Meta Cloud API ───────────────────────────────────────────
     if body.type in ("sms", "whatsapp"):

@@ -168,6 +168,8 @@ async def send_vote_invites(
                 await _send_invite_email(
                     full_name=t["full_name"], email=t["email"], token=token,
                     resolution_title=res["title"],
+                    resolution_id=str(res["id"]),
+                    triggered_by=ctx.user_email,
                 )
             except Exception as exc:
                 failed.append(f"{t['full_name']} ({exc})")
@@ -193,19 +195,19 @@ async def send_vote_invites(
     }
 
 
-async def _send_invite_email(*, full_name: str, email: str, token: str, resolution_title: str) -> None:
-    """Send the magic-link via SendGrid. Falls back to a noop if the API key
-    is not configured (so dev / local works without real email)."""
+async def _send_invite_email(
+    *, full_name: str, email: str, token: str, resolution_title: str,
+    resolution_id: str = "", triggered_by: str = "",
+) -> None:
+    """Send the magic-link via the shared audit+SMTP path so every trustee
+    invite lands in sent_emails (visible in /admin/settings/sent-emails).
+
+    If O365 / SendGrid is not configured, send_raw_email records a FAILED
+    row with the reason, and we still raise so the caller counts it under
+    ``email_failed`` (same contract as before)."""
     from shital.core.fabrics.secrets import SecretsManager
 
-    api_key = await SecretsManager.get("SENDGRID_API_KEY") or ""
-    if not api_key:
-        # Dev fallback: just log it. The token is also visible in the
-        # resolution_vote_tokens table for staff testing.
-        import structlog
-        log = structlog.get_logger()
-        log.info("vote_invite_email_skipped", email=email, token=token, reason="no_sendgrid_key")
-        return
+    from .email_templates import RELATED_BOARD_VOTE, send_raw_email
 
     admin_base = await SecretsManager.get("ADMIN_BASE_URL") or "https://admin.shital.org.uk"
     # Hash format (#token=…) — the admin app is a static Next.js export,
@@ -240,23 +242,17 @@ async def _send_invite_email(*, full_name: str, email: str, token: str, resoluti
     </div>
     """
 
-    import httpx
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(
-            "https://api.sendgrid.com/v3/mail/send",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "personalizations": [{"to": [{"email": email, "name": full_name}]}],
-                "from": {
-                    "email": (await SecretsManager.get("EMAIL_FROM") or "info@shital.org.uk"),
-                    "name": "SHITAL Trustees",
-                },
-                "subject": f"Trustee vote required: {resolution_title}",
-                "content": [{"type": "text/html", "value": body_html}],
-            },
-        )
-        if r.status_code >= 300:
-            raise RuntimeError(f"SendGrid {r.status_code}: {r.text[:200]}")
+    result = await send_raw_email(
+        to_email=email,
+        subject=f"Trustee vote required: {resolution_title}",
+        html_body=body_html,
+        template_key="board_vote_invite",
+        related_type=RELATED_BOARD_VOTE,
+        related_id=resolution_id,
+        triggered_by=triggered_by,
+    )
+    if not result.get("sent"):
+        raise RuntimeError(result.get("error") or result.get("reason") or "send_raw_email failed")
 
 
 # ─── Public (token-only): load resolution + cast vote ─────────────────────────

@@ -347,10 +347,13 @@ async def update_template(template_key: str, body: TemplateUpdate):
 
 @router.post("/test-send")
 async def send_test_email(body: TemplateSendTest):
-    """Render a template with provided variables and send a test email."""
+    """Render a template with provided variables and send a test email.
+
+    Routes through send_raw_email so the test send lands in sent_emails,
+    the same audit table as production sends.
+    """
     from sqlalchemy import text
 
-    from shital.core.fabrics.config import settings
     from shital.core.fabrics.database import SessionLocal
 
     async with SessionLocal() as db:
@@ -367,36 +370,16 @@ async def send_test_email(body: TemplateSendTest):
         dict(row), {**_default_vars(), **body.variables}
     )
 
-    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
-    password   = settings.OFFICE365_PASSWORD
-
-    if not password:
-        return {"sent": False, "reason": "Email not configured — add OFFICE365_EMAIL and OFFICE365_PASSWORD in Admin → API Keys", "subject": subject}
-
-    import asyncio
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-
-    def _send() -> None:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = from_email
-        msg["To"]      = body.to
-        if text_body:
-            msg.attach(MIMEText(text_body, "plain"))
-        msg.attach(MIMEText(html_body, "html"))
-        with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
-            srv.ehlo()
-            srv.starttls()
-            srv.login(from_email, password)
-            srv.sendmail(from_email, body.to, msg.as_string())
-
-    try:
-        await asyncio.get_event_loop().run_in_executor(None, _send)
-        return {"sent": True, "to": body.to, "subject": subject}
-    except Exception as exc:
-        return {"sent": False, "error": str(exc), "subject": subject}
+    result = await send_raw_email(
+        to_email=body.to,
+        subject=f"[TEST] {subject}",
+        html_body=html_body,
+        text_body=text_body,
+        template_key=body.template_key,
+        related_type="test_send",
+        triggered_by="admin_test_send",
+    )
+    return result
 
 
 def render_template(template: dict[str, Any], variables: dict[str, Any]) -> tuple[str, str, str]:
