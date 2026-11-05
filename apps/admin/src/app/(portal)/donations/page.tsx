@@ -89,8 +89,14 @@ export default function DonationsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [today] = useState(() => new Date().toISOString().slice(0, 10))
-  const [firstOfYear] = useState(() => `${new Date().getFullYear()}-01-01`)
-  const [fromDate, setFromDate] = useState(() => `${new Date().getFullYear()}-01-01`)
+  const [firstOfMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+  })
+  const [fromDate, setFromDate] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+  })
   const [toDate, setToDate] = useState(() => new Date().toISOString().slice(0, 10))
 
   // Extended query filters (all wired to the existing /finance/donations params)
@@ -98,7 +104,9 @@ export default function DonationsPage() {
   const [filterSource, setFilterSource]   = useState('')
   const [filterPurpose, setFilterPurpose] = useState('')
   const [filterStatus, setFilterStatus]   = useState('')
-  const [filterLimit, setFilterLimit]     = useState(500)
+  const [pageSize, setPageSize]           = useState(50)
+  const [page, setPage]                   = useState(0)
+  const [total, setTotal]                 = useState(0)
   const [giftAidOnly, setGiftAidOnly]     = useState(false)
   const [search, setSearch]               = useState('')
 
@@ -267,24 +275,26 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
       const qs = new URLSearchParams({
         from_date: fromDate,
         to_date:   toDate,
-        limit:     String(filterLimit),
+        limit:     String(pageSize),
+        offset:    String(page * pageSize),
       })
       if (filterBranch)  qs.set('branch_id', filterBranch)
       if (filterSource)  qs.set('source',    filterSource)
       if (filterPurpose) qs.set('purpose',   filterPurpose)
       if (filterStatus)  qs.set('status',    filterStatus)
       const [donData, brData] = await Promise.all([
-        apiFetch<{ donations: Donation[] }>(`/finance/donations?${qs}`),
+        apiFetch<{ donations: Donation[]; total?: number }>(`/finance/donations?${qs}`),
         apiFetch<{ branches: Branch[] }>('/branches'),
       ])
       setDonations(donData.donations || [])
+      setTotal(donData.total ?? (donData.donations?.length || 0))
       setBranches(brData.branches || [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
       setLoading(false)
     }
-  }, [fromDate, toDate, filterBranch, filterSource, filterPurpose, filterStatus, filterLimit])
+  }, [fromDate, toDate, filterBranch, filterSource, filterPurpose, filterStatus, pageSize, page])
 
   useEffect(() => { load() }, [load])
 
@@ -540,50 +550,50 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
         <div className="flex flex-wrap gap-2 sm:gap-3 items-end">
           <div className="min-w-0 flex-1 sm:flex-none">
             <label className={lbl}>From</label>
-            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={inp + ' w-full sm:w-40'} />
+            <input type="date" value={fromDate} onChange={e => { setFromDate(e.target.value); setPage(0) }} className={inp + ' w-full sm:w-40'} />
           </div>
           <div className="min-w-0 flex-1 sm:flex-none">
             <label className={lbl}>To</label>
-            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={inp + ' w-full sm:w-40'} />
+            <input type="date" value={toDate} onChange={e => { setToDate(e.target.value); setPage(0) }} className={inp + ' w-full sm:w-40'} />
           </div>
           <div className="min-w-0">
             <label className={lbl}>Branch</label>
-            <select value={filterBranch} onChange={e => setFilterBranch(e.target.value)} className={inp + ' min-w-[140px]'}>
+            <select value={filterBranch} onChange={e => { setFilterBranch(e.target.value); setPage(0) }} className={inp + ' min-w-[140px]'}>
               <option value="">All</option>
               {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
             </select>
           </div>
           <div className="min-w-0">
             <label className={lbl}>Source</label>
-            <select value={filterSource} onChange={e => setFilterSource(e.target.value)} className={inp + ' min-w-[150px]'}>
+            <select value={filterSource} onChange={e => { setFilterSource(e.target.value); setPage(0) }} className={inp + ' min-w-[150px]'}>
               {SOURCES.map(s => <option key={s} value={s}>{s || 'All sources'}</option>)}
             </select>
           </div>
           <div className="min-w-0">
             <label className={lbl}>Purpose contains</label>
-            <input value={filterPurpose} onChange={e => setFilterPurpose(e.target.value)}
+            <input value={filterPurpose} onChange={e => { setFilterPurpose(e.target.value); setPage(0) }}
               placeholder="any" className={inp + ' min-w-[140px]'} />
           </div>
           <div className="min-w-0">
             <label className={lbl}>Status</label>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={inp + ' min-w-[130px]'}>
+            <select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setPage(0) }} className={inp + ' min-w-[130px]'}>
               <option value="">All</option>
               {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div className="min-w-0">
-            <label className={lbl}>Row limit</label>
-            <select value={filterLimit} onChange={e => setFilterLimit(Number(e.target.value))} className={inp + ' min-w-[100px]'}>
-              {[100, 250, 500, 1000, 2500].map(n => <option key={n} value={n}>{n}</option>)}
+            <label className={lbl}>Page size</label>
+            <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }} className={inp + ' min-w-[110px]'}>
+              {[25, 50, 100, 200, 500].map(n => <option key={n} value={n}>{n} / page</option>)}
             </select>
           </div>
           <div className="flex gap-2">
             <button onClick={load} className="px-4 py-2.5 rounded-xl text-white text-sm font-bold"
               style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)' }}>Apply</button>
             <button onClick={() => {
-              setFromDate(firstOfYear); setToDate(today)
+              setFromDate(firstOfMonth); setToDate(today)
               setFilterBranch(''); setFilterSource(''); setFilterPurpose('')
-              setFilterStatus(''); setFilterLimit(500); setGiftAidOnly(false); setSearch('')
+              setFilterStatus(''); setPageSize(50); setPage(0); setGiftAidOnly(false); setSearch('')
             }}
               className="px-4 py-2.5 rounded-xl border border-white/10 text-white/50 text-sm font-semibold hover:bg-white/5">Reset</button>
           </div>
@@ -858,6 +868,28 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
           </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {total > 0 && (
+        <div className="glass rounded-2xl p-3 flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-white/60">
+            {total === 0 ? 'No results' : `${page * pageSize + 1}-${Math.min((page + 1) * pageSize, total)} of ${total.toLocaleString()}`}
+          </span>
+          <div className="ml-auto flex gap-1.5">
+            <button onClick={() => setPage(0)} disabled={page === 0}
+              className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 text-xs font-semibold hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed">« First</button>
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+              className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 text-xs font-semibold hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed">‹ Prev</button>
+            <span className="px-3 py-1.5 text-white/60 text-xs">
+              Page <b className="text-white">{page + 1}</b> of {Math.max(1, Math.ceil(total / pageSize))}
+            </span>
+            <button onClick={() => setPage(p => (p + 1) * pageSize < total ? p + 1 : p)} disabled={(page + 1) * pageSize >= total}
+              className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 text-xs font-semibold hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed">Next ›</button>
+            <button onClick={() => setPage(Math.max(0, Math.ceil(total / pageSize) - 1))} disabled={(page + 1) * pageSize >= total}
+              className="px-3 py-1.5 rounded-lg border border-white/10 text-white/70 text-xs font-semibold hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed">Last »</button>
+          </div>
+        </div>
+      )}
 
       {/* Tag-to-project modal */}
       <AnimatePresence>

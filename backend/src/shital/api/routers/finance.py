@@ -71,7 +71,8 @@ async def list_donations(
     ctx: CurrentSpace,
     from_date: str = "2020-01-01",
     to_date: str = "2099-12-31",
-    limit: int = 500,
+    limit: int = 50,
+    offset: int = 0,
     source: str = "",
     branch_id: str = "",
     purpose: str = "",
@@ -99,7 +100,11 @@ async def list_donations(
     purpose_filter= "AND d.purpose ILIKE :purpose" if purpose else ""
     status_filter = "AND d.status = :status" if status else ""
 
-    params: dict[str, Any] = {"from_dt": from_dt, "to_dt": to_dt, "lim": limit}
+    params: dict[str, Any] = {
+        "from_dt": from_dt, "to_dt": to_dt,
+        "lim": max(1, min(limit, 1000)),
+        "off": max(0, offset),
+    }
     if source:
         params["source"] = source
     if branch_id:
@@ -124,6 +129,7 @@ async def list_donations(
 
     async with SessionLocal() as db:
         result = await db.execute(text(f"""
+            WITH all_rows AS (
             SELECT
                 d.id::text,
                 d.branch_id,
@@ -200,12 +206,20 @@ async def list_donations(
               {rgs_exclude}
               {rgs_branch}
               {rgs_status}
-
-            ORDER BY created_at DESC
-            LIMIT :lim
+            )
+            SELECT *, COUNT(*) OVER() AS _total
+              FROM all_rows
+             ORDER BY created_at DESC
+             LIMIT :lim OFFSET :off
         """), params)
         rows = result.mappings().all()
-    return {"donations": [_row(r) for r in rows]}
+    total = int(rows[0]["_total"]) if rows else 0
+    return {
+        "donations": [_row(r) for r in rows],
+        "total":     total,
+        "limit":     params["lim"],
+        "offset":    params["off"],
+    }
 
 
 @router.get("/donations/export.csv")
