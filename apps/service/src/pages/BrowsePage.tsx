@@ -51,7 +51,7 @@ function GaneshBadge() {
   }
   return (
     <img
-      src="/ganesh.png"
+      src="https://admin.shital.org.uk/api/v1/media/library/b7b94b72-2523-4b8e-b450-6456ecedeaf6"
       alt="Shri Ganesh"
       onError={() => setFailed(true)}
       className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover flex-shrink-0"
