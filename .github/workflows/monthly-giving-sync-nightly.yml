@@ -1,0 +1,55 @@
+# Nightly reconcile of Monthly Giving subscriptions — Stripe + PayPal.
+#
+# Keeps every recurring_giving_subscriptions row current without a human
+# clicking "Sync from Stripe" / "Sync from PayPal":
+#   - Status (ACTIVE / CANCELLED / EXPIRED) refreshed from the provider
+#   - Donor identity (name / email / phone / address / postcode)
+#     backfilled from whatever Stripe collected at Checkout and from
+#     PayPal's subscriber block (including shipping_address)
+#   - Missed payments recorded from the provider's invoices / transactions
+#   - Old PENDING_APPROVAL Stripe rows (donor left Checkout) reaped at 2 days
+#
+# Prerequisites in GitHub secrets:
+#   API_BASE_URL         e.g. https://api.shital.org.uk
+#   PAYMENT_SYNC_TOKEN   same token used by payment-sync + email-ingest
+#                        crons; set in Admin → API Keys and mirror here
+#
+# Idempotent: all three underlying reconciles dedupe and only INSERT what
+# is missing.
+name: Monthly giving sync — nightly
+
+on:
+  schedule:
+    # 02:45 UTC every day — 30 min after the transaction sync (02:15) so
+    # Stripe BalanceTransaction rows written then can be referenced by the
+    # giving reconcile. Still well before UK office hours.
+    - cron: '45 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Call /admin/giving/sync/cron
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          PAYMENT_SYNC_TOKEN: ${{ secrets.PAYMENT_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_BASE_URL:-}" ] || [ -z "${PAYMENT_SYNC_TOKEN:-}" ]; then
+            echo "::error::API_BASE_URL and PAYMENT_SYNC_TOKEN must be set as repo secrets"
+            exit 1
+          fi
+          echo "Starting monthly-giving sync (Stripe + PayPal)…"
+          RESPONSE=$(curl --fail-with-body -sS -X POST \
+            "${API_BASE_URL%/}/api/v1/admin/giving/sync/cron" \
+            -H "Content-Type: application/json" \
+            -H "X-Sync-Token: ${PAYMENT_SYNC_TOKEN}" \
+            -d '{}')
+          echo "$RESPONSE" | tee /tmp/monthly-sync.json
+          if echo "$RESPONSE" | grep -q '"status":"error"'; then
+            echo "::error::Monthly giving sync reported an error — see response above"
+            exit 1
+          fi
+          echo "Monthly giving sync complete."
