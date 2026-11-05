@@ -321,6 +321,7 @@ async def _sync_sumup(since: datetime, until: datetime | None, triggered_by: str
             if until:
                 params["newest_time"] = until.isoformat().replace("+00:00", "Z")
 
+            detail_url = f"{base}/v2.1/merchants/{merchant}/transactions"
             pages = 0
             async with httpx.AsyncClient(timeout=30) as client:
                 while pages < MAX_PAGES:
@@ -346,22 +347,74 @@ async def _sync_sumup(since: datetime, until: datetime | None, triggered_by: str
                             created_at = created_at.replace(tzinfo=UTC)
                         amount_decimal = float(it.get("amount", 0) or 0)
                         amount_pence = int(round(amount_decimal * 100))
+
+                        # Fetch per-tx detail for the fee. SumUp's history
+                        # endpoint omits fees (they're charged per deposit),
+                        # but the detail endpoint lists them under `events`.
+                        # One extra HTTP round-trip per tx is acceptable at
+                        # charity volume (hundreds per day, not millions).
+                        fee_pence = 0
+                        card_type = (it.get("card_type") or "") or ""
+                        entry_mode = (it.get("entry_mode") or "") or ""
+                        try:
+                            det_resp = await client.get(
+                                detail_url,
+                                headers=headers,
+                                params={"transaction_code": ext},
+                            )
+                            if det_resp.is_success:
+                                det = det_resp.json() or {}
+                                # Some tenants return a list; normalise.
+                                if isinstance(det, list):
+                                    det = det[0] if det else {}
+                                # Fee: prefer direct field, else sum events
+                                # of type 'CHARGE_BACK'/'REFUND' are NOT fees;
+                                # true fee lives on events with type 'PAYOUT'
+                                # (or a `fee_amount` key) — both are seen in
+                                # production SumUp payloads depending on
+                                # merchant country.
+                                fa = det.get("fee_amount")
+                                if fa is not None:
+                                    try:
+                                        fee_pence = int(round(float(fa) * 100))
+                                    except (TypeError, ValueError):
+                                        fee_pence = 0
+                                if fee_pence == 0:
+                                    for ev in det.get("events") or []:
+                                        ev_fa = ev.get("fee_amount") if isinstance(ev, dict) else None
+                                        if ev_fa:
+                                            try:
+                                                fee_pence += int(round(float(ev_fa) * 100))
+                                            except (TypeError, ValueError):
+                                                pass
+                                card_type = card_type or det.get("card", {}).get("type", "") or det.get("card_type", "")
+                                entry_mode = entry_mode or det.get("entry_mode", "")
+                        except httpx.HTTPError:
+                            # Network blip on the detail call must not fail
+                            # the whole sync — fee just stays 0 for this row.
+                            pass
+
+                        # SumUp fee is the merchant's cost, so subtract from
+                        # gross to get net banked. fee_pence is always a
+                        # positive integer here.
+                        net_pence = amount_pence - abs(fee_pence) if amount_pence > 0 else amount_pence + abs(fee_pence)
+
                         outcome = await _upsert_tx(db, "sumup", ext, {
                             "kind":                (it.get("type") or "transaction").lower(),
                             "status":              (it.get("status") or "").upper(),
                             "amount_pence":        amount_pence,
                             "currency":            (it.get("currency") or "GBP").upper(),
-                            "fee_pence":           0,                        # not provided on this endpoint
-                            "net_pence":           amount_pence,
+                            "fee_pence":           abs(fee_pence),
+                            "net_pence":           net_pence,
                             "description":         it.get("product_summary", "") or it.get("description", ""),
                             "customer_hint":       it.get("payment_type", "") or "",
-                            "payment_method_hint": it.get("card_type", "") or "",
+                            "payment_method_hint": card_type,
                             "source_ref":          it.get("merchant_code", "") or "",
                             "payout_ref":          it.get("payout_plan", "") or "",
                             "provider_created_at": created_at,
                             "raw": {
                                 "payment_type":  it.get("payment_type"),
-                                "entry_mode":    it.get("entry_mode"),
+                                "entry_mode":    entry_mode,
                                 "installments_count": it.get("installments_count"),
                             },
                         })
