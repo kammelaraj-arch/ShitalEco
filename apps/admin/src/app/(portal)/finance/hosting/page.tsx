@@ -36,7 +36,7 @@ const CAT_LABEL: Record<HostingCategory, string> = {
 }
 const CAT_BLURB: Record<HostingCategory, string> = {
   HOSTING:      'Servers, VPS, cloud compute, managed databases, CDN.',
-  SOFTWARE:     'SaaS subscriptions — Microsoft 365, SendGrid, Stripe fixed fees, observability.',
+  SOFTWARE:     'SaaS subscriptions — Microsoft 365, Stripe fixed fees, observability.',
   DOMAIN:       'Domain registrations, DNS providers, SSL.',
   PROFESSIONAL: 'Accountancy, payroll bureau, IT support, legal retainer.',
 }
@@ -313,7 +313,7 @@ export default function HostingCostsPage() {
             {loading && <tr><td colSpan={8} className="px-4 py-10 text-center text-white/30 text-sm">Loading…</td></tr>}
             {!loading && filtered.length === 0 && (
               <tr><td colSpan={8} className="px-4 py-12 text-center text-white/30 text-sm">
-                No cost lines yet. Add Vultr / Microsoft 365 / domain / SendGrid etc. to start tracking.
+                No cost lines yet. Add Vultr / Microsoft 365 / domain etc. to start tracking.
               </td></tr>
             )}
             {filtered.map(p => (

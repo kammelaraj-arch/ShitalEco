@@ -22,8 +22,9 @@ const envSchema = z.object({
   APPLE_CLIENT_ID: z.string().min(1),
   APPLE_CLIENT_SECRET: z.string().min(1),
 
-  // SendGrid
-  SENDGRID_API_KEY: z.string().min(1),
+  // Microsoft 365 SMTP (via backend)
+  OFFICE365_EMAIL: z.string().email().default('noreply@shital.org.uk'),
+  OFFICE365_PASSWORD: z.string().default(''),
 
   // Meta WhatsApp
   META_WHATSAPP_TOKEN: z.string().min(1),

@@ -91,11 +91,7 @@ class Settings(BaseSettings):
     MAIL_AGENT_PASSWORD: str = ""             # set in .env, never in code
     TEAMS_WEBHOOK_URL: str = ""               # MS Teams Incoming Webhook for alerts
 
-    # SendGrid (legacy fallback)
-    SENDGRID_API_KEY: str = ""
-    SENDGRID_FROM_EMAIL: str = "noreply@shital.org.uk"
-
-    # Office 365 SMTP (primary email — overrides SendGrid when password set)
+    # Microsoft 365 SMTP — the only outbound email path.
     OFFICE365_EMAIL: str = "noreply@shital.org.uk"
     OFFICE365_PASSWORD: str = ""
 

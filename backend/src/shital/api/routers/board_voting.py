@@ -202,8 +202,8 @@ async def _send_invite_email(
     """Send the magic-link via the shared audit+SMTP path so every trustee
     invite lands in sent_emails (visible in /admin/settings/sent-emails).
 
-    If O365 / SendGrid is not configured, send_raw_email records a FAILED
-    row with the reason, and we still raise so the caller counts it under
+    If Microsoft 365 isn't configured, send_raw_email records a FAILED row
+    with the reason, and we still raise so the caller counts it under
     ``email_failed`` (same contract as before)."""
     from shital.core.fabrics.secrets import SecretsManager
 

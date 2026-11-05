@@ -504,14 +504,17 @@ async def send_template(
     """
     from sqlalchemy import text
 
-    from shital.core.fabrics.config import settings
     from shital.core.fabrics.database import SessionLocal
+    from shital.core.fabrics.secrets import SecretsManager
 
     if not template_key or not to_email:
         return {"sent": False, "reason": "missing template_key or to_email"}
 
-    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
-    password   = settings.OFFICE365_PASSWORD
+    # Resolve credentials from the Admin → API Keys store first, then env.
+    # That way a key rotation done in the UI (which writes to the api_keys
+    # table) doesn't require a redeploy to pick up.
+    from_email = (await SecretsManager.get("OFFICE365_EMAIL", fallback="")) or "noreply@shital.org.uk"
+    password   = await SecretsManager.get("OFFICE365_PASSWORD", fallback="")
 
     # Look up the template. Fall back to the inactive row if no active one
     # exists — we still record the attempt so the failure shows up in admin.
@@ -564,7 +567,7 @@ async def send_template(
         return {"sent": False, "reason": reason, "template": template_key, "sent_email_id": row_id}
 
     if not password:
-        msg = "OFFICE365_PASSWORD not set"
+        msg = "Email not configured — set OFFICE365_EMAIL and OFFICE365_PASSWORD in Admin → Settings → API Keys"
         await _record_result(row_id, False, msg)
         return {"sent": False, "reason": msg, "template": template_key, "sent_email_id": row_id}
 
@@ -608,13 +611,15 @@ async def send_raw_email(
     Both functions write to sent_emails the same way, so /admin/email-templates/sent
     shows them side-by-side and /resend works against either.
     """
-    from shital.core.fabrics.config import settings
+    from shital.core.fabrics.secrets import SecretsManager
 
     if not to_email or "@" not in to_email:
         return {"sent": False, "reason": "invalid to_email"}
 
-    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
-    password   = settings.OFFICE365_PASSWORD
+    # Admin → API Keys wins over env vars so a UI-driven rotation takes
+    # effect without a redeploy.
+    from_email = (await SecretsManager.get("OFFICE365_EMAIL", fallback="")) or "noreply@shital.org.uk"
+    password   = await SecretsManager.get("OFFICE365_PASSWORD", fallback="")
 
     row_id = await _record_pending(
         template_key, to_email, from_email,
@@ -623,8 +628,9 @@ async def send_raw_email(
     )
 
     if not password:
-        await _record_result(row_id, False, "OFFICE365_PASSWORD not set")
-        return {"sent": False, "reason": "OFFICE365_PASSWORD not set", "sent_email_id": row_id}
+        msg = "Email not configured — set OFFICE365_EMAIL and OFFICE365_PASSWORD in Admin → Settings → API Keys"
+        await _record_result(row_id, False, msg)
+        return {"sent": False, "reason": msg, "sent_email_id": row_id}
 
     try:
         await _smtp_send(from_email, password, to_email, subject, html_body, text_body)

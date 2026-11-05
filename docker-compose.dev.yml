@@ -54,7 +54,8 @@ services:
       GITHUB_TOKEN:           ${GITHUB_TOKEN:?must be set in .env.dev — needed to pull private GHCR images}
       ANTHROPIC_API_KEY:      ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS:           https://dev.shital.org.uk,http://192.248.147.205:8080,http://localhost:8080
-      SENDGRID_API_KEY:       ${SENDGRID_API_KEY:-}
+      OFFICE365_EMAIL:        ${OFFICE365_EMAIL:-noreply@shital.org.uk}
+      OFFICE365_PASSWORD:     ${OFFICE365_PASSWORD:-}
       STRIPE_SECRET_KEY:      ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       MS_CLIENT_ID:           ${MS_CLIENT_ID:-}
