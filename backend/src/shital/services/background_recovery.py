@@ -915,28 +915,52 @@ async def _paypal_reconcile_once(days: int = 35) -> dict[str, Any]:
                 pp_status = (sub_json.get("status") or "").upper()
                 mapped = _PAYPAL_SUB_STATUS_MAP.get(pp_status)
 
-                # Backfill donor name/email from PayPal's subscriber block when we
-                # don't have them (the simple /monthly/ page collects only amount).
-                if not (r.get("donor_name") or "").strip():
-                    _subr = sub_json.get("subscriber") or {}
-                    _nm = _subr.get("name") or {}
-                    _first = (_nm.get("given_name") or "").strip()
-                    _surname = (_nm.get("surname") or "").strip()
-                    _email = (_subr.get("email_address") or "").strip()
-                    _full = f"{_first} {_surname}".strip()
-                    if _full or _email:
-                        async with SessionLocal() as db:
-                            await db.execute(text("""
-                                UPDATE recurring_giving_subscriptions
-                                SET donor_name       = COALESCE(NULLIF(:name,''), donor_name),
-                                    donor_first_name = COALESCE(NULLIF(:first,''), donor_first_name),
-                                    donor_surname    = COALESCE(NULLIF(:surname,''), donor_surname),
-                                    donor_email      = COALESCE(NULLIF(:email,''), donor_email),
-                                    updated_at       = NOW()
-                                WHERE id = CAST(:id AS UUID)
-                            """), {"name": _full, "first": _first, "surname": _surname,
-                                   "email": _email, "id": r["id"]})
-                            await db.commit()
+                # Backfill donor identity from PayPal's subscriber block whenever
+                # OUR row is missing a piece. Runs every pass (not just when
+                # donor_name is empty) so address/phone that PayPal collected
+                # AFTER signup still lands here. COALESCE(NULLIF(x,''), …) so
+                # non-empty values on our side are always preserved.
+                _subr = sub_json.get("subscriber") or {}
+                _nm = _subr.get("name") or {}
+                _first = (_nm.get("given_name") or "").strip()
+                _surname = (_nm.get("surname") or "").strip()
+                _email = (_subr.get("email_address") or "").strip()
+                _full = f"{_first} {_surname}".strip()
+                # Shipping address (billing isn't exposed on subscriber for most
+                # SUBSCRIPTION APIs — shipping is the practical identity source).
+                _ship = _subr.get("shipping_address") or {}
+                _addr = _ship.get("address") or {}
+                _addr_parts = [
+                    _addr.get("address_line_1"), _addr.get("address_line_2"),
+                    _addr.get("admin_area_2"), _addr.get("admin_area_1"),
+                ]
+                _addr_line = ", ".join(p for p in _addr_parts if (p or "").strip())
+                _postcode = (_addr.get("postal_code") or "").strip()
+                _phone = ""
+                _phone_node = (_subr.get("phone") or {}).get("phone_number") or {}
+                if isinstance(_phone_node, dict):
+                    _phone = (_phone_node.get("national_number") or "").strip()
+                if _full or _email or _addr_line or _postcode or _phone:
+                    async with SessionLocal() as db:
+                        await db.execute(text("""
+                            UPDATE recurring_giving_subscriptions
+                            SET donor_name       = COALESCE(NULLIF(donor_name,''),       NULLIF(:name,'')),
+                                donor_first_name = COALESCE(NULLIF(donor_first_name,''), NULLIF(:first,'')),
+                                donor_surname    = COALESCE(NULLIF(donor_surname,''),    NULLIF(:surname,'')),
+                                donor_email      = COALESCE(NULLIF(donor_email,''),      NULLIF(:email,'')),
+                                donor_phone      = COALESCE(NULLIF(donor_phone,''),      NULLIF(:phone,'')),
+                                donor_address    = COALESCE(NULLIF(donor_address,''),    NULLIF(:addr,'')),
+                                donor_postcode   = COALESCE(NULLIF(donor_postcode,''),   NULLIF(:postcode,'')),
+                                updated_at       = NOW()
+                            WHERE id = CAST(:id AS UUID)
+                        """), {
+                            "name": _full, "first": _first, "surname": _surname,
+                            "email": _email, "phone": _phone,
+                            "addr": _addr_line, "postcode": _postcode,
+                            "id": r["id"],
+                        })
+                        await db.commit()
+                    if not (r.get("donor_name") or "").strip():
                         summary["donor_backfilled"] += 1
                 if mapped and mapped != r["status"]:
                     async with SessionLocal() as db:

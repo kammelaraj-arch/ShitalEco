@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 import structlog
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from shital.api.deps import CurrentSpace
@@ -1000,6 +1000,86 @@ async def admin_sync_stripe(space: CurrentSpace, days: int = 90) -> dict[str, An
         logger.warning("sync_stripe_failed", error=str(exc))
         return {"ok": False, "error": str(exc)[:300]}
     return {"ok": True, "result": result}
+
+
+@router.post("/admin/giving/sync/cron")
+async def admin_sync_all_cron(
+    request: Request,
+    x_sync_token: str | None = Header(default=None, alias="X-Sync-Token"),
+) -> dict[str, Any]:
+    """Nightly entry-point that runs BOTH Stripe + PayPal monthly-giving
+    reconciles back-to-back. Shares PAYMENT_SYNC_TOKEN with the transaction
+    ledger + email ingest crons so operators maintain one shared secret.
+
+    What this fixes for the operator:
+      - Donor identity (name / email / phone / address / postcode) that
+        Stripe collected at Checkout, and that PayPal returns in the
+        subscriber block, gets backfilled onto our row on every run —
+        no human has to click "Sync from Stripe" / "Sync from PayPal"
+        after each new signup. The reconciles call _link_subscription_row
+        + _approve/subscriber-backfill which already handle those fields.
+      - Status (ACTIVE / CANCELLED / EXPIRED) stays fresh.
+      - Any missed webhook payment gets recorded from the provider's
+        invoices list, deduped by payment_ref.
+
+    Also runs the time-only stale-pending reap (Stripe only — PayPal
+    doesn't have the same orphan pattern).
+    """
+    from shital.core.fabrics.config import settings as _settings
+    from shital.core.fabrics.secrets import SecretsManager
+    expected = (await SecretsManager.get("PAYMENT_SYNC_TOKEN")) or getattr(_settings, "PAYMENT_SYNC_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="PAYMENT_SYNC_TOKEN not configured")
+    if not x_sync_token or x_sync_token.strip() != str(expected).strip():
+        raise HTTPException(status_code=401, detail="Invalid sync token")
+
+    await _ensure_subscription_columns()
+
+    client = request.client.host if request.client else "unknown"
+    out: dict[str, Any] = {"triggered_by": f"cron:{client}", "results": []}
+
+    # Stripe recurring sync
+    try:
+        from shital.api.routers.stripe_giving import _stripe_giving_reconcile_once
+        stripe_result = await _stripe_giving_reconcile_once(days=90)
+        out["results"].append({"provider": "stripe", "status": "ok", **stripe_result})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cron_sync_stripe_failed", error=str(exc))
+        out["results"].append({"provider": "stripe", "status": "error", "error": str(exc)[:300]})
+
+    # PayPal recurring sync
+    try:
+        from shital.services.background_recovery import _paypal_reconcile_once
+        paypal_result = await _paypal_reconcile_once(days=35)
+        out["results"].append({"provider": "paypal", "status": "ok", **paypal_result})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cron_sync_paypal_failed", error=str(exc))
+        out["results"].append({"provider": "paypal", "status": "error", "error": str(exc)[:300]})
+
+    # Stripe stale-pending reaper — unconditional time-only sweep for rows
+    # older than 2 days that never got a stripe_subscription_id (donor left
+    # Checkout without paying). Pass 0 inside _stripe_giving_reconcile_once
+    # already does this for the 90-day window; this catches older piles.
+    try:
+        from sqlalchemy import text
+
+        from shital.core.fabrics.database import SessionLocal
+        async with SessionLocal() as db:
+            reaped = await db.execute(text("""
+                UPDATE recurring_giving_subscriptions
+                SET status = 'EXPIRED', updated_at = NOW()
+                WHERE payment_provider = 'stripe'
+                  AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')
+                  AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'
+                  AND created_at < NOW() - INTERVAL '2 days'
+            """))
+            await db.commit()
+            out["stripe_stale_reaped"] = reaped.rowcount or 0
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cron_stripe_reap_failed", error=str(exc))
+        out["stripe_stale_reaped"] = 0
+
+    return out
 
 
 @router.post("/admin/giving/reap-stale-stripe")
