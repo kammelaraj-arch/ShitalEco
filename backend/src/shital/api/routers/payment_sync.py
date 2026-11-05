@@ -241,7 +241,13 @@ async def _sync_stripe(since: datetime, until: datetime | None, triggered_by: st
                 if starting_after:
                     call_params["starting_after"] = starting_after
                 page = stripe.BalanceTransaction.list(**call_params)
-                data = page.get("data") or []
+                # Stripe's ListObject is dict-like for attribute access but
+                # doesn't implement .get() — use attribute access (or
+                # .to_dict()). Using attrs keeps the inner BalanceTransaction
+                # objects unmodified so their own .get("amount") etc. still
+                # works.
+                data = list(page.data) if hasattr(page, "data") else (page.to_dict().get("data") or [])
+                has_more = bool(getattr(page, "has_more", False))
                 for bt in data:
                     counts["fetched"] += 1
                     created_at = datetime.fromtimestamp(bt.get("created") or 0, tz=UTC)
@@ -272,7 +278,7 @@ async def _sync_stripe(since: datetime, until: datetime | None, triggered_by: st
                         },
                     })
                     counts[outcome] += 1
-                if not page.get("has_more") or not data:
+                if not has_more or not data:
                     break
                 starting_after = data[-1]["id"]
             await db.commit()
