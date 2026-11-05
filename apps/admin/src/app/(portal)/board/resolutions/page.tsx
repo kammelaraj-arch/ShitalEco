@@ -518,8 +518,8 @@ export default function ResolutionsPage() {
             <motion.div
               initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}
               transition={{ type: 'spring', damping: 26, stiffness: 240 }}
-              className="fixed inset-x-0 top-0 bottom-0 md:inset-6 md:top-10 md:bottom-10 z-50 flex flex-col
-                         bg-temple-deep md:rounded-2xl border border-temple-border overflow-hidden shadow-2xl">
+              className="fixed inset-0 z-50 flex flex-col
+                         bg-temple-deep border-0 overflow-hidden shadow-2xl">
               {/* Header */}
               <div className="px-6 py-4 border-b border-white/5 flex items-start justify-between gap-4 flex-wrap">
                 <div className="min-w-0">
@@ -572,7 +572,7 @@ export default function ResolutionsPage() {
               {/* Body */}
               <div className="flex-1 overflow-y-auto px-6 py-6">
                 {wizStep === 'basics' && (
-                  <div className="max-w-2xl space-y-4">
+                  <div className="max-w-5xl mx-auto w-full space-y-4">
                     <div>
                       <label className={lbl}>Title *</label>
                       <input disabled={locked} value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} className={inp}
@@ -630,7 +630,7 @@ export default function ResolutionsPage() {
                 )}
 
                 {wizStep === 'context' && (
-                  <div className="max-w-2xl space-y-5">
+                  <div className="max-w-5xl mx-auto w-full space-y-5">
                     {/* AI draft */}
                     <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4">
                       <div className="flex items-center gap-2 mb-2">
@@ -709,7 +709,7 @@ export default function ResolutionsPage() {
                 )}
 
                 {wizStep === 'impact' && (
-                  <div className="max-w-2xl space-y-4">
+                  <div className="max-w-5xl mx-auto w-full space-y-4">
                     <div>
                       <label className={lbl}>Risk / Impact</label>
                       <textarea disabled={locked} value={form.risk_impact} onChange={e => setForm(p => ({ ...p, risk_impact: e.target.value }))} rows={4} className={inp + ' resize-none'}
@@ -725,7 +725,7 @@ export default function ResolutionsPage() {
                 )}
 
                 {wizStep === 'review' && (
-                  <div className="max-w-3xl space-y-4">
+                  <div className="max-w-6xl mx-auto w-full space-y-4">
                     <p className="text-white/50 text-xs uppercase tracking-widest font-bold">Preview — this is what trustees will see</p>
                     <div className="rounded-2xl border border-white/10 bg-white/3 p-5 space-y-4">
                       <div>
@@ -793,7 +793,7 @@ export default function ResolutionsPage() {
                 )}
 
                 {wizStep === 'vote' && (
-                  <div className="max-w-3xl space-y-4">
+                  <div className="max-w-6xl mx-auto w-full space-y-4">
                     {!editing && (
                       <div className="rounded-xl border border-white/10 bg-white/3 p-4 text-white/60 text-sm">
                         Save and publish the resolution first. The Review step has the buttons.
