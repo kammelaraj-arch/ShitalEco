@@ -111,6 +111,7 @@ export default function TransactionsPage() {
   const [provider, setProvider] = useState<Provider | ''>('')
   const [kind, setKind] = useState('')
   const [accountFilter, setAccountFilter] = useState('')
+  const [search, setSearch] = useState('')
   const [since, setSince] = useState('')
   const [until, setUntil] = useState('')
   const [page, setPage] = useState(0)
@@ -144,6 +145,7 @@ export default function TransactionsPage() {
       if (accountFilter) qs.set('account_id', accountFilter)
       if (since) qs.set('since', since)
       if (until) qs.set('until', until)
+      if (search.trim()) qs.set('search', search.trim())
       const data = await apiFetch<{ total: number; items: Txn[] }>(`/admin/finance/transactions?${qs}`)
       setItems(data.items || [])
       setTotal(data.total || 0)
@@ -157,6 +159,7 @@ export default function TransactionsPage() {
       if (accountFilter) sumQs.set('account_id', accountFilter)
       if (since) sumQs.set('since', since)
       if (until) sumQs.set('until', until)
+      if (search.trim()) sumQs.set('search', search.trim())
       try {
         const s = await apiFetch<{ providers: ProviderBucket[]; total: { count: number; gross: number; fee: number; net: number; currency: string } }>(
           `/admin/finance/transactions/summary?${sumQs}`,
@@ -166,7 +169,7 @@ export default function TransactionsPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally { setLoading(false) }
-  }, [provider, kind, accountFilter, since, until, page, pageSize, sort, order])
+  }, [provider, kind, accountFilter, search, since, until, page, pageSize, sort, order])
 
   function toggleSort(col: SortKey) {
     if (sort === col) setOrder(o => o === 'asc' ? 'desc' : 'asc')
@@ -197,6 +200,7 @@ export default function TransactionsPage() {
     if (accountFilter) qs.set('account_id', accountFilter)
     if (since) qs.set('since', since)
     if (until) qs.set('until', until)
+    if (search.trim()) qs.set('search', search.trim())
     const token = typeof window !== 'undefined' ? (localStorage.getItem('shital_access_token') || '') : ''
     const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
     const resp = await fetch(`${API}/admin/finance/transactions/export.csv?${qs}`, {
@@ -343,6 +347,18 @@ export default function TransactionsPage() {
             <option key={a.id} value={a.id}>{a.account_type}: {a.name}</option>
           ))}
         </select>
+
+        <div className="relative">
+          <input value={search} onChange={e => { setSearch(e.target.value); setPage(0) }}
+            placeholder="🔍 Search donor, email, ref, last4 …"
+            className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-saffron-400/50 min-w-[280px]" />
+          {search && (
+            <button onClick={() => { setSearch(''); setPage(0) }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white text-xs" title="Clear search">
+              ✕
+            </button>
+          )}
+        </div>
 
         <input value={kind} onChange={e => { setKind(e.target.value); setPage(0) }}
           placeholder="Kind (charge, refund, payout, …)"
