@@ -248,8 +248,13 @@ async def _sync_stripe(since: datetime, until: datetime | None, triggered_by: st
                 # works.
                 data = list(page.data) if hasattr(page, "data") else (page.to_dict().get("data") or [])
                 has_more = bool(getattr(page, "has_more", False))
-                for bt in data:
+                for bt_obj in data:
                     counts["fetched"] += 1
+                    # Stripe SDK: individual resources (BalanceTransaction,
+                    # Charge, …) don't expose .get() any more — call .to_dict()
+                    # first and work on a plain dict. Keeps the rest of the
+                    # loop readable.
+                    bt = bt_obj.to_dict() if hasattr(bt_obj, "to_dict") else dict(bt_obj)
                     created_at = datetime.fromtimestamp(bt.get("created") or 0, tz=UTC)
                     src = bt.get("source") or ""
                     if isinstance(src, dict):
@@ -280,7 +285,11 @@ async def _sync_stripe(since: datetime, until: datetime | None, triggered_by: st
                     counts[outcome] += 1
                 if not has_more or not data:
                     break
-                starting_after = data[-1]["id"]
+                # data[-1] is still the Stripe object; __getitem__["id"] works
+                # on StripeObjects, but be safe with to_dict() fallback.
+                last_obj = data[-1]
+                last_id = last_obj["id"] if "id" in last_obj else last_obj.to_dict().get("id")
+                starting_after = last_id
             await db.commit()
             await _finish_run(db, run_id, "ok", counts)
             return {"provider": "stripe", "status": "ok", **counts}
