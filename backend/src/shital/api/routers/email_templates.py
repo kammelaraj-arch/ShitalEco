@@ -105,16 +105,30 @@ async def admin_list_sent_emails(
 
     Surfaces failures (status=FAILED) so trustees can spot delivery issues
     and resend by id. The same endpoint works for status=SENT review.
+
+    Returns a diagnostic payload instead of 500 when the DB layer fails.
+    nginx otherwise masks the FastAPI error with a bare 'Internal Server
+    Error' text/plain, which gives the operator nothing to act on.
     """
+    import logging
+
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
 
-    # Self-heal if the table or its columns are missing. This runs once per
-    # request (cheap — CREATE TABLE IF NOT EXISTS is a few catalog reads
-    # when the table is present) so the Sent Emails page never 500s with
-    # "relation does not exist" on fresh deploys.
-    await _ensure_sent_emails_table()
+    log = logging.getLogger(__name__)
+
+    # Self-heal in its own try/except — if the table creation itself fails
+    # we still want to tell the operator what's wrong.
+    try:
+        await _ensure_sent_emails_table()
+    except Exception as exc:  # noqa: BLE001
+        log.exception("sent_emails self-heal failed")
+        return {
+            "items": [],
+            "total": 0,
+            "error": f"Table setup failed: {type(exc).__name__}: {str(exc)[:400]}",
+        }
 
     where: list[str] = []
     params: dict[str, Any] = {
@@ -138,35 +152,42 @@ async def admin_list_sent_emails(
         params["search"] = f"%{search.strip().lower()}%"
     where_sql = "WHERE " + " AND ".join(where) if where else ""
 
-    async with SessionLocal() as db:
-        rows = await db.execute(text(f"""
-            SELECT id, template_key, to_email, subject, status, error,
-                   attempts, last_attempt_at, sent_at,
-                   related_type, related_id, created_at
-            FROM   sent_emails
-            {where_sql}
-            ORDER  BY created_at DESC
-            LIMIT  :limit OFFSET :offset
-        """), params)
-        items: list[dict[str, Any]] = []
-        for r in rows.mappings():
-            d = dict(r)
-            d["id"] = str(d["id"])
-            for k in ("created_at", "last_attempt_at", "sent_at"):
-                if d.get(k):
-                    d[k] = d[k].isoformat()
-            items.append(d)
+    try:
+        async with SessionLocal() as db:
+            rows = await db.execute(text(f"""
+                SELECT id, template_key, to_email, subject, status, error,
+                       attempts, last_attempt_at, sent_at,
+                       related_type, related_id, created_at
+                FROM   sent_emails
+                {where_sql}
+                ORDER  BY created_at DESC
+                LIMIT  :limit OFFSET :offset
+            """), params)
+            items: list[dict[str, Any]] = []
+            for r in rows.mappings():
+                d = dict(r)
+                d["id"] = str(d["id"])
+                for k in ("created_at", "last_attempt_at", "sent_at"):
+                    if d.get(k):
+                        d[k] = d[k].isoformat()
+                items.append(d)
 
-        # Count query only takes the filter params — limit / offset aren't
-        # bound here and SQLAlchemy will reject the extras on some
-        # configurations. Pass a copy without them.
-        count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
-        total = (await db.execute(
-            text(f"SELECT COUNT(*) AS c FROM sent_emails {where_sql}"),
-            count_params,
-        )).mappings().one()
-
-    return {"items": items, "total": int(total["c"])}
+            # Count query only takes the filter params — limit / offset aren't
+            # bound here and SQLAlchemy will reject the extras on some
+            # configurations. Pass a copy without them.
+            count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
+            total = (await db.execute(
+                text(f"SELECT COUNT(*) AS c FROM sent_emails {where_sql}"),
+                count_params,
+            )).mappings().one()
+        return {"items": items, "total": int(total["c"])}
+    except Exception as exc:  # noqa: BLE001
+        log.exception("sent_emails list query failed")
+        return {
+            "items": [],
+            "total": 0,
+            "error": f"Query failed: {type(exc).__name__}: {str(exc)[:400]}",
+        }
 
 
 @router.get("/sent/{sent_id}")

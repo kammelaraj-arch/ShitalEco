@@ -77,10 +77,11 @@ export default function SentEmailsPage() {
       if (statusFilter) qs.set('status_filter', statusFilter)
       if (templateKey)  qs.set('template_key',  templateKey)
       if (search)       qs.set('search',        search)
-      const d = await apiFetch<{ items: SentEmailRow[]; total: number }>(
+      const d = await apiFetch<{ items: SentEmailRow[]; total: number; error?: string }>(
         `/admin/email-templates/sent?${qs}`
       )
       setItems(d.items); setTotal(d.total)
+      setErr(d.error || '')
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load sent emails')
     } finally {
