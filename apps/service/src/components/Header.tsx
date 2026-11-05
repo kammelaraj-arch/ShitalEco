@@ -38,7 +38,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 backdrop-blur-md"
       style={{ background: 'var(--bg-header)', borderBottom: '1px solid rgba(212,175,55,0.2)' }}>
-      <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
+      <div className="max-w-screen-2xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
 
         {/* Logo + branch pill. The branch pill used to be a tiny "change"
             text link tucked under the temple name — invisible on mobile
