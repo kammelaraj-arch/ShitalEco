@@ -23,10 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import smtplib
 from datetime import UTC, datetime, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Any
 
 import httpx
@@ -221,23 +218,29 @@ async def _sumup_reconcile_once(days: int = 14) -> dict[str, Any]:
 # Alert digest mailer
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _send_smtp(to: str, subject: str, html: str) -> None:
-    """Inline SMTP send (Office 365). Raises on failure so the caller can log
-    and decide whether to mark the alerts as digested."""
-    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
-    password = settings.OFFICE365_PASSWORD
-    if not password:
-        raise RuntimeError("OFFICE365_PASSWORD not configured")
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = from_email
-    msg["To"] = to
-    msg.attach(MIMEText(html, "html"))
-    with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
-        srv.ehlo()
-        srv.starttls()
-        srv.login(from_email, password)
-        srv.sendmail(from_email, [r.strip() for r in to.split(",") if r.strip()], msg.as_string())
+async def _send_alert_digest_email(recipients: str, subject: str, html: str) -> None:
+    """Fan the alert digest out to every recipient via send_raw_email so each
+    delivery lands in sent_emails (visible in /admin/settings/sent-emails).
+    Raises on any failure so the caller can defer digested_at."""
+    from shital.api.routers.email_templates import send_raw_email
+
+    addrs = [r.strip() for r in recipients.split(",") if r.strip()]
+    if not addrs:
+        raise RuntimeError("No alert recipients configured")
+    errors: list[str] = []
+    for addr in addrs:
+        result = await send_raw_email(
+            to_email=addr,
+            subject=subject,
+            html_body=html,
+            template_key="system_alert_digest",
+            related_type="system_alert_digest",
+            triggered_by="background_recovery",
+        )
+        if not result.get("sent"):
+            errors.append(f"{addr}: {result.get('error') or result.get('reason')}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
 
 
 async def _alert_digest_once() -> dict[str, Any]:
@@ -300,10 +303,7 @@ async def _alert_digest_once() -> dict[str, Any]:
         """
 
         try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                _send_smtp,
+            await _send_alert_digest_email(
                 recipients,
                 f"[ShitalEco] {len(rows)} unresolved alert(s)",
                 html,
@@ -529,10 +529,7 @@ async def _sumup_daily_digest(target_date: datetime | None = None) -> dict[str, 
     recipients = os.environ.get("MONITOR_ALERT_RECIPIENTS", "").strip() \
         or "rajk@shirdisai.org.uk,it@shirdisai.org.uk,gtrustees@shirdisai.org.uk"
     try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            _send_smtp,
+        await _send_alert_digest_email(
             recipients,
             f"[ShitalEco] SumUp daily report — {day_start.strftime('%a %d %b')} — £{completed_gross:.2f} paid, {failed_count} failed",
             html,

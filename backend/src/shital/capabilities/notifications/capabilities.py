@@ -45,41 +45,33 @@ class InAppNotificationInput(BaseModel):
     tags=["email", "notifications"],
 )
 async def send_email(ctx: DigitalSpace, data: EmailInput) -> dict[str, Any]:
-    import asyncio
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
+    """Route through send_raw_email so every capability-driven email lands
+    in sent_emails (visible in /admin/settings/sent-emails)."""
+    from shital.api.routers.email_templates import send_raw_email
 
-    from_email = settings.OFFICE365_EMAIL or "noreply@shital.org.uk"
-    password   = settings.OFFICE365_PASSWORD
-
-    if not password:
-        logger.warning("office365_not_configured")
-        return {"sent": False, "reason": "Email not configured — add OFFICE365_EMAIL and OFFICE365_PASSWORD in Admin → API Keys"}
-
-    def _smtp_send() -> None:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = data.subject
-        msg["From"]    = from_email
-        msg["To"]      = data.to
-        if data.text_body:
-            msg.attach(MIMEText(data.text_body, "plain"))
-        msg.attach(MIMEText(data.html_body, "html"))
-        with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
-            srv.ehlo()
-            srv.starttls()
-            srv.login(from_email, password)
-            srv.sendmail(from_email, data.to, msg.as_string())
-
+    actor = ""
     try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _smtp_send)
+        actor = str(getattr(ctx, "user_email", "") or getattr(ctx, "user_id", "") or "")
+    except Exception:
+        actor = ""
+
+    result = await send_raw_email(
+        to_email=data.to,
+        subject=data.subject,
+        html_body=data.html_body,
+        text_body=data.text_body,
+        template_key="capability_send_email",
+        related_type="capability",
+        triggered_by=actor,
+    )
+    if result.get("sent"):
         logger.info("email_sent", to=data.to, subject=data.subject, method="office365")
-        return {"sent": True, "to": data.to}
-    except Exception as exc:
-        logger.error("office365_smtp_error", error=str(exc))
-        from shital.core.fabrics.errors import ExternalServiceError
-        raise ExternalServiceError("Office365 SMTP", str(exc))
+        return {"sent": True, "to": data.to, "sent_email_id": result.get("sent_email_id")}
+
+    reason = result.get("error") or result.get("reason") or "SMTP failed"
+    logger.error("office365_smtp_error", error=reason)
+    from shital.core.fabrics.errors import ExternalServiceError
+    raise ExternalServiceError("Office365 SMTP", reason)
 
 
 @capability(
