@@ -370,6 +370,155 @@ async def _sync_sumup(since: datetime, until: datetime | None, triggered_by: str
             return {"provider": "sumup", "status": "error", "error": str(exc), **counts}
 
 
+# ────────────────────────────── PayPal sync ────────────────────────────────
+
+PAYPAL_PAGE_SIZE = 100
+
+
+async def _paypal_base() -> str:
+    env = (await SecretsManager.get("PAYPAL_ENV")) or getattr(settings, "PAYPAL_MODE", "sandbox")
+    return "https://api-m.paypal.com" if env.lower() in ("live", "production") else "https://api-m.sandbox.paypal.com"
+
+
+async def _paypal_token() -> str:
+    client_id = (await SecretsManager.get("PAYPAL_CLIENT_ID")) or settings.PAYPAL_CLIENT_ID
+    client_secret = (await SecretsManager.get("PAYPAL_CLIENT_SECRET")) or settings.PAYPAL_CLIENT_SECRET
+    if not client_id or not client_secret:
+        return ""
+    base = await _paypal_base()
+    async with httpx.AsyncClient(timeout=20) as c:
+        resp = await c.post(
+            f"{base}/v1/oauth2/token",
+            auth=(client_id, client_secret),
+            data={"grant_type": "client_credentials"},
+            headers={"Accept": "application/json"},
+        )
+        if not resp.is_success:
+            raise RuntimeError(f"PayPal auth {resp.status_code}: {resp.text[:200]}")
+        return resp.json().get("access_token", "") or ""
+
+
+async def _sync_paypal(since: datetime, until: datetime | None, triggered_by: str) -> dict[str, Any]:
+    """Pull PayPal money movements via Transaction Search v1 into the unified
+    ledger. 31-day max window per call (PayPal rule) — we chunk whatever the
+    caller asked for into ≤31-day slices.
+    """
+    try:
+        token = await _paypal_token()
+    except Exception as exc:  # noqa: BLE001
+        return {"provider": "paypal", "status": "error", "error": str(exc)}
+    if not token:
+        return {"provider": "paypal", "status": "skipped", "reason": "PAYPAL_CLIENT_ID / _SECRET not configured"}
+
+    base = await _paypal_base()
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+    now_utc = datetime.now(UTC)
+    final_until = (until or now_utc).astimezone(UTC)
+    final_since = since.astimezone(UTC)
+    if final_since >= final_until:
+        return {"provider": "paypal", "status": "ok", "fetched": 0, "inserted": 0, "updated": 0, "reason": "empty window"}
+
+    counts = {"fetched": 0, "inserted": 0, "updated": 0}
+    async with SessionLocal() as db:
+        run_id = await _start_run(db, "paypal", triggered_by, final_since, final_until)
+        try:
+            cur_from = final_since
+            async with httpx.AsyncClient(timeout=40) as client:
+                while cur_from < final_until:
+                    chunk_end = min(cur_from + timedelta(days=30), final_until)
+                    page = 1
+                    while True:
+                        params: dict[str, Any] = {
+                            "start_date":     cur_from.strftime("%Y-%m-%dT%H:%M:%S.000%z") or cur_from.isoformat(),
+                            "end_date":       chunk_end.strftime("%Y-%m-%dT%H:%M:%S.000%z") or chunk_end.isoformat(),
+                            "fields":         "all",
+                            "page_size":      PAYPAL_PAGE_SIZE,
+                            "page":           page,
+                        }
+                        # Normalise tz offset to +0000 (PayPal is picky).
+                        params["start_date"] = cur_from.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+                        params["end_date"]   = chunk_end.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+                        resp = await client.get(f"{base}/v1/reporting/transactions", headers=headers, params=params)
+                        if resp.status_code == 429:
+                            # Rate limited — stop this chunk, let the next cron pick up.
+                            break
+                        if not resp.is_success:
+                            raise RuntimeError(f"PayPal {resp.status_code}: {resp.text[:200]}")
+                        body_json = resp.json()
+                        details = body_json.get("transaction_details") or []
+                        for d in details:
+                            counts["fetched"] += 1
+                            tx = d.get("transaction_info") or {}
+                            payer = d.get("payer_info") or {}
+                            ship = d.get("shipping_info") or {}
+                            txn_id = str(tx.get("transaction_id") or tx.get("paypal_reference_id") or "")
+                            if not txn_id:
+                                continue
+                            ts_raw = tx.get("transaction_initiation_date") or tx.get("transaction_updated_date") or ""
+                            try:
+                                created_at = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                            except (ValueError, AttributeError):
+                                created_at = datetime.now(UTC)
+                            if created_at.tzinfo is None:
+                                created_at = created_at.replace(tzinfo=UTC)
+                            amount = tx.get("transaction_amount") or {}
+                            fee = tx.get("fee_amount") or {}
+                            try:
+                                amount_pence = int(round(float(amount.get("value", 0) or 0) * 100))
+                            except (TypeError, ValueError):
+                                amount_pence = 0
+                            try:
+                                fee_pence = int(round(float(fee.get("value", 0) or 0) * 100))
+                            except (TypeError, ValueError):
+                                fee_pence = 0
+                            # PayPal reports fee as a NEGATIVE number from merchant POV.
+                            fee_pence_abs = -fee_pence if fee_pence < 0 else fee_pence
+                            net_pence = amount_pence + fee_pence  # fee already signed
+                            cust = (
+                                (payer.get("payer_name") or {}).get("alternate_full_name")
+                                or (payer.get("payer_name") or {}).get("given_name") or ""
+                            ) + (" " + ((payer.get("payer_name") or {}).get("surname") or "")).rstrip()
+                            email = (payer.get("email_address") or "").strip()
+                            outcome = await _upsert_tx(db, "paypal", txn_id, {
+                                "kind":                (tx.get("transaction_event_code") or "")[:40],
+                                "status":              (tx.get("transaction_status") or "").upper(),
+                                "amount_pence":        amount_pence,
+                                "currency":            (amount.get("currency_code") or "GBP").upper(),
+                                "fee_pence":           fee_pence_abs,
+                                "net_pence":           net_pence,
+                                "description":        (tx.get("transaction_subject")
+                                                       or tx.get("transaction_note")
+                                                       or ship.get("name", "") or "")[:500],
+                                "customer_hint":       (cust or email)[:200],
+                                "payment_method_hint": (tx.get("payment_method_type") or tx.get("protection_eligibility") or "")[:120],
+                                "source_ref":          (tx.get("invoice_id") or tx.get("custom_field") or "")[:120],
+                                "payout_ref":          "",
+                                "provider_created_at": created_at,
+                                "raw": {
+                                    "event_code":   tx.get("transaction_event_code"),
+                                    "payer_email":  email,
+                                    "protection":   tx.get("protection_eligibility"),
+                                    "custom_field": tx.get("custom_field"),
+                                    "invoice_id":   tx.get("invoice_id"),
+                                },
+                            })
+                            counts[outcome] += 1
+                        total_pages = int(body_json.get("total_pages") or 1)
+                        if page >= total_pages or not details:
+                            break
+                        page += 1
+                        if page > MAX_PAGES:
+                            break
+                    cur_from = chunk_end
+            await db.commit()
+            await _finish_run(db, run_id, "ok", counts)
+            return {"provider": "paypal", "status": "ok", **counts}
+        except Exception as exc:
+            await _finish_run(db, run_id, "error", counts, error=str(exc))
+            return {"provider": "paypal", "status": "error", "error": str(exc), **counts}
+
+
 # ────────────────────────────── Endpoints ──────────────────────────────────
 
 class _SyncIn(BaseModel):
@@ -397,9 +546,17 @@ async def sync_sumup(ctx: CurrentSpace, body: _SyncIn) -> dict[str, Any]:
     return await _sync_sumup(since, _parse_iso(body.until), triggered_by=f"user:{ctx.user_email}")
 
 
+@router.post("/sync/paypal")
+async def sync_paypal(ctx: CurrentSpace, body: _SyncIn) -> dict[str, Any]:
+    _only_admin(ctx)
+    async with SessionLocal() as db:
+        since = await _cursor_from_last(db, "paypal", _parse_iso(body.since))
+    return await _sync_paypal(since, _parse_iso(body.until), triggered_by=f"user:{ctx.user_email}")
+
+
 async def _run_all(window_days: int | None, triggered_by: str) -> dict[str, Any]:
     out: dict[str, Any] = {"triggered_by": triggered_by, "results": []}
-    for provider, runner in (("stripe", _sync_stripe), ("sumup", _sync_sumup)):
+    for provider, runner in (("stripe", _sync_stripe), ("sumup", _sync_sumup), ("paypal", _sync_paypal)):
         async with SessionLocal() as db:
             cursor = (
                 datetime.now(UTC) - timedelta(days=window_days)
@@ -504,8 +661,8 @@ async def list_transactions(
     where = ["1=1"]
     params: dict[str, Any] = {"lim": limit, "off": max(0, offset)}
     if provider:
-        if provider not in ("stripe", "sumup"):
-            raise HTTPException(status_code=400, detail="provider must be 'stripe' or 'sumup'")
+        if provider not in ("stripe", "sumup", "paypal"):
+            raise HTTPException(status_code=400, detail="provider must be 'stripe', 'sumup' or 'paypal'")
         where.append("pt.provider = :p")
         params["p"] = provider
     if kind:
@@ -543,9 +700,22 @@ async def list_transactions(
                    pt.provider_created_at, pt.synced_at,
                    pt.account_id::text AS account_id,
                    fa.name          AS account_name,
-                   fa.account_type  AS account_type
+                   fa.account_type  AS account_type,
+                   d.id::text       AS donation_id,
+                   COALESCE(d.gift_aid_eligible, false) AS gift_aid_eligible,
+                   d.gift_aid_amount::numeric            AS gift_aid_amount,
+                   d.purpose                             AS donation_purpose,
+                   d.contact_id::text                    AS contact_id,
+                   c.full_name                           AS contact_name,
+                   c.email                               AS contact_email
               FROM payment_transactions pt
               LEFT JOIN finance_accounts fa ON fa.id = pt.account_id
+              LEFT JOIN donations       d  ON d.deleted_at IS NULL
+                                           AND (
+                                             d.payment_ref = pt.external_id
+                                             OR (pt.source_ref <> '' AND d.payment_ref = pt.source_ref)
+                                           )
+              LEFT JOIN contacts        c  ON c.id = d.contact_id
              WHERE {clause}
              ORDER BY {sort_col} {sort_dir} NULLS LAST, pt.provider_created_at DESC
              LIMIT :lim OFFSET :off
@@ -582,6 +752,13 @@ async def list_transactions(
                 "account_id":           r["account_id"] or "",
                 "account_name":         r["account_name"] or "",
                 "account_type":         r["account_type"] or "",
+                "donation_id":          r["donation_id"] or "",
+                "gift_aid_eligible":    bool(r["gift_aid_eligible"]),
+                "gift_aid_amount":      float(r["gift_aid_amount"] or 0),
+                "donation_purpose":     r["donation_purpose"] or "",
+                "contact_id":           r["contact_id"] or "",
+                "contact_name":         r["contact_name"] or "",
+                "contact_email":        r["contact_email"] or "",
             }
             for r in rows
         ],
