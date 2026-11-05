@@ -625,6 +625,18 @@ async def _sync_paypal(since: datetime, until: datetime | None, triggered_by: st
                         if resp.status_code == 429:
                             # Rate limited — stop this chunk, let the next cron pick up.
                             break
+                        if resp.status_code == 403:
+                            # Transaction Search is a separate scope the REST
+                            # app has to enable — most apps have it OFF by
+                            # default. Give the operator the exact fix path
+                            # instead of the raw PayPal error blob.
+                            raise RuntimeError(
+                                "PayPal 403 NOT_AUTHORIZED — the REST app is missing the "
+                                "'Transaction Search' permission. Fix: developer.paypal.com "
+                                "→ My Apps & Credentials → open your Live app → scroll to "
+                                "Features → enable 'Transaction Search' → Save, then refresh "
+                                "the admin client token in Admin → API Keys."
+                            )
                         if not resp.is_success:
                             raise RuntimeError(f"PayPal {resp.status_code}: {resp.text[:200]}")
                         body_json = resp.json()
