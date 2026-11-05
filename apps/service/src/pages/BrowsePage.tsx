@@ -146,7 +146,7 @@ export function BrowsePage() {
             </p>
           </div>
           {/* Baba (right) — same slot, scaled up a touch on larger viewports. */}
-          <img src="/baba.jpg" alt="Shri Shirdi Sai Baba"
+          <img src="https://admin.shital.org.uk/api/v1/media/library/00a4a66d-d25b-4195-8d33-57b1f2853f63" alt="Shri Shirdi Sai Baba"
             onError={(e) => { e.currentTarget.style.display = 'none' }}
             className="w-20 h-20 sm:w-24 sm:h-24 lg:w-28 lg:h-28 rounded-full object-cover flex-shrink-0"
             style={{ border: '3px solid rgba(212,175,55,0.8)', boxShadow: '0 6px 18px rgba(0,0,0,0.35)' }} />
