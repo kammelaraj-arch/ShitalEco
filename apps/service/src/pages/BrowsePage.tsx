@@ -162,176 +162,216 @@ export function BrowsePage() {
           inner card lets the grid stretch them. */}
       <div className="max-w-screen-2xl mx-auto px-4 mt-5">
 
-        {/* All CTA cards below share the same twilight-glass base (dark backdrop,
-            gold hairline). The accent colour (saffron / green / blue / gold)
-            only dresses the icon box, eyebrow and CTA pill — this keeps the
-            crimson paisley from fighting five competing coloured cards. */}
+        {/* Digital-twin CTA grid. Each card has its OWN neon accent colour
+            and a soft outer bloom so they read like holographic plates
+            floating over the sanctum paisley — not five identical dark
+            tiles. Shared recipe:
+              border: 2px solid <accent>CC   (strong, vivid)
+              box-shadow:
+                0 0 24px <accent>55          outer bloom
+                0 0 48px <accent>22          far halo
+                inset 0 1px 0 <accent>33     top edge highlight
+                0 8px 24px rgba(0,0,0,0.55)  depth */}
 
-        {/* Live Darshan — real-time video of the murthy. Falls back to a
-            still of Baba when nothing is being broadcast. */}
+        {/* Live Darshan — RED neon. Pulsing dot + outer crimson glow. */}
         <button onClick={() => setScreen('darshan')}
-          className="w-full rounded-2xl p-4 mb-3 text-left flex items-center gap-4 transition-all active:scale-[0.99] hover:brightness-110"
+          className="w-full rounded-2xl p-4 mb-3 text-left flex items-center gap-4 transition-all active:scale-[0.99] hover:brightness-125 cta-card cta-red"
           style={{
-            background: 'linear-gradient(180deg, rgba(10,5,8,0.62), rgba(14,3,3,0.72))',
-            border: '1px solid rgba(220,38,38,0.55)',
-            boxShadow: '0 6px 22px rgba(0,0,0,0.5), inset 0 1px 0 rgba(239,68,68,0.14)',
-            backdropFilter: 'blur(10px) saturate(130%)',
-            WebkitBackdropFilter: 'blur(10px) saturate(130%)',
+            background: 'linear-gradient(180deg, rgba(14,4,6,0.78), rgba(22,4,6,0.88))',
+            border: '2px solid rgba(239,68,68,0.80)',
+            boxShadow: '0 0 24px rgba(239,68,68,0.45), 0 0 48px rgba(239,68,68,0.18), inset 0 1px 0 rgba(254,202,202,0.22), 0 8px 24px rgba(0,0,0,0.55)',
+            backdropFilter: 'blur(10px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(10px) saturate(140%)',
           }}
         >
           <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl relative"
-            style={{ background: 'rgba(220,38,38,0.18)', border: '1px solid rgba(220,38,38,0.4)' }}>
+            style={{ background: 'rgba(239,68,68,0.22)', border: '1.5px solid rgba(239,68,68,0.6)', boxShadow: '0 0 14px rgba(239,68,68,0.45), inset 0 0 10px rgba(239,68,68,0.25)' }}>
             🕉
             <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full"
-              style={{ background: '#EF4444', boxShadow: '0 0 8px #EF4444', animation: 'darshan-pulse 1.6s ease-in-out infinite' }} />
+              style={{ background: '#EF4444', boxShadow: '0 0 10px #EF4444, 0 0 20px rgba(239,68,68,0.6)', animation: 'cta-pulse 1.6s ease-in-out infinite' }} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#F87171' }}>
+            <p className="text-[10px] font-black uppercase tracking-[0.22em]"
+              style={{ color: '#FCA5A5', textShadow: '0 0 8px rgba(239,68,68,0.5)' }}>
               {t('live_darshan_eyebrow', language)}
             </p>
-            <p className="font-black text-sm sm:text-base leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
+            <p className="font-black text-sm sm:text-base leading-tight mt-0.5" style={{ color: '#FFF1F2' }}>
               {t('live_darshan_title', language)}
             </p>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-xs mt-1" style={{ color: 'rgba(254,202,202,0.72)' }}>
               {t('live_darshan_sub', language)}
             </p>
           </div>
           <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs flex-shrink-0"
-            style={{ background: 'rgba(220,38,38,0.2)', color: '#FCA5A5', border: '1px solid rgba(220,38,38,0.55)' }}>
+            style={{ background: 'rgba(239,68,68,0.22)', color: '#FCA5A5', border: '1.5px solid rgba(239,68,68,0.75)', boxShadow: '0 0 10px rgba(239,68,68,0.35)' }}>
             {t('watch', language)} →
           </span>
         </button>
 
-        <style>{`@keyframes darshan-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.55; transform:scale(1.35); } }`}</style>
-
-        {/* Future Legacy Appeal — Sponsor a Square Foot */}
+        {/* Future Legacy Appeal — GOLD neon. */}
         <button onClick={() => setScreen('sqft')}
-          className="w-full rounded-2xl p-4 mb-3 text-left flex items-center gap-4 transition-all active:scale-[0.99] hover:brightness-110"
+          className="w-full rounded-2xl p-4 mb-3 text-left flex items-center gap-4 transition-all active:scale-[0.99] hover:brightness-125 cta-card cta-gold"
           style={{
-            background: 'linear-gradient(180deg, rgba(10,5,8,0.62), rgba(14,3,3,0.72))',
-            border: '1px solid rgba(246,196,84,0.45)',
-            boxShadow: '0 6px 22px rgba(0,0,0,0.5), inset 0 1px 0 rgba(246,196,84,0.14)',
-            backdropFilter: 'blur(10px) saturate(130%)',
-            WebkitBackdropFilter: 'blur(10px) saturate(130%)',
+            background: 'linear-gradient(180deg, rgba(14,8,2,0.78), rgba(22,13,2,0.88))',
+            border: '2px solid rgba(246,196,84,0.85)',
+            boxShadow: '0 0 24px rgba(246,196,84,0.45), 0 0 48px rgba(246,196,84,0.18), inset 0 1px 0 rgba(254,240,180,0.28), 0 8px 24px rgba(0,0,0,0.55)',
+            backdropFilter: 'blur(10px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(10px) saturate(140%)',
           }}
         >
           <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
-            style={{ background: 'rgba(246,196,84,0.14)', border: '1px solid rgba(246,196,84,0.35)' }}>🏛</div>
+            style={{ background: 'rgba(246,196,84,0.22)', border: '1.5px solid rgba(246,196,84,0.6)', boxShadow: '0 0 14px rgba(246,196,84,0.45), inset 0 0 10px rgba(246,196,84,0.3)' }}>🏛</div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#F6C454' }}>
+            <p className="text-[10px] font-black uppercase tracking-[0.22em]"
+              style={{ color: '#F6C454', textShadow: '0 0 8px rgba(246,196,84,0.55)' }}>
               {t('future_legacy_eyebrow', language)}
             </p>
-            <p className="font-black text-sm sm:text-base leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
+            <p className="font-black text-sm sm:text-base leading-tight mt-0.5" style={{ color: '#FFF8E7' }}>
               {t('future_legacy_title', language)}
             </p>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-xs mt-1" style={{ color: 'rgba(254,240,180,0.75)' }}>
               {t('future_legacy_sub', language)}
             </p>
           </div>
           <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#4a0e18' }}>
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#4a0e18', boxShadow: '0 0 14px rgba(255,215,0,0.45)' }}>
             {t('sponsor', language)} →
           </span>
         </button>
 
-        {/* Donor Wall — public gratitude page */}
+        {/* Donor Wall — VIOLET neon. */}
         <button onClick={() => setScreen('donor-wall')}
-          className="w-full rounded-2xl p-3.5 mb-3 text-left flex items-center gap-3 transition-all active:scale-[0.99] hover:brightness-110"
+          className="w-full rounded-2xl p-3.5 mb-3 text-left flex items-center gap-3 transition-all active:scale-[0.99] hover:brightness-125 cta-card cta-violet"
           style={{
-            background: 'linear-gradient(180deg, rgba(10,5,8,0.55), rgba(14,3,3,0.65))',
-            border: '1px solid rgba(246,196,84,0.28)',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.42)',
-            backdropFilter: 'blur(10px) saturate(130%)',
-            WebkitBackdropFilter: 'blur(10px) saturate(130%)',
+            background: 'linear-gradient(180deg, rgba(10,4,16,0.78), rgba(18,8,28,0.88))',
+            border: '2px solid rgba(192,132,252,0.78)',
+            boxShadow: '0 0 22px rgba(192,132,252,0.42), 0 0 44px rgba(192,132,252,0.16), inset 0 1px 0 rgba(216,180,254,0.22), 0 6px 20px rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(10px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(10px) saturate(140%)',
           }}
         >
           <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-lg"
-            style={{ background: 'rgba(246,196,84,0.12)', border: '1px solid rgba(246,196,84,0.22)' }}>🙏</div>
+            style={{ background: 'rgba(192,132,252,0.22)', border: '1.5px solid rgba(192,132,252,0.55)', boxShadow: '0 0 12px rgba(192,132,252,0.4), inset 0 0 8px rgba(192,132,252,0.25)' }}>🙏</div>
           <div className="flex-1 min-w-0">
-            <p className="font-black text-sm leading-tight" style={{ color: 'var(--text)' }}>
+            <p className="font-black text-sm leading-tight" style={{ color: '#F3E8FF' }}>
               {t('donor_wall_title', language)}
             </p>
-            <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-[11px] mt-0.5" style={{ color: 'rgba(216,180,254,0.72)' }}>
               {t('donor_wall_sub', language)}
             </p>
           </div>
           <span className="text-xs font-black px-2.5 py-1.5 rounded-md whitespace-nowrap"
-            style={{ background: 'rgba(246,196,84,0.14)', color: '#F6C454', border: '1px solid rgba(246,196,84,0.3)' }}>
+            style={{ background: 'rgba(192,132,252,0.22)', color: '#E9D5FF', border: '1.5px solid rgba(192,132,252,0.65)', boxShadow: '0 0 10px rgba(192,132,252,0.35)' }}>
             {t('view_wall', language)} →
           </span>
         </button>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
-          {/* Volunteer Seva */}
+          {/* Volunteer Seva — EMERALD neon. */}
           <button onClick={() => setScreen('volunteer')}
-            className="rounded-2xl p-4 text-left flex flex-col h-full transition-all active:scale-[0.99] hover:brightness-110"
+            className="rounded-2xl p-4 text-left flex flex-col h-full transition-all active:scale-[0.99] hover:brightness-125 cta-card cta-emerald"
             style={{
-              background: 'linear-gradient(180deg, rgba(10,5,8,0.55), rgba(14,3,3,0.65))',
-              border: '1px solid rgba(101,198,152,0.35)',
-              boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
-              backdropFilter: 'blur(10px) saturate(130%)',
-              WebkitBackdropFilter: 'blur(10px) saturate(130%)',
+              background: 'linear-gradient(180deg, rgba(3,14,10,0.78), rgba(4,22,16,0.88))',
+              border: '2px solid rgba(52,211,153,0.80)',
+              boxShadow: '0 0 24px rgba(52,211,153,0.42), 0 0 48px rgba(52,211,153,0.18), inset 0 1px 0 rgba(167,243,208,0.22), 0 8px 24px rgba(0,0,0,0.55)',
+              backdropFilter: 'blur(10px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(10px) saturate(140%)',
             }}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
-                style={{ background: 'rgba(101,198,152,0.15)', border: '1px solid rgba(101,198,152,0.3)' }}>🤝</div>
+                style={{ background: 'rgba(52,211,153,0.22)', border: '1.5px solid rgba(52,211,153,0.6)', boxShadow: '0 0 12px rgba(52,211,153,0.4), inset 0 0 8px rgba(52,211,153,0.25)' }}>🤝</div>
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#65C698' }}>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em]"
+                  style={{ color: '#6EE7B7', textShadow: '0 0 8px rgba(52,211,153,0.5)' }}>
                   {t('week_seva', language)}
                 </p>
-                <p className="font-black text-sm leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
+                <p className="font-black text-sm leading-tight mt-0.5" style={{ color: '#ECFDF5' }}>
                   {t('volunteer_title', language)}
                 </p>
               </div>
             </div>
-            <p className="text-xs leading-relaxed mb-3" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: 'rgba(167,243,208,0.72)' }}>
               {t('volunteer_sub', language)}
             </p>
             <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs self-start"
-              style={{ background: 'rgba(101,198,152,0.14)', color: '#65C698', border: '1px solid rgba(101,198,152,0.35)' }}>
+              style={{ background: 'rgba(52,211,153,0.22)', color: '#6EE7B7', border: '1.5px solid rgba(52,211,153,0.7)', boxShadow: '0 0 10px rgba(52,211,153,0.35)' }}>
               {t('register', language)} →
             </div>
           </button>
 
-          {/* Monthly Giving */}
+          {/* Monthly Giving — SKY BLUE neon. */}
           <button onClick={() => setScreen('monthly-giving')}
-            className="rounded-2xl p-4 text-left flex flex-col h-full transition-all active:scale-[0.99] hover:brightness-110"
+            className="rounded-2xl p-4 text-left flex flex-col h-full transition-all active:scale-[0.99] hover:brightness-125 cta-card cta-sky"
             style={{
-              background: 'linear-gradient(180deg, rgba(10,5,8,0.55), rgba(14,3,3,0.65))',
-              border: '1px solid rgba(147,197,253,0.35)',
-              boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
-              backdropFilter: 'blur(10px) saturate(130%)',
-              WebkitBackdropFilter: 'blur(10px) saturate(130%)',
+              background: 'linear-gradient(180deg, rgba(3,10,20,0.78), rgba(5,16,30,0.88))',
+              border: '2px solid rgba(96,165,250,0.80)',
+              boxShadow: '0 0 24px rgba(96,165,250,0.42), 0 0 48px rgba(96,165,250,0.18), inset 0 1px 0 rgba(191,219,254,0.22), 0 8px 24px rgba(0,0,0,0.55)',
+              backdropFilter: 'blur(10px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(10px) saturate(140%)',
             }}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
-                style={{ background: 'rgba(147,197,253,0.14)', border: '1px solid rgba(147,197,253,0.3)' }}>🔁</div>
+                style={{ background: 'rgba(96,165,250,0.22)', border: '1.5px solid rgba(96,165,250,0.6)', boxShadow: '0 0 12px rgba(96,165,250,0.4), inset 0 0 8px rgba(96,165,250,0.25)' }}>🔁</div>
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#93C5FD' }}>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em]"
+                  style={{ color: '#93C5FD', textShadow: '0 0 8px rgba(96,165,250,0.5)' }}>
                   {t('monthly_eyebrow', language)}
                 </p>
-                <p className="font-black text-sm leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
+                <p className="font-black text-sm leading-tight mt-0.5" style={{ color: '#EFF6FF' }}>
                   {t('monthly_title', language)}
                 </p>
               </div>
             </div>
-            <p className="text-xs leading-relaxed mb-3" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: 'rgba(191,219,254,0.75)' }}>
               {t('monthly_sub', language)}
             </p>
             <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs self-start"
-              style={{ background: 'rgba(147,197,253,0.14)', color: '#93C5FD', border: '1px solid rgba(147,197,253,0.35)' }}>
+              style={{ background: 'rgba(96,165,250,0.22)', color: '#93C5FD', border: '1.5px solid rgba(96,165,250,0.7)', boxShadow: '0 0 10px rgba(96,165,250,0.35)' }}>
               {t('setup', language)} →
             </div>
           </button>
 
-          {/* Custom Donation (any-amount instant donate) */}
+          {/* Custom Donation — AMBER neon (inside CustomDonationCard). */}
           <CustomDonationCard />
 
         </div>
       </div>
+
+      {/* One keyframe for the pulsing bits (Live-Darshan dot + any future
+          accents). Also a slow rotate for the outer glow so the whole grid
+          feels alive — "digital twin breathing". */}
+      <style>{`
+        @keyframes cta-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.55; transform: scale(1.4); }
+        }
+        .cta-card { position: relative; overflow: hidden; }
+        .cta-card::after {
+          content: '';
+          position: absolute;
+          inset: -2px;
+          border-radius: inherit;
+          pointer-events: none;
+          opacity: 0.35;
+          background: conic-gradient(from 0deg, transparent 0%, currentColor 10%, transparent 20%, transparent 100%);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+          -webkit-mask-composite: xor;
+          padding: 2px;
+          animation: cta-rotate 6s linear infinite;
+        }
+        .cta-red::after     { color: #EF4444; }
+        .cta-gold::after    { color: #F6C454; }
+        .cta-violet::after  { color: #C084FC; }
+        .cta-emerald::after { color: #34D399; }
+        .cta-sky::after     { color: #60A5FA; }
+        .cta-amber::after   { color: #FBBF24; }
+        @keyframes cta-rotate { to { transform: rotate(360deg); } }
+      `}</style>
 
       {/* Category Tabs — centered floating strip (not a full-width bar) */}
       <div className="sticky top-16 z-30 px-3 py-2">
