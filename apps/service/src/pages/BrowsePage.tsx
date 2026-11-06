@@ -176,28 +176,32 @@ export function BrowsePage() {
           inner card lets the grid stretch them. */}
       <div className="max-w-screen-2xl mx-auto px-4 mt-5">
 
-        {/* Future Legacy Appeal — Sponsor a Square Foot (dedicated page) */}
-        <button
-          onClick={() => setScreen('sqft')}
+        {/* All CTA cards below share the same twilight-glass base (dark backdrop,
+            gold hairline). The accent colour (saffron / green / blue / gold)
+            only dresses the icon box, eyebrow and CTA pill — this keeps the
+            crimson paisley from fighting five competing coloured cards. */}
+
+        {/* Future Legacy Appeal — Sponsor a Square Foot */}
+        <button onClick={() => setScreen('sqft')}
           className="w-full rounded-2xl p-4 mb-3 text-left flex items-center gap-4 transition-all active:scale-[0.99] hover:brightness-110"
           style={{
-            background: 'linear-gradient(135deg,rgba(212,175,55,0.22),rgba(140,0,0,0.14))',
-            border: '1.5px solid rgba(212,175,55,0.55)',
-            boxShadow: '0 6px 24px rgba(212,175,55,0.18)',
+            background: 'linear-gradient(180deg, rgba(10,5,8,0.62), rgba(14,3,3,0.72))',
+            border: '1px solid rgba(246,196,84,0.45)',
+            boxShadow: '0 6px 22px rgba(0,0,0,0.5), inset 0 1px 0 rgba(246,196,84,0.14)',
+            backdropFilter: 'blur(10px) saturate(130%)',
+            WebkitBackdropFilter: 'blur(10px) saturate(130%)',
           }}
         >
           <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
-            style={{ background: 'rgba(212,175,55,0.22)', border: '1px solid rgba(212,175,55,0.4)' }}>
-            🏛
-          </div>
+            style={{ background: 'rgba(246,196,84,0.14)', border: '1px solid rgba(246,196,84,0.35)' }}>🏛</div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(212,175,55,0.9)' }}>
+            <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#F6C454' }}>
               Future Legacy Appeal
             </p>
-            <p className="font-black text-sm sm:text-base leading-tight" style={{ color: 'var(--text)' }}>
+            <p className="font-black text-sm sm:text-base leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
               Leave your mark — sponsor the build (from £51)
             </p>
-            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.55)' }}>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
               Sponsor a brick, a square foot &amp; more. Your name on our donor wall. Gift Aid +25%.
             </p>
           </div>
@@ -208,96 +212,94 @@ export function BrowsePage() {
         </button>
 
         {/* Donor Wall — public gratitude page */}
-        <button
-          onClick={() => setScreen('donor-wall')}
-          className="w-full rounded-2xl p-3 mb-3 text-left flex items-center gap-3 transition-all active:scale-[0.99] hover:brightness-110"
+        <button onClick={() => setScreen('donor-wall')}
+          className="w-full rounded-2xl p-3.5 mb-3 text-left flex items-center gap-3 transition-all active:scale-[0.99] hover:brightness-110"
           style={{
-            background: 'rgba(0,0,0,0.25)',
-            border: '1px solid rgba(212,175,55,0.3)',
+            background: 'linear-gradient(180deg, rgba(10,5,8,0.55), rgba(14,3,3,0.65))',
+            border: '1px solid rgba(246,196,84,0.28)',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.42)',
+            backdropFilter: 'blur(10px) saturate(130%)',
+            WebkitBackdropFilter: 'blur(10px) saturate(130%)',
           }}
         >
           <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-lg"
-            style={{ background: 'rgba(212,175,55,0.15)' }}>
-            🙏
-          </div>
+            style={{ background: 'rgba(246,196,84,0.12)', border: '1px solid rgba(246,196,84,0.22)' }}>🙏</div>
           <div className="flex-1 min-w-0">
             <p className="font-black text-sm leading-tight" style={{ color: 'var(--text)' }}>
               Digital Donor Wall
             </p>
-            <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,248,220,0.55)' }}>
+            <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
               See the names of those who have given — grouped by tier.
             </p>
           </div>
-          <span className="text-xs font-bold px-2 py-1 rounded-md"
-            style={{ background: 'rgba(212,175,55,0.15)', color: 'rgba(212,175,55,0.9)' }}>
+          <span className="text-xs font-black px-2.5 py-1.5 rounded-md whitespace-nowrap"
+            style={{ background: 'rgba(246,196,84,0.14)', color: '#F6C454', border: '1px solid rgba(246,196,84,0.3)' }}>
             View wall →
           </span>
         </button>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
-          {/* 1 hr/week Seva — Volunteer Registration */}
-          <button
-            onClick={() => setScreen('volunteer')}
+          {/* Volunteer Seva */}
+          <button onClick={() => setScreen('volunteer')}
             className="rounded-2xl p-4 text-left flex flex-col h-full transition-all active:scale-[0.99] hover:brightness-110"
             style={{
-              background: 'linear-gradient(135deg,rgba(34,197,94,0.18),rgba(22,163,74,0.10))',
-              border: '1.5px solid rgba(74,222,128,0.40)',
-              boxShadow: '0 4px 20px rgba(22,163,74,0.15)',
+              background: 'linear-gradient(180deg, rgba(10,5,8,0.55), rgba(14,3,3,0.65))',
+              border: '1px solid rgba(101,198,152,0.35)',
+              boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
+              backdropFilter: 'blur(10px) saturate(130%)',
+              WebkitBackdropFilter: 'blur(10px) saturate(130%)',
             }}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
-                style={{ background: 'rgba(22,163,74,0.22)', border: '1px solid rgba(74,222,128,0.35)' }}>
-                🤝
-              </div>
+                style={{ background: 'rgba(101,198,152,0.15)', border: '1px solid rgba(101,198,152,0.3)' }}>🤝</div>
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(74,222,128,0.85)' }}>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#65C698' }}>
                   1 hr / week Seva
                 </p>
-                <p className="font-black text-sm text-ivory-200 leading-tight">
+                <p className="font-black text-sm leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
                   Volunteer with SHITAL
                 </p>
               </div>
             </div>
-            <p className="text-xs leading-relaxed mb-3" style={{ color: 'rgba(255,248,220,0.55)' }}>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: 'var(--text-muted)' }}>
               Give one hour a week. Help with seva, langar, events. Register online — trustees review.
             </p>
-            <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs self-start"
-              style={{ background: 'rgba(74,222,128,0.18)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.35)' }}>
+            <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs self-start"
+              style={{ background: 'rgba(101,198,152,0.14)', color: '#65C698', border: '1px solid rgba(101,198,152,0.35)' }}>
               Register →
             </div>
           </button>
 
-          {/* £5 Monthly Giving */}
-          <button
-            onClick={() => setScreen('monthly-giving')}
+          {/* Monthly Giving */}
+          <button onClick={() => setScreen('monthly-giving')}
             className="rounded-2xl p-4 text-left flex flex-col h-full transition-all active:scale-[0.99] hover:brightness-110"
             style={{
-              background: 'linear-gradient(135deg,rgba(96,165,250,0.18),rgba(37,99,235,0.10))',
-              border: '1.5px solid rgba(96,165,250,0.40)',
-              boxShadow: '0 4px 20px rgba(37,99,235,0.15)',
+              background: 'linear-gradient(180deg, rgba(10,5,8,0.55), rgba(14,3,3,0.65))',
+              border: '1px solid rgba(147,197,253,0.35)',
+              boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
+              backdropFilter: 'blur(10px) saturate(130%)',
+              WebkitBackdropFilter: 'blur(10px) saturate(130%)',
             }}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
-                style={{ background: 'rgba(37,99,235,0.22)', border: '1px solid rgba(96,165,250,0.35)' }}>
-                🔁
-              </div>
+                style={{ background: 'rgba(147,197,253,0.14)', border: '1px solid rgba(147,197,253,0.3)' }}>🔁</div>
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(147,197,253,0.85)' }}>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#93C5FD' }}>
                   Monthly Giving
                 </p>
-                <p className="font-black text-sm text-ivory-200 leading-tight">
+                <p className="font-black text-sm leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
                   From just £5 / month
                 </p>
               </div>
             </div>
-            <p className="text-xs leading-relaxed mb-3" style={{ color: 'rgba(255,248,220,0.55)' }}>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: 'var(--text-muted)' }}>
               Set up regular giving via PayPal. Cancel anytime. Gift Aid boosts your impact by 25%.
             </p>
-            <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs self-start"
-              style={{ background: 'rgba(96,165,250,0.18)', color: '#93c5fd', border: '1px solid rgba(96,165,250,0.35)' }}>
+            <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs self-start"
+              style={{ background: 'rgba(147,197,253,0.14)', color: '#93C5FD', border: '1px solid rgba(147,197,253,0.35)' }}>
               Set up →
             </div>
           </button>
