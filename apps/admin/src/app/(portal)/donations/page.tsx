@@ -68,7 +68,7 @@ const ALL_COLUMNS = [
   { key: 'source',           label: 'Source',         default: false, always: false },
   { key: 'donation_type',    label: 'Type',           default: false, always: false },
   { key: 'payment_provider', label: 'Method',         default: true,  always: false },
-  { key: 'device',           label: 'Device / Operator', default: true,  always: false },
+  { key: 'device',           label: 'Device',         default: true,  always: false },
   { key: 'payment_ref',      label: 'Payment Ref',    default: false, always: false },
   { key: 'reference',        label: 'Reference',      default: false, always: false },
   { key: 'status',           label: 'Status',         default: true,  always: true  },
@@ -737,7 +737,7 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                     </th>
                   )}
                   {isVisible('device') && (
-                    <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Device / Operator</th>
+                    <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Device</th>
                   )}
                   {isVisible('payment_ref') && (
                     <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Payment Ref</th>
@@ -831,12 +831,9 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                       <td className="px-4 py-3 text-white/50 text-xs capitalize">{d.payment_provider}</td>
                     )}
                     {isVisible('device') && (
-                      <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap" title={d.kiosk_device_id || ''}>
-                        {d.device_name
-                          ? <div className="flex flex-col"><span>📟 {d.device_name}</span>{d.operator_email && <span className="text-white/40">👤 {d.operator_email}</span>}</div>
-                          : d.operator_email
-                            ? <span>👤 {d.operator_email}</span>
-                            : <span className="text-white/25">—</span>}
+                      <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap font-mono uppercase"
+                        title={d.device_name ? `${d.device_name}${d.operator_email ? ` · ${d.operator_email}` : ''}` : (d.operator_email || '')}>
+                        {d.operator_email || d.device_name || <span className="text-white/25 font-sans normal-case">—</span>}
                       </td>
                     )}
                     {isVisible('payment_ref') && (
