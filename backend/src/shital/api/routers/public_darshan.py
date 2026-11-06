@@ -11,11 +11,12 @@ URL. Keeping this contract separate from the frontend means the client
 code doesn't have to change when streams come online.
 """
 
+from __future__ import annotations
+
 from fastapi import APIRouter
 from sqlalchemy import text
 
 from shital.core.fabrics.database import SessionLocal
-
 
 router = APIRouter(prefix="/public/darshan", tags=["public", "darshan"])
 
