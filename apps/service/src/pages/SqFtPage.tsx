@@ -44,6 +44,13 @@ const PRODUCTS: Product[] = [
   { key: 'founder', tier: 'Founder Brick', color: '#e5e4e2', price: 5100,
     blurb: 'Help shape a whole space in the new build.',
     wall: 'A premium Founder panel — our largest recognition' },
+  // Business sponsorship — larger gift from a company, with an invoice/VAT
+  // receipt. Appears on the donor wall as the business name, and gets a
+  // dedicated plaque. Dedication field on the card doubles as "trading name
+  // as it should appear on the wall".
+  { key: 'business', tier: 'Business Sponsorship', emoji: '🏢', color: '#4a90e2', price: 2501,
+    blurb: 'For local businesses — invoice provided, Gift Aid where eligible, logo displayed on request.',
+    wall: 'Business name on a dedicated panel' },
 ]
 
 const gbp = (n: number) => '£' + n.toLocaleString('en-GB')

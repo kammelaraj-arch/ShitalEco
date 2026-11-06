@@ -24,12 +24,13 @@ interface WallData {
 }
 
 const TIER_ACCENT: Record<string, { color: string; emoji: string; blurb: string }> = {
-  founder: { color: '#e5e4e2', emoji: '💠', blurb: 'The founder panel — those who gave most generously.' },
-  gold:    { color: '#d4af37', emoji: '🪔', blurb: 'Gold brick donors.' },
-  sqft:    { color: '#f6c454', emoji: '🏛', blurb: 'Square-foot sponsors — each gift clears a piece of our sacred ground.' },
-  bronze:  { color: '#cd7f32', emoji: '🧱', blurb: 'Bronze brick donors.' },
-  red:     { color: '#c0392b', emoji: '🧱', blurb: 'Red brick donors.' },
-  anyamt:  { color: '#9b7a3e', emoji: '🌼', blurb: 'With gratitude for every contribution.' },
+  founder:  { color: '#e5e4e2', emoji: '💠', blurb: 'The founder panel — those who gave most generously.' },
+  business: { color: '#4a90e2', emoji: '🏢', blurb: 'Local businesses that stand with our community.' },
+  gold:     { color: '#d4af37', emoji: '🪔', blurb: 'Gold brick donors.' },
+  sqft:     { color: '#f6c454', emoji: '🏛', blurb: 'Square-foot sponsors — each gift clears a piece of our sacred ground.' },
+  bronze:   { color: '#cd7f32', emoji: '🧱', blurb: 'Bronze brick donors.' },
+  red:      { color: '#c0392b', emoji: '🧱', blurb: 'Red brick donors.' },
+  anyamt:   { color: '#9b7a3e', emoji: '🌼', blurb: 'With gratitude for every contribution.' },
 }
 
 export function DonorWallPage() {
