@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useStore } from '../store'
+import { useStore, t } from '../store'
 
 // Digital donor wall — Future Legacy Appeal recognition.
 // Pulls /api/v1/public/donor-wall and renders each tier as its own card
@@ -35,6 +35,7 @@ const TIER_ACCENT: Record<string, { color: string; emoji: string; blurb: string 
 
 export function DonorWallPage() {
   const setScreen = useStore(s => s.setScreen)
+  const language = useStore(s => s.language)
   const [data, setData] = useState<WallData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -67,25 +68,25 @@ export function DonorWallPage() {
         <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
           <div>
             <button onClick={() => setScreen('browse')} className="text-xs font-bold opacity-70 hover:opacity-100 mb-2">
-              ← Back
+              ← {t('back', language)}
             </button>
             <h1 className="text-2xl sm:text-3xl font-black" style={{ fontFamily: 'Georgia, serif' }}>
-              🏛 Digital Donor Wall
+              🏛 {t('donor_wall_title', language)}
             </h1>
             <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-              Future Legacy Appeal · Gratitude from Shital Temple
+              {t('donor_wall_subtitle', language)}
             </p>
           </div>
           <button onClick={() => setScreen('sqft')}
             className="px-5 py-2.5 rounded-xl font-black text-sm"
             style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#4a0e18',
                      boxShadow: '0 4px 14px rgba(212,175,55,0.3)' }}>
-            Add your name →
+            {t('add_your_name', language)} →
           </button>
         </div>
 
         {loading && (
-          <p className="text-center opacity-60 text-sm py-20">Loading the wall…</p>
+          <p className="text-center opacity-60 text-sm py-20">{t('loading_wall', language)}</p>
         )}
         {error && !loading && (
           <p className="text-center text-red-400 text-sm py-20">Could not load the wall. Please try again shortly.</p>

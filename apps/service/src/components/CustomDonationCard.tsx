@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore } from '../store'
+import { useStore, t } from '../store'
 
 // Always-visible "any-amount" donation card. Renders ONLY the card content
 // (no max-w/px-* wrapper) so a parent can place it in whatever layout it
@@ -17,6 +17,7 @@ const PRESET_AMOUNTS = [5, 10, 25, 50, 100]
 export function CustomDonationCard() {
   const addItem   = useStore(s => s.addItem)
   const setScreen = useStore(s => s.setScreen)
+  const language  = useStore(s => s.language)
 
   const [selected, setSelected] = useState<number | null>(null)
   const [custom,   setCustom]   = useState<string>('')
@@ -43,25 +44,26 @@ export function CustomDonationCard() {
   }
 
   return (
-    <div className="rounded-2xl p-4 h-full flex flex-col"
+    <div className="rounded-2xl p-4 h-full flex flex-col cta-card cta-amber"
       style={{
-        background: 'linear-gradient(180deg, rgba(10,5,8,0.55), rgba(14,3,3,0.65))',
-        border: '1px solid rgba(246,196,84,0.4)',
-        boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
-        backdropFilter: 'blur(10px) saturate(130%)',
-        WebkitBackdropFilter: 'blur(10px) saturate(130%)',
+        background: 'linear-gradient(180deg, rgba(18,10,2,0.78), rgba(26,15,2,0.88))',
+        border: '2px solid rgba(251,191,36,0.80)',
+        boxShadow: '0 0 24px rgba(251,191,36,0.42), 0 0 48px rgba(251,191,36,0.16), inset 0 1px 0 rgba(253,230,138,0.24), 0 8px 24px rgba(0,0,0,0.55)',
+        backdropFilter: 'blur(10px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(10px) saturate(140%)',
       }}>
       <div className="flex items-center gap-3 mb-3">
         <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
-          style={{ background: 'rgba(246,196,84,0.14)', border: '1px solid rgba(246,196,84,0.3)' }}>
+          style={{ background: 'rgba(251,191,36,0.22)', border: '1.5px solid rgba(251,191,36,0.6)', boxShadow: '0 0 12px rgba(251,191,36,0.4), inset 0 0 8px rgba(251,191,36,0.25)' }}>
           💛
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#F6C454' }}>
-            Custom Donation
+          <p className="text-[10px] font-black uppercase tracking-[0.22em]"
+            style={{ color: '#FBBF24', textShadow: '0 0 8px rgba(251,191,36,0.5)' }}>
+            {t('custom_eyebrow', language)}
           </p>
-          <p className="font-black text-sm leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
-            Donate any amount
+          <p className="font-black text-sm leading-tight mt-0.5" style={{ color: '#FFFBEB' }}>
+            {t('donate_any_amount', language)}
           </p>
         </div>
       </div>
@@ -96,7 +98,7 @@ export function CustomDonationCard() {
           inputMode="decimal"
           min="1"
           step="0.01"
-          placeholder="Enter amount"
+          placeholder={t('enter_amount', language)}
           value={custom}
           onChange={e => { setCustom(e.target.value); setSelected(null) }}
           className="w-full pl-8 pr-3 py-2.5 rounded-xl text-sm font-bold outline-none"
@@ -121,7 +123,7 @@ export function CustomDonationCard() {
           boxShadow: valid ? '0 4px 12px rgba(212,175,55,0.35)' : 'none',
         }}
       >
-        {valid ? `Donate £${amount.toFixed(2)} →` : 'Donate'}
+        {valid ? `${t('donate_action', language)} £${amount.toFixed(2)} →` : t('donate_action', language)}
       </button>
 
       <AnimatePresence>

@@ -98,9 +98,9 @@ export function Header() {
                 <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
               </svg>
               <span className="truncate max-w-[110px] sm:max-w-none">
-                {branchName && branchName !== 'All Temples' ? branchName : 'Choose branch'}
+                {branchName && branchName !== 'All Temples' ? branchName : t('any_centres', language)}
               </span>
-              <span className="opacity-75 text-[10px] uppercase tracking-wider font-extrabold hidden sm:inline">change</span>
+              <span className="opacity-75 text-[10px] uppercase tracking-wider font-extrabold hidden sm:inline">{t('change', language)}</span>
               <svg className="w-2.5 h-2.5 opacity-75" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
               </svg>
@@ -219,7 +219,7 @@ export function Header() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold text-sm transition-all active:scale-95"
             style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text)', border: '1px solid rgba(255,255,255,0.12)' }}>
             <span>{donorToken ? '🙏' : '👤'}</span>
-            <span className="hidden sm:inline">{donorToken ? 'My Account' : 'Sign in'}</span>
+            <span className="hidden sm:inline">{donorToken ? 'My Account' : t('sign_in', language)}</span>
           </button>
 
           {/* Basket */}
