@@ -668,6 +668,10 @@ async def _patch_schema() -> None:
         # all our centres instead of a one-line list.
         "ALTER TABLE branches ADD COLUMN IF NOT EXISTS image_url   TEXT         NOT NULL DEFAULT ''",
         "ALTER TABLE branches ADD COLUMN IF NOT EXISTS tagline     VARCHAR(160) NOT NULL DEFAULT ''",
+        # Live Darshan stream URL — when non-empty the service portal
+        # plays this feed on /darshan; when empty the page shows a still
+        # of Baba. Populated by an operator per branch (HLS or MP4).
+        "ALTER TABLE branches ADD COLUMN IF NOT EXISTS darshan_stream_url TEXT NOT NULL DEFAULT ''",
         # Backfill internal_ref from branch_id for existing rows (uppercased,
         # trimmed) so every branch has a non-empty internal reference.
         "UPDATE branches SET internal_ref = UPPER(branch_id) WHERE COALESCE(internal_ref,'') = ''",
@@ -4344,6 +4348,7 @@ _mount("shital.api.routers.email_ingest",          "router")
 _mount("shital.api.routers.finance_accounts",      "router")
 _mount("shital.api.routers.board_resolution_extras", "router")
 _mount("shital.api.routers.public_campaigns",      "router")
+_mount("shital.api.routers.public_darshan",        "router")
 _mount("shital.api.routers.donor_wall",            "public_router")
 _mount("shital.api.routers.donor_wall",            "admin_router")
 

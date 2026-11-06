@@ -18,6 +18,7 @@ import { VolunteerRegistrationPage } from './pages/VolunteerRegistrationPage'
 import { SevaPage } from './pages/SevaPage'
 import { SqFtPage } from './pages/SqFtPage'
 import { DonorWallPage } from './pages/DonorWallPage'
+import { DarshanPage } from './pages/DarshanPage'
 import { ReferenceResponsePage } from './pages/ReferenceResponsePage'
 import { scheduleDailyCatalogRefresh, clearServiceCache } from './utils/cachedFetch'
 
@@ -223,6 +224,7 @@ export default function App() {
       case 'seva': return <SevaPage />
       case 'sqft': return <SqFtPage />
       case 'donor-wall': return <DonorWallPage />
+      case 'darshan': return <DarshanPage />
       case 'reference': return <ReferenceResponsePage />
       default:               return <BrowsePage />
     }

@@ -113,18 +113,19 @@ export function BrowsePage() {
   return (
     <div className="min-h-screen pb-32" style={{ background: 'transparent' }}>
 
-      {/* Hero Banner — travertine stone. Deliberately the same warm
-          sandstone band on every theme (dark, crimson, custom) so the
-          donor sees Baba framed the same way from any device. */}
+      {/* Hero Banner — a brushed-gold bar. The gradient is three bright
+          gold stops (champagne → sovereign → antique) so the band reads
+          unambiguously as GOLD on every theme (dark, crimson, custom),
+          not a tan travertine. Dark serif text sits on it for contrast. */}
       <div className="relative overflow-hidden px-4 py-8"
         style={{
-          background: 'linear-gradient(160deg, #D8BC90 0%, #C8A870 40%, #B89858 100%)',
-          borderBottom: '2px solid rgba(212,175,55,0.5)',
+          background: 'linear-gradient(160deg, #F5D678 0%, #E6B84A 35%, #C9961F 72%, #A87A14 100%)',
+          borderBottom: '2px solid rgba(212,175,55,0.65)',
           boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
         }}>
-        {/* Stone texture overlay */}
+        {/* Soft specular highlight to give the bar a brushed-metal sheen. */}
         <div className="absolute inset-0 pointer-events-none" style={{
-          backgroundImage: 'radial-gradient(ellipse 60% 40% at 20% 30%, rgba(255,245,210,0.35) 0%, transparent 60%), radial-gradient(ellipse 50% 60% at 80% 70%, rgba(160,110,40,0.25) 0%, transparent 55%)',
+          backgroundImage: 'radial-gradient(ellipse 65% 45% at 22% 28%, rgba(255,250,215,0.55) 0%, transparent 62%), radial-gradient(ellipse 55% 60% at 82% 72%, rgba(120,70,10,0.28) 0%, transparent 58%)',
         }} />
         {/* Gold shimmer bottom edge */}
         <div className="absolute bottom-0 left-0 right-0 h-px"
@@ -141,10 +142,10 @@ export function BrowsePage() {
               style={{ color: 'rgba(100,60,10,0.7)' }}>🕉 Jai Ganesh · Jai Sai Baba</p>
             <h1 className="font-display font-bold text-2xl sm:text-3xl lg:text-4xl tracking-wide mb-1"
               style={{ color: '#3D1A00', textShadow: '0 1px 0 rgba(255,240,180,0.6)' }}>
-              Donate &amp; Support
+              Services
             </h1>
-            <p className="text-sm sm:text-base" style={{ color: 'rgba(80,40,5,0.65)' }}>
-              Make a donation, book services &amp; support our temple
+            <p className="text-sm sm:text-base" style={{ color: 'rgba(80,40,5,0.75)' }}>
+              Donations, sevas &amp; sponsorships — support our temple
             </p>
           </div>
           {/* Baba (right) — same slot, scaled up a touch on larger viewports. */}
@@ -165,6 +166,43 @@ export function BrowsePage() {
             gold hairline). The accent colour (saffron / green / blue / gold)
             only dresses the icon box, eyebrow and CTA pill — this keeps the
             crimson paisley from fighting five competing coloured cards. */}
+
+        {/* Live Darshan — real-time video of the murthy. Falls back to a
+            still of Baba when nothing is being broadcast. */}
+        <button onClick={() => setScreen('darshan')}
+          className="w-full rounded-2xl p-4 mb-3 text-left flex items-center gap-4 transition-all active:scale-[0.99] hover:brightness-110"
+          style={{
+            background: 'linear-gradient(180deg, rgba(10,5,8,0.62), rgba(14,3,3,0.72))',
+            border: '1px solid rgba(220,38,38,0.55)',
+            boxShadow: '0 6px 22px rgba(0,0,0,0.5), inset 0 1px 0 rgba(239,68,68,0.14)',
+            backdropFilter: 'blur(10px) saturate(130%)',
+            WebkitBackdropFilter: 'blur(10px) saturate(130%)',
+          }}
+        >
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl relative"
+            style={{ background: 'rgba(220,38,38,0.18)', border: '1px solid rgba(220,38,38,0.4)' }}>
+            🕉
+            <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full"
+              style={{ background: '#EF4444', boxShadow: '0 0 8px #EF4444', animation: 'darshan-pulse 1.6s ease-in-out infinite' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#F87171' }}>
+              Live · Darshan
+            </p>
+            <p className="font-black text-sm sm:text-base leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
+              Watch Baba's darshan from the temple
+            </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              Live stream during aarti — a still of Baba when the feed is offline.
+            </p>
+          </div>
+          <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs flex-shrink-0"
+            style={{ background: 'rgba(220,38,38,0.2)', color: '#FCA5A5', border: '1px solid rgba(220,38,38,0.55)' }}>
+            Watch →
+          </span>
+        </button>
+
+        <style>{`@keyframes darshan-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.55; transform:scale(1.35); } }`}</style>
 
         {/* Future Legacy Appeal — Sponsor a Square Foot */}
         <button onClick={() => setScreen('sqft')}

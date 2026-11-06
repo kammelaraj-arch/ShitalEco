@@ -359,35 +359,39 @@ function tintFor(hint: string): { from: string; to: string; glyph: string } {
 // then "Om Sai Ram" — browsers only allow this because we have a user
 // gesture (the tap on the card).
 
-// Picks the most Indian-sounding voice available. getVoices() is async on
-// some browsers (Chrome fires 'voiceschanged' after load), so a caller may
-// need to retry — speakRitual() handles that.
+// Picks a Hindi voice first and only. The utterance text is in Devanagari
+// so we want a hi-IN engine; failing that, any Indian voice; failing that,
+// null — the caller will still set u.lang = 'hi-IN' and let the browser
+// synthesise with whatever it has. getVoices() is async on some browsers
+// (Chrome fires 'voiceschanged' after load), so a caller may need to retry.
 function pickVoice(): SpeechSynthesisVoice | null {
   try {
     const voices = window.speechSynthesis.getVoices()
     if (!voices.length) return null
     const preferred = [
-      /hi-IN/i, /en-IN/i,                          // Hindi / Indian English
-      /ravi|lekha|sangeeta|rishi|neeraj/i,          // named Indian voices
-      /google.*hindi/i, /google.*english \(india\)/i,
+      /^hi(-|_)?/i,                                 // hi, hi-IN, hi_IN
+      /google.*hindi|microsoft.*hindi|hindi/i,      // named Hindi voices
+      /ravi|lekha|sangeeta|rishi|neeraj|aditi|kalpana|hemant/i, // Indian names
+      /en-IN/i,                                     // Indian English as fallback
     ]
     for (const rx of preferred) {
       const v = voices.find(v => rx.test(v.lang) || rx.test(v.name))
       if (v) return v
     }
-    // Default to the first English female-ish voice if nothing matches.
-    return voices.find(v => /^en/i.test(v.lang)) || voices[0]
+    return voices[0] ?? null
   } catch { return null }
 }
 
+// Speak a line of Devanagari with a Hindi voice. We force u.lang = 'hi-IN'
+// so even if no hi-IN voice is installed the browser tries Hindi phonemes.
 function speakWords(words: string, voice: SpeechSynthesisVoice | null) {
   try {
     const u = new SpeechSynthesisUtterance(words)
     if (voice) u.voice = voice
-    u.lang = voice?.lang || 'en-IN'
-    u.rate = 0.82
+    u.lang = 'hi-IN'
+    u.rate = 0.78
     u.pitch = 1.0
-    u.volume = 0.88
+    u.volume = 0.9
     window.speechSynthesis.speak(u)
   } catch { /* Safari in low-power / iOS lock — silent is fine */ }
 }
@@ -436,13 +440,14 @@ function EntranceCeremony({ branch }: { branch: Branch }) {
     // on the curtain slide so the strike + reveal land together).
     const bellId = window.setTimeout(strikeBell, 300)
 
-    // "Namaste" as the curtains finish opening; "Om Sai Ram" near the end
-    // just before the portal transition.
+    // "नमस्ते" (Namaste) as the curtains finish opening; "ॐ साईं राम"
+    // (Om Sai Ram) near the end just before the portal transition.
+    // Devanagari text + lang='hi-IN' → the browser speaks it in Hindi.
     const speak1Id = window.setTimeout(() => {
-      speakWords('Namaste', pickVoice())
+      speakWords('नमस्ते', pickVoice())
     }, 1200)
     const speak2Id = window.setTimeout(() => {
-      speakWords('Om Sai Ram', pickVoice())
+      speakWords('ॐ साईं राम', pickVoice())
     }, 2400)
 
     return () => {
