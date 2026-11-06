@@ -3,6 +3,25 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useStore, SHITAL_LOGO_URL } from '../store'
 import { api } from '../api'
 
+// Fallback hero used for the "General / Any" card and for any branch
+// whose own image_url hasn't been set yet. This is the official Shri
+// Shirdi Sai Baba portrait from the media library, so the entrance
+// ceremony and the picker always open onto Baba even when the branch's
+// own photo is still to be uploaded.
+const BABA_FALLBACK_URL =
+  'https://admin.shital.org.uk/api/v1/media/library/00a4a66d-d25b-4195-8d33-57b1f2853f63'
+
+// Temples vs Centres — simple keyword split so operators don't have to
+// classify each branch. 'Temple' / 'Mandir' / 'Shrine' in the name =
+// temple; the rest (community centres, meeting places) land in the
+// Centres section below.
+function isTemple(b: Branch): boolean {
+  const n = (b.name || '').toLowerCase()
+  if (n.includes('temple') || n.includes('mandir') || n.includes('shrine')) return true
+  if (n.includes('center') || n.includes('centre')) return false
+  return true  // default to Temple if the name doesn't declare itself
+}
+
 // "Enter the Temple" landing — a card gallery of every live centre so the
 // donor picks visually before anything else loads. Each card carries the
 // centre's hero photo, name, city, established year, and a chevron.
@@ -115,28 +134,36 @@ export function BranchPicker() {
           </div>
         ) : (
           <>
-            {/* General-donation chip at the top */}
-            <button onClick={() => beginEnter({ branch_id: 'main', name: 'All Temples', city: '', is_active: true })}
-              className="group w-full max-w-md mx-auto flex items-center gap-3 px-4 py-3 mb-6 sm:mb-8 rounded-2xl text-left transition-all hover:brightness-110"
-              style={{
-                background: 'linear-gradient(135deg, rgba(212,175,55,0.14), rgba(140,0,0,0.08))',
-                border: '1px solid rgba(212,175,55,0.3)',
-              }}>
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
-                style={{ background: 'rgba(212,175,55,0.2)' }}>🕉</div>
-              <div className="flex-1 min-w-0">
-                <p className="font-black text-sm" style={{ color: 'var(--text)' }}>
-                  All Temples · General Donation
-                </p>
-                <p className="text-[11px]" style={{ color: 'rgba(255,248,220,0.5)' }}>
-                  Not sure which centre? Start here.
-                </p>
-              </div>
-              <span className="text-xs font-black tracking-widest group-hover:translate-x-1 transition-transform"
-                style={{ color: '#D4AF37' }}>→</span>
-            </button>
+            {/* "General / Any" card — full-size tile so it reads as an
+                equal member of the gallery. Baba's portrait as the hero
+                so the opening moment lands on Him. */}
+            <div className="mb-8 sm:mb-10">
+              <TempleCard
+                index={0}
+                onClick={() =>
+                  beginEnter({
+                    branch_id: 'main',
+                    name: 'Any · All Centres',
+                    city: 'Worldwide',
+                    is_active: true,
+                    image_url: BABA_FALLBACK_URL,
+                    tagline: 'Not sure which centre? Open with Baba’s blessing and give where help is needed most.',
+                    established: '',
+                  })
+                }
+                branch={{
+                  branch_id: 'main',
+                  name: 'Any · All Centres',
+                  city: 'Worldwide',
+                  is_active: true,
+                  image_url: BABA_FALLBACK_URL,
+                  tagline: 'Not sure which centre? Open with Baba’s blessing and give where help is needed most.',
+                  established: '',
+                }}
+                featured
+              />
+            </div>
 
-            {/* Centre gallery */}
             {branches.length === 0 ? (
               <div className="text-center py-10">
                 <button onClick={() => beginEnter({ branch_id: 'main', name: 'Shital Temple', city: '', is_active: true })}
@@ -145,12 +172,22 @@ export function BranchPicker() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                {branches.map((b, i) => (
-                  <TempleCard key={b.branch_id} branch={b} index={i}
-                    onClick={() => beginEnter(b)} />
-                ))}
-              </div>
+              <>
+                <TempleSection
+                  title="Our Temples"
+                  eyebrow="Places of darshan"
+                  items={branches.filter(isTemple)}
+                  onPick={beginEnter}
+                  startIndex={1}
+                />
+                <TempleSection
+                  title="Our Centres"
+                  eyebrow="Community spaces"
+                  items={branches.filter(b => !isTemple(b))}
+                  onPick={beginEnter}
+                  startIndex={1 + branches.filter(isTemple).length}
+                />
+              </>
             )}
           </>
         )}
@@ -169,10 +206,54 @@ export function BranchPicker() {
   )
 }
 
+// ── Section heading + grid for Temples vs Centres ───────────────────────────
+
+function TempleSection(
+  { title, eyebrow, items, onPick, startIndex }: {
+    title: string
+    eyebrow: string
+    items: Branch[]
+    onPick: (b: Branch) => void
+    startIndex: number
+  },
+) {
+  if (items.length === 0) return null
+  return (
+    <section className="mb-8 sm:mb-10">
+      <header className="flex items-end justify-between flex-wrap gap-2 mb-3 sm:mb-4 pb-2"
+        style={{ borderBottom: '1px solid rgba(246,196,84,0.22)' }}>
+        <div>
+          <p className="text-[10px] sm:text-xs font-black tracking-[0.3em] uppercase"
+            style={{ color: '#F6C454' }}>{eyebrow}</p>
+          <h2 className="font-display font-bold text-xl sm:text-2xl mt-0.5"
+            style={{ color: 'var(--text)' }}>{title}</h2>
+        </div>
+        <span className="text-[11px] tracking-widest uppercase font-black px-2 py-0.5 rounded-full"
+          style={{ background: 'rgba(246,196,84,0.14)', color: '#F6C454' }}>
+          {items.length}
+        </span>
+      </header>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+        {items.map((b, i) => (
+          <TempleCard key={b.branch_id} branch={b} index={startIndex + i}
+            onClick={() => onPick(b)} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 // ── Temple card ──────────────────────────────────────────────────────────────
 
-function TempleCard({ branch, index, onClick }: { branch: Branch; index: number; onClick: () => void }) {
+function TempleCard(
+  { branch, index, onClick, featured = false }: {
+    branch: Branch; index: number; onClick: () => void; featured?: boolean
+  },
+) {
   const accent = tintFor(branch.city || branch.name)
+  // Prefer the branch's own image; fall back to Baba so even unphotographed
+  // centres greet the donor with the portrait rather than a blank gradient.
+  const heroUrl = branch.image_url || BABA_FALLBACK_URL
   return (
     <motion.button
       initial={{ opacity: 0, y: 20 }}
@@ -184,21 +265,23 @@ function TempleCard({ branch, index, onClick }: { branch: Branch; index: number;
       className="group relative rounded-2xl overflow-hidden text-left focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-transparent"
       style={{
         background: 'rgba(14,10,14,0.6)',
-        border: '1px solid rgba(212,175,55,0.22)',
-        boxShadow: '0 8px 28px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)',
+        border: featured ? '1.5px solid rgba(246,196,84,0.55)' : '1px solid rgba(212,175,55,0.22)',
+        boxShadow: featured
+          ? '0 12px 42px rgba(0,0,0,0.6), 0 0 0 4px rgba(246,196,84,0.08), inset 0 1px 0 rgba(255,255,255,0.1)'
+          : '0 8px 28px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)',
         backdropFilter: 'blur(14px) saturate(140%)',
         WebkitBackdropFilter: 'blur(14px) saturate(140%)',
       }}
     >
-      {/* Hero area */}
-      <div className="relative aspect-[16/10] overflow-hidden"
+      {/* Hero area — featured cards get a slightly taller 21:10 so the General
+          tile commands the eye above the sectioned grids below. */}
+      <div className={`relative overflow-hidden ${featured ? 'aspect-[21/10]' : 'aspect-[16/10]'}`}
         style={{ background: `linear-gradient(135deg, ${accent.from} 0%, ${accent.to} 100%)` }}>
-        {branch.image_url ? (
-          <img src={branch.image_url} alt={branch.name}
-            className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.06]"
-            loading="lazy"
-            onError={e => { e.currentTarget.style.display = 'none' }} />
-        ) : (
+        <img src={heroUrl} alt={branch.name}
+          className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.06]"
+          loading="lazy"
+          onError={e => { e.currentTarget.style.display = 'none' }} />
+        {!branch.image_url && !heroUrl.includes('media/library') && (
           <div className="absolute inset-0 flex items-center justify-center text-6xl opacity-60"
             aria-hidden>{accent.glyph}</div>
         )}
@@ -289,9 +372,12 @@ function EntranceCeremony({ branch }: { branch: Branch }) {
         transition={{ duration: 3.0, ease: 'easeOut' }}
         className="absolute inset-0"
         style={{
-          background: branch.image_url
-            ? `url(${branch.image_url}) center/cover no-repeat`
-            : `linear-gradient(135deg, ${accent.from} 0%, ${accent.to} 100%)`,
+          // Always open onto an image. Branch's own hero wins; the generic
+          // Baba portrait is the fallback so even a brand-new centre with
+          // no photo yet still lands the donor on Him.
+          background:
+            `url(${branch.image_url || BABA_FALLBACK_URL}) center/cover no-repeat,` +
+            `linear-gradient(135deg, ${accent.from} 0%, ${accent.to} 100%)`,
           filter: 'brightness(0.6)',
         }}
       />
