@@ -135,12 +135,41 @@ export function BranchPicker() {
           </div>
         ) : (
           <>
-            {/* "General / Any" card — full-size tile so it reads as an
-                equal member of the gallery. Baba's portrait as the hero
-                so the opening moment lands on Him. */}
-            <div className="mb-8 sm:mb-10">
+            {branches.length === 0 ? (
+              <div className="text-center py-10">
+                <button onClick={() => beginEnter({ branch_id: 'main', name: 'Shital Temple', city: '', is_active: true })}
+                  className="btn-gold">
+                  {t('enter', language)} →
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Temples first, then Centres — the places of darshan lead,
+                    the community spaces follow. The "Any · All Centres" hero
+                    card sits last, as a catch-all for donors who don't want
+                    to choose a specific centre. */}
+                <TempleSection
+                  title={t('temples', language)}
+                  eyebrow="Places of darshan"
+                  items={branches.filter(isTemple)}
+                  onPick={beginEnter}
+                  startIndex={0}
+                />
+                <TempleSection
+                  title={t('centres', language)}
+                  eyebrow="Community spaces"
+                  items={branches.filter(b => !isTemple(b))}
+                  onPick={beginEnter}
+                  startIndex={branches.filter(isTemple).length}
+                />
+              </>
+            )}
+
+            {/* "Any · All Centres" — sits at the end of the gallery as a
+                catch-all with Baba's portrait as the hero. */}
+            <div className="mt-8 sm:mt-10">
               <TempleCard
-                index={0}
+                index={branches.length}
                 onClick={() =>
                   beginEnter({
                     branch_id: 'main',
@@ -164,32 +193,6 @@ export function BranchPicker() {
                 featured
               />
             </div>
-
-            {branches.length === 0 ? (
-              <div className="text-center py-10">
-                <button onClick={() => beginEnter({ branch_id: 'main', name: 'Shital Temple', city: '', is_active: true })}
-                  className="btn-gold">
-                  {t('enter', language)} →
-                </button>
-              </div>
-            ) : (
-              <>
-                <TempleSection
-                  title={t('temples', language)}
-                  eyebrow="Places of darshan"
-                  items={branches.filter(isTemple)}
-                  onPick={beginEnter}
-                  startIndex={1}
-                />
-                <TempleSection
-                  title={t('centres', language)}
-                  eyebrow="Community spaces"
-                  items={branches.filter(b => !isTemple(b))}
-                  onPick={beginEnter}
-                  startIndex={1 + branches.filter(isTemple).length}
-                />
-              </>
-            )}
           </>
         )}
 
