@@ -2015,6 +2015,11 @@ class QuickDonationRecordInput(BaseModel):
     # so donations.kiosk_device_id carries per-device attribution. Optional
     # for back-compat: kiosk binaries that don't send it record NULL.
     kiosk_device_id: str = ""
+    # Staff member logged into the kiosk device — email/username captured
+    # at /quick-donation/login and persisted in the device's Zustand store.
+    # Surfaces in the admin donations list so finance can see who processed
+    # each in-person gift. Empty when the device uses a legacy un-authed flow.
+    operator_email: str = ""
     # Optional Gift Aid — collected before payment on the kiosk
     ga_first_name: str = ""
     ga_surname: str = ""
@@ -2114,11 +2119,11 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                 text(
                     "INSERT INTO donations (id, user_id, branch_id, amount, currency, "
                     "gift_aid_eligible, purpose, reference, payment_provider, payment_ref, "
-                    "fee_pct, fee_amount, net_amount, kiosk_device_id, "
+                    "fee_pct, fee_amount, net_amount, kiosk_device_id, operator_email, "
                     "status, source, idempotency_key, created_at, updated_at) "
                     "VALUES (:id, :uid, :bid, :amount, 'GBP', :ga_elig, 'General Fund', :ref, "
                     ":provider, :pref, :fee_pct, :fee_amount, :net_amount, "
-                    "CAST(NULLIF(:kdid, '') AS UUID), "
+                    "CAST(NULLIF(:kdid, '') AS UUID), :op_email, "
                     "'PENDING', 'quick-donation', :ikey, :now, :now) "
                     "ON CONFLICT (idempotency_key) DO NOTHING"
                 ),
@@ -2128,6 +2133,7 @@ async def record_quick_donation(body: QuickDonationRecordInput):
                     "provider": provider_upper, "pref": body.payment_intent_id,
                     "fee_pct": str(fee_pct), "fee_amount": str(fee_amount), "net_amount": str(net_amount),
                     "kdid": body.kiosk_device_id or "",
+                    "op_email": (body.operator_email or "").strip().lower()[:256],
                     "ikey": f"qd-{order_id}", "ga_elig": ga, "now": now,
                 },
             )

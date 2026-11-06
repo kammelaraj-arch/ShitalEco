@@ -23,7 +23,7 @@ export function ProcessingScreen() {
   const {
     amount, branchId, stripeReaderId,
     readerProvider, sumupReaderId, sumupReaderApiId, cloverDeviceId,
-    kioskDeviceId,
+    kioskDeviceId, loggedInUsername,
     pendingGiftAid,
     setScreen, setOrderResult, setReader,
   } = useDonationStore()
@@ -75,6 +75,10 @@ export function ProcessingScreen() {
           payment_provider: provider,
           reader_id: readerId,
           kiosk_device_id: kioskDeviceId,
+          // Staff member logged into the device — surfaces in /admin/donations
+          // as the operator column. Empty when a legacy un-authenticated flow
+          // records the donation.
+          operator_email: loggedInUsername || '',
           ...(pendingGiftAid ? {
             ga_first_name: pendingGiftAid.firstName,
             ga_surname: pendingGiftAid.surname,
