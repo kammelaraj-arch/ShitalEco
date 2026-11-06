@@ -23,12 +23,13 @@ interface Entry {
 }
 
 const TIERS = [
-  { key: 'founder', label: 'Founder Panel' },
-  { key: 'gold',    label: 'Gold Brick' },
-  { key: 'sqft',    label: 'Square Foot' },
-  { key: 'bronze',  label: 'Bronze Brick' },
-  { key: 'red',     label: 'Red Brick' },
-  { key: 'anyamt',  label: 'Any amount' },
+  { key: 'founder',  label: 'Founder Panel' },
+  { key: 'business', label: 'Business Sponsorship' },
+  { key: 'gold',     label: 'Gold Brick' },
+  { key: 'sqft',     label: 'Square Foot' },
+  { key: 'bronze',   label: 'Bronze Brick' },
+  { key: 'red',      label: 'Red Brick' },
+  { key: 'anyamt',   label: 'Any amount' },
 ] as const
 
 const PREFIXES = ['', 'In memory of', 'In honour of', 'Dedicated by', 'With gratitude from']

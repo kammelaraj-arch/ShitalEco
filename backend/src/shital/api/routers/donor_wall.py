@@ -53,15 +53,17 @@ DONOR_WALL_AUTO_APPROVE_THRESHOLD = 101.00   # £ per unit
 
 
 # Tier display order (big first) — matches the way the service site lists
-# them and the way the TV page cycles.
-TIER_ORDER = ["founder", "gold", "sqft", "bronze", "red", "anyamt"]
+# them and the way the TV page cycles. Business sponsorship slots between
+# Founder and Gold — it's typically £2,501+ from a local business.
+TIER_ORDER = ["founder", "business", "gold", "sqft", "bronze", "red", "anyamt"]
 TIER_LABELS = {
-    "founder": "Founder Panel",
-    "gold":    "Gold Brick",
-    "sqft":    "Square Foot",
-    "bronze":  "Bronze Brick",
-    "red":     "Red Brick",
-    "anyamt":  "Dedication",
+    "founder":  "Founder Panel",
+    "business": "Business Sponsorship",
+    "gold":     "Gold Brick",
+    "sqft":     "Square Foot",
+    "bronze":   "Bronze Brick",
+    "red":      "Red Brick",
+    "anyamt":   "Dedication",
 }
 
 
@@ -74,6 +76,8 @@ def tier_from_name(name: str, unit_price: float | int | None = None) -> tuple[st
     n = (name or "").upper()
     if "FOUNDER" in n:
         return ("founder", "Founder Panel")
+    if "BUSINESS" in n:
+        return ("business", "Business Sponsorship")
     if "GOLD" in n and "BRICK" in n:
         return ("gold", "Gold Brick")
     if "SQUARE FOOT" in n or "SQ FT" in n:
@@ -85,11 +89,12 @@ def tier_from_name(name: str, unit_price: float | int | None = None) -> tuple[st
     # Fallback by price (quantity-1 safe).
     p = int(round(float(unit_price or 0)))
     by_price = {
-        5100: ("founder", "Founder Panel"),
-        1008: ("gold",    "Gold Brick"),
-        351:  ("sqft",    "Square Foot"),
-        151:  ("bronze",  "Bronze Brick"),
-        51:   ("red",     "Red Brick"),
+        5100: ("founder",  "Founder Panel"),
+        2501: ("business", "Business Sponsorship"),
+        1008: ("gold",     "Gold Brick"),
+        351:  ("sqft",     "Square Foot"),
+        151:  ("bronze",   "Bronze Brick"),
+        51:   ("red",      "Red Brick"),
     }
     return by_price.get(p, ("anyamt", "Dedication"))
 
@@ -219,8 +224,9 @@ async def public_donor_wall(
                 # row; fall back to the published price so an empty tier still
                 # renders with a correct £ label.
                 amt = float(rows[0]["amount"]) if rows else {
-                    "founder": 5100, "gold": 1008, "sqft": 351,
-                    "bronze": 151, "red": 51, "anyamt": 0,
+                    "founder":  5100, "business": 2501, "gold": 1008,
+                    "sqft":     351,  "bronze":   151,  "red":  51,
+                    "anyamt":   0,
                 }[tk]
                 tiers_out.append({
                     "key":    tk,

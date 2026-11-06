@@ -38,7 +38,9 @@ LEGACY_EXTENSION_GOAL  = 250_000.00  # Build shoe-rack + back hall + kitchen
 
 # Known tier prices (used in the fallback classifier only).
 SQFT_PRICE    = 351
-BRICK_PRICES  = {51, 151, 1008, 5100}
+# Brick + Business Sponsorship + Founder — all go to the "build the extension"
+# bucket. Square Foot is the only tier that clears the mortgage.
+BRICK_PRICES  = {51, 151, 1008, 2501, 5100}
 
 
 @router.get("/legacy/progress")
@@ -117,7 +119,9 @@ async def legacy_progress(response: Response) -> dict[str, Any]:
                         FROM jsonb_array_elements(d.items) it
                         WHERE  UPPER(COALESCE(it->>'name', '')) LIKE '%BRICK%'
                             OR UPPER(COALESCE(it->>'name', '')) LIKE '%FOUNDER%'
+                            OR UPPER(COALESCE(it->>'name', '')) LIKE '%BUSINESS%'
                             OR UPPER(COALESCE(it->>'tier', '')) LIKE '%BRICK%'
+                            OR UPPER(COALESCE(it->>'tier', '')) LIKE '%BUSINESS%'
                     )
                     WHEN (d.items IS NULL OR jsonb_typeof(d.items) <> 'array')
                          AND d.amount::int = ANY(:brick_prices) THEN d.amount

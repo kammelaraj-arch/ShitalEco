@@ -190,6 +190,33 @@ export function BrowsePage() {
           </span>
         </button>
 
+        {/* Donor Wall — public gratitude page */}
+        <button
+          onClick={() => setScreen('donor-wall')}
+          className="w-full rounded-2xl p-3 mb-3 text-left flex items-center gap-3 transition-all active:scale-[0.99] hover:brightness-110"
+          style={{
+            background: 'rgba(0,0,0,0.25)',
+            border: '1px solid rgba(212,175,55,0.3)',
+          }}
+        >
+          <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-lg"
+            style={{ background: 'rgba(212,175,55,0.15)' }}>
+            🙏
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-black text-sm leading-tight" style={{ color: 'var(--text)' }}>
+              Digital Donor Wall
+            </p>
+            <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,248,220,0.55)' }}>
+              See the names of those who have given — grouped by tier.
+            </p>
+          </div>
+          <span className="text-xs font-bold px-2 py-1 rounded-md"
+            style={{ background: 'rgba(212,175,55,0.15)', color: 'rgba(212,175,55,0.9)' }}>
+            View wall →
+          </span>
+        </button>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
           {/* 1 hr/week Seva — Volunteer Registration */}
