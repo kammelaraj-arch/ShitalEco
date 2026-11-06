@@ -142,10 +142,10 @@ export function BrowsePage() {
               style={{ color: 'rgba(100,60,10,0.7)' }}>🕉 Jai Ganesh · Jai Sai Baba</p>
             <h1 className="font-display font-bold text-2xl sm:text-3xl lg:text-4xl tracking-wide mb-1"
               style={{ color: '#3D1A00', textShadow: '0 1px 0 rgba(255,240,180,0.6)' }}>
-              Services
+              {t('services', language)}
             </h1>
             <p className="text-sm sm:text-base" style={{ color: 'rgba(80,40,5,0.75)' }}>
-              Donations, sevas &amp; sponsorships — support our temple
+              {t('hero_subtitle', language)}
             </p>
           </div>
           {/* Baba (right) — same slot, scaled up a touch on larger viewports. */}
@@ -187,18 +187,18 @@ export function BrowsePage() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#F87171' }}>
-              Live · Darshan
+              {t('live_darshan_eyebrow', language)}
             </p>
             <p className="font-black text-sm sm:text-base leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
-              Watch Baba's darshan from the temple
+              {t('live_darshan_title', language)}
             </p>
             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              Live stream during aarti — a still of Baba when the feed is offline.
+              {t('live_darshan_sub', language)}
             </p>
           </div>
           <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs flex-shrink-0"
             style={{ background: 'rgba(220,38,38,0.2)', color: '#FCA5A5', border: '1px solid rgba(220,38,38,0.55)' }}>
-            Watch →
+            {t('watch', language)} →
           </span>
         </button>
 
@@ -219,18 +219,18 @@ export function BrowsePage() {
             style={{ background: 'rgba(246,196,84,0.14)', border: '1px solid rgba(246,196,84,0.35)' }}>🏛</div>
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#F6C454' }}>
-              Future Legacy Appeal
+              {t('future_legacy_eyebrow', language)}
             </p>
             <p className="font-black text-sm sm:text-base leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
-              Leave your mark — sponsor the build (from £51)
+              {t('future_legacy_title', language)}
             </p>
             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              Sponsor a brick, a square foot &amp; more. Your name on our donor wall. Gift Aid +25%.
+              {t('future_legacy_sub', language)}
             </p>
           </div>
           <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs flex-shrink-0"
             style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#4a0e18' }}>
-            Sponsor →
+            {t('sponsor', language)} →
           </span>
         </button>
 
@@ -249,15 +249,15 @@ export function BrowsePage() {
             style={{ background: 'rgba(246,196,84,0.12)', border: '1px solid rgba(246,196,84,0.22)' }}>🙏</div>
           <div className="flex-1 min-w-0">
             <p className="font-black text-sm leading-tight" style={{ color: 'var(--text)' }}>
-              Digital Donor Wall
+              {t('donor_wall_title', language)}
             </p>
             <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              See the names of those who have given — grouped by tier.
+              {t('donor_wall_sub', language)}
             </p>
           </div>
           <span className="text-xs font-black px-2.5 py-1.5 rounded-md whitespace-nowrap"
             style={{ background: 'rgba(246,196,84,0.14)', color: '#F6C454', border: '1px solid rgba(246,196,84,0.3)' }}>
-            View wall →
+            {t('view_wall', language)} →
           </span>
         </button>
 
@@ -279,19 +279,19 @@ export function BrowsePage() {
                 style={{ background: 'rgba(101,198,152,0.15)', border: '1px solid rgba(101,198,152,0.3)' }}>🤝</div>
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#65C698' }}>
-                  1 hr / week Seva
+                  {t('week_seva', language)}
                 </p>
                 <p className="font-black text-sm leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
-                  Volunteer with SHITAL
+                  {t('volunteer_title', language)}
                 </p>
               </div>
             </div>
             <p className="text-xs leading-relaxed mb-3" style={{ color: 'var(--text-muted)' }}>
-              Give one hour a week. Help with seva, langar, events. Register online — trustees review.
+              {t('volunteer_sub', language)}
             </p>
             <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs self-start"
               style={{ background: 'rgba(101,198,152,0.14)', color: '#65C698', border: '1px solid rgba(101,198,152,0.35)' }}>
-              Register →
+              {t('register', language)} →
             </div>
           </button>
 
@@ -311,19 +311,19 @@ export function BrowsePage() {
                 style={{ background: 'rgba(147,197,253,0.14)', border: '1px solid rgba(147,197,253,0.3)' }}>🔁</div>
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#93C5FD' }}>
-                  Monthly Giving
+                  {t('monthly_eyebrow', language)}
                 </p>
                 <p className="font-black text-sm leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
-                  From just £5 / month
+                  {t('monthly_title', language)}
                 </p>
               </div>
             </div>
             <p className="text-xs leading-relaxed mb-3" style={{ color: 'var(--text-muted)' }}>
-              Set up regular giving via PayPal. Cancel anytime. Gift Aid boosts your impact by 25%.
+              {t('monthly_sub', language)}
             </p>
             <div className="mt-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs self-start"
               style={{ background: 'rgba(147,197,253,0.14)', color: '#93C5FD', border: '1px solid rgba(147,197,253,0.35)' }}>
-              Set up →
+              {t('setup', language)} →
             </div>
           </button>
 

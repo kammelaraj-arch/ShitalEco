@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useStore, SHITAL_LOGO_URL } from '../store'
+import { useStore, SHITAL_LOGO_URL, t } from '../store'
 import { api } from '../api'
 
 // Fallback hero used for the "General / Any" card and for any branch
@@ -40,6 +40,7 @@ interface Branch {
 
 export function BranchPicker() {
   const { setBranch } = useStore()
+  const language = useStore(s => s.language)
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -113,7 +114,7 @@ export function BranchPicker() {
             SHITAL · Charity No. 1138530
           </p>
           <p className="text-sm sm:text-base" style={{ color: 'rgba(255,248,220,0.55)' }}>
-            Choose a centre to visit.
+            {t('any_centres', language)}
           </p>
         </header>
 
@@ -168,20 +169,20 @@ export function BranchPicker() {
               <div className="text-center py-10">
                 <button onClick={() => beginEnter({ branch_id: 'main', name: 'Shital Temple', city: '', is_active: true })}
                   className="btn-gold">
-                  Enter the Temple →
+                  {t('enter', language)} →
                 </button>
               </div>
             ) : (
               <>
                 <TempleSection
-                  title="Our Temples"
+                  title={t('temples', language)}
                   eyebrow="Places of darshan"
                   items={branches.filter(isTemple)}
                   onPick={beginEnter}
                   startIndex={1}
                 />
                 <TempleSection
-                  title="Our Centres"
+                  title={t('centres', language)}
                   eyebrow="Community spaces"
                   items={branches.filter(b => !isTemple(b))}
                   onPick={beginEnter}
@@ -429,6 +430,7 @@ function strikeBell() {
 
 function EntranceCeremony({ branch }: { branch: Branch }) {
   const accent = tintFor(branch.city || branch.name)
+  const language = useStore(s => s.language)
 
   // Fire the audio sequence once when the ceremony mounts. The ceremony
   // unmounts after ~3.2s so this effect has exactly one lifetime.
@@ -540,7 +542,7 @@ function EntranceCeremony({ branch }: { branch: Branch }) {
       >
         <p className="text-[10px] sm:text-xs tracking-[0.42em] uppercase font-black mb-5"
           style={{ color: '#f6c454' }}>
-          Welcome to
+          {t('welcome_to', language)}
         </p>
         <h1 className="font-display font-bold text-3xl sm:text-5xl leading-tight mb-5"
           style={{

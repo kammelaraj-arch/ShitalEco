@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useStore } from '../store'
+import { useStore, t } from '../store'
 
 // Live Darshan — real-time stream of the murthy from the main temple.
 // If a live feed isn't being broadcast, we fall back to a still of Baba
@@ -26,6 +26,7 @@ export function DarshanPage() {
   const setScreen = useStore(s => s.setScreen)
   const branchId = useStore(s => s.branchId)
   const branchName = useStore(s => s.branchName)
+  const language = useStore(s => s.language)
 
   const [feed, setFeed] = useState<DarshanFeed | null>(null)
   const [loading, setLoading] = useState(true)
@@ -62,13 +63,13 @@ export function DarshanPage() {
         <div className="mb-5 flex items-center justify-between flex-wrap gap-3">
           <div>
             <button onClick={() => setScreen('browse')} className="text-xs font-bold opacity-70 hover:opacity-100 mb-2">
-              ← Back
+              ← {t('back', language)}
             </button>
             <h1 className="text-2xl sm:text-3xl font-black" style={{ fontFamily: 'Georgia, serif' }}>
-              🕉 Live Darshan
+              🕉 {t('live_darshan_eyebrow', language)}
             </h1>
             <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-              {branchName ? `${branchName} · ` : ''}Watch the murthy from wherever you are.
+              {branchName ? `${branchName} · ` : ''}{t('live_darshan_title', language)}
             </p>
           </div>
           <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-widest"
@@ -82,7 +83,7 @@ export function DarshanPage() {
               boxShadow: isLive ? '0 0 10px #EF4444' : 'none',
               animation: isLive ? 'pulse 1.6s ease-in-out infinite' : 'none',
             }} />
-            {isLive ? 'LIVE' : 'OFFLINE'}
+            {isLive ? t('live', language) : t('offline', language)}
           </span>
         </div>
 
@@ -95,7 +96,7 @@ export function DarshanPage() {
           }}>
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center text-sm opacity-70">
-              Connecting to the temple…
+              {t('connecting_temple', language)}
             </div>
           )}
 
@@ -122,11 +123,10 @@ export function DarshanPage() {
                 style={{ border: '3px solid rgba(246,196,84,0.65)', boxShadow: '0 8px 28px rgba(0,0,0,0.5)' }}
               />
               <p className="font-black text-lg sm:text-xl mb-2" style={{ fontFamily: 'Georgia, serif', color: '#F6C454' }}>
-                Darshan is not live right now
+                {t('darshan_offline_title', language)}
               </p>
               <p className="text-sm opacity-75 max-w-md">
-                Baba is with you. The next aarti stream will appear here automatically — this page
-                re-checks every minute.
+                {t('darshan_offline_sub', language)}
               </p>
             </div>
           )}

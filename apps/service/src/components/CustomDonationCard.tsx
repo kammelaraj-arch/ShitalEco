@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore } from '../store'
+import { useStore, t } from '../store'
 
 // Always-visible "any-amount" donation card. Renders ONLY the card content
 // (no max-w/px-* wrapper) so a parent can place it in whatever layout it
@@ -17,6 +17,7 @@ const PRESET_AMOUNTS = [5, 10, 25, 50, 100]
 export function CustomDonationCard() {
   const addItem   = useStore(s => s.addItem)
   const setScreen = useStore(s => s.setScreen)
+  const language  = useStore(s => s.language)
 
   const [selected, setSelected] = useState<number | null>(null)
   const [custom,   setCustom]   = useState<string>('')
@@ -58,10 +59,10 @@ export function CustomDonationCard() {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#F6C454' }}>
-            Custom Donation
+            {t('custom_eyebrow', language)}
           </p>
           <p className="font-black text-sm leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
-            Donate any amount
+            {t('donate_any_amount', language)}
           </p>
         </div>
       </div>
@@ -96,7 +97,7 @@ export function CustomDonationCard() {
           inputMode="decimal"
           min="1"
           step="0.01"
-          placeholder="Enter amount"
+          placeholder={t('enter_amount', language)}
           value={custom}
           onChange={e => { setCustom(e.target.value); setSelected(null) }}
           className="w-full pl-8 pr-3 py-2.5 rounded-xl text-sm font-bold outline-none"
@@ -121,7 +122,7 @@ export function CustomDonationCard() {
           boxShadow: valid ? '0 4px 12px rgba(212,175,55,0.35)' : 'none',
         }}
       >
-        {valid ? `Donate £${amount.toFixed(2)} →` : 'Donate'}
+        {valid ? `${t('donate_action', language)} £${amount.toFixed(2)} →` : t('donate_action', language)}
       </button>
 
       <AnimatePresence>
