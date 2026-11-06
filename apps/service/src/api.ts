@@ -123,7 +123,7 @@ export const api = {
     return d.id
   },
 
-  async getBranches(): Promise<Array<{ branch_id: string; name: string; city: string; is_active: boolean }>> {
+  async getBranches(): Promise<Array<{ branch_id: string; name: string; city: string; is_active: boolean; image_url?: string; tagline?: string; established?: string; address?: string }>> {
     try {
       const r = await fetch(`${API}/branches`)
       if (!r.ok) return []

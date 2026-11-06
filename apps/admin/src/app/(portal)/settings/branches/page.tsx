@@ -18,12 +18,15 @@ interface Branch {
   manager_name: string
   manager_email: string
   notes: string
+  image_url: string
+  tagline: string
 }
 
 const EMPTY: Omit<Branch, 'id' | 'branch_id'> = {
   internal_ref: '',
   name: '', city: '', postcode: '', address: '', phone: '', email: '',
   established: '', is_active: true, manager_name: '', manager_email: '', notes: '',
+  image_url: '', tagline: '',
 }
 
 interface BranchDashboard {
@@ -116,7 +119,8 @@ export default function BranchesPage() {
     setEditing(b)
     setForm({ internal_ref: b.internal_ref || '', name: b.name, city: b.city, postcode: b.postcode, address: b.address,
       phone: b.phone, email: b.email, established: b.established, is_active: b.is_active,
-      manager_name: b.manager_name, manager_email: b.manager_email, notes: b.notes })
+      manager_name: b.manager_name, manager_email: b.manager_email, notes: b.notes,
+      image_url: b.image_url || '', tagline: b.tagline || '' })
     setShowForm(true)
   }
 
@@ -312,6 +316,30 @@ export default function BranchesPage() {
                 <div>
                   <label className={lbl}>Year Established</label>
                   <input value={form.established} onChange={e => f('established', e.target.value)} placeholder="2024" className={inp} />
+                </div>
+
+                <div>
+                  <label className={lbl}>Hero image URL</label>
+                  <input value={form.image_url} onChange={e => f('image_url', e.target.value)}
+                    placeholder="https://admin.shital.org.uk/api/v1/media/library/…"
+                    className={inp} />
+                  <p className="text-[11px] text-white/40 mt-1">Shown on the service portal branch picker. Paste a media library URL or any public image.</p>
+                  {form.image_url && (
+                    <div className="mt-2 aspect-[16/10] rounded-lg overflow-hidden border border-white/10"
+                      style={{ background: '#1a0f1a' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={form.image_url} alt="preview"
+                        className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none' }} />
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className={lbl}>Tagline</label>
+                  <input value={form.tagline} onChange={e => f('tagline', e.target.value)}
+                    maxLength={160}
+                    placeholder="A warm welcome to Baba's home in North London"
+                    className={inp} />
                 </div>
 
                 <div>
