@@ -113,49 +113,37 @@ export function BrowsePage() {
   return (
     <div className="min-h-screen pb-32" style={{ background: 'transparent' }}>
 
-      {/* Hero Banner — twilight glass, theme-aware.
-          Readable on any background (dark, crimson, custom) because:
-          - a deep near-black glass base with a soft gold radial glow,
-            so neither dark nor light theme shows through chalky
-          - text uses var(--text) + saffron accent, which the theme
-            system already guarantees high-contrast against var(--bg)
-          - a warm top sheen and gold hairline give the "parchment"
-            feel without depending on a specific surrounding colour. */}
-      <div className="relative overflow-hidden px-4 py-7 sm:py-8"
+      {/* Hero Banner — travertine stone. Deliberately the same warm
+          sandstone band on every theme (dark, crimson, custom) so the
+          donor sees Baba framed the same way from any device. */}
+      <div className="relative overflow-hidden px-4 py-8"
         style={{
-          background:
-            'radial-gradient(ellipse 70% 100% at 50% 0%, rgba(246,196,84,0.14) 0%, transparent 65%),' +
-            'radial-gradient(ellipse 120% 80% at 50% 110%, rgba(140,0,0,0.25) 0%, transparent 70%),' +
-            'linear-gradient(180deg, rgba(14,6,4,0.78) 0%, rgba(26,6,6,0.88) 100%)',
-          borderBottom: '1px solid rgba(212,175,55,0.35)',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(246,196,84,0.12)',
-          backdropFilter: 'blur(10px) saturate(130%)',
-          WebkitBackdropFilter: 'blur(10px) saturate(130%)',
+          background: 'linear-gradient(160deg, #D8BC90 0%, #C8A870 40%, #B89858 100%)',
+          borderBottom: '2px solid rgba(212,175,55,0.5)',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
         }}>
+        {/* Stone texture overlay */}
+        <div className="absolute inset-0 pointer-events-none" style={{
+          backgroundImage: 'radial-gradient(ellipse 60% 40% at 20% 30%, rgba(255,245,210,0.35) 0%, transparent 60%), radial-gradient(ellipse 50% 60% at 80% 70%, rgba(160,110,40,0.25) 0%, transparent 55%)',
+        }} />
         {/* Gold shimmer bottom edge */}
         <div className="absolute bottom-0 left-0 right-0 h-px"
           style={{ background: 'linear-gradient(90deg, transparent, #D4AF37, #FFD700, #D4AF37, transparent)' }} />
-        {/* Subtle paisley dust so it has texture without reading as 'stone' */}
-        <div className="absolute inset-0 pointer-events-none opacity-[0.07]" style={{
-          backgroundImage: 'radial-gradient(ellipse 40% 30% at 15% 25%, #f6c454 0%, transparent 60%), radial-gradient(ellipse 50% 40% at 85% 75%, #f6c454 0%, transparent 60%)',
-        }} />
         <div className="max-w-screen-2xl mx-auto relative z-10 flex items-center justify-between gap-4">
           {/* Small Ganesh (left) — tradition is to open any auspicious work
-              with Ganesha's blessing. */}
+              with Ganesha's blessing. Tries /ganesh.png first; if the asset
+              isn't there yet, the onError swap shows a gold Om disc so the
+              corner never looks empty. */}
           <GaneshBadge />
 
           <div className="min-w-0 flex-1 text-center sm:text-left">
-            <p className="text-[11px] sm:text-xs font-black tracking-[0.3em] uppercase mb-1.5"
-              style={{ color: '#F6C454' }}>🕉 Jai Ganesh · Jai Sai Baba</p>
-            <h1 className="font-display font-bold text-2xl sm:text-3xl lg:text-4xl tracking-wide mb-1.5"
-              style={{
-                color: 'var(--text)',
-                textShadow: '0 2px 18px rgba(0,0,0,0.6), 0 0 32px rgba(246,196,84,0.12)',
-                letterSpacing: '-0.005em',
-              }}>
+            <p className="text-xs font-semibold tracking-widest uppercase mb-1"
+              style={{ color: 'rgba(100,60,10,0.7)' }}>🕉 Jai Ganesh · Jai Sai Baba</p>
+            <h1 className="font-display font-bold text-2xl sm:text-3xl lg:text-4xl tracking-wide mb-1"
+              style={{ color: '#3D1A00', textShadow: '0 1px 0 rgba(255,240,180,0.6)' }}>
               Donate &amp; Support
             </h1>
-            <p className="text-sm sm:text-base" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-sm sm:text-base" style={{ color: 'rgba(80,40,5,0.65)' }}>
               Make a donation, book services &amp; support our temple
             </p>
           </div>
@@ -163,10 +151,7 @@ export function BrowsePage() {
           <img src="https://admin.shital.org.uk/api/v1/media/library/00a4a66d-d25b-4195-8d33-57b1f2853f63" alt="Shri Shirdi Sai Baba"
             onError={(e) => { e.currentTarget.style.display = 'none' }}
             className="w-20 h-20 sm:w-24 sm:h-24 lg:w-28 lg:h-28 rounded-full object-cover flex-shrink-0"
-            style={{
-              border: '2px solid rgba(246,196,84,0.7)',
-              boxShadow: '0 6px 22px rgba(0,0,0,0.5), 0 0 0 4px rgba(246,196,84,0.12)',
-            }} />
+            style={{ border: '3px solid rgba(212,175,55,0.8)', boxShadow: '0 6px 18px rgba(0,0,0,0.35)' }} />
         </div>
       </div>
 
