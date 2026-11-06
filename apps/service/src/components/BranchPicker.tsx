@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { useStore, SHITAL_LOGO_URL } from '../store'
 import { api } from '../api'
 
@@ -24,12 +24,27 @@ export function BranchPicker() {
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [entering, setEntering] = useState<Branch | null>(null)
 
   useEffect(() => {
     api.getBranches()
       .then(list => { setBranches(list); setLoading(false) })
       .catch(e => { setError(e?.message || 'Could not load centres'); setLoading(false) })
   }, [])
+
+  // Donor taps a centre → play a ~3.2s ceremony (gates open, lamps light,
+  // name revealed, "Om Sai Ram" invocation) before mounting the portal.
+  // Kept as local state so the picker remains in control of the transition
+  // and never leaves the overlay open if the user navigates away.
+  function beginEnter(branch: Branch, forcedName?: string) {
+    const target: Branch = forcedName
+      ? { ...branch, name: forcedName }
+      : branch
+    setEntering(target)
+    window.setTimeout(() => {
+      setBranch(branch.branch_id, forcedName || branch.name, false)
+    }, 3200)
+  }
 
   return (
     <div className="min-h-screen px-4 sm:px-6 py-8 sm:py-12 relative"
@@ -101,7 +116,7 @@ export function BranchPicker() {
         ) : (
           <>
             {/* General-donation chip at the top */}
-            <button onClick={() => setBranch('main', 'All Temples', false)}
+            <button onClick={() => beginEnter({ branch_id: 'main', name: 'All Temples', city: '', is_active: true })}
               className="group w-full max-w-md mx-auto flex items-center gap-3 px-4 py-3 mb-6 sm:mb-8 rounded-2xl text-left transition-all hover:brightness-110"
               style={{
                 background: 'linear-gradient(135deg, rgba(212,175,55,0.14), rgba(140,0,0,0.08))',
@@ -124,7 +139,8 @@ export function BranchPicker() {
             {/* Centre gallery */}
             {branches.length === 0 ? (
               <div className="text-center py-10">
-                <button onClick={() => setBranch('main', 'Shital Temple', false)} className="btn-gold">
+                <button onClick={() => beginEnter({ branch_id: 'main', name: 'Shital Temple', city: '', is_active: true })}
+                  className="btn-gold">
                   Enter the Temple →
                 </button>
               </div>
@@ -132,12 +148,17 @@ export function BranchPicker() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                 {branches.map((b, i) => (
                   <TempleCard key={b.branch_id} branch={b} index={i}
-                    onClick={() => setBranch(b.branch_id, b.name, false)} />
+                    onClick={() => beginEnter(b)} />
                 ))}
               </div>
             )}
           </>
         )}
+
+        {/* Entrance ceremony — plays over the picker when a centre is tapped */}
+        <AnimatePresence>
+          {entering && <EntranceCeremony branch={entering} />}
+        </AnimatePresence>
 
         <p className="text-center text-[11px] mt-10 sm:mt-12 tracking-widest"
           style={{ color: 'rgba(255,248,220,0.25)' }}>
@@ -246,4 +267,176 @@ function tintFor(hint: string): { from: string; to: string; glyph: string } {
   if (h.includes('birmingham'))                      return { from: '#40181f', to: '#722a35', glyph: '🛕' }
   // sensible saffron default
   return { from: '#5c1824', to: '#b26922', glyph: '🛕' }
+}
+
+// ── Entrance ceremony ────────────────────────────────────────────────────────
+// Cinematic overlay played between tapping a centre and the portal mounting.
+// The sequence runs ~3.2s total and is all CSS/SVG so nothing has to load.
+
+function EntranceCeremony({ branch }: { branch: Branch }) {
+  const accent = tintFor(branch.city || branch.name)
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      transition={{ duration: 0.5 }}
+      className="fixed inset-0 z-[9999] flex items-center justify-center overflow-hidden"
+      style={{ background: '#05020a' }}
+      aria-live="polite"
+    >
+      {/* Hero backdrop — the branch photo (or gradient) slowly zooming in */}
+      <motion.div
+        initial={{ scale: 1.25, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 3.0, ease: 'easeOut' }}
+        className="absolute inset-0"
+        style={{
+          background: branch.image_url
+            ? `url(${branch.image_url}) center/cover no-repeat`
+            : `linear-gradient(135deg, ${accent.from} 0%, ${accent.to} 100%)`,
+          filter: 'brightness(0.6)',
+        }}
+      />
+
+      {/* Cinematic dark gradient so the type always reads */}
+      <div className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(ellipse 80% 60% at 50% 50%, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.85) 90%)',
+        }} />
+
+      {/* Torana (temple arch) opening — two gold curtains sliding apart */}
+      <motion.div
+        initial={{ x: 0 }} animate={{ x: '-100%' }}
+        transition={{ duration: 1.1, delay: 0.25, ease: [0.55, 0, 0.3, 1] }}
+        className="absolute inset-y-0 left-0 w-1/2"
+        style={{
+          background:
+            'linear-gradient(90deg, #4a0e18 0%, #6B0000 45%, #8c1a1a 100%)',
+          borderRight: '3px solid rgba(212,175,55,0.5)',
+          boxShadow: 'inset -40px 0 80px rgba(0,0,0,0.6), 4px 0 20px rgba(0,0,0,0.5)',
+        }}
+      >
+        <div className="absolute inset-y-0 right-0 w-10"
+          style={{ background: 'linear-gradient(90deg, transparent, rgba(0,0,0,0.6))' }} />
+        {/* Gold Toran motif on the curtain's trailing edge */}
+        <div className="absolute inset-y-0 right-2 flex items-center">
+          <div className="w-1.5 h-40 rounded-full"
+            style={{ background: 'linear-gradient(180deg, #d4af37, #fff4c4, #d4af37)' }} />
+        </div>
+      </motion.div>
+      <motion.div
+        initial={{ x: 0 }} animate={{ x: '100%' }}
+        transition={{ duration: 1.1, delay: 0.25, ease: [0.55, 0, 0.3, 1] }}
+        className="absolute inset-y-0 right-0 w-1/2"
+        style={{
+          background:
+            'linear-gradient(-90deg, #4a0e18 0%, #6B0000 45%, #8c1a1a 100%)',
+          borderLeft: '3px solid rgba(212,175,55,0.5)',
+          boxShadow: 'inset 40px 0 80px rgba(0,0,0,0.6), -4px 0 20px rgba(0,0,0,0.5)',
+        }}
+      >
+        <div className="absolute inset-y-0 left-0 w-10"
+          style={{ background: 'linear-gradient(-90deg, transparent, rgba(0,0,0,0.6))' }} />
+        <div className="absolute inset-y-0 left-2 flex items-center">
+          <div className="w-1.5 h-40 rounded-full"
+            style={{ background: 'linear-gradient(180deg, #d4af37, #fff4c4, #d4af37)' }} />
+        </div>
+      </motion.div>
+
+      {/* Two diyas (oil lamps) that flicker to life */}
+      <Diya position="left" />
+      <Diya position="right" />
+
+      {/* Content */}
+      <motion.div
+        initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.9, delay: 1.1 }}
+        className="relative z-10 text-center px-6 max-w-xl"
+      >
+        <p className="text-[10px] sm:text-xs tracking-[0.42em] uppercase font-black mb-5"
+          style={{ color: '#f6c454' }}>
+          Welcome to
+        </p>
+        <h1 className="font-display font-bold text-3xl sm:text-5xl leading-tight mb-5"
+          style={{
+            color: '#fff5d1',
+            textShadow: '0 0 28px rgba(246,196,84,0.4), 0 4px 32px rgba(0,0,0,0.9)',
+            letterSpacing: '-0.01em',
+          }}>
+          {branch.name}
+        </h1>
+        {branch.city && (
+          <p className="text-sm sm:text-base tracking-wider mb-4" style={{ color: 'rgba(255,248,220,0.75)' }}>
+            {branch.city}
+          </p>
+        )}
+        <motion.p
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          transition={{ duration: 0.6, delay: 2.0 }}
+          className="text-[10px] sm:text-xs tracking-[0.5em] uppercase font-black mt-2"
+          style={{ color: '#D4AF37' }}
+        >
+          Om Sai Ram
+        </motion.p>
+
+        {/* Progress bead — fills over the final beat */}
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          transition={{ duration: 0.4, delay: 2.1 }}
+          className="relative mx-auto mt-6 h-[2px] w-56 overflow-hidden rounded-full"
+          style={{ background: 'rgba(212,175,55,0.15)' }}
+        >
+          <motion.div
+            initial={{ width: 0 }} animate={{ width: '100%' }}
+            transition={{ duration: 1.1, delay: 2.1, ease: 'easeInOut' }}
+            className="h-full"
+            style={{ background: 'linear-gradient(90deg, transparent, #d4af37, #fff4c4, #d4af37, transparent)' }}
+          />
+        </motion.div>
+      </motion.div>
+
+      {/* Final flash to carry us into the portal */}
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+        transition={{ duration: 0.4, delay: 3.0 }}
+        className="absolute inset-0 pointer-events-none"
+        style={{ background: 'radial-gradient(circle at 50% 50%, rgba(255,245,209,0.9) 0%, transparent 70%)' }}
+      />
+    </motion.div>
+  )
+}
+
+function Diya({ position }: { position: 'left' | 'right' }) {
+  const side = position === 'left' ? { left: '14%' } : { right: '14%' }
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.8, delay: 1.3 }}
+      className="absolute bottom-[14%] hidden sm:block"
+      style={side}
+    >
+      {/* Flame */}
+      <motion.div
+        animate={{ scale: [1, 1.12, 0.94, 1.08, 1], opacity: [0.9, 1, 0.85, 1, 0.9] }}
+        transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+        className="w-5 h-7 rounded-full mx-auto"
+        style={{
+          background:
+            'radial-gradient(ellipse at 50% 60%, #fff4c4 0%, #ffbf3b 45%, #e97a1f 75%, transparent 100%)',
+          filter: 'blur(1px)',
+          boxShadow: '0 0 36px rgba(255,180,60,0.8), 0 0 80px rgba(255,120,30,0.5)',
+        }}
+      />
+      {/* Diya bowl */}
+      <div
+        className="w-14 h-4 mx-auto rounded-b-full"
+        style={{
+          background: 'linear-gradient(180deg, #a3471e 0%, #4a2412 100%)',
+          border: '1px solid rgba(212,175,55,0.5)',
+          marginTop: '-2px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+        }}
+      />
+    </motion.div>
+  )
 }
