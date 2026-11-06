@@ -355,9 +355,104 @@ function tintFor(hint: string): { from: string; to: string; glyph: string } {
 // ── Entrance ceremony ────────────────────────────────────────────────────────
 // Cinematic overlay played between tapping a centre and the portal mounting.
 // The sequence runs ~3.2s total and is all CSS/SVG so nothing has to load.
+// A soft temple bell plays on open and the Web Speech API speaks "Namaste"
+// then "Om Sai Ram" — browsers only allow this because we have a user
+// gesture (the tap on the card).
+
+// Picks the most Indian-sounding voice available. getVoices() is async on
+// some browsers (Chrome fires 'voiceschanged' after load), so a caller may
+// need to retry — speakRitual() handles that.
+function pickVoice(): SpeechSynthesisVoice | null {
+  try {
+    const voices = window.speechSynthesis.getVoices()
+    if (!voices.length) return null
+    const preferred = [
+      /hi-IN/i, /en-IN/i,                          // Hindi / Indian English
+      /ravi|lekha|sangeeta|rishi|neeraj/i,          // named Indian voices
+      /google.*hindi/i, /google.*english \(india\)/i,
+    ]
+    for (const rx of preferred) {
+      const v = voices.find(v => rx.test(v.lang) || rx.test(v.name))
+      if (v) return v
+    }
+    // Default to the first English female-ish voice if nothing matches.
+    return voices.find(v => /^en/i.test(v.lang)) || voices[0]
+  } catch { return null }
+}
+
+function speakWords(words: string, voice: SpeechSynthesisVoice | null) {
+  try {
+    const u = new SpeechSynthesisUtterance(words)
+    if (voice) u.voice = voice
+    u.lang = voice?.lang || 'en-IN'
+    u.rate = 0.82
+    u.pitch = 1.0
+    u.volume = 0.88
+    window.speechSynthesis.speak(u)
+  } catch { /* Safari in low-power / iOS lock — silent is fine */ }
+}
+
+// A single mellow temple bell struck via Web Audio API. Two partials +
+// exponential decay gives a warm brass-y 'tung' without shipping any
+// audio asset. Ignored if Web Audio isn't available (private window etc).
+function strikeBell() {
+  try {
+    const AC = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)
+    if (!AC) return
+    const ctx = new AC()
+    const now = ctx.currentTime
+    const gain = ctx.createGain()
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(0.42, now + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 2.4)
+    gain.connect(ctx.destination)
+
+    // Fundamental + a minor-third partial for that bell colour.
+    for (const [freq, mix] of [[523.25, 1.0], [659.25, 0.45], [784.0, 0.22]] as const) {
+      const o = ctx.createOscillator()
+      o.type = 'triangle'
+      o.frequency.value = freq
+      const g = ctx.createGain()
+      g.gain.value = mix
+      o.connect(g).connect(gain)
+      o.start(now)
+      o.stop(now + 2.5)
+    }
+    // Close the context after the bell has fully decayed so we don't leak.
+    window.setTimeout(() => { try { void ctx.close() } catch { /* already closed */ } }, 2800)
+  } catch { /* silent on failure — the visual ceremony still carries */ }
+}
 
 function EntranceCeremony({ branch }: { branch: Branch }) {
   const accent = tintFor(branch.city || branch.name)
+
+  // Fire the audio sequence once when the ceremony mounts. The ceremony
+  // unmounts after ~3.2s so this effect has exactly one lifetime.
+  useEffect(() => {
+    // Trigger speechSynthesis voices to load if they haven't yet.
+    try { window.speechSynthesis?.getVoices?.() } catch { /* nop */ }
+
+    // Bell strikes as the curtains start to part (matches the 0.25s delay
+    // on the curtain slide so the strike + reveal land together).
+    const bellId = window.setTimeout(strikeBell, 300)
+
+    // "Namaste" as the curtains finish opening; "Om Sai Ram" near the end
+    // just before the portal transition.
+    const speak1Id = window.setTimeout(() => {
+      speakWords('Namaste', pickVoice())
+    }, 1200)
+    const speak2Id = window.setTimeout(() => {
+      speakWords('Om Sai Ram', pickVoice())
+    }, 2400)
+
+    return () => {
+      window.clearTimeout(bellId)
+      window.clearTimeout(speak1Id)
+      window.clearTimeout(speak2Id)
+      try { window.speechSynthesis?.cancel?.() } catch { /* nop */ }
+    }
+  }, [])
+
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
