@@ -42,6 +42,7 @@ interface Donation {
   project_name?: string | null
   kiosk_device_id?: string | null
   device_name?: string
+  operator_email?: string
 }
 
 interface DonationDetail {
@@ -830,8 +831,9 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                       <td className="px-4 py-3 text-white/50 text-xs capitalize">{d.payment_provider}</td>
                     )}
                     {isVisible('device') && (
-                      <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap" title={d.kiosk_device_id || ''}>
-                        {d.device_name ? <span>📟 {d.device_name}</span> : <span className="text-white/25">—</span>}
+                      <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap font-mono uppercase"
+                        title={d.device_name ? `${d.device_name}${d.operator_email ? ` · ${d.operator_email}` : ''}` : (d.operator_email || '')}>
+                        {d.operator_email || d.device_name || <span className="text-white/25 font-sans normal-case">—</span>}
                       </td>
                     )}
                     {isVisible('payment_ref') && (

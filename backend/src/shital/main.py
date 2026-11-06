@@ -2031,6 +2031,11 @@ async def _patch_schema() -> None:
         "ALTER TABLE basket_items ADD COLUMN IF NOT EXISTS gift_aid_amount NUMERIC(12,2) NOT NULL DEFAULT 0",
         # Source channel on donations (kiosk, quick-donation, service, paypal, etc.)
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'kiosk'",
+        # Operator email — staff member logged into the quick-donation device
+        # when they processed the gift. Populated by the kiosk /record endpoint
+        # from the Zustand-stored loggedInUsername; surfaced in /admin/donations.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS operator_email VARCHAR(256) NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS idx_donations_operator ON donations(operator_email) WHERE operator_email <> ''",
         # ── Payment failure detail + actual settlement (Stripe/SumUp robustness) ──
         # last_failure_* : why a card payment failed (Stripe last_payment_error /
         #   SumUp decline). card_type: VISA/MASTERCARD/AMEX/OTHER for "why declined"
