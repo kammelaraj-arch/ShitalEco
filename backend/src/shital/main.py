@@ -663,6 +663,11 @@ async def _patch_schema() -> None:
         # public-facing `name` is the display name shown to donors (donation
         # portal, receipts, kiosk). branch_id (slug) remains the DB FK.
         "ALTER TABLE branches ADD COLUMN IF NOT EXISTS internal_ref VARCHAR(30) NOT NULL DEFAULT ''",
+        # Hero image + optional one-line tagline shown on the service portal
+        # branch picker — turns the enter screen into a rich card gallery of
+        # all our centres instead of a one-line list.
+        "ALTER TABLE branches ADD COLUMN IF NOT EXISTS image_url   TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE branches ADD COLUMN IF NOT EXISTS tagline     VARCHAR(160) NOT NULL DEFAULT ''",
         # Backfill internal_ref from branch_id for existing rows (uppercased,
         # trimmed) so every branch has a non-empty internal reference.
         "UPDATE branches SET internal_ref = UPPER(branch_id) WHERE COALESCE(internal_ref,'') = ''",

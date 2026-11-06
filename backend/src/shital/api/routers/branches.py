@@ -42,6 +42,8 @@ class BranchIn(BaseModel):
     manager_name: str = ""
     manager_email: str = ""
     notes: str = ""
+    image_url: str = ""             # hero photo shown on the service portal branch picker
+    tagline: str = ""               # one-line descriptor under the name
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -98,16 +100,19 @@ async def create_branch(body: BranchIn, ctx: CurrentSpace) -> dict[str, Any]:
         await db.execute(text("""
             INSERT INTO branches (id, branch_id, internal_ref, name, city, postcode, address,
                 phone, email, established, is_active, manager_name, manager_email,
-                notes, created_at, updated_at)
+                notes, image_url, tagline, created_at, updated_at)
             VALUES (:id, :bid, :iref, :name, :city, :pc, :addr, :ph, :em, :est,
-                :active, :mgr, :mgr_em, :notes, :now, :now)
+                :active, :mgr, :mgr_em, :notes, :img, :tag, :now, :now)
         """), {
             "id": str(uuid.uuid4()), "bid": branch_id, "iref": internal_ref,
             "name": body.name, "city": body.city, "pc": body.postcode,
             "addr": body.address, "ph": body.phone, "em": body.email,
             "est": body.established, "active": body.is_active,
             "mgr": body.manager_name, "mgr_em": body.manager_email,
-            "notes": body.notes, "now": now,
+            "notes": body.notes,
+            "img": (body.image_url or "").strip()[:1024],
+            "tag": (body.tagline or "").strip()[:160],
+            "now": now,
         })
         await db.commit()
     return {"ok": True, "branch_id": branch_id, "internal_ref": internal_ref}
@@ -139,6 +144,7 @@ async def update_branch(branch_id: str, body: BranchIn, ctx: CurrentSpace) -> di
                 city = :city, postcode = :pc, address = :addr,
                 phone = :ph, email = :em, established = :est, is_active = :active,
                 manager_name = :mgr, manager_email = :mgr_em, notes = :notes,
+                image_url = :img, tagline = :tag,
                 updated_at = :now
             WHERE branch_id = :bid
         """), {
@@ -146,7 +152,10 @@ async def update_branch(branch_id: str, body: BranchIn, ctx: CurrentSpace) -> di
             "addr": body.address, "ph": body.phone, "em": body.email,
             "est": body.established, "active": body.is_active,
             "mgr": body.manager_name, "mgr_em": body.manager_email,
-            "notes": body.notes, "now": now, "bid": branch_id,
+            "notes": body.notes,
+            "img": (body.image_url or "").strip()[:1024],
+            "tag": (body.tagline or "").strip()[:160],
+            "now": now, "bid": branch_id,
         })
         await db.commit()
         if result.rowcount == 0:  # type: ignore[attr-defined]
