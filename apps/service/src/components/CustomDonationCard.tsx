@@ -45,20 +45,22 @@ export function CustomDonationCard() {
   return (
     <div className="rounded-2xl p-4 h-full flex flex-col"
       style={{
-        background: 'linear-gradient(135deg,rgba(212,175,55,0.20),rgba(212,175,55,0.08))',
-        border: '1.5px solid rgba(212,175,55,0.50)',
-        boxShadow: '0 4px 24px rgba(212,175,55,0.18)',
+        background: 'linear-gradient(180deg, rgba(10,5,8,0.55), rgba(14,3,3,0.65))',
+        border: '1px solid rgba(246,196,84,0.4)',
+        boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
+        backdropFilter: 'blur(10px) saturate(130%)',
+        WebkitBackdropFilter: 'blur(10px) saturate(130%)',
       }}>
       <div className="flex items-center gap-3 mb-3">
         <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
-          style={{ background: 'rgba(212,175,55,0.20)', border: '1px solid rgba(212,175,55,0.35)' }}>
+          style={{ background: 'rgba(246,196,84,0.14)', border: '1px solid rgba(246,196,84,0.3)' }}>
           💛
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,217,128,0.85)' }}>
+          <p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: '#F6C454' }}>
             Custom Donation
           </p>
-          <p className="font-black text-sm text-ivory-200 leading-tight">
+          <p className="font-black text-sm leading-tight mt-0.5" style={{ color: 'var(--text)' }}>
             Donate any amount
           </p>
         </div>
