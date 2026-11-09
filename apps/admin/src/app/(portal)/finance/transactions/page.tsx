@@ -444,7 +444,11 @@ export default function TransactionsPage() {
                 <th onClick={() => toggleSort('amount')}     className="px-4 py-3 text-right font-semibold cursor-pointer select-none hover:text-white/80">Gross {sortArrow('amount')}</th>
                 <th className="px-4 py-3 text-right font-semibold">Fee</th>
                 <th onClick={() => toggleSort('net')}        className="px-4 py-3 text-right font-semibold cursor-pointer select-none hover:text-white/80">Net {sortArrow('net')}</th>
-                <th onClick={() => toggleSort('status')}     className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">Status {sortArrow('status')}</th>
+                <th onClick={() => toggleSort('status')}
+                    title="Stripe/SumUp BALANCE status — 'pending' means the payment succeeded and the donor was charged; funds move to 'available' in ~2 business days. This is NOT the donation or subscription status."
+                    className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">
+                  Funds {sortArrow('status')}
+                </th>
                 <th className="px-4 py-3 text-left font-semibold">Donor / Purpose</th>
                 <th className="px-4 py-3 text-center font-semibold">🇬🇧 Gift Aid</th>
                 <th className="px-4 py-3 text-left font-semibold">Description</th>
@@ -482,7 +486,23 @@ export default function TransactionsPage() {
                   <td className={`px-4 py-3 text-right font-mono text-sm font-bold ${(t.net_pence || 0) < 0 ? 'text-red-400' : 'text-green-400'}`}>
                     {fmtMoney(t.net_pence, t.currency)}
                   </td>
-                  <td className="px-4 py-3 text-white/60 text-xs">{t.status || '—'}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <span
+                      title={
+                        t.status === 'pending'
+                          ? 'Payment succeeded; funds settle into the account balance in ~2 business days. The donor IS charged.'
+                          : t.status === 'available'
+                            ? 'Funds have cleared and are available in the account balance.'
+                            : t.status || ''
+                      }
+                      className={
+                        t.status === 'pending'   ? 'text-amber-300/80' :
+                        t.status === 'available' ? 'text-green-400'    :
+                                                   'text-white/60'
+                      }>
+                      {t.status || '—'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-white/80 text-xs max-w-[220px] truncate" title={`${t.contact_name} <${t.contact_email}>`}>
                     {t.contact_name || t.contact_email || t.customer_hint || <em className="text-white/30">—</em>}
                     {t.donation_purpose && <div className="text-[10px] text-white/40 truncate">{t.donation_purpose}</div>}
@@ -612,17 +632,22 @@ function TxnDetail({ txn, onClose }: { txn: Txn; onClose: () => void }) {
   }
   return (
     <>
-      <div onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
-      <div className="fixed right-0 top-0 h-full w-full sm:max-w-xl bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
-        <div className="px-6 py-5 border-b border-white/5 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-white/40 text-xs uppercase tracking-widest font-bold">{txn.provider} · {txn.kind || '—'}</p>
-            <h2 className="text-white font-black text-2xl mt-1 font-mono">{money(txn.amount_pence)}</h2>
-            <p className="text-white/50 text-xs mt-1">{when(txn.provider_created_at)}</p>
+      {/* Centred popup instead of the old right-side drawer. Operator asked
+          for it to open as a popup not an inline column, so the table stays
+          visible behind the dimmed backdrop and the detail reads as a modal.
+          Click the backdrop or the ✕ to close. */}
+      <div onClick={onClose} className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div className="pointer-events-auto w-full max-w-2xl max-h-[88vh] rounded-2xl bg-temple-deep border border-white/10 shadow-2xl flex flex-col overflow-hidden">
+          <div className="px-6 py-5 border-b border-white/5 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-white/40 text-xs uppercase tracking-widest font-bold">{txn.provider} · {txn.kind || '—'}</p>
+              <h2 className="text-white font-black text-2xl mt-1 font-mono">{money(txn.amount_pence)}</h2>
+              <p className="text-white/50 text-xs mt-1">{when(txn.provider_created_at)}</p>
+            </div>
+            <button onClick={onClose} className="text-white/40 hover:text-white text-xl p-1 flex-shrink-0">✕</button>
           </div>
-          <button onClick={onClose} className="text-white/40 hover:text-white text-xl p-1">✕</button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 text-sm">
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 text-sm">
           <Section title="Money">
             <KV label="Gross" value={money(txn.amount_pence)} />
             <KV label="Fee"   value={txn.fee_pence ? money(txn.fee_pence) : '—'} tone={txn.fee_pence ? 'red' : undefined} />
@@ -670,6 +695,7 @@ function TxnDetail({ txn, onClose }: { txn: Txn; onClose: () => void }) {
               } />
             )}
           </Section>
+          </div>
         </div>
       </div>
     </>
