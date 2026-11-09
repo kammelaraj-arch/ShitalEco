@@ -514,6 +514,7 @@ jobs:
               -d donate.shital.org.uk -d screen.shital.org.uk \
               -d api.shital.org.uk -d dev.shital.org.uk \
               -d service.shital.org.uk \
+              -d service.shirdisai.org.uk \
               --expand --non-interactive --agree-tos \
               -m admin@shirdisai.org.uk \
               2>&1 | tail -10 || echo "certbot returned non-zero — non-fatal, certs may be unchanged"
