@@ -388,7 +388,7 @@ export default function RecurringGivingPage() {
               </button>
               {/* Diagnostic — compare what Stripe knows vs what our DB thinks.
                   Returns a verdict pointing at the specific failure. */}
-              <button onClick={stripeDiagnostic} disabled={syncing}
+              <button onClick={() => stripeDiagnostic()} disabled={syncing}
                 title="Pulls Stripe's view of Checkout sessions for the last 30 days and cross-checks against our DB. Tells you whether donors are abandoning, paying-but-unlinked, or working."
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#0ea5e9,#0369a1)' }}>
