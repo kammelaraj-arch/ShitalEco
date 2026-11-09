@@ -1252,6 +1252,82 @@ async def admin_delete_tier(tier_id: str, space: CurrentSpace) -> dict[str, str]
     return {"status": "deactivated"}
 
 
+@router.get("/admin/giving/stats")
+async def admin_giving_stats(space: CurrentSpace, limit: int = 50) -> dict[str, Any]:
+    """Operator-facing counts + £ totals for Monthly Giving, in one call.
+
+    Returns three groups the admin page renders as a stat strip + a
+    Stripe-style transaction list:
+
+      subscriptions — ACTIVE / PENDING_APPROVAL / CANCELLED / EXPIRED counts
+      totals        — £ taken this month, last month, this year, all-time
+                      plus the successful-charge count
+      recent_charges — most recent ``limit`` monthly-giving donations
+                       (purpose='Monthly Giving') with donor / amount / date /
+                       provider / ref so the operator can see who has paid
+                       without clicking into each subscription.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    out: dict[str, Any] = {"subscriptions": {}, "totals": {}, "recent_charges": []}
+    async with SessionLocal() as db:
+        # ── Subscription counts by status ─────────────────────────────────
+        rows = (await db.execute(text("""
+            SELECT UPPER(COALESCE(status,'')) AS status, COUNT(*) AS n
+            FROM   recurring_giving_subscriptions
+            GROUP  BY status
+        """))).mappings().all()
+        out["subscriptions"] = {str(r["status"] or "UNKNOWN"): int(r["n"]) for r in rows}
+
+        # ── £ totals + charge count for purpose='Monthly Giving' donations ─
+        # Any donation row inserted by _record_invoice_donation / the PayPal
+        # equivalent carries purpose='Monthly Giving'. COMPLETED only — a
+        # row with status != COMPLETED hasn't actually settled.
+        totals = (await db.execute(text("""
+            SELECT
+              COALESCE(SUM(CASE WHEN created_at >= date_trunc('month', NOW())
+                           THEN amount ELSE 0 END), 0) AS this_month,
+              COALESCE(SUM(CASE WHEN created_at >= date_trunc('month', NOW()) - INTERVAL '1 month'
+                              AND created_at <  date_trunc('month', NOW())
+                           THEN amount ELSE 0 END), 0) AS last_month,
+              COALESCE(SUM(CASE WHEN created_at >= date_trunc('year', NOW())
+                           THEN amount ELSE 0 END), 0) AS this_year,
+              COALESCE(SUM(amount), 0)       AS all_time,
+              COUNT(*)                       AS charge_count
+            FROM   donations
+            WHERE  purpose = 'Monthly Giving'
+              AND  UPPER(COALESCE(status,'')) = 'COMPLETED'
+        """))).mappings().first()
+        out["totals"] = {k: float(totals[k]) if k != "charge_count" else int(totals[k])
+                         for k in totals.keys()}
+
+        # ── Most recent monthly-giving charges ────────────────────────────
+        hard_limit = max(1, min(int(limit), 500))
+        rows = (await db.execute(text("""
+            SELECT d.id::text AS id, d.amount, d.currency, d.payment_provider,
+                   d.payment_ref, d.branch_id, d.created_at, d.status,
+                   COALESCE(d.gift_aid_eligible, false) AS gift_aid_eligible,
+                   c.email AS donor_email, c.first_name AS donor_first_name,
+                   c.surname AS donor_surname, c.full_name AS donor_name
+            FROM   donations d
+            LEFT JOIN contacts c ON c.id = d.contact_id
+            WHERE  d.purpose = 'Monthly Giving'
+            ORDER  BY d.created_at DESC
+            LIMIT  :lim
+        """), {"lim": hard_limit})).mappings().all()
+        out["recent_charges"] = [
+            {
+                **{k: (str(v) if k == "id" else
+                       float(v) if k == "amount" else
+                       v.isoformat() if hasattr(v, "isoformat") else v)
+                   for k, v in r.items()}
+            }
+            for r in rows
+        ]
+    return out
+
+
 @router.get("/admin/giving/subscriptions")
 async def admin_list_subscriptions(space: CurrentSpace) -> dict[str, Any]:
     from sqlalchemy import text

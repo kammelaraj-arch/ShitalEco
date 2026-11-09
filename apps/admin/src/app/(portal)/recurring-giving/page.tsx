@@ -27,6 +27,26 @@ const STATUS_COLOURS: Record<string, string> = {
   CANCELLED: '#f87171', SUSPENDED: '#fb923c', EXPIRED: '#94a3b8',
 }
 
+interface Charge {
+  id: string; amount: number; currency: string; payment_provider: string
+  payment_ref: string | null; branch_id: string; created_at: string
+  status: string; gift_aid_eligible: boolean
+  donor_email: string | null; donor_name: string | null
+  donor_first_name: string | null; donor_surname: string | null
+}
+interface GivingStats {
+  subscriptions: Record<string, number>
+  totals: {
+    this_month: number; last_month: number; this_year: number; all_time: number
+    charge_count: number
+  }
+  recent_charges: Charge[]
+}
+
+function fmtGBP(n: number): string {
+  return `£${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 export default function RecurringGivingPage() {
   const [tiers, setTiers]     = useState<Tier[]>([])
   const [subs, setSubs]       = useState<Sub[]>([])
@@ -36,6 +56,7 @@ export default function RecurringGivingPage() {
   const [copied, setCopied]   = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncNote, setSyncNote] = useState('')
+  const [stats, setStats]     = useState<GivingStats | null>(null)
 
   async function syncPayPal() {
     setSyncing(true); setSyncNote('')
@@ -200,7 +221,20 @@ export default function RecurringGivingPage() {
     }
   }
 
-  useEffect(() => { loadTiers(); loadSubs() }, [])
+  async function loadStats() {
+    try {
+      const r = await fetch(`${API}/admin/giving/stats?limit=50`, { headers: authHeaders() })
+      if (!r.ok) return
+      setStats(await r.json())
+    } catch { /* silent — the other data still loads */ }
+  }
+  useEffect(() => {
+    loadTiers(); loadSubs(); loadStats()
+    // Refresh stats + charges every 60 s so the strip stays fresh while
+    // the operator keeps the page open.
+    const iv = setInterval(loadStats, 60_000)
+    return () => clearInterval(iv)
+  }, [])
 
   // Track which sub-id is currently being refreshed (per-row spinner) and
   // the most recent refresh result for the inline status note.
@@ -283,15 +317,113 @@ export default function RecurringGivingPage() {
         </p>
       )}
 
+      {/* ── Live Monthly Giving stats strip ───────────────────────────────
+          Six tiles, refreshed every 60 s from /admin/giving/stats. Answers
+          the questions the operator used to have to compile by hand:
+            - how many subscriptions are ACTIVE right now?
+            - how much have we actually received this month / this year?
+            - how many individual charges have landed? */}
+      {stats && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {[
+            { k: 'this_month',     label: 'This month',       sub: 'from monthly giving',  value: fmtGBP(stats.totals.this_month),  tone: '#4ade80' },
+            { k: 'last_month',     label: 'Last month',       sub: 'from monthly giving',  value: fmtGBP(stats.totals.last_month),  tone: '#fbbf24' },
+            { k: 'this_year',      label: 'This year',        sub: 'all branches',          value: fmtGBP(stats.totals.this_year),   tone: '#f59e0b' },
+            { k: 'all_time',       label: 'All-time',         sub: 'since launch',          value: fmtGBP(stats.totals.all_time),    tone: '#D4AF37' },
+            { k: 'charge_count',   label: 'Successful charges', sub: 'invoices settled',    value: String(stats.totals.charge_count), tone: '#60a5fa' },
+            { k: 'active_subs',    label: 'Active subscriptions', sub: 'now billing',       value: String(stats.subscriptions.ACTIVE || 0), tone: '#86efac' },
+          ].map(s => (
+            <div key={s.k} className="rounded-xl p-4 relative overflow-hidden border border-white/5"
+              style={{ background: 'rgba(255,255,255,0.03)' }}>
+              <div className="absolute top-0 right-0 w-14 h-14 rounded-full blur-xl opacity-20"
+                style={{ background: s.tone }} />
+              <p className="text-white/50 text-[11px] font-medium uppercase tracking-wider">{s.label}</p>
+              <p className="text-2xl font-black text-white mt-1" style={{ color: s.tone }}>{s.value}</p>
+              <p className="text-white/30 text-[10px] mt-0.5">{s.sub}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-white/10">
-        {(['tiers', 'subs', 'links'] as const).map(t => (
+      <div className="flex gap-2 border-b border-white/10 flex-wrap">
+        {(['tiers', 'subs', 'charges', 'links'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${tab === t ? 'border-saffron-400 text-saffron-400' : 'border-transparent text-white/50 hover:text-white/80'}`}>
-            {t === 'tiers' ? `Donation Tiers (${tiers.length})` : t === 'subs' ? `Subscriptions (${subs.length})` : '🔗 Share Links'}
+            {t === 'tiers'   ? `Donation Tiers (${tiers.length})` :
+             t === 'subs'    ? `Subscriptions (${subs.length})` :
+             t === 'charges' ? `Recent Charges (${stats?.recent_charges.length ?? 0})` :
+                               '🔗 Share Links'}
           </button>
         ))}
       </div>
+
+      {/* Recent monthly-giving charges — the Stripe-style transaction list
+          the operator asked for. Pulled from the `donations` table where
+          purpose='Monthly Giving' (same rows the finance ledger shows). */}
+      {tab === 'charges' && (
+        <div className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-white font-bold">Recent monthly-giving charges</h2>
+            <p className="text-white/40 text-xs">Updates every 60 s · purpose=Monthly Giving · status=COMPLETED</p>
+          </div>
+          {(!stats || stats.recent_charges.length === 0) ? (
+            <p className="text-sm text-white/40 py-6 text-center">No monthly-giving charges yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-white/50 border-b border-white/10 uppercase text-[11px] tracking-wider">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Date / time</th>
+                    <th className="px-3 py-2 text-left font-semibold">Donor</th>
+                    <th className="px-3 py-2 text-left font-semibold">Provider</th>
+                    <th className="px-3 py-2 text-right font-semibold">Amount</th>
+                    <th className="px-3 py-2 text-center font-semibold">🇬🇧</th>
+                    <th className="px-3 py-2 text-left font-semibold">Branch</th>
+                    <th className="px-3 py-2 text-left font-semibold">Payment ref</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.recent_charges.map(c => {
+                    const d = new Date(c.created_at)
+                    const donorLabel = (c.donor_name || c.donor_email || '—').toString()
+                    return (
+                      <tr key={c.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <td className="px-3 py-2 text-white/80 text-xs whitespace-nowrap">
+                          {d.toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}
+                        </td>
+                        <td className="px-3 py-2 text-white/80 text-xs max-w-[220px] truncate" title={c.donor_email || ''}>
+                          {donorLabel}
+                        </td>
+                        <td className="px-3 py-2 text-xs capitalize">
+                          <span className="px-2 py-0.5 rounded-full border text-[11px] font-bold"
+                            style={{
+                              background: c.payment_provider?.toLowerCase() === 'stripe' ? 'rgba(99,91,255,0.15)' : 'rgba(0,70,193,0.15)',
+                              color:      c.payment_provider?.toLowerCase() === 'stripe' ? '#9FA8FF' : '#60A5FA',
+                              borderColor:c.payment_provider?.toLowerCase() === 'stripe' ? 'rgba(99,91,255,0.4)' : 'rgba(0,70,193,0.4)',
+                            }}>
+                            {c.payment_provider}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-sm font-bold text-green-400">
+                          {fmtGBP(c.amount)}
+                        </td>
+                        <td className="px-3 py-2 text-center text-xs">
+                          {c.gift_aid_eligible ? <span className="text-blue-300 font-bold">Yes</span> : <span className="text-white/20">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-white/60 text-xs">{c.branch_id}</td>
+                        <td className="px-3 py-2 text-white/40 text-[11px] font-mono truncate max-w-[180px]" title={c.payment_ref || ''}>
+                          {c.payment_ref || '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tiers tab */}
       {tab === 'tiers' && (
