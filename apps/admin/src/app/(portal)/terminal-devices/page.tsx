@@ -119,32 +119,10 @@ function DeviceModal({
 
   const isEdit = !!device
 
-  // SumUp Solo markers in label or serial. Shared with the backend's
-  // _reject_provider_mismatch check in terminal_devices.py so a value
-  // the backend will reject never gets saved in the first place.
-  function looksLikeSumUp(label: string, sumupSerial: string): boolean {
-    const s = sumupSerial.trim()
-    if (s.startsWith('2001') || s.startsWith('2002') || s.startsWith('rdr_')) return true
-    const lab = label.trim()
-    const low = lab.toLowerCase()
-    if (/\b(2001\d{7,8}|2002\d{7,8})\b/.test(lab)) return true
-    if (/^[a-z]+-[a-z]+-[a-z]+$/.test(low)) return true
-    if (low.includes('sumup') || /\bsolo\b/.test(low)) return true
-    return false
-  }
-  // Mutates the form patch so provider auto-flips to 'sumup' the moment
-  // the volunteer types a SumUp-looking label/serial. Stops the
-  // historical "forgot to switch the dropdown" regression at source.
-  const set = (k: keyof FormState, v: string) => setForm(f => {
-    const next = { ...f, [k]: v }
-    if (k === 'label' || k === 'sumup_reader_serial') {
-      if (looksLikeSumUp(next.label || '', next.sumup_reader_serial || '')
-          && next.provider !== 'sumup') {
-        next.provider = 'sumup'
-      }
-    }
-    return next
-  })
+  // Simple setter — no auto-correct, no derivation. Whichever Provider
+  // the admin picks from the dropdown is what we save. The admin UI is
+  // the source of truth for reader identity.
+  const set = (k: keyof FormState, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   async function save(confirmProtected = false) {
     if (!form.label.trim()) { setError('Label is required'); return }
@@ -218,65 +196,27 @@ function DeviceModal({
             <div className="bg-red-500/15 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>
           )}
 
-          {/* Provider — DERIVED from the identity fields the volunteer
-              types below. There is no dropdown any more. The backend
-              computes the provider from whichever id/serial is set and
-              ignores anything the client sends for `provider`. That is
-              the permanent fix for the "STRIPE on SumUp" regression:
-              volunteers cannot pick the wrong provider because the
-              provider is no longer a choice. */}
-          <div className="rounded-xl border border-white/10 bg-white/3 px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-white/50 text-xs font-semibold uppercase tracking-wider mb-1">
-                  Provider — set automatically
-                </p>
-                <p className="text-white/60 text-xs leading-snug">
-                  The system reads the reader IDs you type below and picks the
-                  right provider. No more wrong choices.
-                </p>
-              </div>
-              {(() => {
-                // Mirror of the backend's _derive_provider rules.
-                const s = form.sumup_reader_serial.trim()
-                const c = form.clover_device_id.trim()
-                const t = form.stripe_reader_id.trim()
-                const q = form.square_device_id.trim()
-                const lab = form.label.trim()
-                const low = lab.toLowerCase()
-                const sumup_from_label =
-                  !!lab && (
-                    /\b(2001\d{7,8}|2002\d{7,8})\b/.test(lab) ||
-                    /^[a-z]+-[a-z]+-[a-z]+$/.test(low) ||
-                    low.includes('sumup') ||
-                    /\bsolo\b/.test(low)
-                  )
-                let derived = ''
-                if (s) derived = 'sumup'
-                else if (c) derived = 'clover'
-                else if (t.startsWith('tmr_')) derived = 'stripe_terminal'
-                else if (q) derived = 'square'
-                else if (sumup_from_label) derived = 'sumup'
-                const meta: Record<string, { label: string; icon: string; cls: string }> = {
-                  sumup:           { label: 'SumUp',     icon: '💳', cls: 'bg-green-500/15 text-green-300 border-green-500/40' },
-                  stripe_terminal: { label: 'Stripe',    icon: '⚡', cls: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/40' },
-                  clover:          { label: 'Clover',    icon: '🍀', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
-                  square:          { label: 'Square',    icon: '◼',  cls: 'bg-slate-500/15 text-slate-300 border-slate-500/40' },
-                }
-                if (!derived) {
-                  return (
-                    <span className="px-3 py-1.5 rounded-full text-xs font-bold border bg-white/5 border-white/15 text-white/40 whitespace-nowrap">
-                      ⚠ Enter a reader ID below
-                    </span>
-                  )
-                }
-                const m = meta[derived]
-                return (
-                  <span className={`px-3 py-1.5 rounded-full text-xs font-bold border ${m.cls} whitespace-nowrap`}>
-                    {m.icon} Will save as: {m.label}
-                  </span>
-                )
-              })()}
+          {/* Provider — the admin explicitly picks this. No automatic
+              derivation anywhere; whatever's selected here is what we
+              save. Pair this with the matching Reader ID field below
+              (SumUp serial / Stripe reader id / Clover id / Square id). */}
+          <div>
+            <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider mb-2">Provider</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {PROVIDERS.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => set('provider', p.id)}
+                  className={`p-3 rounded-xl border text-sm font-semibold transition-all text-center ${
+                    form.provider === p.id
+                      ? 'bg-saffron-400/15 border-saffron-400/40 text-saffron-400'
+                      : 'bg-white/3 border-white/5 text-white/40 hover:border-white/15'
+                  }`}
+                >
+                  <span className="block text-xl mb-1">{p.icon}</span>
+                  <span className="text-xs leading-tight">{p.label}</span>
+                </button>
+              ))}
             </div>
           </div>
 
