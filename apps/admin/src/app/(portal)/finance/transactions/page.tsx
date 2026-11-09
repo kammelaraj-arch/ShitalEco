@@ -632,17 +632,22 @@ function TxnDetail({ txn, onClose }: { txn: Txn; onClose: () => void }) {
   }
   return (
     <>
-      <div onClick={onClose} className="fixed inset-0 bg-black/60 z-40" />
-      <div className="fixed right-0 top-0 h-full w-full sm:max-w-xl bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
-        <div className="px-6 py-5 border-b border-white/5 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-white/40 text-xs uppercase tracking-widest font-bold">{txn.provider} · {txn.kind || '—'}</p>
-            <h2 className="text-white font-black text-2xl mt-1 font-mono">{money(txn.amount_pence)}</h2>
-            <p className="text-white/50 text-xs mt-1">{when(txn.provider_created_at)}</p>
+      {/* Centred popup instead of the old right-side drawer. Operator asked
+          for it to open as a popup not an inline column, so the table stays
+          visible behind the dimmed backdrop and the detail reads as a modal.
+          Click the backdrop or the ✕ to close. */}
+      <div onClick={onClose} className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div className="pointer-events-auto w-full max-w-2xl max-h-[88vh] rounded-2xl bg-temple-deep border border-white/10 shadow-2xl flex flex-col overflow-hidden">
+          <div className="px-6 py-5 border-b border-white/5 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-white/40 text-xs uppercase tracking-widest font-bold">{txn.provider} · {txn.kind || '—'}</p>
+              <h2 className="text-white font-black text-2xl mt-1 font-mono">{money(txn.amount_pence)}</h2>
+              <p className="text-white/50 text-xs mt-1">{when(txn.provider_created_at)}</p>
+            </div>
+            <button onClick={onClose} className="text-white/40 hover:text-white text-xl p-1 flex-shrink-0">✕</button>
           </div>
-          <button onClick={onClose} className="text-white/40 hover:text-white text-xl p-1">✕</button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 text-sm">
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 text-sm">
           <Section title="Money">
             <KV label="Gross" value={money(txn.amount_pence)} />
             <KV label="Fee"   value={txn.fee_pence ? money(txn.fee_pence) : '—'} tone={txn.fee_pence ? 'red' : undefined} />
@@ -690,6 +695,7 @@ function TxnDetail({ txn, onClose }: { txn: Txn; onClose: () => void }) {
               } />
             )}
           </Section>
+          </div>
         </div>
       </div>
     </>
