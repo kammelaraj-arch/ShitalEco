@@ -168,28 +168,16 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
         except Exception as exc:  # noqa: BLE001
             logger.warning("boot_heal_paypal_orphans_failed", error=str(exc))
 
-        try:
-            # Card-reader provider heal — fix rows where the admin form
-            # defaulted to provider='stripe_terminal' when the serial is
-            # clearly a SumUp Solo (volunteer forgot to switch the
-            # dropdown at pair-time). The current classifier is
-            # conservative — it only touches rows where the evidence is
-            # unambiguous (serial starts with 2001/2002/rdr_ or the
-            # label matches SumUp Solo naming), so this is safe to run
-            # on every boot. The bad silent-flip from before was caused
-            # by a different sweep that classified by stripe_reader_id
-            # first and got cross-wired on placeholder tmr_ ids — that
-            # sweep has been removed and this one has been proven safe
-            # in the audit log every time the admin ran it manually.
-            from shital.api.routers.card_reader_health import (
-                _heal_misclassified_once,
-            )
-            res = await _a.wait_for(_heal_misclassified_once(), timeout=30)
-            logger.info("boot_heal_card_reader_providers",
-                        healed=res.get("healed_count", 0),
-                        skipped=res.get("skipped_count", 0))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("boot_heal_card_reader_providers_failed", error=str(exc))
+        # NOTE — the card-reader auto-heal boot step was intentionally
+        # REMOVED (previously called _heal_misclassified_once on every
+        # start). Per operator policy, the Admin UI is the only source
+        # of truth for reader identity: whoever creates the kiosk
+        # explicitly assigns the reader and its provider; nothing on the
+        # server reclassifies it after. The `_heal_misclassified_once`
+        # function and the `/heal-misclassified` endpoint still exist in
+        # card_reader_health.py so an admin can run it manually from the
+        # terminal-devices page if they ever want to — they're just not
+        # fired automatically.
 
         try:
             # Stripe giving reconcile — Pass B self-links orphan paid
