@@ -264,6 +264,87 @@ async def scan_health(ctx: CurrentSpace) -> dict[str, Any]:
     return out
 
 
+async def _heal_misclassified_once(actor_email: str = "boot_heal",
+                                    actor_role: str | None = None) -> dict[str, Any]:
+    """Internal entry-point for the periodic heal — same work the admin
+    endpoint does, no auth check, no ctx requirement. Used by the
+    backend's _boot_heals and the 15-minute recovery loop so the fleet
+    self-heals even when nobody has clicked the admin button in weeks.
+    Returns the same shape heal_misclassified() returns."""
+    # Reuse scan_health's query by calling it with a synthetic "space"
+    # — scan_health only uses ctx.role, which we fake here. We DO want to
+    # keep the admin-facing endpoint behind auth, so route through a
+    # simple shim: build a minimal ctx-like object that satisfies the
+    # role check.
+    class _FakeSpace:
+        role = "SUPER_ADMIN"
+        user_email = actor_email
+    scan = await scan_health(_FakeSpace())  # type: ignore[arg-type]
+    healed: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    for item in scan["misclassified_terminal_devices"]:
+        async with SessionLocal() as db:
+            before = await snapshot(db, "terminal_devices", item["id"])
+            if not before:
+                skipped.append({**item, "reason": "row vanished between scan and heal"})
+                continue
+            label_serial = _extract_sumup_serial_from_label(before.get("label") or "")
+            backfill_sumup = (
+                item["expected_provider"] == "sumup"
+                and not (before.get("sumup_reader_serial") or "").strip()
+                and label_serial
+            )
+            if backfill_sumup:
+                result = await db.execute(text("""
+                    UPDATE terminal_devices
+                    SET provider            = :prov,
+                        sumup_reader_serial = :serial,
+                        stripe_reader_id    = NULL,
+                        clover_device_id    = NULL,
+                        updated_at          = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                      AND deleted_at IS NULL
+                      AND provider = :old_prov
+                    RETURNING id
+                """), {"id": item["id"], "prov": item["expected_provider"],
+                       "old_prov": item["current_provider"], "serial": label_serial})
+            else:
+                result = await db.execute(text("""
+                    UPDATE terminal_devices
+                    SET provider = :prov, updated_at = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                      AND deleted_at IS NULL
+                      AND provider = :old_prov
+                    RETURNING id
+                """), {"id": item["id"], "prov": item["expected_provider"],
+                       "old_prov": item["current_provider"]})
+            row = result.first()
+            await db.commit()
+            after = await snapshot(db, "terminal_devices", item["id"])
+
+        if not row:
+            skipped.append({**item, "reason": "provider changed between scan and heal"})
+            continue
+        await record_audit(
+            actor_email=actor_email, actor_role=actor_role,
+            action="auto_heal_misclassified",
+            entity_type="terminal_devices", entity_id=item["id"],
+            branch_id=item.get("branch_id"),
+            source_endpoint="boot_heal",
+            before=before, after=after,
+            diff_summary=(
+                f"auto-healed misclassified reader: provider "
+                f"'{item['current_provider']}' → '{item['expected_provider']}' "
+                f"(evidence: {item['evidence']})"
+            ),
+        )
+        healed.append(item)
+
+    return {"healed": healed, "healed_count": len(healed),
+            "skipped": skipped, "skipped_count": len(skipped)}
+
+
 @router.post("/heal-misclassified")
 async def heal_misclassified(ctx: CurrentSpace) -> dict[str, Any]:
     """Auto-fix the serial-format misclassifications. The other three

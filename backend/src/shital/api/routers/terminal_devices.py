@@ -34,6 +34,67 @@ _PROTECTED_FIELDS = ("provider", "stripe_reader_id", "sumup_reader_serial",
                      "clover_device_id", "branch_id")
 
 
+# Provider / identity validation. The admin form defaults to
+# provider='stripe_terminal', which means a volunteer pairing a SumUp Solo
+# forgets to switch the dropdown and the row saves as Stripe despite a
+# SumUp serial. That's how the Kiosks panel ends up showing "Solo-Wem-02
+# STRIPE" — correctly reflecting the DB but obviously wrong in meaning.
+# Reject the save at the API boundary so the next regression fails loudly
+# instead of lurking until a volunteer notices.
+def _reject_provider_mismatch(provider: str,
+                              label: str,
+                              sumup_serial: str,
+                              stripe_reader_id: str,
+                              clover_device_id: str) -> None:
+    import re as _re
+    p = (provider or "").strip().lower()
+    s = (sumup_serial or "").strip()
+    lab = (label or "").strip()
+    low = lab.lower()
+
+    # Any of these says "this is a SumUp" unambiguously.
+    sumup_markers = (
+        s.startswith(("2001", "2002", "rdr_")) or
+        bool(_re.search(r"\b(2001\d{7,8}|2002\d{7,8})\b", lab)) or
+        bool(_re.match(r"^[a-z]+-[a-z]+-[a-z]+$", low)) or
+        "sumup" in low or
+        bool(_re.search(r"\bsolo\b", low))
+    )
+    stripe_markers = (
+        bool(stripe_reader_id and stripe_reader_id.startswith("tmr_"))
+    )
+    clover_markers = bool((clover_device_id or "").strip())
+
+    if sumup_markers and p != "sumup":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The serial '{s}' or label '{lab}' looks like a SumUp Solo "
+                f"(serial 2001…/2002…/rdr_… or three-hyphenated words) but "
+                f"the Provider is '{p}'. Set Provider to 'sumup' and save "
+                f"again. (This block exists because mis-pairing was the "
+                f"single biggest source of 'STRIPE' labels on SumUp readers.)"
+            ),
+        )
+    if stripe_markers and p != "stripe_terminal":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The stripe_reader_id '{stripe_reader_id}' starts with "
+                f"'tmr_' (a Stripe Terminal id) but Provider is '{p}'. "
+                f"Set Provider to 'stripe_terminal' and save again."
+            ),
+        )
+    if clover_markers and p != "clover":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"clover_device_id is set but Provider is '{p}'. "
+                f"Set Provider to 'clover' and save again."
+            ),
+        )
+
+
 # ─── Pydantic models ──────────────────────────────────────────────────────────
 
 class DeviceCreate(BaseModel):
@@ -205,6 +266,16 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
 
     from shital.core.fabrics.database import SessionLocal
 
+    # Fail fast if the provider dropdown disagrees with the serial/label.
+    # See _reject_provider_mismatch for the full rule set.
+    _reject_provider_mismatch(
+        provider=body.provider,
+        label=body.label,
+        sumup_serial=body.sumup_reader_serial,
+        stripe_reader_id=body.stripe_reader_id,
+        clover_device_id=body.clover_device_id,
+    )
+
     device_id = str(uuid.uuid4())
     now = datetime.utcnow()
 
@@ -309,6 +380,18 @@ async def update_device(
         before = await snapshot(db, "terminal_devices", device_id)
         if not before:
             raise HTTPException(status_code=404, detail="Device not found")
+
+        # Provider/identity sanity check — reject provider=stripe when
+        # the serial clearly indicates SumUp (or vice-versa). Uses the
+        # MERGED view (fields that ARE changing + fields the row already
+        # had) so a partial patch doesn't bypass the check.
+        _reject_provider_mismatch(
+            provider=fields.get("provider", before.get("provider") or ""),
+            label=fields.get("label", before.get("label") or ""),
+            sumup_serial=fields.get("sumup_reader_serial", before.get("sumup_reader_serial") or ""),
+            stripe_reader_id=fields.get("stripe_reader_id", before.get("stripe_reader_id") or ""),
+            clover_device_id=fields.get("clover_device_id", before.get("clover_device_id") or ""),
+        )
 
         # Protected-field guard
         if not confirm_protected_change:
