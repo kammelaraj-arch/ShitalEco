@@ -1256,6 +1256,57 @@ async def recovery_loop_supervised() -> None:
         await asyncio.sleep(delay)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Fast Stripe-giving self-heal loop — 60 s cadence, 1-day window
+# ─────────────────────────────────────────────────────────────────────────────
+# The main recovery_loop above runs every 15 min which, for Stripe monthly
+# giving, is too slow: a donor whose Checkout session landed before the
+# webhook fired (STRIPE_WEBHOOK_SECRET drifted, URL wrong, network blip)
+# sees a visibly PENDING subscription until the next 15-min pass. Operators
+# then page the engineer to "fix pending" every week. This loop runs the
+# same reconcile at 60 s with a tight 1-day window — cheap Stripe API calls
+# (one Subscription.list + one Session.list per minute) and the pending
+# pain self-clears within a minute of Stripe settling the payment.
+
+async def stripe_giving_fast_loop() -> None:
+    """60 s / 1-day cadence for Stripe monthly-giving reconcile.
+
+    Independent of the main recovery loop so a stuck sweep elsewhere
+    doesn't delay this one. Supervised the same way — if it crashes, back
+    off and restart."""
+    await asyncio.sleep(90)  # Let boot-time reconcile + schema patch finish.
+    while True:
+        try:
+            from shital.api.routers.stripe_giving import _stripe_giving_reconcile_once
+            # 1-day window is enough: anything older than a day in
+            # PENDING_APPROVAL is already EXPIRED by Pass 0 of the reconcile.
+            await _run_sweep(
+                "stripe_giving_fast",
+                lambda: _stripe_giving_reconcile_once(days=1),
+                timeout=45,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("stripe_giving_fast_loop_pass_failed", error=str(exc))
+        await asyncio.sleep(60)
+
+
+async def stripe_giving_fast_loop_supervised() -> None:
+    """Same restart policy as the main recovery supervisor."""
+    delay = 10
+    while True:
+        try:
+            logger.info("stripe_giving_fast_loop_starting")
+            await stripe_giving_fast_loop()
+        except asyncio.CancelledError:
+            logger.info("stripe_giving_fast_loop_cancelled")
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.error("stripe_giving_fast_loop_crashed", error=str(exc))
+        delay = min(delay * 2, 600)
+        logger.info("stripe_giving_fast_loop_restart_in", seconds=delay)
+        await asyncio.sleep(delay)
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Removed in #273:

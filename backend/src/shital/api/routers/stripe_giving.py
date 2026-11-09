@@ -964,6 +964,56 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
                 summary["activated"] += 1
                 await _record_paid_invoices(str(sub.get("id")))
 
+        # ── Pass C · orphans via Checkout Session ────────────────────────
+        # Pass B keys on ``Subscription.metadata.rgs_id``. That works in the
+        # happy path but has quietly failed in the field — operators kept
+        # hitting the pain where the diagnostic banner says "N Stripe
+        # sessions · 1 paid · 1 unlinked. Webhook + confirm paths both
+        # missed" even after Pass B ran. Reasons we've seen:
+        #   - Stripe sometimes doesn't propagate subscription_data.metadata
+        #     onto the Subscription object in older Stripe accounts.
+        #   - The Subscription.list query is paginated at 100 and a busy
+        #     window of trial / test subs can push a real one off the first
+        #     page before Pass B scans it.
+        #   - A donor returned to the thank-you page too fast → /confirm
+        #     bailed on `payment_status=unpaid` → the webhook never arrived
+        #     because STRIPE_WEBHOOK_SECRET drifted since the last rotate.
+        # The Checkout Session carries ``client_reference_id = rgs_id``
+        # DIRECTLY (not inside metadata), set at create time, and PAID
+        # sessions also expose ``subscription``. So we can link any orphan
+        # whose rgs_id matches a PAID Checkout Session even when every
+        # other path has silently failed — the system heals itself without
+        # the operator going anywhere near Stripe Dashboard or API Keys.
+        if want:
+            try:
+                sess_iter = stripe.checkout.Session.list(
+                    created={"gte": since}, limit=100,
+                ).auto_paging_iter()
+            except Exception:  # noqa: BLE001
+                sess_iter = iter(())
+            for sess in sess_iter:
+                rgs = str(sess.get("client_reference_id") or "")
+                if rgs not in want:
+                    continue
+                status = sess.get("status") or ""
+                pay    = sess.get("payment_status") or ""
+                if status != "complete" or pay not in ("paid", "no_payment_required"):
+                    continue
+                try:
+                    full = stripe.checkout.Session.retrieve(
+                        sess.get("id"),
+                        expand=["customer_details", "subscription", "custom_fields"],
+                    )
+                    data = full if isinstance(full, dict) else full.to_dict()
+                    await _handle_checkout_completed(data)
+                    want.discard(rgs)
+                    summary["linked_orphans"] += 1
+                    summary["activated"]      += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("stripe_passC_link_failed",
+                                   session_id=str(sess.get("id")), error=str(exc))
+                    summary["errors"] += 1
+
         # Anything still unmatched and old → reap so it stops showing as pending.
         # Only PENDING_APPROVAL rows get reaped — EXPIRED rows that stayed in
         # `want` (because we scanned them above but Stripe has no matching
