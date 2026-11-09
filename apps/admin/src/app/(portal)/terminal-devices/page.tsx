@@ -50,8 +50,15 @@ interface FormState {
 
 const DEFAULT_LOCATION_ID = 'tml_Gcuz0gCsvSvQZg'
 
+// New-device form starts with NO provider selected. This is the permanent
+// fix for the SumUp-labeled-Stripe regression — the form previously
+// defaulted to 'stripe_terminal', which meant a volunteer pairing a SumUp
+// Solo just had to forget to change the dropdown and the row saved wrong.
+// Now there is no default; Save is disabled until the admin picks one.
+// The dropdown is still the sole source of truth (per operator policy
+// "user picks, no automatic"), but it doesn't lie about what they picked.
 const EMPTY_FORM: FormState = {
-  branch_id: '', branch_name: '', label: '', provider: 'stripe_terminal',
+  branch_id: '', branch_name: '', label: '', provider: '',
   stripe_reader_id: '', stripe_location_id: DEFAULT_LOCATION_ID, square_device_id: '',
   clover_device_id: '', sumup_reader_serial: '',
   device_type: '', serial_number: '',
@@ -127,6 +134,7 @@ function DeviceModal({
   async function save(confirmProtected = false) {
     if (!form.label.trim()) { setError('Label is required'); return }
     if (!form.branch_id.trim()) { setError('Branch ID is required'); return }
+    if (!form.provider) { setError('Please pick a Provider — none selected.'); return }
 
     setSaving(true)
     setError('')
@@ -199,10 +207,19 @@ function DeviceModal({
           {/* Provider — the admin explicitly picks this. No automatic
               derivation anywhere; whatever's selected here is what we
               save. Pair this with the matching Reader ID field below
-              (SumUp serial / Stripe reader id / Clover id / Square id). */}
+              (SumUp serial / Stripe reader id / Clover id / Square id).
+              NO DEFAULT — the form opens with none selected and Save is
+              disabled until one is picked. */}
           <div>
-            <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider mb-2">Provider</label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <div className="flex items-baseline justify-between mb-2">
+              <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider">Provider *</label>
+              {!form.provider && !isEdit && (
+                <span className="text-[11px] text-amber-300/90 font-semibold">
+                  ⚠ Pick one — not pre‑selected on purpose
+                </span>
+              )}
+            </div>
+            <div className={`grid grid-cols-2 sm:grid-cols-3 gap-2 ${!form.provider && !isEdit ? 'ring-1 ring-amber-400/40 rounded-xl p-0.5' : ''}`}>
               {PROVIDERS.map(p => (
                 <button
                   key={p.id}
@@ -292,8 +309,13 @@ function DeviceModal({
           </button>
           <button
             onClick={() => save()}
-            disabled={saving}
-            className="px-6 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white text-sm font-black shadow-lg disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
+            disabled={saving || !form.provider || !form.label.trim() || !form.branch_id.trim()}
+            title={
+              !form.provider ? 'Pick a Provider above' :
+              !form.label.trim() ? 'Enter a device label' :
+              !form.branch_id.trim() ? 'Pick a branch' : ''
+            }
+            className="px-6 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white text-sm font-black shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95"
           >
             {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Register Device'}
           </button>
