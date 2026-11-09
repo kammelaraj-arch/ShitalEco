@@ -986,50 +986,61 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
         # whose rgs_id matches a PAID Checkout Session even when every
         # other path has silently failed — the system heals itself without
         # the operator going anywhere near Stripe Dashboard or API Keys.
-        if want:
-            try:
-                sess_iter = stripe.checkout.Session.list(
-                    created={"gte": since}, limit=100,
-                ).auto_paging_iter()
-            except Exception:  # noqa: BLE001
-                sess_iter = iter(())
-            for sess in sess_iter:
-                # Accept rgs_id from EITHER client_reference_id OR metadata.
-                # Older paid sessions created before PR #329 shipped may only
-                # have it in metadata.rgs_id, not in client_reference_id at
-                # top-level. We already check metadata on the Subscription in
-                # Pass B, but this gives us a third path — Session metadata
-                # — which covers the "orphan from before the fix" case the
-                # operator kept seeing stuck at "1 unlinked".
-                rgs = (
-                    str(sess.get("client_reference_id") or "") or
-                    str((sess.get("metadata") or {}).get("rgs_id") or "")
-                )
-                if rgs not in want:
-                    continue
-                status = sess.get("status") or ""
-                pay    = sess.get("payment_status") or ""
-                # Accept paid OR status=complete (same test the diagnostic
-                # uses) — a session can briefly be status=complete with
-                # payment_status=unpaid during Stripe's own internal
-                # settlement; waiting for payment_status=paid would miss it
-                # in that window.
-                if status != "complete" and pay not in ("paid", "no_payment_required"):
-                    continue
-                try:
-                    full = stripe.checkout.Session.retrieve(
-                        sess.get("id"),
-                        expand=["customer_details", "subscription", "custom_fields"],
-                    )
-                    data = full if isinstance(full, dict) else full.to_dict()
-                    await _handle_checkout_completed(data)
-                    want.discard(rgs)
-                    summary["linked_orphans"] += 1
-                    summary["activated"]      += 1
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("stripe_passC_link_failed",
-                                   session_id=str(sess.get("id")), error=str(exc))
-                    summary["errors"] += 1
+    # Pass C always runs now — even when `want` is empty — so paid
+    # sessions whose rgs_id doesn't match ANY existing DB row still get
+    # linked (by _link_subscription_row's fallback INSERT). Previously
+    # we skipped Pass C when want was empty, which left those "no DB
+    # row for this rgs_id" cases stuck as diagnostic "1 unlinked"
+    # forever. _handle_checkout_completed is fully idempotent — it
+    # SELECTs by stripe_subscription_id before INSERTing — so
+    # re-processing an already-linked session is a no-op.
+    try:
+        sess_iter = stripe.checkout.Session.list(
+            created={"gte": since}, limit=100,
+        ).auto_paging_iter()
+    except Exception:  # noqa: BLE001
+        sess_iter = iter(())
+    for sess in sess_iter:
+        status = sess.get("status") or ""
+        pay    = sess.get("payment_status") or ""
+        # Accept paid OR status=complete (same test the diagnostic
+        # uses) — a session can briefly be status=complete with
+        # payment_status=unpaid during Stripe's own internal
+        # settlement; waiting for payment_status=paid would miss it
+        # in that window.
+        if status != "complete" and pay not in ("paid", "no_payment_required"):
+            continue
+        # Accept rgs_id from EITHER client_reference_id OR metadata.
+        # Older paid sessions created before PR #329 shipped may only
+        # have it in metadata.rgs_id, not in client_reference_id at
+        # top-level. We already check metadata on the Subscription in
+        # Pass B, but this gives us a third path — Session metadata.
+        rgs = (
+            str(sess.get("client_reference_id") or "") or
+            str((sess.get("metadata") or {}).get("rgs_id") or "")
+        )
+        # If rgs_id matches an orphan in `want`, link + remove from set
+        # so Pass C doesn't also reap it as expired. If it doesn't
+        # match (either empty or an rgs_id with no DB row at all) we
+        # STILL call _handle_checkout_completed — it will INSERT a
+        # fresh ACTIVE row keyed by stripe_subscription_id. That is
+        # the fix for the stuck "paid with rgs but unlinked" diagnostic
+        # that would never clear otherwise.
+        try:
+            full = stripe.checkout.Session.retrieve(
+                sess.get("id"),
+                expand=["customer_details", "subscription", "custom_fields"],
+            )
+            data = full if isinstance(full, dict) else full.to_dict()
+            await _handle_checkout_completed(data)
+            if rgs and rgs in want:
+                want.discard(rgs)
+                summary["linked_orphans"] += 1
+            summary["activated"] += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stripe_passC_link_failed",
+                           session_id=str(sess.get("id")), error=str(exc))
+            summary["errors"] += 1
 
         # Anything still unmatched and old → reap so it stops showing as pending.
         # Only PENDING_APPROVAL rows get reaped — EXPIRED rows that stayed in

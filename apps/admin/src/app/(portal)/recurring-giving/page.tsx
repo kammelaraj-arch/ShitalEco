@@ -379,7 +379,21 @@ export default function RecurringGivingPage() {
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${tab === t ? 'border-saffron-400 text-saffron-400' : 'border-transparent text-white/50 hover:text-white/80'}`}>
             {t === 'tiers'   ? `Donation Tiers (${tiers.length})` :
-             t === 'subs'    ? `Subscriptions (${subs.length})` :
+             t === 'subs'    ? (() => {
+               // Show the USEFUL number first (how many are currently
+               // billing) and the gross total in a muted second clause
+               // so the tab stops looking like 153 live subscribers when
+               // most of those rows are abandoned Checkouts.
+               const active   = stats?.subscriptions.ACTIVE          || 0
+               const pending  = stats?.subscriptions.PENDING_APPROVAL || 0
+               const expired  = stats?.subscriptions.EXPIRED          || 0
+               const canceled = stats?.subscriptions.CANCELLED        || 0
+               const total    = subs.length
+               return `Subscriptions · ${active} active · ${pending} pending · ${total} all`
+                 // Compact for mobile
+                 .replace(active + ' active', `${active} active`)
+                 + (expired + canceled > 0 ? ` (· ${expired + canceled} ended)` : '')
+             })() :
              t === 'charges' ? `Recent Charges (${stats?.recent_charges.length ?? 0})` :
                                '🔗 Share Links'}
           </button>
