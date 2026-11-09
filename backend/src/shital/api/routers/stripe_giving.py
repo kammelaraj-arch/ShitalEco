@@ -1103,21 +1103,44 @@ async def confirm_checkout(body: ConfirmBody) -> dict[str, Any]:
         return {"ok": False, "reason": "stripe_not_configured"}
     if not body.session_id:
         return {"ok": False, "reason": "missing_session_id"}
-    try:
-        session = stripe.checkout.Session.retrieve(
-            body.session_id,
-            expand=["customer_details", "subscription", "custom_fields"],
-        )
-        data = session if isinstance(session, dict) else session.to_dict()
-        status = data.get("status")
-        pay = data.get("payment_status")
-        if status == "complete" or pay in ("paid", "no_payment_required"):
-            await _handle_checkout_completed(data)
-            return {"ok": True, "status": "active"}
-        return {"ok": False, "reason": f"status={status} payment_status={pay}"}
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("stripe_confirm_failed", error=str(exc), session_id=body.session_id)
-        return {"ok": False, "reason": str(exc)[:200]}
+    # Poll Stripe up to 5 times at 1.5 s intervals (~7.5 s wall-clock)
+    # before giving up. Stripe's internal settlement for a just-submitted
+    # card can lag a second or two — the donor clicks Pay, bounces back,
+    # and Session.payment_status is still 'unpaid' for a brief window even
+    # though the real-world outcome is already "paid". A single retrieve
+    # used to miss that window → /confirm returned ok=false → the row sat
+    # PENDING_APPROVAL until the 60 s self-heal loop found it. This loop
+    # closes the gap so the thank-you page usually sees ACTIVE on the very
+    # first call from the SPA.
+    import asyncio as _a
+    for attempt in range(5):
+        try:
+            session = stripe.checkout.Session.retrieve(
+                body.session_id,
+                expand=["customer_details", "subscription", "custom_fields"],
+            )
+            data = session if isinstance(session, dict) else session.to_dict()
+            status = data.get("status")
+            pay = data.get("payment_status")
+            if status == "complete" or pay in ("paid", "no_payment_required"):
+                await _handle_checkout_completed(data)
+                return {"ok": True, "status": "active"}
+            # Not yet settled — wait and retry (except on the last attempt).
+            if attempt < 4:
+                await _a.sleep(1.5)
+                continue
+            return {"ok": False, "reason": f"status={status} payment_status={pay}"}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stripe_confirm_failed",
+                           error=str(exc), session_id=body.session_id, attempt=attempt)
+            # A retrieve error isn't always terminal (brief Stripe 5xx) — one
+            # retry, then give up so the 60 s self-heal loop can handle it.
+            if attempt < 4:
+                await _a.sleep(1.5)
+                continue
+            return {"ok": False, "reason": str(exc)[:200]}
+    # Unreachable, but satisfies the type checker.
+    return {"ok": False, "reason": "unknown"}
 
 
 # ── Admin diagnostic ──────────────────────────────────────────────────────────
