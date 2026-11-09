@@ -233,15 +233,18 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             prefill = {"customer_email": email}
 
-    # Core session — everything the payment needs. This is the CARD path;
-    # Monthly Giving has its own PayPal button, so card only (no PayPal/Link).
-    #
-    # Stripe deprecated `payment_method_types` on Checkout.Session.create —
-    # payment methods are now configured in the Stripe Dashboard
-    # (Settings → Payments → Payment methods). We leave the choice there;
-    # the dashboard is set to card-only for this account.
+    # Core session — CARD-ONLY. We force `payment_method_types=['card']`
+    # so Stripe's hosted page NEVER offers PayPal, Google Pay, Klarna or
+    # Link beside the card tile, whatever the dashboard's Payment Methods
+    # settings look like. The donor's choice of provider must be made on
+    # OUR portal (where Monthly Giving is explicitly Stripe-only), not on
+    # Stripe's page — a second PayPal button inside the Stripe flow
+    # creates duplicate subscriptions and makes reconciliation a mess.
+    # `payment_method_types` is still a supported, documented parameter;
+    # the older comment here claiming it was "deprecated" was wrong.
     base_kwargs: dict[str, Any] = dict(
         mode="subscription",
+        payment_method_types=["card"],
         line_items=[{
             "price_data": {
                 "currency": "gbp",

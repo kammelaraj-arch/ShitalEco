@@ -46,17 +46,16 @@ export function MonthlyGivingPage() {
 
   const [giftAidDeclared, setGiftAidDeclared] = useState(false)
 
-  const [customMode, setCustomMode] = useState(false)
   const [customAmount, setCustomAmount] = useState('')
   const customAmountValid = (() => {
     const n = parseFloat(customAmount)
     return Number.isFinite(n) && n >= 1 && n <= 1000
   })()
-  function pickCustom() {
-    setCustomMode(true)
-    setSelected(null)
-  }
-  function confirmCustom() {
+  // The custom amount is the source of truth whenever the donor has typed
+  // anything in the custom field. No Set button, no "Other amount" chip —
+  // every keystroke of a valid number flows straight into `selected`.
+  useEffect(() => {
+    if (!customAmount.trim()) return
     if (!customAmountValid) return
     const n = parseFloat(customAmount)
     setSelected({
@@ -68,7 +67,11 @@ export function MonthlyGivingPage() {
       is_default: false,
       display_order: 999,
     })
-  }
+  }, [customAmount, customAmountValid])
+  // The dashed "Other amount" card is gone — this derived flag just marks
+  // "is the current selection the custom one" so the tile highlighting stays
+  // consistent with how it used to look.
+  const customMode = selected?.id === 'custom'
 
   const detailsValid = firstName.trim().length > 0 && surname.trim().length > 0 && donorEmail.trim().includes('@') && selectedAddress.length > 3
 
@@ -344,7 +347,7 @@ export function MonthlyGivingPage() {
           </p>
           <div className="grid grid-cols-2 gap-3 mb-3">
             {tiers.map(tier => (
-              <button key={tier.id} onClick={() => { setCustomMode(false); setSelected(tier) }}
+              <button key={tier.id} onClick={() => { setCustomAmount(''); setSelected(tier) }}
                 className="rounded-2xl p-4 text-left transition-all active:scale-[0.98]"
                 style={{
                   background: selected?.id === tier.id && !customMode
@@ -361,84 +364,54 @@ export function MonthlyGivingPage() {
                 <p className="text-xs mt-1" style={{ color: 'rgba(255,248,220,0.4)' }}>{tier.description}</p>
               </button>
             ))}
-
-            <button onClick={pickCustom}
-              className="rounded-2xl p-4 text-left transition-all active:scale-[0.98] col-span-2"
-              style={{
-                background: customMode
-                  ? 'linear-gradient(135deg,rgba(212,175,55,0.25),rgba(212,175,55,0.12))'
-                  : 'rgba(255,255,255,0.04)',
-                border: `2px dashed ${customMode ? '#D4AF37' : 'rgba(255,255,255,0.15)'}`,
-              }}>
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">✨</span>
-                <div className="flex-1">
-                  <p className="font-bold text-sm text-ivory-100">Other amount</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'rgba(255,248,220,0.4)' }}>
-                    Enter your own monthly gift — any amount from £1 to £1,000
-                  </p>
-                </div>
-              </div>
-            </button>
           </div>
 
-          {customMode && (
-            <div className="rounded-2xl p-4 mb-4"
-              style={{ background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.25)' }}>
-              <label className="block text-xs font-bold uppercase tracking-widest mb-2"
-                style={{ color: 'rgba(212,175,55,0.8)' }}>
-                Your monthly amount (£)
-              </label>
-              <div className="flex gap-2 items-center">
-                <span className="text-2xl font-black text-gold-400">£</span>
-                <input type="number" min="1" max="1000" step="0.01"
-                  inputMode="decimal"
-                  value={customAmount}
-                  onChange={e => setCustomAmount(e.target.value)}
-                  onBlur={confirmCustom}
-                  placeholder="e.g. 30"
-                  className="flex-1 px-3 py-2 rounded-xl text-2xl font-black bg-black/30 border border-white/10 focus:border-saffron-400/50 outline-none text-gold-400 placeholder-white/20"
-                  autoFocus />
-                <button onClick={confirmCustom} disabled={!customAmountValid}
-                  className="px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-40"
-                  style={{ background: 'rgba(212,175,55,0.25)', color: '#FFD980', border: '1px solid rgba(212,175,55,0.4)' }}>
-                  Set
-                </button>
-              </div>
-              {customAmount && !customAmountValid && (
-                <p className="text-xs mt-2" style={{ color: '#fca5a5' }}>
-                  Please enter an amount between £1 and £1,000.
-                </p>
-              )}
-              {selected?.id === 'custom' && customAmountValid && (
-                <p className="text-xs mt-2" style={{ color: 'rgba(255,248,220,0.6)' }}>
-                  ✓ £{Number(selected.amount).toFixed(2)} per month
-                </p>
-              )}
+          {/* Always-visible custom amount field. No "Other amount" chip to
+              expand it, no "Set" button to commit it — every keystroke of
+              a valid number flows into `selected` via the effect above and
+              updates the primary "Pay by Card — £X/month" button below. */}
+          <div className="rounded-2xl p-4 mb-4"
+            style={{
+              background: customMode
+                ? 'linear-gradient(135deg,rgba(212,175,55,0.16),rgba(212,175,55,0.08))'
+                : 'rgba(212,175,55,0.06)',
+              border: `2px ${customMode ? 'solid #D4AF37' : 'dashed rgba(212,175,55,0.3)'}`,
+            }}>
+            <label className="block text-xs font-bold uppercase tracking-widest mb-2"
+              style={{ color: 'rgba(212,175,55,0.9)' }}>
+              ✨ Your own amount (£1 – £1,000)
+            </label>
+            <div className="flex gap-2 items-center">
+              <span className="text-2xl font-black text-gold-400">£</span>
+              <input type="number" min="1" max="1000" step="0.01"
+                inputMode="decimal"
+                value={customAmount}
+                onChange={e => setCustomAmount(e.target.value)}
+                placeholder="e.g. 30"
+                className="flex-1 px-3 py-2 rounded-xl text-2xl font-black bg-black/30 border border-white/10 focus:border-saffron-400/50 outline-none text-gold-400 placeholder-white/20" />
             </div>
-          )}
+            {customAmount.trim() && !customAmountValid && (
+              <p className="text-xs mt-2" style={{ color: '#fca5a5' }}>
+                Please enter an amount between £1 and £1,000.
+              </p>
+            )}
+            {customMode && customAmountValid && (
+              <p className="text-xs mt-2" style={{ color: 'rgba(255,248,220,0.6)' }}>
+                ✓ £{Number(selected?.amount || 0).toFixed(2)} per month
+              </p>
+            )}
+          </div>
 
-          {/* Stripe card — primary: straight to Stripe's hosted card page, no
-              on-site form (Stripe captures name/email/address). */}
-          {stripeEnabled && (
-            <button onClick={payByStripe}
-              disabled={!selected || (customMode && !customAmountValid) || stripeBusy}
-              className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.99] flex items-center justify-center gap-2"
-              style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#3B0000' }}>
-              {stripeBusy ? 'Connecting to secure card checkout…'
-                : `💳 Pay by Card — £${selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month`}
-            </button>
-          )}
-
-          <button onClick={() => setStep('details')}
-            disabled={!selected || (customMode && !customAmountValid)}
-            className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.99]"
-            style={ stripeEnabled
-              ? { background: 'rgba(255,255,255,0.06)', color: '#FFF8DC', border: '1px solid rgba(255,255,255,0.15)', marginTop: '0.7rem' }
-              : { background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' } }>
-            {stripeEnabled
-              ? 'Or pay with PayPal →'
-              : `Continue — £${selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month →`}
+          {/* Stripe card — the ONLY path. Straight to Stripe Checkout,
+              which collects name/email/address on its hosted page.
+              The PayPal button has been removed per operator decision —
+              reconciliation stays clean when every monthly is Stripe. */}
+          <button onClick={payByStripe}
+            disabled={!selected || (customMode && !customAmountValid) || stripeBusy}
+            className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.99] flex items-center justify-center gap-2"
+            style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#3B0000' }}>
+            {stripeBusy ? 'Connecting to secure card checkout…'
+              : `💳 Pay by Card — £${selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month`}
           </button>
 
           {error && (
