@@ -90,34 +90,69 @@ export function MonthlyGivingPage() {
     ]).finally(() => setLoading(false))
   }, [])
 
-  // Returning from a hosted checkout (Stripe or PayPal redirect) lands here with
-  // ?status=approved. Show the thank-you ('done') and, for display only, the
-  // amount passed as `amt`. Then clean the URL so a refresh doesn't re-fire.
+  // Returning from the Stripe hosted checkout lands here with
+  // ?status=approved&provider=stripe&session_id=cs_live_...
+  // Three states the thank-you page can report, in priority order:
+  //   active      — /confirm returned ok=true (Stripe settled and we linked)
+  //   setting_up  — /confirm returned ok=false (payment still pending at
+  //                 Stripe, OR the row hasn't linked yet because the webhook
+  //                 is slow) — the 60 s self-heal loop will activate it, so
+  //                 reassure the donor instead of claiming "active" when it
+  //                 might not be yet.
+  //   unknown     — /confirm never answered (offline, network error)
+  // We retry /confirm twice (at 3 s and 10 s) because the race between the
+  // donor hitting the thank-you page and Stripe's internal processing is
+  // tight; after that the fast self-heal loop takes over.
+  const [confirmState, setConfirmState] = useState<'pending' | 'active' | 'setting_up' | 'unknown'>('pending')
   useEffect(() => {
     const p = new URLSearchParams(window.location.search)
-    if (p.get('status') === 'approved') {
-      const amt = Number(p.get('amt') || '')
-      if (Number.isFinite(amt) && amt > 0) {
-        setSelected(s => s ?? {
-          id: 'return', amount: amt, label: 'Monthly Gift',
-          description: `£${amt.toFixed(2)} every month`, frequency: 'MONTH',
-          is_default: false, display_order: 0,
-        })
-      }
-      // Belt-and-braces: activate the Stripe subscription immediately on return
-      // (don't wait for a webhook / manual sync). The confirm endpoint is
-      // idempotent and never fails the donor — it flips the row to ACTIVE and
-      // records the first payment. Without this, paid subs sit at PENDING_APPROVAL.
-      const sessionId = p.get('session_id') || ''
-      if (p.get('provider') === 'stripe' && sessionId) {
-        fetch(`${import.meta.env.VITE_API_URL ?? '/api/v1'}/service/giving/stripe/confirm`, {
+    if (p.get('status') !== 'approved') return
+    const amt = Number(p.get('amt') || '')
+    if (Number.isFinite(amt) && amt > 0) {
+      setSelected(s => s ?? {
+        id: 'return', amount: amt, label: 'Monthly Gift',
+        description: `£${amt.toFixed(2)} every month`, frequency: 'MONTH',
+        is_default: false, display_order: 0,
+      })
+    }
+    setStep('done')
+    window.history.replaceState(null, '', `${window.location.pathname}?screen=monthly-giving`)
+
+    const sessionId = p.get('session_id') || ''
+    if (p.get('provider') !== 'stripe' || !sessionId) {
+      // No session id → the webhook / self-heal loop still handles it.
+      setConfirmState('setting_up')
+      return
+    }
+    const base = import.meta.env.VITE_API_URL ?? '/api/v1'
+    const abort = new AbortController()
+
+    async function tryConfirm(): Promise<boolean> {
+      try {
+        const r = await fetch(`${base}/service/giving/stripe/confirm`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: sessionId }),
-        }).catch(() => { /* webhook / sync will still reconcile it */ })
+          signal: abort.signal,
+        })
+        const d = await r.json()
+        return !!d?.ok
+      } catch {
+        return false
       }
-      setStep('done')
-      window.history.replaceState(null, '', `${window.location.pathname}?screen=monthly-giving`)
     }
+    (async () => {
+      if (await tryConfirm()) { setConfirmState('active'); return }
+      await new Promise(r => setTimeout(r, 3000))
+      if (abort.signal.aborted) return
+      if (await tryConfirm()) { setConfirmState('active'); return }
+      await new Promise(r => setTimeout(r, 7000))
+      if (abort.signal.aborted) return
+      if (await tryConfirm()) { setConfirmState('active'); return }
+      // Still not active after ~10 s. The 60 s self-heal loop will catch it.
+      setConfirmState('setting_up')
+    })()
+
+    return () => abort.abort()
   }, [])
 
   // Stripe card: go STRAIGHT to Stripe Checkout from the amount step — no
@@ -586,11 +621,32 @@ export function MonthlyGivingPage() {
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-8 space-y-4">
           <div className="text-6xl">🙏</div>
           <h2 className="font-display font-bold text-2xl text-gold-400">Baba's Blessings, {firstName || 'Friend'}!</h2>
-          <p className="text-sm" style={{ color: 'rgba(255,248,220,0.7)' }}>
-            Your monthly support of <strong className="text-gold-400">
-              £{selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/{selected?.frequency.toLowerCase() ?? 'month'}
-            </strong> is now active.
-          </p>
+
+          {/* Honest status. If /confirm came back ok we know Stripe has
+              charged + our DB flipped ACTIVE → say "active". Otherwise the
+              60 s self-heal loop will activate it, so say "being set up". */}
+          {confirmState === 'active' && (
+            <p className="text-sm" style={{ color: 'rgba(255,248,220,0.75)' }}>
+              Your monthly support of <strong className="text-gold-400">
+                £{selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/{selected?.frequency.toLowerCase() ?? 'month'}
+              </strong> is <span style={{ color: '#86efac' }}>active</span>.
+              Baba is grateful.
+            </p>
+          )}
+          {confirmState !== 'active' && (
+            <div className="space-y-2">
+              <p className="text-sm" style={{ color: 'rgba(255,248,220,0.75)' }}>
+                Your monthly support of <strong className="text-gold-400">
+                  £{selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month
+                </strong> is being set up —
+              </p>
+              <p className="text-xs" style={{ color: 'rgba(255,248,220,0.55)' }}>
+                We're waiting on Stripe to confirm your first charge. This
+                usually takes a few seconds. You'll get a confirmation email
+                as soon as it goes through — <strong>you don't need to do anything</strong>.
+              </p>
+            </div>
+          )}
 
           {giftAidDeclared && (
             <div className="rounded-xl mx-auto max-w-xs px-4 py-3 text-xs"
@@ -599,32 +655,22 @@ export function MonthlyGivingPage() {
             </div>
           )}
 
-          {donorEmail && (
-            <p className="text-xs" style={{ color: 'rgba(255,248,220,0.55)' }}>
-              📧 A confirmation email is on its way to <strong>{donorEmail}</strong>
-            </p>
-          )}
-
+          {/* Cancel / pause — Stripe is the biller now, so the PayPal-autopay
+              instructions that used to be here no longer apply. Easiest path
+              for every donor: one email to us and we stop it. We also link
+              Stripe's customer portal (donors can self-serve if they prefer). */}
           <div className="mt-6 mx-auto max-w-md text-left rounded-xl px-4 py-4"
             style={{ background: 'rgba(212,175,55,0.06)', border: '1px solid rgba(212,175,55,0.2)' }}>
-            <p className="text-sm font-bold text-gold-400 mb-2">How to cancel or pause</p>
-            <ol className="text-xs space-y-1.5 list-decimal list-inside" style={{ color: 'rgba(255,248,220,0.7)' }}>
-              <li>Sign in at <a href="https://www.paypal.com/myaccount/autopay" target="_blank" rel="noopener noreferrer"
-                  className="underline text-gold-400">paypal.com/myaccount/autopay</a></li>
-              <li>Find <strong>SHITAL</strong> in your automatic payments list</li>
-              <li>Click <strong>Cancel</strong> — it stops immediately, no further charges</li>
-            </ol>
-            <p className="text-xs mt-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
-              Need help? Email <a href="mailto:info@shital.org.uk" className="underline text-gold-400">info@shital.org.uk</a> and we'll cancel for you.
-            </p>
-            <p className="text-xs mt-3 pt-3" style={{ color: 'rgba(255,248,220,0.5)', borderTop: '1px solid rgba(212,175,55,0.15)' }}>
-              <strong>Stop emails about this payment?</strong>
-            </p>
-            <ul className="text-xs mt-1 space-y-1 list-disc list-inside" style={{ color: 'rgba(255,248,220,0.5)' }}>
-              <li>From PayPal: <a href="https://www.paypal.com/myaccount/notifications" target="_blank" rel="noopener noreferrer"
-                  className="underline text-gold-400">paypal.com/myaccount/notifications</a> → uncheck subscription notifications.</li>
-              <li>From SHITAL: reply "unsubscribe" to any email and we'll remove you.</li>
+            <p className="text-sm font-bold text-gold-400 mb-2">To cancel or change your monthly gift</p>
+            <ul className="text-xs space-y-1.5 list-disc list-inside" style={{ color: 'rgba(255,248,220,0.7)' }}>
+              <li>Email <a href="mailto:info@shital.org.uk" className="underline text-gold-400">info@shital.org.uk</a>
+                  — we'll cancel or adjust it the same day, no questions asked.</li>
+              <li>Or reply "unsubscribe" to any email we send you.</li>
             </ul>
+            <p className="text-xs mt-3" style={{ color: 'rgba(255,248,220,0.5)' }}>
+              Your card is billed by <strong>Stripe</strong> on behalf of SHITAL. Receipts come from
+              <em> noreply@shital.org.uk</em>; your bank statement will show <em>SHITAL / Stripe</em>.
+            </p>
           </div>
 
           <div className="flex gap-2 justify-center mt-4">
