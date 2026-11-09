@@ -11,6 +11,7 @@ GET by-branch is public so the kiosk can call it without a token.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any
@@ -34,65 +35,77 @@ _PROTECTED_FIELDS = ("provider", "stripe_reader_id", "sumup_reader_serial",
                      "clover_device_id", "branch_id")
 
 
-# Provider / identity validation. The admin form defaults to
-# provider='stripe_terminal', which means a volunteer pairing a SumUp Solo
-# forgets to switch the dropdown and the row saves as Stripe despite a
-# SumUp serial. That's how the Kiosks panel ends up showing "Solo-Wem-02
-# STRIPE" — correctly reflecting the DB but obviously wrong in meaning.
-# Reject the save at the API boundary so the next regression fails loudly
-# instead of lurking until a volunteer notices.
-def _reject_provider_mismatch(provider: str,
-                              label: str,
-                              sumup_serial: str,
-                              stripe_reader_id: str,
-                              clover_device_id: str) -> None:
-    import re as _re
-    p = (provider or "").strip().lower()
-    s = (sumup_serial or "").strip()
+# ─── Provider derivation — provider is NEVER chosen by the client ────────────
+# PERMANENT fix for the "STRIPE on SumUp" regression. The old design let the
+# admin form submit any `provider` string it wanted; we tried validating, but
+# validation only blocks save-time, not the dozens of other code paths that
+# write to this table. The permanent answer is: there is no "provider" field
+# on the client contract any more. The server derives it, authoritatively,
+# from the identity fields the volunteer typed in. One source of truth,
+# literally impossible to disagree with itself.
+#
+# Rules, in order (first match wins):
+#   1. sumup_reader_serial is set         → sumup
+#   2. clover_device_id is set            → clover
+#   3. stripe_reader_id looks like tmr_…  → stripe_terminal
+#   4. square_device_id is set            → square
+#   5. label alone hints SumUp            → sumup   (see _looks_sumup_label)
+#   6. nothing identifies the reader      → reject with 400
+#
+# If the volunteer leaves every ID blank we do NOT silently default to
+# stripe_terminal — we return 400 asking for an ID. That stops the "save a
+# row with no reader" accidental-create path that also hid bad data.
+
+_SUMUP_SERIAL_RE = re.compile(r"\b(2001\d{7,8}|2002\d{7,8})\b")
+_SUMUP_FRIENDLY_RE = re.compile(r"^[a-z]+-[a-z]+-[a-z]+$")
+
+
+def _looks_sumup_label(label: str) -> bool:
     lab = (label or "").strip()
     low = lab.lower()
+    if not low:
+        return False
+    if _SUMUP_SERIAL_RE.search(lab):
+        return True
+    if _SUMUP_FRIENDLY_RE.match(low):
+        return True
+    return "sumup" in low or bool(re.search(r"\bsolo\b", low))
 
-    # Any of these says "this is a SumUp" unambiguously.
-    sumup_markers = (
-        s.startswith(("2001", "2002", "rdr_")) or
-        bool(_re.search(r"\b(2001\d{7,8}|2002\d{7,8})\b", lab)) or
-        bool(_re.match(r"^[a-z]+-[a-z]+-[a-z]+$", low)) or
-        "sumup" in low or
-        bool(_re.search(r"\bsolo\b", low))
-    )
-    stripe_markers = (
-        bool(stripe_reader_id and stripe_reader_id.startswith("tmr_"))
-    )
-    clover_markers = bool((clover_device_id or "").strip())
 
-    if sumup_markers and p != "sumup":
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"The serial '{s}' or label '{lab}' looks like a SumUp Solo "
-                f"(serial 2001…/2002…/rdr_… or three-hyphenated words) but "
-                f"the Provider is '{p}'. Set Provider to 'sumup' and save "
-                f"again. (This block exists because mis-pairing was the "
-                f"single biggest source of 'STRIPE' labels on SumUp readers.)"
-            ),
-        )
-    if stripe_markers and p != "stripe_terminal":
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"The stripe_reader_id '{stripe_reader_id}' starts with "
-                f"'tmr_' (a Stripe Terminal id) but Provider is '{p}'. "
-                f"Set Provider to 'stripe_terminal' and save again."
-            ),
-        )
-    if clover_markers and p != "clover":
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"clover_device_id is set but Provider is '{p}'. "
-                f"Set Provider to 'clover' and save again."
-            ),
-        )
+def _derive_provider(sumup_serial: str,
+                     stripe_reader_id: str,
+                     clover_device_id: str,
+                     square_device_id: str,
+                     label: str) -> str:
+    """Compute the provider from the identity fields. Never trusts a value
+    sent by the client. Returns one of sumup / stripe_terminal / clover /
+    square — or raises HTTP 400 if nothing identifies the reader."""
+    s = (sumup_serial or "").strip()
+    if s:
+        return "sumup"
+    c = (clover_device_id or "").strip()
+    if c:
+        return "clover"
+    t = (stripe_reader_id or "").strip()
+    if t.startswith("tmr_"):
+        return "stripe_terminal"
+    q = (square_device_id or "").strip()
+    if q:
+        return "square"
+    # No dedicated ID → try the label. Covers older rows / weird label-only
+    # pairings where SumUp's three-word name is all the volunteer knew.
+    if _looks_sumup_label(label):
+        return "sumup"
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "Can't save a reader without an identifier. Enter one of: "
+            "SumUp Reader Serial (2001.../2002.../rdr_...), Stripe Reader ID "
+            "(tmr_...), Clover Device ID, or Square Device ID. The system "
+            "picks the provider automatically from whichever you set — "
+            "that's why the Provider dropdown is gone."
+        ),
+    )
 
 
 # ─── Pydantic models ──────────────────────────────────────────────────────────
@@ -261,19 +274,22 @@ async def get_device(device_id: str, ctx: RequiredSpace):
 
 @router.post("/")
 async def create_device(body: DeviceCreate, ctx: RequiredSpace):
-    """Register a new terminal device and link it to a branch."""
+    """Register a new terminal device and link it to a branch.
+
+    Provider is DERIVED from the identity fields, not read from `body.provider`.
+    See _derive_provider for the rule set. Any `provider` value the client
+    sends is ignored — one source of truth."""
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
 
-    # Fail fast if the provider dropdown disagrees with the serial/label.
-    # See _reject_provider_mismatch for the full rule set.
-    _reject_provider_mismatch(
-        provider=body.provider,
-        label=body.label,
+    # Derive the authoritative provider. 400 if no identifier was given.
+    derived_provider = _derive_provider(
         sumup_serial=body.sumup_reader_serial,
         stripe_reader_id=body.stripe_reader_id,
         clover_device_id=body.clover_device_id,
+        square_device_id=body.square_device_id,
+        label=body.label,
     )
 
     device_id = str(uuid.uuid4())
@@ -307,7 +323,11 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
                 "user_name": body.user_name,
                 "user_email": body.user_email,
                 "label": body.label,
-                "provider": body.provider,
+                # Provider comes from the derivation above — body.provider
+                # is IGNORED on purpose. If the client sent it, we discard
+                # it. The only source of truth for provider is the set of
+                # identity columns typed by the volunteer.
+                "provider": derived_provider,
                 "stripe_reader_id": body.stripe_reader_id,
                 "stripe_location_id": body.stripe_location_id,
                 "square_device_id": body.square_device_id,
@@ -381,16 +401,22 @@ async def update_device(
         if not before:
             raise HTTPException(status_code=404, detail="Device not found")
 
-        # Provider/identity sanity check — reject provider=stripe when
-        # the serial clearly indicates SumUp (or vice-versa). Uses the
-        # MERGED view (fields that ARE changing + fields the row already
-        # had) so a partial patch doesn't bypass the check.
-        _reject_provider_mismatch(
-            provider=fields.get("provider", before.get("provider") or ""),
-            label=fields.get("label", before.get("label") or ""),
-            sumup_serial=fields.get("sumup_reader_serial", before.get("sumup_reader_serial") or ""),
-            stripe_reader_id=fields.get("stripe_reader_id", before.get("stripe_reader_id") or ""),
-            clover_device_id=fields.get("clover_device_id", before.get("clover_device_id") or ""),
+        # ── Derive the provider from the MERGED identity view ─────────
+        # Same contract as create: provider is never editable by the
+        # client. We compute it from the identity fields after the patch
+        # would be applied. Any `provider` the client sent is overwritten
+        # with the derived value here.
+        merged_sumup  = fields.get("sumup_reader_serial", before.get("sumup_reader_serial") or "")
+        merged_stripe = fields.get("stripe_reader_id",    before.get("stripe_reader_id")    or "")
+        merged_clover = fields.get("clover_device_id",    before.get("clover_device_id")    or "")
+        merged_square = fields.get("square_device_id",    before.get("square_device_id")    or "")
+        merged_label  = fields.get("label",               before.get("label")               or "")
+        fields["provider"] = _derive_provider(
+            sumup_serial=merged_sumup,
+            stripe_reader_id=merged_stripe,
+            clover_device_id=merged_clover,
+            square_device_id=merged_square,
+            label=merged_label,
         )
 
         # Protected-field guard
