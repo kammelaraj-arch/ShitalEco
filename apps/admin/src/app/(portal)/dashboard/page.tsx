@@ -21,6 +21,23 @@ interface Stats {
   }[]
 }
 
+// ── Monthly-giving Stripe health widget ─────────────────────────────────────
+// Lives under the top stat row. Polls /admin/giving/stripe-diagnostic every
+// 60 s so the operator sees how many Checkout sessions Stripe created,
+// how many were paid, and whether any paid session is still orphan in our
+// DB (which would mean the self-heal loop has something left to fix). Same
+// numbers the yellow banner on the Monthly Giving page shows — just surfaced
+// on the home screen so nobody has to hunt for them.
+interface StripeHealth {
+  stripe_api_key_present: boolean
+  stripe_session_count?: number
+  stripe_session_breakdown?: Record<string, number>
+  paid_sessions_with_rgs?: number
+  paid_but_unlinked?: { rgs_id: string; reason: string }[]
+  verdict?: string
+  days_window?: number
+}
+
 function fmt(n: number) {
   return `£${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
@@ -36,12 +53,32 @@ function timeAgo(iso: string) {
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [health, setHealth] = useState<StripeHealth | null>(null)
+  const [healthErr, setHealthErr] = useState<string>('')
 
   useEffect(() => {
     apiFetch<Stats>('/admin/stats')
       .then(setStats)
       .catch(() => setStats(null))
       .finally(() => setLoading(false))
+  }, [])
+
+  // Monthly-giving health poll — initial fetch + every 60 s thereafter.
+  // Non-blocking: if the endpoint errors (rare), we show the error without
+  // taking down the rest of the dashboard.
+  useEffect(() => {
+    let alive = true
+    async function tick() {
+      try {
+        const r = await apiFetch<StripeHealth>('/admin/giving/stripe-diagnostic?days=30')
+        if (alive) { setHealth(r); setHealthErr('') }
+      } catch (e: unknown) {
+        if (alive) setHealthErr(e instanceof Error ? e.message : 'Could not load health')
+      }
+    }
+    tick()
+    const iv = setInterval(tick, 60_000)
+    return () => { alive = false; clearInterval(iv) }
   }, [])
 
   const now = new Date()
@@ -115,6 +152,97 @@ export default function DashboardPage() {
           ))}
         </div>
       )}
+
+      {/* ── Monthly-giving Stripe health (live from /admin/giving/stripe-diagnostic) ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.25 }}
+        className="glass rounded-2xl p-6"
+      >
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <h2 className="text-white font-bold text-lg">Monthly Giving — Stripe Health</h2>
+            <p className="text-white/40 text-sm">
+              Live from Stripe · last {health?.days_window ?? 30} days · refreshes every 60 s
+            </p>
+          </div>
+          <a href="/recurring-giving" className="text-saffron-400 text-sm hover:text-saffron-300 transition-colors">
+            Manage subscriptions →
+          </a>
+        </div>
+
+        {!health && !healthErr && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="rounded-xl bg-white/5 animate-pulse h-24" />
+            ))}
+          </div>
+        )}
+
+        {healthErr && (
+          <p className="text-sm text-red-400 py-6 text-center">
+            Could not load Stripe health — {healthErr}
+          </p>
+        )}
+
+        {health && !health.stripe_api_key_present && (
+          <p className="text-sm text-amber-400 py-6 text-center">
+            ⚠ STRIPE_SECRET_KEY not readable by the backend — set it in Admin → System Ops → API Keys.
+          </p>
+        )}
+
+        {health && health.stripe_api_key_present && (
+          <>
+            {/* Four tiles: total sessions, paid, abandoned, orphans. Colours
+                make the health status readable at a glance — green when
+                orphans == 0, amber when > 0 (self-heal has work to do). */}
+            {(() => {
+              const sessions   = health.stripe_session_count ?? 0
+              const paid       = health.paid_sessions_with_rgs ?? 0
+              const abandoned  = Math.max(0, sessions - paid)
+              const orphans    = (health.paid_but_unlinked ?? []).length
+              const orphansOk  = orphans === 0
+              const tiles = [
+                { label: 'Checkout sessions', value: sessions,  icon: '🛒', color: 'from-blue-600 to-indigo-500',
+                  sub: 'Opened by donors' },
+                { label: 'Paid',              value: paid,      icon: '✅', color: 'from-green-600 to-emerald-500',
+                  sub: 'Stripe charged the card' },
+                { label: 'Abandoned',         value: abandoned, icon: '⏸',  color: 'from-slate-600 to-slate-500',
+                  sub: 'Donor closed before paying' },
+                { label: 'Orphan (unlinked)', value: orphans,   icon: orphansOk ? '🟢' : '⚠',
+                  color: orphansOk ? 'from-green-600 to-emerald-500' : 'from-amber-600 to-orange-500',
+                  sub: orphansOk ? 'All paid sessions linked' : 'Self-heal will fix within 60 s' },
+              ]
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {tiles.map((t) => (
+                    <div key={t.label}
+                      className="rounded-xl p-4 relative overflow-hidden border border-white/5"
+                      style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <div className={`absolute top-0 right-0 w-16 h-16 rounded-full bg-gradient-to-br ${t.color} opacity-10 blur-xl`} />
+                      <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${t.color} flex items-center justify-center text-base mb-2 shadow`}>
+                        {t.icon}
+                      </div>
+                      <p className="text-white/50 text-xs font-medium">{t.label}</p>
+                      <p className="text-2xl font-black text-white">{t.value}</p>
+                      <p className="text-white/30 text-[11px]">{t.sub}</p>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
+
+            {/* Verdict line from the backend — plain English, same as the
+                banner on the Monthly Giving page. */}
+            {health.verdict && (
+              <p className="text-xs text-white/60 mt-4 leading-relaxed">
+                <span className="font-semibold text-saffron-400">Verdict:</span> {health.verdict}
+              </p>
+            )}
+          </>
+        )}
+      </motion.div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
         {/* Revenue chart */}
