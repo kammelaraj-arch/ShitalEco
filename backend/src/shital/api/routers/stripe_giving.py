@@ -994,12 +994,27 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
             except Exception:  # noqa: BLE001
                 sess_iter = iter(())
             for sess in sess_iter:
-                rgs = str(sess.get("client_reference_id") or "")
+                # Accept rgs_id from EITHER client_reference_id OR metadata.
+                # Older paid sessions created before PR #329 shipped may only
+                # have it in metadata.rgs_id, not in client_reference_id at
+                # top-level. We already check metadata on the Subscription in
+                # Pass B, but this gives us a third path — Session metadata
+                # — which covers the "orphan from before the fix" case the
+                # operator kept seeing stuck at "1 unlinked".
+                rgs = (
+                    str(sess.get("client_reference_id") or "") or
+                    str((sess.get("metadata") or {}).get("rgs_id") or "")
+                )
                 if rgs not in want:
                     continue
                 status = sess.get("status") or ""
                 pay    = sess.get("payment_status") or ""
-                if status != "complete" or pay not in ("paid", "no_payment_required"):
+                # Accept paid OR status=complete (same test the diagnostic
+                # uses) — a session can briefly be status=complete with
+                # payment_status=unpaid during Stripe's own internal
+                # settlement; waiting for payment_status=paid would miss it
+                # in that window.
+                if status != "complete" and pay not in ("paid", "no_payment_required"):
                     continue
                 try:
                     full = stripe.checkout.Session.retrieve(
