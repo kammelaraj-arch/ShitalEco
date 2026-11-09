@@ -14,7 +14,7 @@ interface TerminalDevice {
   user_name: string
   user_email: string
   label: string
-  provider: '' | 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash'
+  provider: 'stripe_terminal' | 'square' | 'clover' | 'sumup' | 'cash'
   stripe_reader_id: string
   stripe_location_id: string
   square_device_id: string
