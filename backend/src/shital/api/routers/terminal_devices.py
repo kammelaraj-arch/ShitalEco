@@ -62,6 +62,7 @@ class DeviceCreate(BaseModel):
     user_name: str = ""
     user_email: str = ""
     notes: str = ""
+    description: str = ""
 
 
 class DeviceUpdate(BaseModel):
@@ -82,6 +83,7 @@ class DeviceUpdate(BaseModel):
     is_active: bool | None = None
     status: str | None = None
     notes: str | None = None
+    description: str | None = None
 
 
 class AssignUserInput(BaseModel):
@@ -220,6 +222,11 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
     from shital.core.fabrics.database import SessionLocal
 
     device_id = str(uuid.uuid4())
+    # Short, unique, human-readable identifier derived from the UUID — the
+    # same rule the boot-time backfill uses, so a volunteer can write this
+    # on the back of the reader with a marker and match it against the
+    # admin list without reading a full UUID. e.g. "RDR-5A1B".
+    internal_ref = f"RDR-{device_id[:4].upper()}"
     now = datetime.utcnow()
 
     async with SessionLocal() as db:
@@ -230,13 +237,15 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
             text("""
                 INSERT INTO terminal_devices (
                     id, branch_id, branch_name, user_id, user_name, user_email,
-                    label, provider, stripe_reader_id, stripe_location_id,
+                    label, internal_ref, description,
+                    provider, stripe_reader_id, stripe_location_id,
                     square_device_id, clover_device_id, sumup_reader_serial,
                     device_type, serial_number,
                     status, is_active, notes, created_at, updated_at
                 ) VALUES (
                     :id, :branch_id, :branch_name, :user_id, :user_name, :user_email,
-                    :label, :provider, :stripe_reader_id, :stripe_location_id,
+                    :label, :internal_ref, :description,
+                    :provider, :stripe_reader_id, :stripe_location_id,
                     :square_device_id, :clover_device_id, :sumup_reader_serial,
                     :device_type, :serial_number,
                     'offline', TRUE, :notes, :now, :now
@@ -250,6 +259,8 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
                 "user_name": body.user_name,
                 "user_email": body.user_email,
                 "label": body.label,
+                "internal_ref": internal_ref,
+                "description": body.description,
                 "provider": body.provider,
                 "stripe_reader_id": body.stripe_reader_id,
                 "stripe_location_id": body.stripe_location_id,
@@ -303,7 +314,10 @@ async def update_device(
         "stripe_reader_id", "stripe_location_id", "square_device_id",
         "clover_device_id", "sumup_reader_serial",
         "device_type", "serial_number", "user_id", "user_name", "user_email",
-        "is_active", "status", "notes",
+        "is_active", "status", "notes", "description",
+        # NB: internal_ref deliberately NOT updatable — it's auto-generated
+        # at create-time and printed on the physical device; if a volunteer
+        # could change it, the sticker on the back would stop matching.
     ):
         val = getattr(body, field)
         if val is not None:

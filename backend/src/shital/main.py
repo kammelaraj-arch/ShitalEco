@@ -1501,6 +1501,23 @@ async def _patch_schema() -> None:
         # Idempotent columns for providers added after initial schema
         "ALTER TABLE terminal_devices ADD COLUMN IF NOT EXISTS clover_device_id   VARCHAR(255) NOT NULL DEFAULT ''",
         "ALTER TABLE terminal_devices ADD COLUMN IF NOT EXISTS sumup_reader_serial VARCHAR(255) NOT NULL DEFAULT ''",
+        # Human-readable internal reference printed on the back of the physical
+        # reader (e.g. "RDR-5A1B"). Auto-generated at insert-time from the
+        # first 4 hex characters of the row's UUID so every reader has a short,
+        # unique, admin-visible identifier that volunteers can read off the
+        # device and match to the DB row without squinting at a UUID. The
+        # description column holds a longer human explanation (what room, what
+        # the reader is for) separate from the short `label`.
+        "ALTER TABLE terminal_devices ADD COLUMN IF NOT EXISTS internal_ref VARCHAR(20) NOT NULL DEFAULT ''",
+        "ALTER TABLE terminal_devices ADD COLUMN IF NOT EXISTS description  TEXT         NOT NULL DEFAULT ''",
+        # Backfill internal_ref for every existing row that still has none:
+        # take the first 4 hex chars of the UUID, upper-case, prefix "RDR-".
+        # NO-OP for any row that already has a non-empty value.
+        "UPDATE terminal_devices "
+        "SET internal_ref = 'RDR-' || UPPER(SUBSTRING(id::text, 1, 4)) "
+        "WHERE COALESCE(internal_ref, '') = ''",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_terminal_devices_internal_ref "
+        "ON terminal_devices(internal_ref) WHERE deleted_at IS NULL",
         # ── Gift Aid Declarations ─────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS gift_aid_declarations (
             id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
