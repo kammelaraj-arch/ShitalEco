@@ -135,8 +135,8 @@ export default function RecurringGivingPage() {
   // Checkout sessions vs what our DB thinks happened. Returns a plain-
   // English verdict pointing at the specific break: "donors aren't
   // reaching Stripe", "paying but we're not linking", "all working", etc.
-  async function stripeDiagnostic() {
-    setSyncing(true); setSyncNote('')
+  async function stripeDiagnostic(silent = false) {
+    if (!silent) { setSyncing(true); setSyncNote('') }
     try {
       const r = await fetch(`${API}/admin/giving/stripe-diagnostic?days=30`, { headers: authHeaders() })
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
@@ -148,9 +148,37 @@ export default function RecurringGivingPage() {
         `${d.verdict || ''}`
       )
     } catch (e) {
-      setSyncNote(e instanceof Error ? e.message : 'Diagnostic failed')
-    } finally { setSyncing(false) }
+      if (!silent) setSyncNote(e instanceof Error ? e.message : 'Diagnostic failed')
+    } finally { if (!silent) setSyncing(false) }
   }
+
+  // Auto-diagnostic — runs on page load and every 30 s so the yellow
+  // banner is always showing current state (orphan count, verdict),
+  // not a stale snapshot from the last manual click. Silent on errors
+  // so a transient network blip doesn't scare the operator.
+  useEffect(() => {
+    stripeDiagnostic(true)
+    const iv = setInterval(() => stripeDiagnostic(true), 30_000)
+    return () => clearInterval(iv)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Auto-sync — runs the full reconcile once on page load so an orphan
+  // paid session that happens to be sitting in PENDING_APPROVAL when
+  // the operator opens the page gets linked within ~2 seconds, without
+  // anyone having to click "Sync from Stripe". The 60 s background
+  // self-heal loop (shipped in #329) runs this same reconcile every
+  // minute anyway — this just moves the next tick to "now".
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      try {
+        await fetch(`${API}/admin/giving/sync-stripe`, { method: 'POST', headers: authHeaders() })
+        await stripeDiagnostic(true)
+      } catch { /* silent — background loop will still catch it */ }
+    }, 400) // small delay so initial subs load first
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Time-only reap — marks any Stripe row stuck in PENDING_APPROVAL for
   // more than 2 days as EXPIRED. Used to clear the historical pile that
@@ -360,7 +388,7 @@ export default function RecurringGivingPage() {
               </button>
               {/* Diagnostic — compare what Stripe knows vs what our DB thinks.
                   Returns a verdict pointing at the specific failure. */}
-              <button onClick={stripeDiagnostic} disabled={syncing}
+              <button onClick={() => stripeDiagnostic()} disabled={syncing}
                 title="Pulls Stripe's view of Checkout sessions for the last 30 days and cross-checks against our DB. Tells you whether donors are abandoning, paying-but-unlinked, or working."
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#0ea5e9,#0369a1)' }}>

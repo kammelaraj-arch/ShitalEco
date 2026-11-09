@@ -1265,14 +1265,17 @@ async def stripe_diagnostic(space: CurrentSpace, days: int = 30) -> dict[str, An
             "the Stripe Dashboard → Payments for the actual failure reasons."
         )
     elif unlinked:
+        # Pass C + the 60 s fast loop (shipped in #329) now auto-link these
+        # within ~60 s — the operator doesn't have to click anything. The
+        # verdict reflects that so the admin page stops nagging them to
+        # paste a webhook secret they already pasted.
         out["verdict"] = (
             f"Donors ARE paying — Stripe has {out['paid_sessions_with_rgs']} "
-            "paid Checkout sessions in the window — but our DB didn't link "
-            f"{len(unlinked)} of them. The webhook + confirm paths both "
-            "missed. Fix: make sure the webhook URL in Stripe Dashboard is "
-            "'https://admin.shital.org.uk/api/v1/stripe/webhook'. Then click "
-            "'Sync from Stripe' — the reconcile's Pass B will link these "
-            "orphan paid sessions and mark them ACTIVE."
+            "paid Checkout sessions in the window. "
+            f"{len(unlinked)} are not yet linked in our DB but the self-heal "
+            "loop (Pass C via Checkout Session.client_reference_id) runs "
+            "every 60 s and will link them automatically — no action needed. "
+            "If you want it instantly, click 'Sync from Stripe' once."
         )
     else:
         out["verdict"] = "All paid Stripe sessions are linked in the DB. Monthly giving via Stripe is working."
