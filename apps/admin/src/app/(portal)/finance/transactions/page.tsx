@@ -444,7 +444,11 @@ export default function TransactionsPage() {
                 <th onClick={() => toggleSort('amount')}     className="px-4 py-3 text-right font-semibold cursor-pointer select-none hover:text-white/80">Gross {sortArrow('amount')}</th>
                 <th className="px-4 py-3 text-right font-semibold">Fee</th>
                 <th onClick={() => toggleSort('net')}        className="px-4 py-3 text-right font-semibold cursor-pointer select-none hover:text-white/80">Net {sortArrow('net')}</th>
-                <th onClick={() => toggleSort('status')}     className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">Status {sortArrow('status')}</th>
+                <th onClick={() => toggleSort('status')}
+                    title="Stripe/SumUp BALANCE status — 'pending' means the payment succeeded and the donor was charged; funds move to 'available' in ~2 business days. This is NOT the donation or subscription status."
+                    className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">
+                  Funds {sortArrow('status')}
+                </th>
                 <th className="px-4 py-3 text-left font-semibold">Donor / Purpose</th>
                 <th className="px-4 py-3 text-center font-semibold">🇬🇧 Gift Aid</th>
                 <th className="px-4 py-3 text-left font-semibold">Description</th>
@@ -482,7 +486,23 @@ export default function TransactionsPage() {
                   <td className={`px-4 py-3 text-right font-mono text-sm font-bold ${(t.net_pence || 0) < 0 ? 'text-red-400' : 'text-green-400'}`}>
                     {fmtMoney(t.net_pence, t.currency)}
                   </td>
-                  <td className="px-4 py-3 text-white/60 text-xs">{t.status || '—'}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <span
+                      title={
+                        t.status === 'pending'
+                          ? 'Payment succeeded; funds settle into the account balance in ~2 business days. The donor IS charged.'
+                          : t.status === 'available'
+                            ? 'Funds have cleared and are available in the account balance.'
+                            : t.status || ''
+                      }
+                      className={
+                        t.status === 'pending'   ? 'text-amber-300/80' :
+                        t.status === 'available' ? 'text-green-400'    :
+                                                   'text-white/60'
+                      }>
+                      {t.status || '—'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-white/80 text-xs max-w-[220px] truncate" title={`${t.contact_name} <${t.contact_email}>`}>
                     {t.contact_name || t.contact_email || t.customer_hint || <em className="text-white/30">—</em>}
                     {t.donation_purpose && <div className="text-[10px] text-white/40 truncate">{t.donation_purpose}</div>}
