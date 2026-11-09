@@ -504,6 +504,51 @@ async def capture_paypal_order(body: CaptureBody) -> dict[str, Any]:
                 )
 
             await db.commit()
+
+        # ── Receipt email (idempotent, non-fatal) ──────────────────────
+        # If the donor gave us an email, send them the admin-editable
+        # `donation_receipt` template. send_template() always writes a
+        # sent_emails audit row (pending → sent/failed), so the admin can
+        # see every attempt in Admin → Email Templates → Sent — including
+        # failures. Non-fatal: the donor's money is already in and the
+        # donation row is written; any email failure is captured in the
+        # audit, never in a 500 to the caller.
+        if body.contact_email and "@" in body.contact_email:
+            try:
+                from shital.api.routers.email_templates import (
+                    RELATED_DONATION,
+                    send_template,
+                )
+                from shital.core.fabrics.config import settings
+                await send_template(
+                    "donation_receipt",
+                    body.contact_email,
+                    {
+                        "order_ref":        order_ref,
+                        "customer_name":    body.contact_name or "",
+                        "total":            f"{captured_amount:.2f}",
+                        "items":            list(body.items or []),
+                        "branch_name":      body.branch_id or "Shital Temple",
+                        "date":             now.strftime("%d %B %Y").lstrip("0"),
+                        "charity_number":   getattr(settings, "CHARITY_NUMBER", "") or "1138530",
+                        "logo_url":         "https://shital.org.uk/logo.png",
+                        "website_url":      "https://shital.org.uk",
+                        "monthly_url":      "https://shital.org.uk/donate?monthly=1",
+                        "account_url":      "https://shital.org.uk/account",
+                        "payment_provider": "paypal",
+                        "payment_ref":      capture_id,
+                    },
+                    related_type=RELATED_DONATION,
+                    related_id=order_id,
+                    triggered_by="paypal-capture",
+                )
+            except Exception as mail_exc:
+                import structlog
+                structlog.get_logger().warning(
+                    "paypal_capture_receipt_email_failed",
+                    error=str(mail_exc),
+                    paypal_capture_id=capture_id,
+                )
     except Exception as exc:
         # Donor's PayPal payment SUCCEEDED — only our DB recording failed.
         # Surface this to the frontend so the donor sees the PayPal references
