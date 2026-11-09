@@ -221,17 +221,54 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
     # Idempotency key = rgs_id scoped by call. If the SPA retries POST
     # /create-checkout (slow network, user double-click), Stripe returns the
     # SAME customer + the SAME Checkout session instead of creating duplicates.
+    # Temple-branded invoice footer. Appears on every Stripe-issued receipt
+    # for this customer — including the automatic "Your receipt from SHITAL"
+    # email that Stripe sends after each successful charge. The donor who
+    # asked for this wanted the Gift Aid line and a cancel instruction to
+    # appear in whatever email Stripe sends, since Stripe's own template
+    # has neither by default and we can't inject HTML into it from the API.
+    # Kept under 500 chars so Stripe doesn't truncate it on the hosted page.
+    temple_invoice_footer = (
+        "Thank you for supporting SHITAL (Shri Shirdi Saibaba Temple), "
+        "UK Charity No. 1138530.\n\n"
+        "GIFT AID: If you are a UK taxpayer, we may claim an extra 25p "
+        "for every £1 you give — email info@shirdisai.org.uk so we can set it up.\n\n"
+        "CANCEL / CHANGE: email info@shirdisai.org.uk and we'll do it "
+        "the same day, or manage your gift at "
+        "https://service.shital.org.uk/?screen=my-giving\n\n"
+        "Jay Shri Krishna"
+    )
+
     prefill: dict[str, Any] = {}
     if email:
         try:
             cust = stripe.Customer.create(
                 email=email, name=(full_name or None),
                 phone=(body.donor_phone or None) if body.donor_phone else None,
+                # Footer on every invoice issued to this customer — Stripe's
+                # auto-receipt renders this text verbatim beneath the line
+                # items, so the Gift Aid + cancel info the donor asked for
+                # reaches them even when they read Stripe's email and not
+                # ours. If Stripe's API rejects the kwarg (older account
+                # version), we retry without it so Customer creation never
+                # fails because of a cosmetic field.
+                invoice_settings={"footer": temple_invoice_footer},
                 idempotency_key=f"rgs-cust-{rgs_id}",
             )
             prefill = {"customer": cust.id}
         except Exception:  # noqa: BLE001
-            prefill = {"customer_email": email}
+            # Retry minimal — most likely cause is the footer kwarg being
+            # rejected by an older Stripe account version; retry without
+            # the invoice_settings so the donation never fails on cosmetics.
+            try:
+                cust = stripe.Customer.create(
+                    email=email, name=(full_name or None),
+                    phone=(body.donor_phone or None) if body.donor_phone else None,
+                    idempotency_key=f"rgs-cust-{rgs_id}-plain",
+                )
+                prefill = {"customer": cust.id}
+            except Exception:  # noqa: BLE001
+                prefill = {"customer_email": email}
 
     # Core session — payment methods are LEFT TO THE STRIPE DASHBOARD.
     # The admin wants donors to see Card / PayPal / Google Pay / Klarna /
