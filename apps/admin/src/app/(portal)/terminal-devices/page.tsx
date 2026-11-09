@@ -119,7 +119,32 @@ function DeviceModal({
 
   const isEdit = !!device
 
-  const set = (k: keyof FormState, v: string) => setForm(f => ({ ...f, [k]: v }))
+  // SumUp Solo markers in label or serial. Shared with the backend's
+  // _reject_provider_mismatch check in terminal_devices.py so a value
+  // the backend will reject never gets saved in the first place.
+  function looksLikeSumUp(label: string, sumupSerial: string): boolean {
+    const s = sumupSerial.trim()
+    if (s.startsWith('2001') || s.startsWith('2002') || s.startsWith('rdr_')) return true
+    const lab = label.trim()
+    const low = lab.toLowerCase()
+    if (/\b(2001\d{7,8}|2002\d{7,8})\b/.test(lab)) return true
+    if (/^[a-z]+-[a-z]+-[a-z]+$/.test(low)) return true
+    if (low.includes('sumup') || /\bsolo\b/.test(low)) return true
+    return false
+  }
+  // Mutates the form patch so provider auto-flips to 'sumup' the moment
+  // the volunteer types a SumUp-looking label/serial. Stops the
+  // historical "forgot to switch the dropdown" regression at source.
+  const set = (k: keyof FormState, v: string) => setForm(f => {
+    const next = { ...f, [k]: v }
+    if (k === 'label' || k === 'sumup_reader_serial') {
+      if (looksLikeSumUp(next.label || '', next.sumup_reader_serial || '')
+          && next.provider !== 'sumup') {
+        next.provider = 'sumup'
+      }
+    }
+    return next
+  })
 
   async function save(confirmProtected = false) {
     if (!form.label.trim()) { setError('Label is required'); return }
