@@ -26,6 +26,13 @@ interface TerminalDevice {
   is_active: boolean
   last_seen_at: string | null
   notes: string
+  // Short, human-readable internal reference auto-generated at create time
+  // (e.g. "RDR-5A1B"). Printed on the back of the physical reader with a
+  // marker so it matches a row in the DB. Read-only in the admin UI.
+  internal_ref: string
+  // Longer human explanation of where the reader lives / what it's for,
+  // separate from the short `label` (friendly name).
+  description: string
   created_at: string
   updated_at: string
 }
@@ -46,6 +53,7 @@ interface FormState {
   user_name: string
   user_email: string
   notes: string
+  description: string
 }
 
 const DEFAULT_LOCATION_ID = 'tml_Gcuz0gCsvSvQZg'
@@ -62,7 +70,7 @@ const EMPTY_FORM: FormState = {
   stripe_reader_id: '', stripe_location_id: DEFAULT_LOCATION_ID, square_device_id: '',
   clover_device_id: '', sumup_reader_serial: '',
   device_type: '', serial_number: '',
-  user_id: '', user_name: '', user_email: '', notes: '',
+  user_id: '', user_name: '', user_email: '', notes: '', description: '',
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -118,6 +126,7 @@ function DeviceModal({
           device_type: device.device_type,   serial_number: device.serial_number,
           user_id: device.user_id ?? '',     user_name: device.user_name,
           user_email: device.user_email,     notes: device.notes,
+          description: device.description || '',
         }
       : { ...EMPTY_FORM }
   )
@@ -238,7 +247,34 @@ function DeviceModal({
           </div>
 
           {/* Label */}
-          <Field label="Device Label *" value={form.label} onChange={v => set('label', v)} placeholder="e.g. Wembley Kiosk 1" />
+          {/* Internal reference — auto-generated RDR-XXXX. Shown in the
+              modal so the volunteer can write it on the back of the
+              reader with a permanent marker before putting it in service.
+              On Create it's a placeholder ("generated after save") since
+              we don't know the UUID yet; on Edit it shows the live value. */}
+          {isEdit && device?.internal_ref && (
+            <div className="rounded-xl border border-saffron-400/30 bg-saffron-400/5 px-4 py-3 flex items-center justify-between">
+              <div className="min-w-0">
+                <p className="text-saffron-400/80 text-[10px] font-bold uppercase tracking-widest mb-0.5">Internal Reference</p>
+                <p className="font-mono text-2xl font-black text-saffron-300 tracking-widest">{device.internal_ref}</p>
+                <p className="text-white/40 text-[11px] mt-0.5">Write this on the back of the reader with a marker.</p>
+              </div>
+              <button
+                onClick={() => { navigator.clipboard.writeText(device.internal_ref); }}
+                className="px-3 py-1.5 rounded-lg bg-white/10 text-white/70 hover:bg-white/15 text-xs font-bold flex-shrink-0"
+                title="Copy to clipboard"
+              >
+                Copy
+              </button>
+            </div>
+          )}
+          {!isEdit && (
+            <p className="text-white/30 text-[11px] -mt-1">
+              A unique internal reference (e.g. <span className="font-mono text-saffron-300/70">RDR-XXXX</span>) will be generated after save, to write on the back of the reader.
+            </p>
+          )}
+
+          <Field label="Friendly Name *" value={form.label} onChange={v => set('label', v)} placeholder="e.g. Wembley Main Hall Reader" />
 
           {/* Branch — search & select */}
           <div>
@@ -289,13 +325,27 @@ function DeviceModal({
             </div>
           </div>
 
-          {/* Notes */}
+          {/* Description — what it's for / where it lives. Separate from
+              the short friendly Label above so the list stays tidy but the
+              detail view explains properly. */}
           <div>
-            <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider mb-1.5">Notes</label>
+            <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider mb-1.5">Description</label>
+            <textarea
+              value={form.description}
+              onChange={e => set('description', e.target.value)}
+              placeholder="e.g. 'Mounted on the main hall entrance kiosk, used for Sunday collection'"
+              rows={2}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-white/25 resize-none focus:outline-none focus:border-saffron-400/40"
+            />
+          </div>
+
+          {/* Notes — operator / maintenance notes (shorter history log). */}
+          <div>
+            <label className="block text-white/50 text-xs font-semibold uppercase tracking-wider mb-1.5">Notes (operator / maintenance)</label>
             <textarea
               value={form.notes}
               onChange={e => set('notes', e.target.value)}
-              placeholder="Any notes about this device..."
+              placeholder="Any operator notes about this device..."
               rows={2}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-white/25 resize-none focus:outline-none focus:border-saffron-400/40"
             />
@@ -924,8 +974,16 @@ export default function TerminalDevicesPage() {
                           <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-lg flex-shrink-0">
                             {{ stripe_terminal: '⚡', square: '◼', clover: '🍀', sumup: '💳', cash: '💵' }[d.provider] ?? '💳'}
                           </div>
-                          <div>
-                            <p className="text-white font-semibold text-sm">{d.label}</p>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-white font-semibold text-sm truncate">{d.label}</p>
+                              {d.internal_ref && (
+                                <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-saffron-400/15 text-saffron-300 border border-saffron-400/25 whitespace-nowrap"
+                                  title="Internal reference written on the back of the reader">
+                                  {d.internal_ref}
+                                </span>
+                              )}
+                            </div>
                             {d.device_type && <p className="text-white/30 text-xs">{d.device_type}</p>}
                             {d.serial_number && <p className="text-white/20 text-xs font-mono">{d.serial_number}</p>}
                           </div>
