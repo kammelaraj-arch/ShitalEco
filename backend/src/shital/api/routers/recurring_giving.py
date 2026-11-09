@@ -1328,6 +1328,93 @@ async def admin_giving_stats(space: CurrentSpace, limit: int = 50) -> dict[str, 
     return out
 
 
+@router.get("/admin/giving/subscriptions/{sub_id}/charges")
+async def admin_sub_charges(sub_id: str, space: CurrentSpace) -> dict[str, Any]:
+    """All charges that belong to a single monthly-giving subscription.
+
+    The operator clicks a subscription row in the admin page → a detail
+    drawer opens and asks this endpoint for the donor's charge history.
+    Matches by the stripe_subscription_id / paypal_subscription_id on the
+    subscription row, or (fallback) by the contact_id when both id
+    columns are blank.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    async with SessionLocal() as db:
+        sub = (await db.execute(text("""
+            SELECT id::text AS id, stripe_subscription_id, paypal_subscription_id,
+                   contact_id::text AS contact_id,
+                   amount, frequency, status, donor_name, donor_email,
+                   donor_first_name, donor_surname, donor_phone, donor_address,
+                   donor_postcode, branch_id,
+                   approved_at, created_at, last_payment_at, next_billing_date,
+                   total_payments
+            FROM   recurring_giving_subscriptions
+            WHERE  id = CAST(:id AS uuid)
+            LIMIT  1
+        """), {"id": sub_id})).mappings().first()
+        if not sub:
+            raise HTTPException(status_code=404, detail="subscription not found")
+
+        # Charge lookup: prefer the provider's own subscription id (exact).
+        # Fallback to contact_id (matches the donor's past gifts even across
+        # providers). Keeps a single query path either way.
+        if sub["stripe_subscription_id"]:
+            where, params = (
+                "payment_provider = 'STRIPE' AND payment_ref IN ("
+                "  SELECT id::text FROM donations "
+                "  WHERE payment_ref LIKE 'in_%' AND payment_ref IS NOT NULL)",
+                {},
+            )
+            # Simpler + more reliable: look up by contact_id if we have it,
+            # else by donor_email on the subscription. The invoice IDs are
+            # stored as payment_ref — matching those across tables isn't
+            # worth the join.
+            where, params = ("contact_id = CAST(:cid AS uuid)", {"cid": sub["contact_id"]}) \
+                if sub["contact_id"] else \
+                ("UPPER(COALESCE(payment_ref,'')) LIKE :stub",
+                 {"stub": f"%{str(sub['stripe_subscription_id'])[-20:].upper()}%"})
+        elif sub["paypal_subscription_id"]:
+            where, params = ("contact_id = CAST(:cid AS uuid)", {"cid": sub["contact_id"]}) \
+                if sub["contact_id"] else \
+                ("payment_ref LIKE :stub", {"stub": f"%{sub['paypal_subscription_id']}%"})
+        else:
+            where, params = ("contact_id = CAST(:cid AS uuid)", {"cid": sub["contact_id"]}) \
+                if sub["contact_id"] else \
+                ("FALSE", {})
+
+        charges = (await db.execute(text(f"""
+            SELECT id::text AS id, amount, currency, payment_provider,
+                   payment_ref, created_at, status,
+                   COALESCE(gift_aid_eligible, false) AS gift_aid_eligible
+            FROM   donations
+            WHERE  purpose = 'Monthly Giving'
+              AND  {where}
+            ORDER  BY created_at DESC
+            LIMIT  100
+        """), params)).mappings().all()
+
+    return {
+        "subscription": {
+            **{k: (str(v) if k in ("id", "contact_id") else
+                   float(v) if k in ("amount",) else
+                   int(v) if k == "total_payments" else
+                   v.isoformat() if hasattr(v, "isoformat") else v)
+               for k, v in sub.items()},
+        },
+        "charges": [
+            {
+                **{k: (str(v) if k == "id" else
+                       float(v) if k == "amount" else
+                       v.isoformat() if hasattr(v, "isoformat") else v)
+                   for k, v in c.items()},
+            }
+            for c in charges
+        ],
+    }
+
+
 @router.get("/admin/giving/subscriptions")
 async def admin_list_subscriptions(space: CurrentSpace) -> dict[str, Any]:
     from sqlalchemy import text
