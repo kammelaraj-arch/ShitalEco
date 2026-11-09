@@ -50,7 +50,7 @@ function fmtGBP(n: number): string {
 export default function RecurringGivingPage() {
   const [tiers, setTiers]     = useState<Tier[]>([])
   const [subs, setSubs]       = useState<Sub[]>([])
-  const [tab, setTab]         = useState<'tiers' | 'subs' | 'links'>('tiers')
+  const [tab, setTab]         = useState<'tiers' | 'subs' | 'charges' | 'links'>('tiers')
   const [linkAmount, setLinkAmount] = useState('11')
   const [linkBranch, setLinkBranch] = useState('')
   const [copied, setCopied]   = useState('')
