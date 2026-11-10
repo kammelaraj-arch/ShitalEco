@@ -128,6 +128,15 @@ class DeviceIn(BaseModel):
     # touches card_reader_id. Not persisted from the request body — the
     # value stored in the DB is auto-generated at create time and stable.
     pairing_pin: str | None = None
+    # Project donation mode (QUICK_DONATION devices only). When mode='project'
+    # the Quick Donation client renders a 6-tile grid of linked projects
+    # instead of tap-and-go amount tiles. linked_project_ids is admin-ordered
+    # and capped at 6 by the UI; the backend doesn't enforce the cap so an
+    # operator can temporarily stash more and curate later. gupt_daan_enabled
+    # shows an extra anonymous tile above the grid.
+    donation_mode: str = "quick"                        # quick | project
+    linked_project_ids: list[str] = []
+    gupt_daan_enabled: bool = False
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -166,6 +175,9 @@ async def list_devices(
                        serial_number, ip_address, device_token,
                        COALESCE(pairing_pin, '')  AS pairing_pin,
                        COALESCE(profile_version, 1) AS profile_version,
+                       COALESCE(donation_mode, 'quick')  AS donation_mode,
+                       COALESCE(linked_project_ids, '{{}}'::uuid[]) AS linked_project_ids,
+                       COALESCE(gupt_daan_enabled, false) AS gupt_daan_enabled,
                        kiosk_theme, org_name, org_logo_url,
                        device_username,
                        show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
@@ -337,6 +349,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
                  monthly_giving_text, monthly_giving_amount, confirmation_text,
                  bg_color, menu_options,
+                 donation_mode, linked_project_ids, gupt_daan_enabled,
                  created_at, updated_at)
             VALUES
                 (:id, :name, :desc, :dtype, :bid, :loc, :lat, :lng, :status,
@@ -347,6 +360,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  :show_monthly, :gift_aid, :tap_go, :donate_title,
                  :mg_text, :mg_amount, :confirm_text,
                  :bg_color, CAST(:menu_opts AS JSONB),
+                 :dmode, CAST(:projs AS UUID[]), :gupt,
                  :now, :now)
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
@@ -371,6 +385,12 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "confirm_text": body.confirmation_text or "",
             "bg_color": body.bg_color or "",
             "menu_opts": json.dumps(body.menu_options or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}),
+            # Project-donation config. Cap linked_project_ids at 6 at the
+            # write boundary (even if the UI forgot) — the client renders
+            # exactly six slots and anything above is wasted anyway.
+            "dmode": (body.donation_mode or "quick").strip().lower(),
+            "projs": (body.linked_project_ids or [])[:6],
+            "gupt":  bool(body.gupt_daan_enabled),
             "now": now,
         })
         await db.commit()
@@ -471,6 +491,9 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 bg_color = :bg_color,
                 menu_profile_id = :menu_profile_id,
                 menu_options = CAST(:menu_opts AS JSONB),
+                donation_mode      = :dmode,
+                linked_project_ids = CAST(:projs AS UUID[]),
+                gupt_daan_enabled  = :gupt,
                 profile_version = profile_version + 1,
                 updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
@@ -498,6 +521,9 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "bg_color": body.bg_color or "",
             "menu_profile_id": body.menu_profile_id,
             "menu_opts": json.dumps(body.menu_options or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}),
+            "dmode": (body.donation_mode or "quick").strip().lower(),
+            "projs": (body.linked_project_ids or [])[:6],
+            "gupt":  bool(body.gupt_daan_enabled),
             "now": now,
         })
         await db.commit()

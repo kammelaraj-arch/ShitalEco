@@ -3364,6 +3364,9 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
                        COALESCE(kd.profile_version, 1) AS profile_version,
+                       COALESCE(kd.donation_mode, 'quick') AS donation_mode,
+                       COALESCE(kd.linked_project_ids, '{}'::uuid[]) AS linked_project_ids,
+                       COALESCE(kd.gupt_daan_enabled, false) AS gupt_daan_enabled,
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
                        COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
@@ -3454,6 +3457,15 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             # since last login, so the client fires one /refresh-config
             # call and updates. Until then the cached config is trusted.
             "profile_version": int(device["profile_version"] or 1),
+            # Project-donation config. The Quick Donation client reads
+            # donation_mode at login and routes to either the existing
+            # tap-and-go screens ('quick') or a 6-tile project grid
+            # ('project'). linked_project_ids is an admin-ordered list
+            # (<= 6) used to populate the grid; gupt_daan_enabled surfaces
+            # an extra anonymous tile.
+            "donation_mode":     device["donation_mode"] or "quick",
+            "linked_project_ids": [str(p) for p in (device["linked_project_ids"] or [])],
+            "gupt_daan_enabled":  bool(device["gupt_daan_enabled"]),
         }
 
     # ── Path 2: Legacy user-table login (quickkiosk-* accounts) ──────────────
