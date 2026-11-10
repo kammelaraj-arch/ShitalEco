@@ -1267,6 +1267,29 @@ async def _patch_schema() -> None:
         # refresh-config call. No per-donation network hit to resolve the
         # reader: the config is fixed locally until the version bumps.
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS profile_version INTEGER NOT NULL DEFAULT 1",
+        # Project-donation device mode. When `donation_mode='project'` the
+        # Quick Donation client renders a 6-tile grid of the admin-linked
+        # projects instead of the tap-and-go amount keypad. On 'quick' the
+        # client keeps the existing behaviour, so this change is backward
+        # compatible — every existing kiosk stays in quick mode until an
+        # admin flips it. `linked_project_ids` holds up to 6 project UUIDs
+        # (admin-ordered); `gupt_daan_enabled` surfaces an extra anonymous
+        # tile above the grid for donors who don't want to leave details.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS donation_mode      VARCHAR(20) NOT NULL DEFAULT 'quick'",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS linked_project_ids UUID[]      NOT NULL DEFAULT '{}'::uuid[]",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS gupt_daan_enabled  BOOLEAN     NOT NULL DEFAULT false",
+        # Ordered list of tile ids shown on the Project-mode start screen.
+        # Values match the client-side TILE_CATALOG ids (brick, sqft,
+        # material, volunt, services, business, general). Empty means
+        # "show the default set in catalog order". The gupt_daan tile is
+        # controlled by gupt_daan_enabled separately, and the any_amount
+        # tile is always shown as the last single slot.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS enabled_tiles TEXT[] NOT NULL DEFAULT '{}'::text[]",
+        # Anonymous-donation marker on the donations table itself — a Gupt
+        # Daan row saves contact_id=NULL and is_anonymous=true so finance
+        # reports can treat it distinctly, no receipt email is sent, and
+        # the donor's inbox stays untouched by design.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT false",
         # Seed kiosk menus (idempotent — guarded by NOT EXISTS)
         """INSERT INTO menus (app_id, code, label, icon, display_order)
         SELECT * FROM (VALUES
