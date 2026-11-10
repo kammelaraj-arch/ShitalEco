@@ -145,6 +145,9 @@ export default function DevicesPage() {
   const [playlists, setPlaylists]       = useState<Playlist[]>([])
   const [cardReaders, setCardReaders]   = useState<CardReader[]>([])
   const [menuProfiles, setMenuProfiles] = useState<MenuProfile[]>([])
+  // Fundraising projects, loaded for the project-mode multi-select below.
+  // Shape: { id (uuid), name, branch_id }. Filtered to the device's branch.
+  const [projects, setProjects] = useState<{ id: string; name: string; branch_id: string }[]>([])
   const [loading, setLoading]           = useState(true)
   const [drawerOpen, setDrawerOpen]     = useState(false)
   const [editing, setEditing]           = useState<KioskDevice | null>(null)
@@ -167,13 +170,14 @@ export default function DevicesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [devData, brData, profData, plData, crData, mpData] = await Promise.all([
+      const [devData, brData, profData, plData, crData, mpData, prjData] = await Promise.all([
         apiFetch<{ devices: KioskDevice[] }>('/kiosk-devices'),
         apiFetch<{ branches: Branch[] }>('/branches').catch(() => ({ branches: [] })),
         apiFetch<{ profiles: ScreenProfile[] }>('/screen/profiles').catch(() => ({ profiles: [] })),
         apiFetch<{ playlists: Playlist[] }>('/screen/playlists').catch(() => ({ playlists: [] })),
         apiFetch<{ devices: CardReader[] }>('/terminal-devices/?active_only=true').catch(() => ({ devices: [] })),
         apiFetch<{ profiles: MenuProfile[] }>('/admin/menu-profiles?app_id=kiosk').catch(() => ({ profiles: [] })),
+        apiFetch<{ projects: { id: string; name: string; branch_id: string }[] }>('/projects').catch(() => ({ projects: [] })),
       ])
       setDevices(devData.devices || [])
       setBranches(brData.branches || [])
@@ -181,6 +185,7 @@ export default function DevicesPage() {
       setPlaylists(plData.playlists || [])
       setCardReaders(crData.devices || [])
       setMenuProfiles(mpData.profiles || [])
+      setProjects(prjData.projects || [])
     } catch (e: unknown) {
       setError(String(e))
     }
@@ -884,65 +889,6 @@ export default function DevicesPage() {
                       </div>
                     )}
 
-                    {/* Project Donation mode — flips the Quick Donation client's
-                        start screen from the tap-and-go amount tiles to a 9-tile
-                        category grid (Brick / Sq Ft / Materials / Volunteering /
-                        Pro Services / Business / General / Gupt Daan / Any Amount).
-                        Linked projects decide which tier presets are offered when
-                        the donor taps a category; Gupt Daan is an opt-in anonymous
-                        tile with no form / no receipt. */}
-                    <div className="rounded-xl p-4 space-y-3"
-                         style={{ background: 'rgba(255,153,51,0.06)', border: '1px solid rgba(255,153,51,0.3)' }}>
-                      <div>
-                        <p className={lbl} style={{ color: '#FDBA74' }}>Donation Mode</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {(['quick', 'project'] as const).map(m => (
-                            <button key={m} type="button"
-                              onClick={() => setForm(f => ({ ...f, donation_mode: m }))}
-                              className="rounded-xl p-3 text-left transition-all"
-                              style={{
-                                background: form.donation_mode === m ? 'rgba(255,153,51,0.2)' : 'rgba(255,255,255,0.03)',
-                                border: form.donation_mode === m ? '1.5px solid #FF9933' : '1.5px solid rgba(255,255,255,0.08)',
-                              }}>
-                              <p className="text-white font-bold text-sm capitalize">{m === 'quick' ? 'Quick Donation (amounts)' : 'Project Donation (tiles)'}</p>
-                              <p className="text-white/50 text-[11px] mt-0.5">
-                                {m === 'quick' ? 'Current tap-and-go amount tiles' : '9-tile category grid → tier picker → contact form'}
-                              </p>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      {form.donation_mode === 'project' && (
-                        <>
-                          <div>
-                            <p className={lbl} style={{ color: '#FDBA74' }}>Linked Project IDs (one per line, admin-ordered)</p>
-                            <textarea className={`${inp} font-mono text-xs resize-none`} rows={3}
-                              value={form.linked_project_ids.join('\n')}
-                              onChange={e => setForm(f => ({ ...f, linked_project_ids: e.target.value.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 6) }))}
-                              placeholder="paste project UUIDs from Projects admin, one per line (max 6)" />
-                            <p className="text-white/30 text-[10px] mt-1">Tier presets will come from these projects&apos; catalog items.</p>
-                          </div>
-                          <div>
-                            <p className={lbl} style={{ color: '#FDBA74' }}>Enabled Tiles (ordered; leave blank for default set)</p>
-                            <input className={`${inp} font-mono text-xs`}
-                              value={form.enabled_tiles.join(',')}
-                              onChange={e => setForm(f => ({ ...f, enabled_tiles: e.target.value.split(',').map(s => s.trim()).filter(Boolean).slice(0, 12) }))}
-                              placeholder="brick,sqft,material,volunt,services,business,general,any" />
-                            <p className="text-white/30 text-[10px] mt-1">Known ids: brick, sqft, material, volunt, services, business, general, any</p>
-                          </div>
-                          <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
-                            <input type="checkbox" className="w-4 h-4 accent-amber-500"
-                              checked={form.gupt_daan_enabled}
-                              onChange={e => setForm(f => ({ ...f, gupt_daan_enabled: e.target.checked }))} />
-                            <div>
-                              <p className="text-white font-bold text-sm">Enable Gupt Daan (anonymous) tile</p>
-                              <p className="text-white/50 text-[11px]">No contact form, no Gift Aid, no receipt — donor stays anonymous.</p>
-                            </div>
-                          </label>
-                        </>
-                      )}
-                    </div>
-
                     {/* Feature toggles */}
                     <div className="space-y-2.5 pt-1">
                       {([
@@ -976,6 +922,136 @@ export default function DevicesPage() {
                       ))}
                     </div>
                   </div>
+                )}
+
+                {/* ── Project Donation Mode (Quick Donation devices only) ─────
+                     Flips the Quick Donation client from the tap-and-go amount
+                     tiles to a 9-tile category grid. Gated to QUICK_DONATION
+                     device_type because that's the only app that reads the
+                     donation_mode flag; Kiosk and Smart Display ignore it. */}
+                {form.device_type === 'QUICK_DONATION' && (
+                <div className="rounded-2xl p-4 space-y-3" style={{ background: 'rgba(255,153,51,0.08)', border: '1px solid rgba(255,153,51,0.35)' }}>
+                  <p className="text-amber-400 text-xs font-bold uppercase tracking-wide">🪔 Donation Mode</p>
+                  <p className="text-white/35 text-[10px]">Choose how the start screen looks on this kiosk. Quick Donation keeps today&apos;s amount tiles. Project Donation shows a category grid (Brick / Sq Ft / Materials / Volunteering / Pro Services / Business / General / Any Amount) with an optional anonymous tile.</p>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { v: 'quick',   title: 'Quick Donation', desc: 'Today\'s tap-and-go amount tiles' },
+                      { v: 'project', title: 'Project Donation', desc: 'Category tiles → tier picker → contact form' },
+                    ] as const).map(opt => (
+                      <button key={opt.v} type="button"
+                        onClick={() => setForm(f => ({ ...f, donation_mode: opt.v }))}
+                        className="rounded-xl p-3 text-left transition-all"
+                        style={{
+                          background: form.donation_mode === opt.v ? 'rgba(255,153,51,0.2)' : 'rgba(255,255,255,0.03)',
+                          border: form.donation_mode === opt.v ? '1.5px solid #FF9933' : '1.5px solid rgba(255,255,255,0.08)',
+                        }}>
+                        <p className="text-white font-bold text-sm">{opt.title}</p>
+                        <p className="text-white/50 text-[11px] mt-0.5">{opt.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {form.donation_mode === 'project' && (
+                    <>
+                      {/* Project multi-select: checkbox list of fundraising
+                          projects, filtered to the device's branch (fallback:
+                          all projects). Admin ticks up to 6; the tick order
+                          becomes the ordered linked_project_ids array. */}
+                      <div>
+                        <p className={lbl} style={{ color: '#FDBA74' }}>
+                          Linked Projects ({form.linked_project_ids.length}/6)
+                        </p>
+                        <div className="rounded-xl p-2 max-h-56 overflow-y-auto space-y-1"
+                             style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                          {projects.length === 0 && (
+                            <p className="text-white/40 text-xs p-3 text-center">No projects yet. Create one at <a className="text-amber-400 underline" href="/projects">Admin → Projects</a>.</p>
+                          )}
+                          {projects
+                            .filter(p => !form.branch_id || !p.branch_id || p.branch_id === form.branch_id)
+                            .map(p => {
+                              const checked = form.linked_project_ids.includes(p.id)
+                              const atMax = !checked && form.linked_project_ids.length >= 6
+                              return (
+                                <label key={p.id}
+                                       className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer ${atMax ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/5'}`}>
+                                  <input type="checkbox" className="w-4 h-4 accent-amber-500"
+                                    disabled={atMax}
+                                    checked={checked}
+                                    onChange={e => setForm(f => {
+                                      const list = e.target.checked
+                                        ? [...f.linked_project_ids, p.id].slice(0, 6)
+                                        : f.linked_project_ids.filter(id => id !== p.id)
+                                      return { ...f, linked_project_ids: list }
+                                    })} />
+                                  <span className="text-white/80 text-sm flex-1 truncate">{p.name}</span>
+                                  {checked && (
+                                    <span className="text-amber-400 text-[10px] font-mono">
+                                      #{form.linked_project_ids.indexOf(p.id) + 1}
+                                    </span>
+                                  )}
+                                </label>
+                              )
+                            })}
+                        </div>
+                        <p className="text-white/30 text-[10px] mt-1">Numbered chips show the order on the kiosk. Tick in the order you want them to appear.</p>
+                      </div>
+
+                      {/* Tile picker: checkbox list of built-in tile types,
+                          user ticks in the order they want them to appear. */}
+                      <div>
+                        <p className={lbl} style={{ color: '#FDBA74' }}>
+                          Tiles shown on the start screen ({form.enabled_tiles.length || 8}/8)
+                        </p>
+                        <div className="rounded-xl p-2 space-y-1"
+                             style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                          {([
+                            { id: 'brick',    label: '🧱 Brick' },
+                            { id: 'sqft',     label: '📏 Square Feet' },
+                            { id: 'material', label: '🗿 Materials' },
+                            { id: 'volunt',   label: '🤝 Volunteering' },
+                            { id: 'services', label: '🛠️ Professional Services' },
+                            { id: 'business', label: '💼 Business Sponsorship' },
+                            { id: 'general',  label: '🪔 General Donation' },
+                            { id: 'any',      label: '£ Any Amount' },
+                          ] as const).map(t => {
+                            const list = form.enabled_tiles.length ? form.enabled_tiles : ['brick','sqft','material','volunt','services','business','general','any']
+                            const checked = list.includes(t.id)
+                            return (
+                              <label key={t.id} className="flex items-center gap-3 p-2 rounded-lg cursor-pointer hover:bg-white/5">
+                                <input type="checkbox" className="w-4 h-4 accent-amber-500"
+                                  checked={checked}
+                                  onChange={e => setForm(f => {
+                                    const cur = f.enabled_tiles.length ? f.enabled_tiles : ['brick','sqft','material','volunt','services','business','general','any']
+                                    const next = e.target.checked
+                                      ? [...cur, t.id]
+                                      : cur.filter(id => id !== t.id)
+                                    return { ...f, enabled_tiles: next }
+                                  })} />
+                                <span className="text-white/80 text-sm flex-1">{t.label}</span>
+                                {checked && (
+                                  <span className="text-amber-400 text-[10px] font-mono">#{list.indexOf(t.id) + 1}</span>
+                                )}
+                              </label>
+                            )
+                          })}
+                        </div>
+                        <p className="text-white/30 text-[10px] mt-1">Leave everything ticked for the default layout. Untick to hide a tile.</p>
+                      </div>
+
+                      {/* Gupt Daan toggle */}
+                      <label className="flex items-start gap-3 cursor-pointer p-3 rounded-xl transition-colors hover:bg-white/5">
+                        <input type="checkbox" className="w-5 h-5 accent-amber-500 mt-0.5"
+                          checked={form.gupt_daan_enabled}
+                          onChange={e => setForm(f => ({ ...f, gupt_daan_enabled: e.target.checked }))} />
+                        <div>
+                          <p className="text-white font-bold text-sm">ॐ Enable Gupt Daan (anonymous) tile</p>
+                          <p className="text-white/50 text-[11px] mt-0.5">A 9th tile that takes a card tap without asking for name / email / Gift Aid — donation saves anonymously with no receipt. Traditional temple practice.</p>
+                        </div>
+                      </label>
+                    </>
+                  )}
+                </div>
                 )}
 
                 {/* ── Device Login Credentials (all types) ────────────── */}
