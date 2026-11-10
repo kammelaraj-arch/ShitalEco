@@ -558,6 +558,63 @@ async def tap_setup_status(setup_intent_id: str) -> dict[str, Any]:
 
 # ── Recording helpers ───────────────────────────────────────────────────────────
 
+async def _send_recurring_confirmation_once(stripe_sub_id: str, fallback_amount: float | None = None) -> None:
+    """Fire the recurring_giving_confirmation email exactly once per
+    subscription, by atomically claiming the `confirmation_sent_at` column.
+
+    Called from three different code paths — the fresh checkout
+    (`_link_subscription_row`), the Pass A status-map sweep, and the Pass B
+    orphan-link sweep. Any of them might land first depending on whether
+    Stripe's webhook was slow or dropped; whichever runs first claims the
+    send and the others silently skip.
+
+    Non-fatal: the SMTP path may be down for unrelated reasons, and the
+    row has already been activated by the caller. Email failures are
+    logged but never propagated.
+    """
+    if not stripe_sub_id:
+        return
+    from sqlalchemy import text as _t
+
+    from shital.core.fabrics.database import SessionLocal
+    now = datetime.utcnow()
+    try:
+        async with SessionLocal() as db:
+            claim = (await db.execute(_t("""
+                UPDATE recurring_giving_subscriptions
+                SET confirmation_sent_at = :now
+                WHERE stripe_subscription_id = :sub
+                  AND confirmation_sent_at IS NULL
+                  AND COALESCE(donor_email,'') <> ''
+                RETURNING donor_email, donor_first_name, donor_name, amount,
+                          COALESCE(gift_aid_declared, false) AS ga
+            """), {"now": now, "sub": stripe_sub_id})).mappings().first()
+            await db.commit()
+        if not claim:
+            return
+        from shital.api.routers.email_templates import send_template
+        from shital.core.fabrics.config import settings
+        await send_template(
+            "recurring_giving_confirmation",
+            claim["donor_email"],
+            {
+                "donor_first_name": claim["donor_first_name"] or claim["donor_name"] or "Friend",
+                "amount": f"{float(claim['amount'] or fallback_amount or 0):.2f}",
+                "frequency": "month",
+                "tier_label": "Monthly Gift",
+                "subscription_id": stripe_sub_id,
+                "gift_aid_declared": bool(claim["ga"]),
+                "logo_url": "https://shirdisai.org.uk/Cnt/img/shital-logo-new.png",
+                "charity_number": settings.CHARITY_NUMBER or "1138530",
+                "manage_url": "https://service.shital.org.uk/?screen=my-giving",
+                "support_email": "info@shirdisai.org.uk",
+            },
+            related_type="recurring_giving_subscription",
+        )
+    except Exception as exc:  # noqa: BLE001 — email is non-fatal
+        logger.warning("stripe_confirmation_email_failed", sub=stripe_sub_id, error=str(exc))
+
+
 async def _link_subscription_row(*, rgs_id: str | None, stripe_sub_id: str,
                                   customer_id: str | None, checkout_id: str | None,
                                   name: str, email: str, branch_id: str,
@@ -625,45 +682,9 @@ async def _link_subscription_row(*, rgs_id: str | None, stripe_sub_id: str,
                 })
         await db.commit()
 
-    # ── Confirmation email (idempotent) ───────────────────────────────────────
-    # Send the temple's own recurring-giving confirmation for Stripe subs too
-    # (donors otherwise only get Stripe's receipt). We "claim" the send with a
-    # guarded UPDATE on confirmation_sent_at so webhook + confirm + sync all
-    # firing for the same subscription only ever send ONE email. Non-fatal.
-    try:
-        async with SessionLocal() as db:
-            claim = (await db.execute(text("""
-                UPDATE recurring_giving_subscriptions
-                SET confirmation_sent_at = :now
-                WHERE stripe_subscription_id = :sub
-                  AND confirmation_sent_at IS NULL
-                  AND COALESCE(donor_email,'') <> ''
-                RETURNING donor_email, donor_first_name, donor_name, amount,
-                          COALESCE(gift_aid_declared, false) AS ga
-            """), {"now": now, "sub": stripe_sub_id})).mappings().first()
-            await db.commit()
-        if claim:
-            from shital.api.routers.email_templates import send_template
-            from shital.core.fabrics.config import settings
-            await send_template(
-                "recurring_giving_confirmation",
-                claim["donor_email"],
-                {
-                    "donor_first_name": claim["donor_first_name"] or claim["donor_name"] or "Friend",
-                    "amount": f"{float(claim['amount'] or amount or 0):.2f}",
-                    "frequency": "month",
-                    "tier_label": "Monthly Gift",
-                    "subscription_id": stripe_sub_id,
-                    "gift_aid_declared": bool(claim["ga"]),
-                    "logo_url": "https://shirdisai.org.uk/Cnt/img/shital-logo-new.png",
-                    "charity_number": settings.CHARITY_NUMBER or "1138530",
-                    "manage_url": "https://service.shital.org.uk/?screen=my-giving",
-                    "support_email": "info@shirdisai.org.uk",
-                },
-                related_type="recurring_giving_subscription",
-            )
-    except Exception as exc:  # noqa: BLE001 — email is non-fatal
-        logger.warning("stripe_confirmation_email_failed", sub=stripe_sub_id, error=str(exc))
+    # Fire the temple's own confirmation email, idempotent on
+    # confirmation_sent_at. Non-fatal.
+    await _send_recurring_confirmation_once(stripe_sub_id, fallback_amount=amount)
 
 
 async def _handle_checkout_completed(session: dict[str, Any]) -> None:
@@ -951,6 +972,11 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
             summary["status_updated"] += 1
             if mapped == "ACTIVE":
                 summary["activated"] += 1
+                # Pass A just flipped a PENDING_APPROVAL row to ACTIVE —
+                # fire the confirmation email in case the Checkout webhook
+                # (where _link_subscription_row would normally run) never
+                # reached us. Idempotent on confirmation_sent_at.
+                await _send_recurring_confirmation_once(r["sub_id"])
             elif mapped in ("CANCELLED", "EXPIRED"):
                 summary["cancelled"] += 1
         if (mapped or r["status"]) == "ACTIVE":
@@ -1002,6 +1028,10 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
             if st == "ACTIVE":
                 summary["activated"] += 1
                 await _record_paid_invoices(str(sub.get("id")))
+                # Pass B just linked an orphan row to its Stripe sub and
+                # activated it — fire the confirmation email the same way
+                # Pass A does. Still idempotent via confirmation_sent_at.
+                await _send_recurring_confirmation_once(str(sub.get("id")))
 
         # ── Pass C · orphans via Checkout Session ────────────────────────
         # Pass B keys on ``Subscription.metadata.rgs_id``. That works in the

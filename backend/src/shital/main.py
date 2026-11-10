@@ -2560,6 +2560,13 @@ async def _patch_schema() -> None:
         # under "Unattributed"). Indexed for the by-device aggregation.
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS kiosk_device_id UUID DEFAULT NULL",
         "CREATE INDEX IF NOT EXISTS idx_donations_kiosk_device ON donations(kiosk_device_id) WHERE kiosk_device_id IS NOT NULL",
+        # Idempotency marker for the one-off donation receipt email. The
+        # Stripe payment-intent and SumUp webhooks each try to send a
+        # donation_receipt the first time they flip the row to COMPLETED,
+        # and claim this column in the same UPDATE so webhook re-deliveries
+        # can't double-send. NULL means nothing's been sent yet; a timestamp
+        # means a send was claimed by whichever path ran first.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS receipt_sent_at TIMESTAMPTZ DEFAULT NULL",
         # ── Webhook event audit log ───────────────────────────────────────────
         # Every PayPal webhook gets stored here, idempotent on event_id, before
         # we touch any business state. Lets us replay a failed handler without

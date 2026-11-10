@@ -1093,6 +1093,88 @@ async def sumup_checkout(body: SumUpCheckoutInput):
         return {"error": str(e)}
 
 
+async def _send_donation_receipt_once(payment_ref: str, source: str) -> None:
+    """Fire the donation_receipt email exactly once per donation.
+
+    Called from the SumUp webhook and the Stripe payment-intent webhook the
+    moment either of them flips a donations row to COMPLETED. The
+    donations.receipt_sent_at column is claimed in the same UPDATE, so a
+    second webhook delivery (or a race with the 15-min sweeper) finds the
+    column already set and silently skips. Guarded by the donor-email check
+    too — a cash walk-up without an email on file stays silent.
+
+    Non-fatal: if SMTP is down or the template renders badly, the donation
+    row is already COMPLETED by the caller; we log the failure and move on.
+
+    `source` is just for the audit-log triggered_by field ("stripe_pi_webhook"
+    or "sumup_webhook"), so an operator reading sent_emails can tell which
+    path fired it.
+    """
+    if not payment_ref:
+        return
+    try:
+        async with SessionLocal() as db:
+            # Atomic claim + fetch of the donor + donation details. Joining
+            # to contacts gives us the email; the donations row carries the
+            # amount, purpose and branch context. We only claim and return
+            # a row when there is actually an email to send to — a walk-in
+            # cash gift without a contact stays silent instead of recording
+            # a FAILED send.
+            row = (await db.execute(text("""
+                WITH claimed AS (
+                    UPDATE donations SET receipt_sent_at = NOW()
+                    WHERE payment_ref = :ref
+                      AND receipt_sent_at IS NULL
+                      AND UPPER(COALESCE(status,'')) = 'COMPLETED'
+                      AND deleted_at IS NULL
+                    RETURNING id, branch_id, amount, currency, purpose,
+                              reference, contact_id
+                )
+                SELECT c.id AS donation_id,
+                       c.branch_id, c.amount, c.currency, c.purpose, c.reference,
+                       co.email      AS donor_email,
+                       co.full_name  AS donor_name,
+                       b.name        AS branch_name
+                FROM claimed c
+                LEFT JOIN contacts co ON co.id = c.contact_id
+                LEFT JOIN branches b  ON b.branch_id = c.branch_id
+            """), {"ref": payment_ref})).mappings().first()
+            await db.commit()
+        if not row or not (row.get("donor_email") or "").strip():
+            # Either another webhook already claimed it, or there's no
+            # donor email to reach. Both cases are correct no-ops.
+            return
+        from shital.api.routers.email_templates import RELATED_DONATION, send_template
+        from shital.core.fabrics.config import settings
+        amount = float(row["amount"] or 0)
+        currency = row["currency"] or "GBP"
+        order_ref = row["reference"] or str(row["donation_id"])[:8].upper()
+        purpose = row["purpose"] or "General Donation"
+        await send_template(
+            "donation_receipt",
+            row["donor_email"].strip(),
+            {
+                "order_ref":     order_ref,
+                "customer_name": row["donor_name"] or "Friend",
+                "total":         amount,
+                "items":         [{"name": purpose, "quantity": 1, "unitPrice": amount}],
+                "branch_name":   row["branch_name"] or row["branch_id"] or "Shital Temple",
+                "date":          datetime.utcnow().strftime("%-d %B %Y"),
+                "currency":      currency,
+                "charity_number": settings.CHARITY_NUMBER or "1138530",
+            },
+            related_type=RELATED_DONATION,
+            related_id=str(row["donation_id"]),
+            triggered_by=source,
+        )
+    except Exception as exc:  # noqa: BLE001 — email is non-fatal
+        import logging as _log
+        _log.getLogger("shital.receipt").warning(
+            "donation_receipt_failed ref=%s source=%s error=%s",
+            payment_ref, source, str(exc),
+        )
+
+
 @router.post("/sumup/webhook")
 async def sumup_webhook(request: Request):
     """
@@ -1212,6 +1294,13 @@ async def sumup_webhook(request: Request):
             import logging as _log
             _log.getLogger("shital.sumup").exception(
                 "sumup webhook DB update failed for checkout %s", checkout_id)
+
+    # Fire the donation receipt the first time a webhook flips this donation
+    # to COMPLETED. Idempotent on donations.receipt_sent_at, so re-deliveries
+    # don't double-send, and only runs when the donor actually has an email
+    # on file (walk-in cash gifts stay silent).
+    if new_status == "COMPLETED":
+        await _send_donation_receipt_once(checkout_id, source="sumup_webhook")
 
     return {"ok": True, "status": status, "applied": new_status}
 
@@ -1389,6 +1478,13 @@ async def stripe_webhook(request: Request):
             """), {**params, "st": new_status})
             applied = new_status
         await db.commit()
+
+    # Same deal as the SumUp webhook: on the first COMPLETED transition,
+    # fire the donation receipt. Idempotent on receipt_sent_at so a race
+    # with the SumUp path (impossible here but same code shape) or with
+    # a webhook re-delivery doesn't double-send.
+    if applied == "COMPLETED":
+        await _send_donation_receipt_once(pi_id, source="stripe_pi_webhook")
 
     return {"ok": True, "event": etype, "status": st, "applied": applied}
 
