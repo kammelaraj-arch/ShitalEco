@@ -1093,37 +1093,48 @@ async def sumup_checkout(body: SumUpCheckoutInput):
         return {"error": str(e)}
 
 
-async def _send_donation_receipt_once(payment_ref: str, source: str) -> None:
-    """Fire the donation_receipt email exactly once per donation.
+async def _send_donation_receipt_once(
+    *,
+    payment_ref: str | None = None,
+    donation_id: str | None = None,
+    source: str,
+) -> None:
+    """Fire the donation_receipt email exactly once per donation, regardless of
+    how the row got to COMPLETED.
 
-    Called from the SumUp webhook and the Stripe payment-intent webhook the
-    moment either of them flips a donations row to COMPLETED. The
-    donations.receipt_sent_at column is claimed in the same UPDATE, so a
-    second webhook delivery (or a race with the 15-min sweeper) finds the
-    column already set and silently skips. Guarded by the donor-email check
-    too — a cash walk-up without an email on file stays silent.
+    One of ``payment_ref`` or ``donation_id`` must be given:
+      - webhook callers (Stripe PI, SumUp) know the payment_ref — the
+        atomic claim includes it so webhook re-deliveries don't double-send
+      - the 15-min sweeper in services.background_recovery knows the
+        donation id and uses that path — this catches PayPal, cash, bank
+        transfers, monthly-giving invoice rows, admin-entered gifts, and
+        anything else that lands in donations.status='COMPLETED' without
+        a provider webhook to fire the receipt inline.
 
-    Non-fatal: if SMTP is down or the template renders badly, the donation
-    row is already COMPLETED by the caller; we log the failure and move on.
-
-    `source` is just for the audit-log triggered_by field ("stripe_pi_webhook"
-    or "sumup_webhook"), so an operator reading sent_emails can tell which
-    path fired it.
+    Same atomic claim-on-receipt_sent_at idempotency either way. Non-fatal:
+    the donation row is already COMPLETED by the caller; a template render
+    error or SMTP failure logs a warning and returns. `source` goes to the
+    sent_emails audit log's triggered_by so a reader can tell which path
+    fired the email.
     """
-    if not payment_ref:
+    if not payment_ref and not donation_id:
         return
     try:
+        # Claim is keyed on whichever identifier the caller gave us. Both
+        # queries are atomic + idempotent because receipt_sent_at IS NULL
+        # is in the WHERE — the losing caller gets a 0-row result and
+        # returns without sending.
+        if payment_ref:
+            where_sql = "payment_ref = :key"
+            params = {"key": payment_ref}
+        else:
+            where_sql = "id = CAST(:key AS uuid)"
+            params = {"key": str(donation_id)}
         async with SessionLocal() as db:
-            # Atomic claim + fetch of the donor + donation details. Joining
-            # to contacts gives us the email; the donations row carries the
-            # amount, purpose and branch context. We only claim and return
-            # a row when there is actually an email to send to — a walk-in
-            # cash gift without a contact stays silent instead of recording
-            # a FAILED send.
-            row = (await db.execute(text("""
+            row = (await db.execute(text(f"""
                 WITH claimed AS (
                     UPDATE donations SET receipt_sent_at = NOW()
-                    WHERE payment_ref = :ref
+                    WHERE {where_sql}
                       AND receipt_sent_at IS NULL
                       AND UPPER(COALESCE(status,'')) = 'COMPLETED'
                       AND deleted_at IS NULL
@@ -1138,11 +1149,12 @@ async def _send_donation_receipt_once(payment_ref: str, source: str) -> None:
                 FROM claimed c
                 LEFT JOIN contacts co ON co.id = c.contact_id
                 LEFT JOIN branches b  ON b.branch_id = c.branch_id
-            """), {"ref": payment_ref})).mappings().first()
+            """), params)).mappings().first()
             await db.commit()
         if not row or not (row.get("donor_email") or "").strip():
             # Either another webhook already claimed it, or there's no
-            # donor email to reach. Both cases are correct no-ops.
+            # donor email to reach (walk-in cash gift without a contact).
+            # Both cases are correct no-ops.
             return
         from shital.api.routers.email_templates import RELATED_DONATION, send_template
         from shital.core.fabrics.config import settings
@@ -1170,8 +1182,8 @@ async def _send_donation_receipt_once(payment_ref: str, source: str) -> None:
     except Exception as exc:  # noqa: BLE001 — email is non-fatal
         import logging as _log
         _log.getLogger("shital.receipt").warning(
-            "donation_receipt_failed ref=%s source=%s error=%s",
-            payment_ref, source, str(exc),
+            "donation_receipt_failed key=%s source=%s error=%s",
+            payment_ref or donation_id, source, str(exc),
         )
 
 
@@ -1300,7 +1312,7 @@ async def sumup_webhook(request: Request):
     # don't double-send, and only runs when the donor actually has an email
     # on file (walk-in cash gifts stay silent).
     if new_status == "COMPLETED":
-        await _send_donation_receipt_once(checkout_id, source="sumup_webhook")
+        await _send_donation_receipt_once(payment_ref=checkout_id, source="sumup_webhook")
 
     return {"ok": True, "status": status, "applied": new_status}
 
@@ -1484,7 +1496,7 @@ async def stripe_webhook(request: Request):
     # with the SumUp path (impossible here but same code shape) or with
     # a webhook re-delivery doesn't double-send.
     if applied == "COMPLETED":
-        await _send_donation_receipt_once(pi_id, source="stripe_pi_webhook")
+        await _send_donation_receipt_once(payment_ref=pi_id, source="stripe_pi_webhook")
 
     return {"ok": True, "event": etype, "status": st, "applied": applied}
 
