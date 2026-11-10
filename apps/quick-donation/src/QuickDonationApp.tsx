@@ -6,6 +6,9 @@ import { ProcessingScreen } from './pages/ProcessingScreen'
 import { TapScreen } from './pages/TapScreen'
 import { ConfirmationScreen } from './pages/ConfirmationScreen'
 import { AdminScreen } from './pages/AdminScreen'
+import { ProjectStartScreen } from './pages/ProjectStartScreen'
+import { ProjectTiersScreen } from './pages/ProjectTiersScreen'
+import { ProjectContactScreen } from './pages/ProjectContactScreen'
 import { unlockVoiceOnFirstGesture } from './lib/voice'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api/v1'
@@ -286,14 +289,25 @@ export function QuickDonationApp() {
     exit: { opacity: 0, scale: 1.02, transition: { duration: 0.2 } },
   }
 
+  // Project donation mode: admin flipped this device to the 9-tile
+  // category grid instead of the tap-and-go amount tiles. 'donate' resolves
+  // to a different start screen in that case; everything else (tap,
+  // processing, confirmation, admin) flows through the same screens as
+  // quick mode so the card reader + receipt pipeline doesn't fork.
+  const donationMode = useDonationStore(s => s.donationMode)
   const renderScreen = () => {
     switch (screen) {
-      case 'donate':        return <DonationScreen key="donate" />
-      case 'processing':    return <ProcessingScreen key="processing" />
-      case 'tap':           return <TapScreen key="tap" />
-      case 'confirmation':  return <ConfirmationScreen key="confirmation" />
-      case 'admin':         return <AdminScreen key="admin" />
-      default:              return <DonationScreen key="donate" />
+      case 'donate':
+        return donationMode === 'project'
+          ? <ProjectStartScreen key="project-start" />
+          : <DonationScreen    key="donate" />
+      case 'project-tiers':   return <ProjectTiersScreen   key="project-tiers" />
+      case 'project-contact': return <ProjectContactScreen key="project-contact" />
+      case 'processing':      return <ProcessingScreen key="processing" />
+      case 'tap':             return <TapScreen        key="tap" />
+      case 'confirmation':    return <ConfirmationScreen key="confirmation" />
+      case 'admin':           return <AdminScreen      key="admin" />
+      default:                return <DonationScreen   key="donate" />
     }
   }
 

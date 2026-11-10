@@ -137,6 +137,7 @@ class DeviceIn(BaseModel):
     donation_mode: str = "quick"                        # quick | project
     linked_project_ids: list[str] = []
     gupt_daan_enabled: bool = False
+    enabled_tiles: list[str] = []                       # ordered tile ids
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -178,6 +179,7 @@ async def list_devices(
                        COALESCE(donation_mode, 'quick')  AS donation_mode,
                        COALESCE(linked_project_ids, '{{}}'::uuid[]) AS linked_project_ids,
                        COALESCE(gupt_daan_enabled, false) AS gupt_daan_enabled,
+                       COALESCE(enabled_tiles, '{{}}'::text[]) AS enabled_tiles,
                        kiosk_theme, org_name, org_logo_url,
                        device_username,
                        show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
@@ -350,6 +352,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  monthly_giving_text, monthly_giving_amount, confirmation_text,
                  bg_color, menu_options,
                  donation_mode, linked_project_ids, gupt_daan_enabled,
+                 enabled_tiles,
                  created_at, updated_at)
             VALUES
                 (:id, :name, :desc, :dtype, :bid, :loc, :lat, :lng, :status,
@@ -361,6 +364,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  :mg_text, :mg_amount, :confirm_text,
                  :bg_color, CAST(:menu_opts AS JSONB),
                  :dmode, CAST(:projs AS UUID[]), :gupt,
+                 CAST(:tiles AS TEXT[]),
                  :now, :now)
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
@@ -391,6 +395,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "dmode": (body.donation_mode or "quick").strip().lower(),
             "projs": (body.linked_project_ids or [])[:6],
             "gupt":  bool(body.gupt_daan_enabled),
+            "tiles": (body.enabled_tiles or [])[:12],
             "now": now,
         })
         await db.commit()
@@ -494,6 +499,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 donation_mode      = :dmode,
                 linked_project_ids = CAST(:projs AS UUID[]),
                 gupt_daan_enabled  = :gupt,
+                enabled_tiles      = CAST(:tiles AS TEXT[]),
                 profile_version = profile_version + 1,
                 updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
@@ -524,6 +530,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "dmode": (body.donation_mode or "quick").strip().lower(),
             "projs": (body.linked_project_ids or [])[:6],
             "gupt":  bool(body.gupt_daan_enabled),
+            "tiles": (body.enabled_tiles or [])[:12],
             "now": now,
         })
         await db.commit()

@@ -47,6 +47,12 @@ interface KioskDevice {
   tap_and_go: boolean
   menu_profile_id: string | null
   menu_options?: { test_print?: boolean; theme_cycle?: boolean; refresh?: boolean; admin?: boolean }
+  // Project donation mode (per-device): 'quick' keeps today's amount tiles
+  // unchanged; 'project' renders a 9-tile category grid on the kiosk.
+  donation_mode?: 'quick' | 'project'
+  linked_project_ids?: string[]
+  gupt_daan_enabled?: boolean
+  enabled_tiles?: string[]
   created_at: string
   updated_at: string
 }
@@ -103,6 +109,11 @@ const EMPTY_FORM = {
   bg_color: '',
   menu_profile_id: '',
   menu_options: { test_print: true, theme_cycle: true, refresh: true, admin: true },
+  // Project donation mode (QUICK_DONATION devices only)
+  donation_mode: 'quick' as 'quick' | 'project',
+  linked_project_ids: [] as string[],
+  gupt_daan_enabled: false,
+  enabled_tiles: [] as string[],
   // Typed into the UI only when the admin is changing the card reader on
   // an existing kiosk; backend ignores it on create and on an edit that
   // doesn't touch card_reader_id.
@@ -224,6 +235,10 @@ export default function DevicesPage() {
         refresh:     d.menu_options?.refresh     ?? true,
         admin:       d.menu_options?.admin       ?? true,
       },
+      donation_mode:      (d.donation_mode === 'project' ? 'project' : 'quick') as 'quick' | 'project',
+      linked_project_ids: d.linked_project_ids || [],
+      gupt_daan_enabled:  d.gupt_daan_enabled ?? false,
+      enabled_tiles:      d.enabled_tiles || [],
       pairing_pin_input: '',
     })
     setError('')
@@ -868,6 +883,65 @@ export default function DevicesPage() {
                         </div>
                       </div>
                     )}
+
+                    {/* Project Donation mode — flips the Quick Donation client's
+                        start screen from the tap-and-go amount tiles to a 9-tile
+                        category grid (Brick / Sq Ft / Materials / Volunteering /
+                        Pro Services / Business / General / Gupt Daan / Any Amount).
+                        Linked projects decide which tier presets are offered when
+                        the donor taps a category; Gupt Daan is an opt-in anonymous
+                        tile with no form / no receipt. */}
+                    <div className="rounded-xl p-4 space-y-3"
+                         style={{ background: 'rgba(255,153,51,0.06)', border: '1px solid rgba(255,153,51,0.3)' }}>
+                      <div>
+                        <p className={lbl} style={{ color: '#FDBA74' }}>Donation Mode</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(['quick', 'project'] as const).map(m => (
+                            <button key={m} type="button"
+                              onClick={() => setForm(f => ({ ...f, donation_mode: m }))}
+                              className="rounded-xl p-3 text-left transition-all"
+                              style={{
+                                background: form.donation_mode === m ? 'rgba(255,153,51,0.2)' : 'rgba(255,255,255,0.03)',
+                                border: form.donation_mode === m ? '1.5px solid #FF9933' : '1.5px solid rgba(255,255,255,0.08)',
+                              }}>
+                              <p className="text-white font-bold text-sm capitalize">{m === 'quick' ? 'Quick Donation (amounts)' : 'Project Donation (tiles)'}</p>
+                              <p className="text-white/50 text-[11px] mt-0.5">
+                                {m === 'quick' ? 'Current tap-and-go amount tiles' : '9-tile category grid → tier picker → contact form'}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {form.donation_mode === 'project' && (
+                        <>
+                          <div>
+                            <p className={lbl} style={{ color: '#FDBA74' }}>Linked Project IDs (one per line, admin-ordered)</p>
+                            <textarea className={`${inp} font-mono text-xs resize-none`} rows={3}
+                              value={form.linked_project_ids.join('\n')}
+                              onChange={e => setForm(f => ({ ...f, linked_project_ids: e.target.value.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 6) }))}
+                              placeholder="paste project UUIDs from Projects admin, one per line (max 6)" />
+                            <p className="text-white/30 text-[10px] mt-1">Tier presets will come from these projects&apos; catalog items.</p>
+                          </div>
+                          <div>
+                            <p className={lbl} style={{ color: '#FDBA74' }}>Enabled Tiles (ordered; leave blank for default set)</p>
+                            <input className={`${inp} font-mono text-xs`}
+                              value={form.enabled_tiles.join(',')}
+                              onChange={e => setForm(f => ({ ...f, enabled_tiles: e.target.value.split(',').map(s => s.trim()).filter(Boolean).slice(0, 12) }))}
+                              placeholder="brick,sqft,material,volunt,services,business,general,any" />
+                            <p className="text-white/30 text-[10px] mt-1">Known ids: brick, sqft, material, volunt, services, business, general, any</p>
+                          </div>
+                          <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
+                            <input type="checkbox" className="w-4 h-4 accent-amber-500"
+                              checked={form.gupt_daan_enabled}
+                              onChange={e => setForm(f => ({ ...f, gupt_daan_enabled: e.target.checked }))} />
+                            <div>
+                              <p className="text-white font-bold text-sm">Enable Gupt Daan (anonymous) tile</p>
+                              <p className="text-white/50 text-[11px]">No contact form, no Gift Aid, no receipt — donor stays anonymous.</p>
+                            </div>
+                          </label>
+                        </>
+                      )}
+                    </div>
 
                     {/* Feature toggles */}
                     <div className="space-y-2.5 pt-1">

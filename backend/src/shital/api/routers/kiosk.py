@@ -1093,6 +1093,31 @@ async def sumup_checkout(body: SumUpCheckoutInput):
         return {"error": str(e)}
 
 
+async def _resolve_project_names(project_ids: list[str]) -> list[dict[str, str]]:
+    """Resolve [uuid, uuid, ...] → [{id, name}, ...] preserving the input order.
+
+    Called from the Quick Donation login so the client's header can show
+    the admin-linked project name (e.g. "— Temple Hall Expansion") without
+    a second network round-trip. Non-fatal — on any error we return an
+    empty list and the client falls back to showing just the branch name.
+    """
+    if not project_ids:
+        return []
+    try:
+        async with SessionLocal() as db:
+            rows = (await db.execute(text("""
+                SELECT id::text AS id, name
+                FROM   projects
+                WHERE  id = ANY(CAST(:ids AS uuid[]))
+                  AND  COALESCE(is_active, true) = true
+            """), {"ids": project_ids})).mappings().all()
+        # Preserve the admin's ordered list from linked_project_ids.
+        by_id = {r["id"]: r["name"] for r in rows}
+        return [{"id": pid, "name": by_id[pid]} for pid in project_ids if pid in by_id]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 async def _send_donation_receipt_once(
     *,
     payment_ref: str | None = None,
@@ -3367,6 +3392,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(kd.donation_mode, 'quick') AS donation_mode,
                        COALESCE(kd.linked_project_ids, '{}'::uuid[]) AS linked_project_ids,
                        COALESCE(kd.gupt_daan_enabled, false) AS gupt_daan_enabled,
+                       COALESCE(kd.enabled_tiles, '{}'::text[]) AS enabled_tiles,
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
                        COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
@@ -3466,6 +3492,14 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "donation_mode":     device["donation_mode"] or "quick",
             "linked_project_ids": [str(p) for p in (device["linked_project_ids"] or [])],
             "gupt_daan_enabled":  bool(device["gupt_daan_enabled"]),
+            # Ordered list of tile ids the admin picked; empty means
+            # "use the client's default order of all tile types".
+            "enabled_tiles":      list(device["enabled_tiles"] or []),
+            # Project names resolved server-side so the client's header can
+            # show "— Temple Hall Expansion" without a second round-trip.
+            "linked_projects":    await _resolve_project_names(
+                [str(p) for p in (device["linked_project_ids"] or [])],
+            ),
         }
 
     # ── Path 2: Legacy user-table login (quickkiosk-* accounts) ──────────────

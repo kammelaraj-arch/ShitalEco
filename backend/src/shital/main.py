@@ -1278,6 +1278,13 @@ async def _patch_schema() -> None:
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS donation_mode      VARCHAR(20) NOT NULL DEFAULT 'quick'",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS linked_project_ids UUID[]      NOT NULL DEFAULT '{}'::uuid[]",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS gupt_daan_enabled  BOOLEAN     NOT NULL DEFAULT false",
+        # Ordered list of tile ids shown on the Project-mode start screen.
+        # Values match the client-side TILE_CATALOG ids (brick, sqft,
+        # material, volunt, services, business, general). Empty means
+        # "show the default set in catalog order". The gupt_daan tile is
+        # controlled by gupt_daan_enabled separately, and the any_amount
+        # tile is always shown as the last single slot.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS enabled_tiles TEXT[] NOT NULL DEFAULT '{}'::text[]",
         # Anonymous-donation marker on the donations table itself — a Gupt
         # Daan row saves contact_id=NULL and is_anonymous=true so finance
         # reports can treat it distinctly, no receipt email is sent, and

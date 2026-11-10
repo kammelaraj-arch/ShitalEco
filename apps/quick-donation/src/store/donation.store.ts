@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
-export type Screen = 'donate' | 'processing' | 'tap' | 'confirmation' | 'admin'
+export type Screen = 'donate' | 'processing' | 'tap' | 'confirmation' | 'admin' | 'project-tiers' | 'project-contact'
 export type ReaderProvider = 'stripe_terminal' | 'sumup' | 'clover' | ''
+export type DonationMode = 'quick' | 'project'
+export interface LinkedProject { id: string; name: string }
 
 export interface GiftAidData {
   firstName: string
@@ -64,6 +66,18 @@ export interface DonationState {
   // then the cached reader + flags are trusted — no per-donation lookup.
   profileVersion: number
 
+  // Project donation mode (set by admin per-device).
+  //   'quick'   → existing tap-and-go amount tiles (unchanged)
+  //   'project' → new 9-tile category grid → tier picker → contact form
+  donationMode: DonationMode
+  linkedProjects: LinkedProject[]       // resolved from linked_project_ids
+  guptDaanEnabled: boolean               // show the anonymous tile?
+  enabledTiles: string[]                 // ordered tile ids; [] = use default
+  // Which category the donor tapped on the project start screen
+  // (brick / sqft / material / volunt / services / business / general /
+  // gupt / any) — picks which tier list ProjectTiersScreen shows.
+  pickedCategory: string
+
   _hasHydrated: boolean
   setHasHydrated: (v: boolean) => void
 
@@ -73,6 +87,8 @@ export interface DonationState {
   setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string, sumupApiId?: string, cloverDeviceId?: string) => void
   setKioskDeviceId: (id: string) => void
   setProfileVersion: (v: number) => void
+  setDonationMode: (mode: DonationMode, projects: LinkedProject[], guptDaanEnabled: boolean, enabledTiles: string[]) => void
+  setPickedCategory: (cat: string) => void
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number; confirmationText: string; kioskTheme: string; orgLogoUrl: string; orgName: string; bgColor: string }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string, username?: string) => void
@@ -116,6 +132,12 @@ export const useDonationStore = create<DonationState>()(
       loggedInUsername: '',
       profileVersion: 0,
 
+      donationMode: 'quick',
+      linkedProjects: [],
+      guptDaanEnabled: false,
+      enabledTiles: [],
+      pickedCategory: '',
+
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
@@ -126,6 +148,9 @@ export const useDonationStore = create<DonationState>()(
         set({ stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, sumupReaderApiId, cloverDeviceId }),
       setKioskDeviceId: (kioskDeviceId) => set({ kioskDeviceId }),
       setProfileVersion: (profileVersion) => set({ profileVersion }),
+      setDonationMode: (donationMode, linkedProjects, guptDaanEnabled, enabledTiles) =>
+        set({ donationMode, linkedProjects, guptDaanEnabled, enabledTiles }),
+      setPickedCategory: (pickedCategory) => set({ pickedCategory }),
       setDeviceFlags: (flags) => set(flags),
       setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName, username) => set({
         isDeviceLoggedIn, loggedInName,
@@ -172,6 +197,10 @@ export const useDonationStore = create<DonationState>()(
         loggedInName: state.loggedInName,
         loggedInUsername: state.loggedInUsername,
         profileVersion: state.profileVersion,
+        donationMode: state.donationMode,
+        linkedProjects: state.linkedProjects,
+        guptDaanEnabled: state.guptDaanEnabled,
+        enabledTiles: state.enabledTiles,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true)

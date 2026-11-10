@@ -1,0 +1,122 @@
+import { motion } from 'framer-motion'
+import { useDonationStore } from '../store/donation.store'
+
+// Shared catalog of all tile types. The admin picks which ones show per
+// device (via kiosk_devices.enabled_tiles); empty means render the whole
+// list in this order. The anonymous Gupt Daan tile is gated separately by
+// kiosk_devices.gupt_daan_enabled.
+export interface TileDef {
+  id: string
+  name: string
+  emoji: string
+  caption: string
+  bg: string
+  accent: string
+  anon?: boolean
+  any?: boolean
+}
+
+export const TILE_CATALOG: TileDef[] = [
+  { id: 'brick',    name: 'Brick',                 emoji: '🧱', caption: 'Red to Founder · as you wish',    bg: '#D45030', accent: '#FFB899' },
+  { id: 'sqft',     name: 'Square Feet',           emoji: '📏', caption: 'Any size · as you can afford',   bg: '#2E86AB', accent: '#A0D8F1' },
+  { id: 'material', name: 'Materials',             emoji: '🗿', caption: 'Help supply the build',          bg: '#C06C00', accent: '#FFD28B' },
+  { id: 'volunt',   name: 'Volunteering',          emoji: '🤝', caption: 'Help supply the build',          bg: '#14B8A6', accent: '#A7F3D0' },
+  { id: 'services', name: 'Professional Services', emoji: '🛠️', caption: 'Share your skill or sponsor it',  bg: '#7B2CBF', accent: '#D8B4FE' },
+  { id: 'business', name: 'Business Sponsorship',  emoji: '💼', caption: 'A lasting partnership',          bg: '#2E7D32', accent: '#A6E0A9' },
+  { id: 'general',  name: 'General Donation',      emoji: '🪔', caption: 'Where it\'s needed most',         bg: '#E63E7F', accent: '#FFC3DA' },
+  { id: 'any',      name: 'Any Amount',            emoji: '£',  caption: 'Give what you wish',             bg: '#FF9933', accent: '#FFE0B2', any: true },
+]
+
+export const GUPT_DAAN_TILE: TileDef = {
+  id: 'gupt', name: 'Gupt Daan', emoji: 'ॐ',
+  caption: 'Anonymous · no name, no record',
+  bg: '#5B2A99', accent: '#CDA4DF', anon: true,
+}
+
+export function ProjectStartScreen() {
+  const {
+    enabledTiles, guptDaanEnabled, linkedProjects, branchId,
+    setPickedCategory, setScreen,
+  } = useDonationStore()
+
+  // Resolve the ordered list of tiles the admin picked. Empty config
+  // means render every project-type tile in catalog order.
+  const picked = enabledTiles.length
+    ? enabledTiles.map(id => TILE_CATALOG.find(t => t.id === id)).filter(Boolean) as TileDef[]
+    : TILE_CATALOG
+  const tiles: TileDef[] = [
+    ...picked,
+    ...(guptDaanEnabled ? [GUPT_DAAN_TILE] : []),
+  ]
+
+  function tapTile(t: TileDef) {
+    setPickedCategory(t.id)
+    // Anonymous path skips the contact form and jumps straight to tap-card.
+    // Everything else flows through the tier picker + contact form.
+    setScreen(t.anon ? 'tap' : 'project-tiers')
+  }
+
+  // Compact header line matches the live Tap & Donate layout but appends
+  // the admin-linked project name(s) so the donor knows what they're
+  // supporting without a separate ribbon. One project → its name;
+  // multiple → "N projects"; none → branch alone.
+  const projectSuffix = linkedProjects.length === 1
+    ? ` · ${linkedProjects[0].name}`
+    : linkedProjects.length > 1
+      ? ` · ${linkedProjects.length} projects`
+      : ''
+
+  return (
+    <div className="min-h-screen flex flex-col px-4 py-5"
+         style={{ background: 'var(--qd-bg, #140606)', color: 'var(--qd-text-primary, #FFF8EC)' }}>
+      <header className="flex items-center justify-between mb-4">
+        <div>
+          <h1 className="font-black text-4xl leading-none"
+              style={{ color: 'var(--qd-accent, #F6C454)', fontFamily: 'serif', letterSpacing: '-0.02em' }}>
+            Tap &amp; Donate
+            <span className="ml-2 font-medium text-sm align-middle"
+                  style={{ color: 'var(--qd-text-muted, #E7C796)' }}>
+              · Shital {branchId || ''}{projectSuffix}
+            </span>
+          </h1>
+        </div>
+        <button onClick={() => setScreen('admin')}
+                className="w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          ⚙
+        </button>
+      </header>
+
+      {/* 3-col grid of vivid tiles — same bones as today's amount grid */}
+      <div className="grid grid-cols-3 gap-3 flex-1" style={{ gridAutoRows: '1fr' }}>
+        {tiles.map(t => (
+          <motion.button
+            key={t.id}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => tapTile(t)}
+            className="rounded-3xl flex flex-col items-center justify-center text-center text-white font-bold p-4"
+            style={{
+              background: `
+                radial-gradient(ellipse 60% 55% at 15% 0%, ${t.accent}70 0%, transparent 65%),
+                linear-gradient(170deg, ${t.bg} 0%, ${t.bg}B0 100%)
+              `,
+              border: `2px solid ${t.accent}80`,
+              boxShadow: `0 8px 24px rgba(0,0,0,0.45), 0 0 0 1px ${t.accent}40 inset`,
+              textShadow: '0 2px 6px rgba(0,0,0,0.3)',
+            }}
+          >
+            <div className="text-5xl mb-3 leading-none" style={{ filter: 'drop-shadow(0 3px 10px rgba(0,0,0,0.5))' }}>
+              {t.emoji}
+            </div>
+            <div className="text-2xl font-black leading-tight mb-2" style={{ fontFamily: 'serif', letterSpacing: '-0.01em' }}>
+              {t.name}
+            </div>
+            <div className="text-xs font-medium" style={{ color: t.accent }}>
+              {t.caption}
+            </div>
+          </motion.button>
+        ))}
+      </div>
+    </div>
+  )
+}

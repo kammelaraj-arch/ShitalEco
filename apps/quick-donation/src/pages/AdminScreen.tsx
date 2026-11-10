@@ -35,7 +35,7 @@ export function AdminScreen() {
   const {
     branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, cloverDeviceId,
     isDeviceLoggedIn, loggedInName, loggedInUsername,
-    setBranchId, setReader, setKioskDeviceId, setDeviceFlags, setDeviceLoggedIn, setScreen, setProfileVersion,
+    setBranchId, setReader, setKioskDeviceId, setDeviceFlags, setDeviceLoggedIn, setScreen, setProfileVersion, setDonationMode,
   } = useDonationStore()
 
   const [syncing, setSyncing] = useState(false)
@@ -95,6 +95,19 @@ export function AdminScreen() {
     // needs to refresh-config. No version → treat as 0 so the first
     // heartbeat forces one refresh.
     setProfileVersion(Number((data as unknown as { profile_version?: number }).profile_version) || 0)
+    // Admin-configured project donation mode (empty → classic quick donation)
+    const d2 = data as unknown as {
+      donation_mode?: string;
+      linked_projects?: { id: string; name: string }[];
+      gupt_daan_enabled?: boolean;
+      enabled_tiles?: string[];
+    }
+    setDonationMode(
+      (d2.donation_mode === 'project' ? 'project' : 'quick') as 'quick' | 'project',
+      d2.linked_projects || [],
+      !!d2.gupt_daan_enabled,
+      d2.enabled_tiles || [],
+    )
     // Persist login — survives reboots until explicit logout
     setDeviceLoggedIn(true, data.user?.name || enteredUsername, enteredUsername)
     setScreen('donate')
