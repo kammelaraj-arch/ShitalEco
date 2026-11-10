@@ -1131,6 +1131,15 @@ async def _send_donation_receipt_once(
             where_sql = "id = CAST(:key AS uuid)"
             params = {"key": str(donation_id)}
         async with SessionLocal() as db:
+            # Rich pull: donation + donor contact + home address + gift-aid
+            # declaration + branch, all in one go. All joins are LEFT so
+            # rows without an address / without a GA declaration still
+            # return — the template renders those sections conditionally.
+            # Keeping every field aligned with the variables the existing
+            # /kiosk/receipt path passes (kiosk.py:2389-2405) so templates
+            # the admin customised for the old path render identically
+            # whether the receipt was triggered from a kiosk tap, a webhook,
+            # or the 15-min sweeper.
             row = (await db.execute(text(f"""
                 WITH claimed AS (
                     UPDATE donations SET receipt_sent_at = NOW()
@@ -1139,16 +1148,38 @@ async def _send_donation_receipt_once(
                       AND UPPER(COALESCE(status,'')) = 'COMPLETED'
                       AND deleted_at IS NULL
                     RETURNING id, branch_id, amount, currency, purpose,
-                              reference, contact_id
+                              reference, contact_id,
+                              payment_provider, payment_ref,
+                              gift_aid_eligible, gift_aid_amount
                 )
                 SELECT c.id AS donation_id,
                        c.branch_id, c.amount, c.currency, c.purpose, c.reference,
+                       c.payment_provider, c.payment_ref,
+                       COALESCE(c.gift_aid_eligible, false) AS gift_aid_eligible,
+                       COALESCE(c.gift_aid_amount, 0)      AS gift_aid_amount,
                        co.email      AS donor_email,
                        co.full_name  AS donor_name,
-                       b.name        AS branch_name
+                       co.first_name AS donor_first_name,
+                       co.phone      AS donor_phone,
+                       b.name        AS branch_name,
+                       addr.formatted AS donor_address,
+                       addr.postcode  AS donor_postcode,
+                       ga.gift_aid_agreed AS ga_agreed
                 FROM claimed c
                 LEFT JOIN contacts co ON co.id = c.contact_id
                 LEFT JOIN branches b  ON b.branch_id = c.branch_id
+                LEFT JOIN LATERAL (
+                    SELECT formatted, postcode FROM addresses
+                    WHERE contact_id = c.contact_id
+                    ORDER BY is_primary DESC NULLS LAST, created_at DESC
+                    LIMIT 1
+                ) addr ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT gift_aid_agreed FROM gift_aid_declarations
+                    WHERE order_ref = c.reference OR contact_id = c.contact_id
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) ga ON TRUE
             """), params)).mappings().first()
             await db.commit()
         if not row or not (row.get("donor_email") or "").strip():
@@ -1162,18 +1193,49 @@ async def _send_donation_receipt_once(
         currency = row["currency"] or "GBP"
         order_ref = row["reference"] or str(row["donation_id"])[:8].upper()
         purpose = row["purpose"] or "General Donation"
+        branch_label = row["branch_name"] or row["branch_id"] or "Shital Temple"
+        gift_aid_declared = bool(row.get("ga_agreed") or row.get("gift_aid_eligible"))
+        # Full payload — mirrors the variables the legacy /kiosk/receipt
+        # endpoint passes, plus the richer donor fields (email, address,
+        # gift-aid flag, phone) so the admin-customised template that
+        # shows "Email: … / Address: … / Gift Aid Declaration" renders
+        # the same regardless of which path fired the receipt.
         await send_template(
             "donation_receipt",
             row["donor_email"].strip(),
             {
-                "order_ref":     order_ref,
-                "customer_name": row["donor_name"] or "Friend",
-                "total":         amount,
-                "items":         [{"name": purpose, "quantity": 1, "unitPrice": amount}],
-                "branch_name":   row["branch_name"] or row["branch_id"] or "Shital Temple",
-                "date":          datetime.utcnow().strftime("%-d %B %Y"),
-                "currency":      currency,
-                "charity_number": settings.CHARITY_NUMBER or "1138530",
+                # Core (same keys the legacy kiosk /receipt path passes)
+                "order_ref":        order_ref,
+                "receipt_number":   order_ref,
+                "customer_name":    row["donor_name"] or "Friend",
+                "total":            amount,
+                "items":            [{"name": purpose, "quantity": 1, "unitPrice": amount}],
+                "branch_name":      branch_label,
+                "date":             datetime.utcnow().strftime("%-d %B %Y"),
+                "currency":         currency,
+                "charity_number":   settings.CHARITY_NUMBER or "1138530",
+                # Links used by the template CTAs / footer
+                "logo_url":         "https://shital.org.uk/logo.png",
+                "website_url":      "https://shital.org.uk",
+                "monthly_url":      "https://shital.org.uk/donate?monthly=1",
+                "account_url":      "https://shital.org.uk/account",
+                # Payment context so the receipt can show "Paid via Stripe" etc.
+                "payment_provider": row.get("payment_provider") or "",
+                "payment_ref":      row.get("payment_ref") or "",
+                # Donor detail the current template shows in the body
+                "donor_name":       row["donor_name"] or "",
+                "donor_first_name": (row.get("donor_first_name") or "").strip() or ((row.get("donor_name") or "").split(" ")[0] if row.get("donor_name") else ""),
+                "donor_email":      row["donor_email"].strip(),
+                "donor_phone":      row.get("donor_phone") or "",
+                "donor_address":    row.get("donor_address") or "",
+                "donor_postcode":   row.get("donor_postcode") or "",
+                # Gift Aid — both the flag and the £ amount so the template
+                # can show "SHITAL will reclaim £X.XX" if it wants to.
+                "gift_aid_declared": gift_aid_declared,
+                "gift_aid_eligible": gift_aid_declared,
+                "gift_aid_amount":   float(row.get("gift_aid_amount") or 0),
+                # Legacy alias some older template versions used
+                "purpose":           purpose,
             },
             related_type=RELATED_DONATION,
             related_id=str(row["donation_id"]),
