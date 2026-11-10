@@ -67,6 +67,16 @@ export default function SentEmailsPage() {
   const [resending, setResend]  = useState<string>('')
   const [actionMsg, setMsg]     = useState<{ text: string; ok: boolean } | null>(null)
 
+  // Inline "Send Test Email" form — gives the operator a one-click way to
+  // verify SMTP end-to-end without touching a production template. Expanded
+  // only on request so it doesn't crowd the audit list.
+  const [testOpen, setTestOpen]           = useState(false)
+  const [testTo, setTestTo]               = useState('')
+  const [testSubject, setTestSubject]     = useState('')
+  const [testBody, setTestBody]           = useState('')
+  const [testIsHtml, setTestIsHtml]       = useState(false)
+  const [testSending, setTestSending]     = useState(false)
+
   const load = useCallback(async () => {
     setLoading(true); setErr('')
     try {
@@ -127,6 +137,49 @@ export default function SentEmailsPage() {
     }
   }
 
+  // Send the freeform test email. Routes through
+  // POST /admin/email-templates/send-raw-test which calls send_raw_email,
+  // so the same sent_emails row + SMTP path a production email would use
+  // runs end-to-end. On a visible success or failure we refresh the list
+  // so the new row (PENDING → SENT or FAILED) shows up right away.
+  async function sendTest() {
+    if (!testTo.trim() || !testSubject.trim() || !testBody.trim()) {
+      setMsg({ text: 'Fill in To, Subject and Body before sending.', ok: false })
+      return
+    }
+    setTestSending(true); setMsg(null)
+    try {
+      const res = await apiFetch<{ status: string; error?: string }>(
+        '/admin/email-templates/send-raw-test',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            to: testTo.trim(),
+            subject: testSubject.trim(),
+            body: testBody,
+            is_html: testIsHtml,
+          }),
+        },
+      )
+      if (res.status === 'SENT') {
+        setMsg({ text: `Test email sent to ${testTo.trim()}. Check the inbox + the row below.`, ok: true })
+        // Clear subject/body but keep the recipient; most test runs change
+        // the content, not the address.
+        setTestSubject(''); setTestBody('')
+      } else {
+        setMsg({ text: `Send recorded as ${res.status}${res.error ? ` — ${res.error}` : ''}`, ok: false })
+      }
+      // Jump to the ALL filter so a PENDING / FAILED row is visible even
+      // when the admin was looking at SENT only.
+      setStatusFilter(''); setOffset(0)
+      await load()
+    } catch (e) {
+      setMsg({ text: e instanceof Error ? e.message : 'Send failed', ok: false })
+    } finally {
+      setTestSending(false)
+    }
+  }
+
   // Counts for the filter chip-row (best-effort — we know exact counts only
   // for the currently-fetched window, so we just show "Active" highlight).
   const onPage = items.length
@@ -170,11 +223,81 @@ export default function SentEmailsPage() {
           className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-white text-sm outline-none w-72"
         />
 
+        <button onClick={() => setTestOpen(o => !o)}
+          className={`ml-auto px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors ${testOpen ? 'bg-amber-500/25 border-amber-400/50 text-amber-200' : 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'}`}>
+          ✉ Send Test Email
+        </button>
+
         <button onClick={load}
-          className="ml-auto px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 text-xs hover:bg-white/10">
+          className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 text-xs hover:bg-white/10">
           ↻ Refresh
         </button>
       </div>
+
+      {/* ── Send Test Email form ──────────────────────────────────────────────
+           Collapsible by default — the audit list is the primary view. When
+           expanded, gives the operator a clean "To / Subject / Body / Send"
+           path that goes through the same send_raw_email code the production
+           receipts use, so the audit row + SMTP outcome are both verified in
+           one click. No template, no variables, no interpolation. */}
+      {testOpen && (
+        <div className="glass rounded-2xl p-4 space-y-3 border border-amber-500/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-amber-300 font-bold text-sm">Send a test email</p>
+              <p className="text-white/40 text-xs mt-0.5">
+                Runs through the same path production receipts use. A row with the result lands in the list below.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-white/60 text-xs cursor-pointer">
+              <input type="checkbox" checked={testIsHtml} onChange={e => setTestIsHtml(e.target.checked)}
+                     className="w-4 h-4 accent-amber-500" />
+              Body is HTML
+            </label>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <input
+              value={testTo}
+              onChange={e => setTestTo(e.target.value)}
+              placeholder="To (e.g. you@example.com)"
+              type="email"
+              autoComplete="off"
+              className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-amber-500/50"
+            />
+            <input
+              value={testSubject}
+              onChange={e => setTestSubject(e.target.value)}
+              placeholder="Subject"
+              autoComplete="off"
+              className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-amber-500/50"
+            />
+          </div>
+          <textarea
+            value={testBody}
+            onChange={e => setTestBody(e.target.value)}
+            placeholder={testIsHtml ? 'HTML body…' : 'Plain-text body… (newlines are preserved)'}
+            rows={5}
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-amber-500/50 resize-none font-mono"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setTestSubject(''); setTestBody('') }}
+              className="px-3 py-2 rounded-xl text-white/60 hover:text-white text-xs"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              disabled={testSending}
+              onClick={sendTest}
+              className="px-5 py-2 rounded-xl bg-amber-500 text-black text-sm font-bold hover:bg-amber-400 disabled:opacity-40"
+            >
+              {testSending ? 'Sending…' : 'Send'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {actionMsg && (
         <p className={`text-sm rounded-lg px-3 py-2 ${actionMsg.ok ? 'bg-green-500/15 text-green-300 border border-green-500/30' : 'bg-red-500/15 text-red-300 border border-red-500/30'}`}>
