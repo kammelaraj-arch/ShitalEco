@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { BranchSelect, SearchSelect } from '@/components/ui/SearchSelect'
+import { DeviceOnboardingWizard } from '@/components/DeviceOnboardingWizard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type KioskThemeId = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine' | 'crimson'
@@ -146,6 +147,10 @@ export default function DevicesPage() {
   const [filterBranch, setFilterBranch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [deleting, setDeleting]         = useState<string | null>(null)
+  // The guided create-flow runs through <DeviceOnboardingWizard /> instead
+  // of the flat drawer. Edit still uses the drawer — edits are small
+  // corrections where the extra hand-holding isn't warranted.
+  const [wizardOpen, setWizardOpen]     = useState(false)
 
   // ── Load data ───────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -343,7 +348,7 @@ export default function DevicesPage() {
           <p className="text-white/40 text-sm mt-0.5">Manage kiosks, quick donation terminals & smart displays</p>
         </div>
         <button
-          onClick={openCreate}
+          onClick={() => setWizardOpen(true)}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white font-bold text-sm transition-all active:scale-95"
           style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)', boxShadow: '0 4px 14px rgba(185,28,28,0.35)' }}
         >
@@ -385,7 +390,7 @@ export default function DevicesPage() {
           <div className="text-center py-20">
             <p className="text-5xl mb-4">🖥️</p>
             <p className="text-white/40 font-semibold">No devices registered yet</p>
-            <button onClick={openCreate} className="mt-4 text-amber-400 hover:text-amber-300 text-sm font-bold">+ Add your first device</button>
+            <button onClick={() => setWizardOpen(true)} className="mt-4 text-amber-400 hover:text-amber-300 text-sm font-bold">+ Add your first device</button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -511,7 +516,17 @@ export default function DevicesPage() {
         )}
       </div>
 
-      {/* ── Side drawer ─────────────────────────────────────────────────── */}
+      {/* ── Onboarding wizard (new-device create flow) ────────────────────── */}
+      <AnimatePresence>
+        {wizardOpen && (
+          <DeviceOnboardingWizard
+            onClose={() => setWizardOpen(false)}
+            onCreated={() => load()}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Side drawer (edit flow) ──────────────────────────────────────── */}
       <AnimatePresence>
         {drawerOpen && (
           <>
