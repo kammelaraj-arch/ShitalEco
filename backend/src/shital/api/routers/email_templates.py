@@ -27,6 +27,16 @@ class TemplateSendTest(BaseModel):
     variables: dict[str, Any] = {}
 
 
+class RawSendTest(BaseModel):
+    """Freeform admin test send — no template rendering. Operator types the
+    recipient, subject and body and hits Send, so the SMTP path + sent_emails
+    audit can be verified in one click without touching a production template."""
+    to: str
+    subject: str
+    body: str                           # plain text or HTML — detected on send
+    is_html: bool = False               # default text/plain; UI can tick HTML
+
+
 @router.get("")
 async def list_templates():
     from sqlalchemy import text
@@ -380,6 +390,37 @@ async def send_test_email(body: TemplateSendTest):
         triggered_by="admin_test_send",
     )
     return result
+
+
+@router.post("/send-raw-test")
+async def send_raw_test(body: RawSendTest):
+    """Freeform admin test send — pure diagnostic.
+
+    No template, no variables. Operator types recipient + subject + body,
+    hits Send, and the SMTP path runs end-to-end via send_raw_email so the
+    result (and any failure) is written to sent_emails exactly like a
+    production email would be. Used from the Sent Emails admin page as a
+    one-click "is outbound email working?" check.
+    """
+    # Wrap plain text in a minimal HTML envelope when the operator didn't
+    # tick "HTML", so the email renders cleanly in most clients without
+    # them having to compose full HTML.
+    if body.is_html:
+        html = body.body
+        text_ = ""
+    else:
+        text_ = body.body
+        safe  = body.body.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>\n")
+        html  = f"<html><body style=\"font-family:system-ui,sans-serif\"><pre style=\"white-space:pre-wrap\">{safe}</pre></body></html>"
+
+    return await send_raw_email(
+        to_email=body.to,
+        subject=body.subject,
+        html_body=html,
+        text_body=text_,
+        related_type="admin_raw_test",
+        triggered_by="admin_raw_test_send",
+    )
 
 
 def render_template(template: dict[str, Any], variables: dict[str, Any]) -> tuple[str, str, str]:
