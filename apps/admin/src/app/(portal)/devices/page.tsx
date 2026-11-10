@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { BranchSelect, SearchSelect } from '@/components/ui/SearchSelect'
+import { DeviceOnboardingWizard } from '@/components/DeviceOnboardingWizard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type KioskThemeId = 'lotus' | 'saffron' | 'royal' | 'peacock' | 'jasmine' | 'crimson'
@@ -26,6 +27,10 @@ interface KioskDevice {
   serial_number: string
   ip_address: string
   device_token: string
+  // 4-digit PIN auto-generated at create time; printed on the back of
+  // the physical kiosk. Required to re-pair a reader to this kiosk.
+  pairing_pin: string
+  profile_version: number
   last_seen_at: string | null
   notes: string
   kiosk_theme: KioskThemeId
@@ -98,6 +103,10 @@ const EMPTY_FORM = {
   bg_color: '',
   menu_profile_id: '',
   menu_options: { test_print: true, theme_cycle: true, refresh: true, admin: true },
+  // Typed into the UI only when the admin is changing the card reader on
+  // an existing kiosk; backend ignores it on create and on an edit that
+  // doesn't touch card_reader_id.
+  pairing_pin_input: '',
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -138,6 +147,10 @@ export default function DevicesPage() {
   const [filterBranch, setFilterBranch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [deleting, setDeleting]         = useState<string | null>(null)
+  // The guided create-flow runs through <DeviceOnboardingWizard /> instead
+  // of the flat drawer. Edit still uses the drawer — edits are small
+  // corrections where the extra hand-holding isn't warranted.
+  const [wizardOpen, setWizardOpen]     = useState(false)
 
   // ── Load data ───────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -211,6 +224,7 @@ export default function DevicesPage() {
         refresh:     d.menu_options?.refresh     ?? true,
         admin:       d.menu_options?.admin       ?? true,
       },
+      pairing_pin_input: '',
     })
     setError('')
     setDrawerOpen(true)
@@ -219,6 +233,16 @@ export default function DevicesPage() {
   // ── Save ─────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!form.name.trim()) { setError('Device name is required'); return }
+
+    // On edit: if the admin is changing which reader is paired to this
+    // kiosk, the backend requires the kiosk's pairing PIN. Catch the
+    // missing-PIN case here with a clearer message than a 428 bounce.
+    const readerChanged = !!editing && (form.card_reader_id || null) !== (editing.card_reader_id || null)
+    if (readerChanged && !form.pairing_pin_input.trim()) {
+      setError("Enter this kiosk's 4-digit pairing PIN to change the paired card reader. The PIN is written on the back of the physical kiosk.")
+      return
+    }
+
     setSaving(true); setError('')
     try {
       const body = {
@@ -235,11 +259,15 @@ export default function DevicesPage() {
         ...body,
         card_reader_id: form.card_reader_id || null,
         menu_profile_id: form.menu_profile_id || null,
+        pairing_pin: readerChanged ? form.pairing_pin_input.trim() : null,
       }
+      // `pairing_pin_input` is a UI-only field name; the server expects
+      // `pairing_pin`. Strip the UI-only alias from the body.
+      delete (bodyWithReader as Record<string, unknown>).pairing_pin_input
       if (editing) {
         await apiFetch<{ ok: boolean }>(`/kiosk-devices/${editing.id}`, { method: 'PUT', body: JSON.stringify(bodyWithReader) })
       } else {
-        const created = await apiFetch<{ ok: boolean; id: string; device_token: string }>('/kiosk-devices', { method: 'POST', body: JSON.stringify(bodyWithReader) })
+        const created = await apiFetch<{ ok: boolean; id: string; device_token: string; pairing_pin: string }>('/kiosk-devices', { method: 'POST', body: JSON.stringify(bodyWithReader) })
         if (created.device_token) {
           setTokenMap(m => ({ ...m, [created.id]: created.device_token }))
         }
@@ -320,7 +348,7 @@ export default function DevicesPage() {
           <p className="text-white/40 text-sm mt-0.5">Manage kiosks, quick donation terminals & smart displays</p>
         </div>
         <button
-          onClick={openCreate}
+          onClick={() => setWizardOpen(true)}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white font-bold text-sm transition-all active:scale-95"
           style={{ background: 'linear-gradient(135deg,#B91C1C,#7f1010)', boxShadow: '0 4px 14px rgba(185,28,28,0.35)' }}
         >
@@ -362,7 +390,7 @@ export default function DevicesPage() {
           <div className="text-center py-20">
             <p className="text-5xl mb-4">🖥️</p>
             <p className="text-white/40 font-semibold">No devices registered yet</p>
-            <button onClick={openCreate} className="mt-4 text-amber-400 hover:text-amber-300 text-sm font-bold">+ Add your first device</button>
+            <button onClick={() => setWizardOpen(true)} className="mt-4 text-amber-400 hover:text-amber-300 text-sm font-bold">+ Add your first device</button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -488,7 +516,17 @@ export default function DevicesPage() {
         )}
       </div>
 
-      {/* ── Side drawer ─────────────────────────────────────────────────── */}
+      {/* ── Onboarding wizard (new-device create flow) ────────────────────── */}
+      <AnimatePresence>
+        {wizardOpen && (
+          <DeviceOnboardingWizard
+            onClose={() => setWizardOpen(false)}
+            onCreated={() => load()}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Side drawer (edit flow) ──────────────────────────────────────── */}
       <AnimatePresence>
         {drawerOpen && (
           <>
@@ -579,6 +617,59 @@ export default function DevicesPage() {
                     {cardReaderOptions.length <= 1 && (
                       <p className="text-white/30 text-[10px] mt-1">No active card readers for this branch. Register one in Card Readers first.</p>
                     )}
+                  </div>
+                )}
+
+                {/* ── Pairing PIN prompt ─ shown only when editing an existing kiosk
+                       AND the Card Reader selection has changed. The PIN is the
+                       4-digit code written on the back of the physical kiosk;
+                       requiring it before accepting the re-pair is a non-automatic
+                       sanity check that the admin is standing at the right device.
+                       Without a change, the field is hidden — regular edits of
+                       name/theme/etc don't need the PIN. ──────────────────────── */}
+                {editing && (form.card_reader_id || null) !== (editing.card_reader_id || null) && (
+                  <div className="rounded-xl p-3" style={{ background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.35)' }}>
+                    <p className={lbl} style={{ color: '#FDBA74' }}>Enter Kiosk Pairing PIN *</p>
+                    <input
+                      className={inp}
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={10}
+                      value={form.pairing_pin_input}
+                      onChange={e => setForm(f => ({ ...f, pairing_pin_input: e.target.value }))}
+                      placeholder="4-digit code from the back of this kiosk"
+                    />
+                    <p className="text-amber-200/60 text-[10px] mt-1.5 leading-snug">
+                      Read the PIN written on the back of the physical kiosk with a marker.
+                      Required because you're changing the paired card reader.
+                    </p>
+                  </div>
+                )}
+
+                {/* ── Pairing PIN display (edit mode, read-only). Shown so the
+                       admin can read + Copy the kiosk's PIN if they lost the
+                       sticker, and so they know what to write on a replacement
+                       sticker. Hidden during Create — the PIN is generated by
+                       the backend on save, and only visible once the row loads
+                       back into the edit drawer. ──────────────────────────────── */}
+                {editing && editing.pairing_pin && (
+                  <div className="rounded-xl p-3" style={{ background: 'rgba(255,153,51,0.06)', border: '1px solid rgba(255,153,51,0.25)' }}>
+                    <p className={lbl} style={{ color: '#FDBA74' }}>Kiosk Pairing PIN (on the back)</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <code className="text-amber-300 text-xl font-mono tracking-widest flex-1">{editing.pairing_pin}</code>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try { await navigator.clipboard.writeText(editing.pairing_pin); setCopied(editing.id); setTimeout(() => setCopied(null), 1200) } catch {}
+                        }}
+                        className="px-3 py-1 text-xs rounded-md bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 transition-colors border border-amber-500/30"
+                      >
+                        {copied === editing.id ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
+                    <p className="text-amber-200/50 text-[10px] mt-1.5 leading-snug">
+                      Write this on the back of the kiosk with a marker. Anyone re-pairing a card reader to this kiosk must enter it.
+                    </p>
                   </div>
                 )}
 

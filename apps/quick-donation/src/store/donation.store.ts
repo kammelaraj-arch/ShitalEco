@@ -57,6 +57,13 @@ export interface DonationState {
   loggedInName: string
   loggedInUsername: string  // raw username used to login, for refresh-config calls
 
+  // Server-controlled config version. Stored at login / refresh-config and
+  // compared against the value the heartbeat returns. Mismatch means the
+  // admin changed the device config in the portal since this client last
+  // pulled, so the client fires one /refresh-config call and updates. Until
+  // then the cached reader + flags are trusted — no per-donation lookup.
+  profileVersion: number
+
   _hasHydrated: boolean
   setHasHydrated: (v: boolean) => void
 
@@ -65,6 +72,7 @@ export interface DonationState {
   setBranchId: (id: string) => void
   setReader: (readerId: string, label: string, provider?: ReaderProvider, sumupSerial?: string, sumupApiId?: string, cloverDeviceId?: string) => void
   setKioskDeviceId: (id: string) => void
+  setProfileVersion: (v: number) => void
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number; confirmationText: string; kioskTheme: string; orgLogoUrl: string; orgName: string; bgColor: string }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string, username?: string) => void
@@ -106,6 +114,7 @@ export const useDonationStore = create<DonationState>()(
       isDeviceLoggedIn: false,
       loggedInName: '',
       loggedInUsername: '',
+      profileVersion: 0,
 
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
@@ -116,6 +125,7 @@ export const useDonationStore = create<DonationState>()(
       setReader: (stripeReaderId, stripeReaderLabel, readerProvider = '', sumupReaderId = '', sumupReaderApiId = '', cloverDeviceId = '') =>
         set({ stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, sumupReaderApiId, cloverDeviceId }),
       setKioskDeviceId: (kioskDeviceId) => set({ kioskDeviceId }),
+      setProfileVersion: (profileVersion) => set({ profileVersion }),
       setDeviceFlags: (flags) => set(flags),
       setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName, username) => set({
         isDeviceLoggedIn, loggedInName,
@@ -161,6 +171,7 @@ export const useDonationStore = create<DonationState>()(
         isDeviceLoggedIn: state.isDeviceLoggedIn,
         loggedInName: state.loggedInName,
         loggedInUsername: state.loggedInUsername,
+        profileVersion: state.profileVersion,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true)

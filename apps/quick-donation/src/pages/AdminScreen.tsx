@@ -35,7 +35,7 @@ export function AdminScreen() {
   const {
     branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, cloverDeviceId,
     isDeviceLoggedIn, loggedInName, loggedInUsername,
-    setBranchId, setReader, setKioskDeviceId, setDeviceFlags, setDeviceLoggedIn, setScreen,
+    setBranchId, setReader, setKioskDeviceId, setDeviceFlags, setDeviceLoggedIn, setScreen, setProfileVersion,
   } = useDonationStore()
 
   const [syncing, setSyncing] = useState(false)
@@ -90,6 +90,11 @@ export function AdminScreen() {
       orgName: data.org_name ?? '',
       bgColor: data.bg_color ?? '',
     })
+    // Store the server's profile_version so subsequent heartbeats can tell
+    // when the admin has changed something in the portal and the client
+    // needs to refresh-config. No version → treat as 0 so the first
+    // heartbeat forces one refresh.
+    setProfileVersion(Number((data as unknown as { profile_version?: number }).profile_version) || 0)
     // Persist login — survives reboots until explicit logout
     setDeviceLoggedIn(true, data.user?.name || enteredUsername, enteredUsername)
     setScreen('donate')
@@ -122,6 +127,7 @@ export function AdminScreen() {
         orgName: data.org_name ?? '',
         bgColor: data.bg_color ?? '',
       })
+      setProfileVersion(Number((data as { profile_version?: number }).profile_version) || 0)
       setSyncResult('ok')
       setTimeout(() => setSyncResult('idle'), 3000)
     } catch { setSyncResult('fail') }
