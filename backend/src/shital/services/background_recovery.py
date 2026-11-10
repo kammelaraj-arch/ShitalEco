@@ -1198,6 +1198,78 @@ async def _run_sweep(name: str, coro_factory: Any, timeout: int = 90) -> None:
         logger.error(f"recovery_{name}_failed", error=str(exc))
 
 
+async def _donation_receipts_sweep_once(days: int = 14) -> dict[str, Any]:
+    """Universal donation-receipt sweeper.
+
+    Catches any COMPLETED donation that didn't get a receipt email at the
+    source — PayPal captures, monthly-giving invoice renewals, cash gifts
+    staff entered manually, bank-transfer reconciliations, and anything
+    else. The inline per-provider webhook triggers (Stripe PI, SumUp) are
+    still the primary path because they email within seconds of the card
+    tap; this sweep is the safety net that covers everything else within
+    15 minutes.
+
+    Idempotent: the per-row send helper claims donations.receipt_sent_at
+    atomically, so a row that was already sent by a webhook on the same
+    tick is a correct no-op here.
+
+    Email-is-mandatory: rows without a contact_email on file are skipped
+    silently — a walk-in cash gift from someone who gave only their name
+    stays off the sent_emails log instead of recording a FAILED send.
+    """
+    summary = {"scanned": 0, "sent": 0, "errors": 0, "days_window": days}
+    try:
+        async with SessionLocal() as db:
+            rows = (await db.execute(text("""
+                SELECT d.id::text AS id
+                FROM   donations d
+                JOIN   contacts  c ON c.id = d.contact_id
+                WHERE  UPPER(COALESCE(d.status,'')) = 'COMPLETED'
+                  AND  d.receipt_sent_at IS NULL
+                  AND  d.deleted_at IS NULL
+                  AND  COALESCE(c.email,'') <> ''
+                  AND  d.created_at >= NOW() - (:days || ' days')::interval
+                ORDER  BY d.created_at DESC
+                LIMIT  200
+            """), {"days": str(days)})).mappings().all()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("receipts_sweep_select_failed", error=str(exc))
+        return {**summary, "skipped": "select_failed"}
+
+    if not rows:
+        return summary
+
+    from shital.api.routers.kiosk import _send_donation_receipt_once
+    for r in rows:
+        summary["scanned"] += 1
+        try:
+            await _send_donation_receipt_once(
+                donation_id=r["id"], source="receipts_sweeper",
+            )
+            # _send_donation_receipt_once returns silently on success; we
+            # read back receipt_sent_at to count "actually sent" accurately
+            # vs claimed-by-another-caller-mid-sweep. Doing this per row is
+            # cheap compared to the SMTP call.
+            check = (await _check_sent(r["id"]))
+            if check:
+                summary["sent"] += 1
+        except Exception as exc:  # noqa: BLE001
+            summary["errors"] += 1
+            logger.warning("receipts_sweep_row_failed", id=r["id"], error=str(exc))
+    return summary
+
+
+async def _check_sent(donation_id: str) -> bool:
+    try:
+        async with SessionLocal() as db:
+            r = (await db.execute(text(
+                "SELECT receipt_sent_at FROM donations WHERE id = CAST(:id AS uuid)"
+            ), {"id": donation_id})).first()
+        return bool(r and r[0])
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def recovery_loop() -> None:
     """Forever-loop. Sleeps RECOVERY_INTERVAL_SECONDS between passes.
     Each pass runs the SumUp sweep, the Stripe reconcile, the Stripe account-health
@@ -1226,6 +1298,15 @@ async def recovery_loop() -> None:
         await _run_sweep(
             "paypal_recover_orphans",
             _paypal_recover_orphans_from_history,
+            timeout=120,
+        )
+        # Universal donation-receipt safety net: catches any COMPLETED
+        # donation the per-provider webhook triggers missed (PayPal,
+        # cash, monthly-giving invoice renewals, bank transfer, …).
+        # Idempotent on receipt_sent_at.
+        await _run_sweep(
+            "donation_receipts_sweep",
+            _donation_receipts_sweep_once,
             timeout=120,
         )
         await _run_sweep("alert_digest", _alert_digest_once, timeout=60)
