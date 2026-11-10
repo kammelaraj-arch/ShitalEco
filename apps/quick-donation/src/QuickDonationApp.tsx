@@ -61,7 +61,7 @@ const THEME_TEXT = {
 }
 
 export function QuickDonationApp() {
-  const { screen, setScreen, isDeviceLoggedIn, _hasHydrated, stripeReaderId, sumupReaderId, cloverDeviceId, kioskTheme, bgColor, loggedInUsername, kioskDeviceId, setDeviceFlags, setBranchId, setReader, setKioskDeviceId } = useDonationStore()
+  const { screen, setScreen, isDeviceLoggedIn, _hasHydrated, stripeReaderId, sumupReaderId, cloverDeviceId, kioskTheme, bgColor, loggedInUsername, kioskDeviceId, profileVersion, setDeviceFlags, setBranchId, setReader, setKioskDeviceId, setProfileVersion } = useDonationStore()
 
   // Any of stripe terminal / sumup / clover counts as "a reader is set up".
   // Without this guard, staff land on the tile screen, tap an amount, and
@@ -99,6 +99,44 @@ export function QuickDonationApp() {
           ).then(x => x.json()).catch(() => null)
           if (cfg && cfg.ok && cfg.kiosk_device_id) {
             setKioskDeviceId(cfg.kiosk_device_id)  // next tick beats against the live id
+            setProfileVersion(Number(cfg.profile_version) || 0)
+          }
+          return
+        }
+        // Compare server's profile_version against the one we cached at
+        // login / last refresh. Mismatch means the admin changed something
+        // (most commonly the paired reader) in the portal — one
+        // refresh-config call pulls the fresh config without staff action.
+        if (r.ok && loggedInUsername) {
+          const hb = await r.json().catch(() => null)
+          const serverVer = Number(hb?.profile_version) || 0
+          if (serverVer && serverVer !== profileVersion) {
+            const cfg = await fetch(
+              `${API_BASE}/kiosk/quick-donation/refresh-config?username=${encodeURIComponent(loggedInUsername)}`,
+              { cache: 'no-store' },
+            ).then(x => x.json()).catch(() => null)
+            if (cfg?.ok) {
+              const sumupSerial = cfg.sumup_reader_serial || ''
+              const cloverId = cfg.clover_device_id || ''
+              const provider = (sumupSerial ? 'sumup' : cloverId ? 'clover' : (cfg.reader_provider || 'stripe_terminal')) as import('./store/donation.store').ReaderProvider
+              setBranchId(cfg.branch.id)
+              setReader(cfg.stripe_reader_id || '', cfg.reader_label || cfg.stripe_reader_id || sumupSerial || cloverId, provider, sumupSerial, '', cloverId)
+              setKioskDeviceId(cfg.kiosk_device_id || kioskDeviceId)
+              setDeviceFlags({
+                showMonthlyGiving: cfg.show_monthly_giving ?? false,
+                enableGiftAid:     cfg.enable_gift_aid     ?? false,
+                tapAndGo:          cfg.tap_and_go          ?? true,
+                donateTitle:       cfg.donate_title        ?? 'Tap & Donate',
+                monthlyGivingText: cfg.monthly_giving_text ?? 'Make a big impact from just £5/month',
+                monthlyGivingAmount: cfg.monthly_giving_amount ?? 5,
+                confirmationText:  cfg.confirmation_text   ?? '',
+                kioskTheme:        cfg.kiosk_theme         ?? 'saffron',
+                orgLogoUrl:        cfg.org_logo_url        ?? '',
+                orgName:           cfg.org_name            ?? '',
+                bgColor:           cfg.bg_color            ?? '',
+              })
+              setProfileVersion(Number(cfg.profile_version) || serverVer)
+            }
           }
         }
       } catch { /* offline — try next tick */ }
@@ -106,7 +144,7 @@ export function QuickDonationApp() {
     beat()
     const id = setInterval(beat, 30_000)
     return () => clearInterval(id)
-  }, [kioskDeviceId, loggedInUsername])
+  }, [kioskDeviceId, loggedInUsername, profileVersion]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Wait for persisted state to load before deciding whether to show admin setup.
   // Without this check, isDeviceLoggedIn is always false on first render (before
@@ -140,6 +178,7 @@ export function QuickDonationApp() {
           orgName: data.org_name ?? '',
           bgColor: data.bg_color ?? '',
         })
+        setProfileVersion(Number(data.profile_version) || 0)
       })
       .catch(() => {})
     // React to changes in login or any reader id — the original effect was

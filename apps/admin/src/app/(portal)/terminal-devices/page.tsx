@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { BranchSelect } from '@/components/ui/SearchSelect'
+import { ReaderOnboardingWizard } from '@/components/ReaderOnboardingWizard'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1131,7 +1132,12 @@ export default function TerminalDevicesPage() {
       {/* Modals */}
       <AnimatePresence>
         {modal === 'create' && (
-          <DeviceModal device={null} onClose={() => setModal(null)} onSaved={load} />
+          // Step-based wizard for new-reader onboarding: pick provider (with
+          // illustration) → learn where its ID lives → enter it → name + branch
+          // → review. Editing an existing reader still uses the flat form in
+          // DeviceModal below; the wizard is for first-time setup where the
+          // extra guidance pays off.
+          <ReaderOnboardingWizard onClose={() => setModal(null)} onCreated={() => load()} />
         )}
         {modal === 'edit' && selected && (
           <DeviceModal device={selected} onClose={() => { setModal(null); setSelected(null) }} onSaved={load} />

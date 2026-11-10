@@ -1214,6 +1214,59 @@ async def _patch_schema() -> None:
             PRIMARY KEY (profile_id, menu_id)
         )""",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS menu_profile_id UUID REFERENCES menu_profiles(id) ON DELETE SET NULL",
+        # Per-kiosk pairing PIN — operator writes the generated 4-digit code on
+        # the back of the physical kiosk with a marker, same convention as the
+        # reader's RDR-XXXX. Required in the request body when an admin changes
+        # the card_reader_id on a kiosk_devices row — a non-automatic sanity
+        # check that the admin is physically at the right kiosk before
+        # re-pairing a reader to it. Not in any public response.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS pairing_pin VARCHAR(10) NOT NULL DEFAULT ''",
+        # Backfill a random 4-digit PIN for every existing row that doesn't
+        # have one yet. Collision-aware: loops per row, picking a fresh
+        # random value until it doesn't clash with an active row that
+        # already has one. Idempotent — only touches rows where
+        # pairing_pin is still blank, so repeated boots are a no-op.
+        """DO $$
+        DECLARE
+          r RECORD;
+          new_pin TEXT;
+          attempts INT;
+        BEGIN
+          FOR r IN
+            SELECT id FROM kiosk_devices
+            WHERE COALESCE(pairing_pin, '') = '' AND deleted_at IS NULL
+          LOOP
+            attempts := 0;
+            LOOP
+              new_pin := LPAD(FLOOR(RANDOM() * 10000)::int::text, 4, '0');
+              EXIT WHEN NOT EXISTS (
+                SELECT 1 FROM kiosk_devices
+                WHERE pairing_pin = new_pin AND deleted_at IS NULL
+              );
+              attempts := attempts + 1;
+              -- Belt-and-braces: with 10,000 slots and however few
+              -- kiosks a temple actually runs, this should never spin.
+              -- Bail at 100 so a bug can't deadlock startup.
+              EXIT WHEN attempts > 100;
+            END LOOP;
+            UPDATE kiosk_devices SET pairing_pin = new_pin WHERE id = r.id;
+          END LOOP;
+        END$$""",
+        # Unique partial index on pairing_pin, but only for live rows —
+        # soft-deleted rows can keep their old PIN without blocking future
+        # inserts. Created AFTER the backfill above so its own run can't
+        # fail on existing blank values. Index-build is cheap at this
+        # size and idempotent via IF NOT EXISTS.
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_pairing_pin "
+        "ON kiosk_devices(pairing_pin) WHERE deleted_at IS NULL AND pairing_pin <> ''",
+        # Client-side profile cache invalidation marker. Every admin change
+        # that affects what the client sees (card_reader_id, theme, flags,
+        # texts, menu_options, etc.) bumps this. The kiosk + quick-donation
+        # clients persist this value alongside their config; on heartbeat/
+        # login they compare theirs against the server's — mismatch → one
+        # refresh-config call. No per-donation network hit to resolve the
+        # reader: the config is fixed locally until the version bumps.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS profile_version INTEGER NOT NULL DEFAULT 1",
         # Seed kiosk menus (idempotent — guarded by NOT EXISTS)
         """INSERT INTO menus (app_id, code, label, icon, display_order)
         SELECT * FROM (VALUES
