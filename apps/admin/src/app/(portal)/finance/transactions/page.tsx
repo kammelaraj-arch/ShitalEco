@@ -89,6 +89,73 @@ function fmtMoney(pence: number, ccy: string): string {
   }
 }
 
+/** Short date label, e.g. "13 Nov". For the clearing-date sub-line on
+ *  pending payouts — "~13 Nov" is more useful than a full timestamp. */
+function fmtShortDate(iso: string): string {
+  if (!iso) return ''
+  try { return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) } catch { return '' }
+}
+
+/** Derive the human "payment outcome" for a transaction row.
+ *
+ *  Stripe `payment_transactions.status` is actually Stripe's
+ *  BalanceTransaction.status (pending/available — the clearing-into-payout
+ *  status), NOT the charge outcome. The outcome is implicit in the row:
+ *  if a BalanceTransaction exists at all, the charge succeeded; refund
+ *  rows come through as a separate BT with kind=refund; a disputed
+ *  charge is flagged by `disputed`. SumUp / PayPal stuff their actual
+ *  payment outcome into `status`, so we use that directly for them.
+ *
+ *  Keeps the "pending" word reserved for payouts — a donor reading the
+ *  old page thought their charge hadn't gone through, which it had. */
+function outcomeOf(t: Txn): { label: string; cls: string; detail: string } {
+  if (t.provider === 'stripe') {
+    if (t.disputed)                           return { label: 'Disputed',  cls: 'bg-red-500/20 text-red-300 border-red-500/30',       detail: 'Cardholder has opened a chargeback.' }
+    if (t.refunded || t.kind === 'refund' || t.kind === 'payment_refund')
+      return { label: 'Refunded',  cls: 'bg-orange-500/20 text-orange-300 border-orange-500/30', detail: 'Payment was refunded in full or in part.' }
+    if (t.kind === 'charge')                  return { label: 'Succeeded', cls: 'bg-green-500/20 text-green-300 border-green-500/30',   detail: 'The card charge went through; the donor was charged.' }
+    if (t.kind === 'payout')                  return { label: 'Payout',    cls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30', detail: 'Transfer of cleared funds to the connected bank account.' }
+    if (t.kind === 'stripe_fee')              return { label: 'Fee',       cls: 'bg-white/10 text-white/60 border-white/20',             detail: 'Stripe billing or usage fee.' }
+    if (t.kind === 'adjustment')              return { label: 'Adjustment',cls: 'bg-white/10 text-white/60 border-white/20',             detail: 'Manual adjustment made by Stripe.' }
+    return { label: t.kind || 'Unknown', cls: 'bg-white/10 text-white/60 border-white/20', detail: '' }
+  }
+  // SumUp / PayPal — provider ships the actual payment outcome in `status`.
+  const s = (t.status || '').toUpperCase()
+  if (s === 'SUCCESSFUL' || s === 'SUCCEEDED' || s === 'COMPLETED' || s === 'PAID')
+    return { label: 'Succeeded', cls: 'bg-green-500/20 text-green-300 border-green-500/30', detail: 'Payment was accepted by the card network.' }
+  if (s === 'FAILED' || s === 'CANCELLED' || s === 'CANCELED')
+    return { label: 'Failed',    cls: 'bg-red-500/20 text-red-300 border-red-500/30',       detail: 'Payment did not go through. Donor was NOT charged.' }
+  if (s === 'REFUNDED' || t.refunded)
+    return { label: 'Refunded',  cls: 'bg-orange-500/20 text-orange-300 border-orange-500/30', detail: 'Payment was refunded.' }
+  if (s === 'PENDING')  return { label: 'Pending',   cls: 'bg-amber-500/20 text-amber-300 border-amber-500/30', detail: 'Payment is awaiting confirmation from the network.' }
+  return { label: t.status || '—', cls: 'bg-white/10 text-white/60 border-white/20', detail: '' }
+}
+
+/** Derive the "when does this money clear into the account balance?" state.
+ *
+ *  Only Stripe reports this separately (BalanceTransaction.status with a
+ *  T+2-ish clearing window for UK card payments). SumUp / PayPal clear
+ *  instantly from our point of view, so we render "—" there. For Stripe:
+ *   - pending   → "Clearing" plus the expected availability date so the
+ *                 operator can tell if it's within normal window or stuck.
+ *   - available → "Cleared"
+ *   - unknown   → raw. */
+function payoutStateOf(t: Txn): { label: string; cls: string; when: string; detail: string } {
+  if (t.provider !== 'stripe') return { label: '—', cls: 'text-white/25', when: '', detail: 'Only Stripe charges go through a payout clearing window; SumUp and PayPal clear instantly.' }
+  const s = (t.status || '').toLowerCase()
+  if (s === 'pending') {
+    const when = fmtShortDate(t.available_at)
+    return {
+      label: 'Clearing', cls: 'text-amber-300/90', when: when ? `~${when}` : '',
+      detail: 'The money has been collected; Stripe is holding it for ~2 business days before releasing to the account balance. The donor WAS charged.',
+    }
+  }
+  if (s === 'available') {
+    return { label: 'Cleared', cls: 'text-green-400', when: '', detail: 'Funds have been released from the clearing window into the account balance.' }
+  }
+  return { label: t.status || '—', cls: 'text-white/60', when: '', detail: '' }
+}
+
 const PROVIDER_BADGE: Record<string, string> = {
   stripe: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
   sumup:  'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
@@ -444,10 +511,23 @@ export default function TransactionsPage() {
                 <th onClick={() => toggleSort('amount')}     className="px-4 py-3 text-right font-semibold cursor-pointer select-none hover:text-white/80">Gross {sortArrow('amount')}</th>
                 <th className="px-4 py-3 text-right font-semibold">Fee</th>
                 <th onClick={() => toggleSort('net')}        className="px-4 py-3 text-right font-semibold cursor-pointer select-none hover:text-white/80">Net {sortArrow('net')}</th>
+                {/* Split the old single "Status" column into two: Outcome
+                    (did the card charge actually succeed?) and Payout
+                    (has Stripe released the money to the account yet?).
+                    On a Stripe subscription, these answer two different
+                    questions — a row can read Succeeded + Clearing for
+                    the ~2 business days before funds land in the
+                    account balance. The previous single column labelled
+                    the clearing window "pending", which read as a stuck
+                    charge even when the donor had been charged.         */}
+                <th title="Did the card charge actually go through? Succeeded = donor was charged. Failed = donor was NOT charged."
+                    className="px-4 py-3 text-left font-semibold">
+                  Outcome
+                </th>
                 <th onClick={() => toggleSort('status')}
-                    title="Stripe/SumUp BALANCE status — 'pending' means the payment succeeded and the donor was charged; funds move to 'available' in ~2 business days. This is NOT the donation or subscription status."
+                    title="Stripe only: has the money cleared from Stripe into the account balance? 'Clearing' = payment succeeded, funds release in ~2 business days. 'Cleared' = money is in the account. SumUp/PayPal clear instantly, so this stays blank for them."
                     className="px-4 py-3 text-left font-semibold cursor-pointer select-none hover:text-white/80">
-                  Funds {sortArrow('status')}
+                  Payout {sortArrow('status')}
                 </th>
                 <th className="px-4 py-3 text-left font-semibold">Donor / Purpose</th>
                 <th className="px-4 py-3 text-center font-semibold">🇬🇧 Gift Aid</th>
@@ -456,9 +536,9 @@ export default function TransactionsPage() {
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={12} className="px-4 py-12 text-center text-white/40">Loading…</td></tr>}
+              {loading && <tr><td colSpan={13} className="px-4 py-12 text-center text-white/40">Loading…</td></tr>}
               {!loading && items.length === 0 && (
-                <tr><td colSpan={12} className="px-4 py-12 text-center text-white/40">
+                <tr><td colSpan={13} className="px-4 py-12 text-center text-white/40">
                   No transactions. Hit a Sync button to pull from Stripe, SumUp or PayPal.
                 </td></tr>
               )}
@@ -486,22 +566,36 @@ export default function TransactionsPage() {
                   <td className={`px-4 py-3 text-right font-mono text-sm font-bold ${(t.net_pence || 0) < 0 ? 'text-red-400' : 'text-green-400'}`}>
                     {fmtMoney(t.net_pence, t.currency)}
                   </td>
+                  {/* Outcome — pill shows the payment outcome so SumUp's
+                      SUCCESSFUL and Stripe's succeeded charge both read the
+                      same way, and a Stripe clearing-window row no longer
+                      reads "pending" when the charge already went through. */}
                   <td className="px-4 py-3 text-xs">
-                    <span
-                      title={
-                        t.status === 'pending'
-                          ? 'Payment succeeded; funds settle into the account balance in ~2 business days. The donor IS charged.'
-                          : t.status === 'available'
-                            ? 'Funds have cleared and are available in the account balance.'
-                            : t.status || ''
-                      }
-                      className={
-                        t.status === 'pending'   ? 'text-amber-300/80' :
-                        t.status === 'available' ? 'text-green-400'    :
-                                                   'text-white/60'
-                      }>
-                      {t.status || '—'}
-                    </span>
+                    {(() => {
+                      const o = outcomeOf(t)
+                      return (
+                        <span title={o.detail}
+                              className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${o.cls}`}>
+                          {o.label}
+                        </span>
+                      )
+                    })()}
+                  </td>
+                  {/* Payout — only meaningful for Stripe. Shows the
+                      clearing window state plus the expected availability
+                      date so the operator can see at a glance whether the
+                      money is still within Stripe's normal ~2-business-day
+                      hold or the row is actually stuck. */}
+                  <td className="px-4 py-3 text-xs">
+                    {(() => {
+                      const p = payoutStateOf(t)
+                      return (
+                        <span title={p.detail} className={p.cls}>
+                          {p.label}
+                          {p.when && <span className="ml-1 text-[10px] text-white/40">{p.when}</span>}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-white/80 text-xs max-w-[220px] truncate" title={`${t.contact_name} <${t.contact_email}>`}>
                     {t.contact_name || t.contact_email || t.customer_hint || <em className="text-white/30">—</em>}
@@ -539,7 +633,7 @@ export default function TransactionsPage() {
                   <td className="px-4 py-3 text-right font-mono font-bold text-green-400">
                     Page net: {fmtMoney(pageTotalPence, items[0]?.currency || 'GBP')}
                   </td>
-                  <td colSpan={5} />
+                  <td colSpan={6} />
                 </tr>
               </tfoot>
             )}
@@ -652,7 +746,12 @@ function TxnDetail({ txn, onClose }: { txn: Txn; onClose: () => void }) {
             <KV label="Gross" value={money(txn.amount_pence)} />
             <KV label="Fee"   value={txn.fee_pence ? money(txn.fee_pence) : '—'} tone={txn.fee_pence ? 'red' : undefined} />
             <KV label="Net"   value={money(txn.net_pence)} tone="green" />
-            <KV label="Status" value={txn.status || '—'} />
+            {/* Split Status → Outcome (did the charge succeed?) + Payout
+                (has Stripe released the funds?). Same two-answer idea as
+                the table columns, so the drawer matches what the operator
+                just clicked on. */}
+            <KV label="Outcome" value={outcomeOf(txn).label} />
+            <KV label="Payout"  value={(() => { const p = payoutStateOf(txn); return p.when ? `${p.label} ${p.when}` : p.label })()} />
             {txn.refunded && <KV label="Refunded" value={money(txn.refund_amount_pence)} tone="red" />}
             {txn.disputed && <KV label="Disputed" value="⚠ Yes" tone="red" />}
           </Section>
