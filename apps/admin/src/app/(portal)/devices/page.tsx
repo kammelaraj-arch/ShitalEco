@@ -964,11 +964,24 @@ export default function DevicesPage() {
                         </p>
                         <div className="rounded-xl p-2 max-h-56 overflow-y-auto space-y-1"
                              style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                          {projects.length === 0 && (
-                            <p className="text-white/40 text-xs p-3 text-center">No projects yet. Create one at <a className="text-amber-400 underline" href="/projects">Admin → Projects</a>.</p>
-                          )}
+                          {(() => {
+                            const branchProjects = projects.filter(p => (p.branch_id || '') === (form.branch_id || ''))
+                            if (projects.length === 0) {
+                              return <p className="text-white/40 text-xs p-3 text-center">No projects yet. Create one at <a className="text-amber-400 underline" href="/projects">Admin → Projects</a>.</p>
+                            }
+                            if (branchProjects.length === 0) {
+                              return <p className="text-white/40 text-xs p-3 text-center">No projects at branch <span className="font-mono text-amber-300">{form.branch_id || '(unset)'}</span>. Create one at <a className="text-amber-400 underline" href="/projects">Admin → Projects</a>.</p>
+                            }
+                            return null
+                          })()}
                           {projects
-                            .filter(p => !form.branch_id || !p.branch_id || p.branch_id === form.branch_id)
+                            // Strict branch match: only projects whose
+                            // branch_id matches the device's branch. A
+                            // project without a branch (back-office test
+                            // row) is hidden — the kiosk is always
+                            // physically at a specific branch so the
+                            // "unassigned" bucket shouldn't be offered.
+                            .filter(p => (p.branch_id || '') === (form.branch_id || ''))
                             .map(p => {
                               const checked = form.linked_project_ids.includes(p.id)
                               const atMax = !checked && form.linked_project_ids.length >= 6
