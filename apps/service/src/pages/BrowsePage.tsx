@@ -113,19 +113,23 @@ export function BrowsePage() {
   return (
     <div className="min-h-screen pb-32" style={{ background: 'transparent' }}>
 
-      {/* Hero Banner — a brushed-gold bar. The gradient is three bright
-          gold stops (champagne → sovereign → antique) so the band reads
-          unambiguously as GOLD on every theme (dark, crimson, custom),
-          not a tan travertine. Dark serif text sits on it for contrast. */}
+      {/* Hero Banner — travertine stone. The warm sandstone band the user
+          repeatedly asked us to keep ("dont change the gold bar, previous
+          one is very good, keep for all" — PR #325). PR #327 regressed
+          this to a brighter flat gold while adding i18n; we keep the i18n
+          below but restore the travertine gradient + stone-texture
+          highlights so the top of the page reads like warm marble again,
+          not a flat yellow bar. */}
       <div className="relative overflow-hidden px-4 py-8"
         style={{
-          background: 'linear-gradient(160deg, #F5D678 0%, #E6B84A 35%, #C9961F 72%, #A87A14 100%)',
-          borderBottom: '2px solid rgba(212,175,55,0.65)',
+          background: 'linear-gradient(160deg, #D8BC90 0%, #C8A870 40%, #B89858 100%)',
+          borderBottom: '2px solid rgba(212,175,55,0.5)',
           boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
         }}>
-        {/* Soft specular highlight to give the bar a brushed-metal sheen. */}
+        {/* Stone texture overlay — soft highlight top-left, warm shadow
+            bottom-right. Gives the bar a lit-from-above marble feel. */}
         <div className="absolute inset-0 pointer-events-none" style={{
-          backgroundImage: 'radial-gradient(ellipse 65% 45% at 22% 28%, rgba(255,250,215,0.55) 0%, transparent 62%), radial-gradient(ellipse 55% 60% at 82% 72%, rgba(120,70,10,0.28) 0%, transparent 58%)',
+          backgroundImage: 'radial-gradient(ellipse 60% 40% at 20% 30%, rgba(255,245,210,0.35) 0%, transparent 60%), radial-gradient(ellipse 50% 60% at 80% 70%, rgba(160,110,40,0.25) 0%, transparent 55%)',
         }} />
         {/* Gold shimmer bottom edge */}
         <div className="absolute bottom-0 left-0 right-0 h-px"
