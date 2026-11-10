@@ -11,6 +11,7 @@ GET by-branch is public so the kiosk can call it without a token.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any
@@ -23,6 +24,87 @@ from shital.core.space.branches import resolve_branch_code
 from shital.services.audit import record_audit, snapshot
 
 router = APIRouter(prefix="/terminal-devices", tags=["terminal-devices"])
+
+# Reader ID shape by provider — a sanity check on data the admin typed, not
+# auto-derivation. The Provider dropdown still decides what gets saved; this
+# just refuses to save a pair that physically cannot exist together. Yesterday's
+# SumUp-labeled-STRIPE regression started with a volunteer pasting a tmr_* ID
+# into a row where Provider was pre-selected as something else; from today the
+# row refuses to save in either direction.
+_STRIPE_READER_ID_PREFIX = "tmr_"
+# SumUp Solo readers are named "three-hyphenated-lowercase-english-words" by
+# SumUp's onboarding (e.g. "yellow-river-stone"). That three-token lowercase
+# shape is the pair-code the volunteer reads off the device; anything else
+# landing in sumup_reader_serial is a typo or a wrong-field paste.
+_SUMUP_SERIAL_RE = re.compile(r"^[a-z]+-[a-z]+-[a-z]+$")
+
+
+def _validate_provider_id_match(provider: str, stripe_reader_id: str, sumup_reader_serial: str) -> None:
+    """Raise 422 if the provider dropdown and the typed reader ID disagree.
+
+    Keeps the Provider dropdown as the single human-chosen authority — this
+    doesn't derive anything, it just blocks saves where the two fields
+    contradict each other. Unknown / future providers skip the check.
+    """
+    p = (provider or "").lower()
+    sr = (stripe_reader_id or "").strip()
+    su = (sumup_reader_serial or "").strip()
+
+    # Hard-reject: a tmr_* value was typed into a row the admin marked as
+    # anything other than stripe_terminal. That's the SumUp-labeled-STRIPE
+    # mistake in reverse, and the only honest fix is to refuse the save.
+    if sr and p != "stripe_terminal":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "provider_id_mismatch",
+                "message": (
+                    "The Stripe Reader ID looks like a Stripe terminal "
+                    f"('{sr}' starts with 'tmr_'), but Provider is set to "
+                    f"'{p or '(blank)'}'. Switch Provider to 'Stripe Terminal' "
+                    "or clear the Stripe Reader ID field."
+                ),
+            },
+        )
+    # Mirror: a SumUp pair-code typed into a non-SumUp row.
+    if su and p != "sumup":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "provider_id_mismatch",
+                "message": (
+                    "The SumUp Reader Serial is set but Provider is "
+                    f"'{p or '(blank)'}'. Switch Provider to 'SumUp' "
+                    "or clear the SumUp Reader Serial field."
+                ),
+            },
+        )
+
+    # Shape checks per provider — only run when the field is non-empty, so
+    # the admin can save a row and come back to fill the ID later.
+    if p == "stripe_terminal" and sr and not sr.startswith(_STRIPE_READER_ID_PREFIX):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "stripe_reader_id_shape",
+                "message": (
+                    f"Stripe Reader IDs start with 'tmr_' (got '{sr}'). "
+                    "Check the admin.stripe.com dashboard for the right ID."
+                ),
+            },
+        )
+    if p == "sumup" and su and not _SUMUP_SERIAL_RE.match(su):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "sumup_serial_shape",
+                "message": (
+                    "SumUp Solo serials are three hyphenated lowercase words "
+                    f"(e.g. 'yellow-river-stone'); got '{su}'. Re-read the "
+                    "pair-code from the back of the SumUp Solo device."
+                ),
+            },
+        )
 
 
 # Fields whose change we never want to let through silently without an
@@ -221,6 +303,10 @@ async def create_device(body: DeviceCreate, ctx: RequiredSpace):
 
     from shital.core.fabrics.database import SessionLocal
 
+    _validate_provider_id_match(
+        body.provider, body.stripe_reader_id, body.sumup_reader_serial,
+    )
+
     device_id = str(uuid.uuid4())
     # Short, unique, human-readable identifier derived from the UUID — the
     # same rule the boot-time backfill uses, so a volunteer can write this
@@ -326,6 +412,19 @@ async def update_device(
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
 
+    # Validate reader-ID ↔ provider shape BEFORE touching the DB. We only
+    # know the effective provider / IDs once we merge the submitted fields
+    # against the existing row, so the full check happens inside the
+    # transaction below — this early pass catches the easy case where the
+    # admin changed both fields in the same request to an obviously-wrong
+    # pair, without a DB round-trip.
+    if ("provider" in fields) and ("stripe_reader_id" in fields or "sumup_reader_serial" in fields):
+        _validate_provider_id_match(
+            fields.get("provider") or "",
+            fields.get("stripe_reader_id") or "",
+            fields.get("sumup_reader_serial") or "",
+        )
+
     fields["updated_at"] = datetime.utcnow()
     fields["id"] = device_id
 
@@ -356,6 +455,15 @@ async def update_device(
                         "changes": protected_changes,
                     },
                 )
+
+        # Now that we have the current row, check the EFFECTIVE provider +
+        # reader IDs after merging the fields being changed. Catches the
+        # partial-update cases the early pass misses: e.g. admin flips
+        # provider alone (keeping the old reader ID), or vice versa.
+        eff_provider = fields.get("provider", before.get("provider") or "")
+        eff_stripe   = fields.get("stripe_reader_id", before.get("stripe_reader_id") or "")
+        eff_sumup    = fields.get("sumup_reader_serial", before.get("sumup_reader_serial") or "")
+        _validate_provider_id_match(eff_provider, eff_stripe, eff_sumup)
 
         result = await db.execute(
             text(f"""

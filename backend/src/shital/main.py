@@ -1214,6 +1214,27 @@ async def _patch_schema() -> None:
             PRIMARY KEY (profile_id, menu_id)
         )""",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS menu_profile_id UUID REFERENCES menu_profiles(id) ON DELETE SET NULL",
+        # Per-kiosk pairing PIN — operator writes the generated 4-digit code on
+        # the back of the physical kiosk with a marker, same convention as the
+        # reader's RDR-XXXX. Required in the request body when an admin changes
+        # the card_reader_id on a kiosk_devices row — a non-automatic sanity
+        # check that the admin is physically at the right kiosk before
+        # re-pairing a reader to it. Not in any public response.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS pairing_pin VARCHAR(10) NOT NULL DEFAULT ''",
+        # Backfill a random 4-digit PIN for every existing row that doesn't
+        # have one yet. Idempotent — only touches rows where pairing_pin is
+        # blank. Run once at boot; new rows get theirs at create time.
+        "UPDATE kiosk_devices "
+        "SET pairing_pin = LPAD(FLOOR(RANDOM() * 10000)::int::text, 4, '0') "
+        "WHERE COALESCE(pairing_pin, '') = ''",
+        # Client-side profile cache invalidation marker. Every admin change
+        # that affects what the client sees (card_reader_id, theme, flags,
+        # texts, menu_options, etc.) bumps this. The kiosk + quick-donation
+        # clients persist this value alongside their config; on heartbeat/
+        # login they compare theirs against the server's — mismatch → one
+        # refresh-config call. No per-donation network hit to resolve the
+        # reader: the config is fixed locally until the version bumps.
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS profile_version INTEGER NOT NULL DEFAULT 1",
         # Seed kiosk menus (idempotent — guarded by NOT EXISTS)
         """INSERT INTO menus (app_id, code, label, icon, display_order)
         SELECT * FROM (VALUES

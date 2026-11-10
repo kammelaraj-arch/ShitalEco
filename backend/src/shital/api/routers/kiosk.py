@@ -3193,6 +3193,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(kd.menu_options, '{"test_print": true, "theme_cycle": true, "refresh": true, "admin": true}'::jsonb) AS menu_options,
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
+                       COALESCE(kd.profile_version, 1) AS profile_version,
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
                        COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
@@ -3277,6 +3278,12 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "org_logo_url": device["org_logo_url"] or "",
             "org_name": device["org_name"] or "",
             "menu_codes": menu_codes,
+            # The version stamp the client persists alongside its config.
+            # On each heartbeat the client gets the current server value;
+            # a mismatch means the admin changed something in the portal
+            # since last login, so the client fires one /refresh-config
+            # call and updates. Until then the cached config is trusted.
+            "profile_version": int(device["profile_version"] or 1),
         }
 
     # ── Path 2: Legacy user-table login (quickkiosk-* accounts) ──────────────
@@ -3563,6 +3570,7 @@ async def quick_kiosk_refresh_config(username: str):
                        COALESCE(kd.menu_options, '{"test_print": true, "theme_cycle": true, "refresh": true, "admin": true}'::jsonb) AS menu_options,
                        COALESCE(kd.org_logo_url, '') AS org_logo_url,
                        COALESCE(kd.org_name, '') AS org_name,
+                       COALESCE(kd.profile_version, 1) AS profile_version,
                        kd.card_reader_id,
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
@@ -3614,6 +3622,7 @@ async def quick_kiosk_refresh_config(username: str):
         "menu_options": dict(device).get("menu_options") or {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True},
         "org_logo_url": device["org_logo_url"] or "",
         "org_name": device["org_name"] or "",
+        "profile_version": int(device["profile_version"] or 1),
     }
 
 

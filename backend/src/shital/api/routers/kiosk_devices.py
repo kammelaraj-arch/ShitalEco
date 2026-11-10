@@ -40,6 +40,16 @@ def _gen_token() -> str:
     return secrets.token_urlsafe(36)[:48]
 
 
+def _gen_pairing_pin() -> str:
+    """Zero-padded 4-digit PIN written on the back of the physical kiosk.
+
+    Not a security token — 10,000 possible values is fine for a "did the
+    admin walk over to the right kiosk before re-pairing a reader" check.
+    The device token above is still the real authentication secret.
+    """
+    return f"{secrets.randbelow(10000):04d}"
+
+
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 
 class DeviceIn(BaseModel):
@@ -84,6 +94,13 @@ class DeviceIn(BaseModel):
     menu_profile_id: str | None = None
     # Per-device staff-menu options — controls what appears in the kiosk gear icon
     menu_options: dict = {"test_print": True, "theme_cycle": True, "refresh": True, "admin": True}
+    # Pairing PIN: required by the backend on UPDATE when card_reader_id
+    # is changing — the admin must have read the 4-digit code from the back
+    # of the physical kiosk before re-pairing a reader to it. Always None
+    # on create (backend generates one); only populated on an edit that
+    # touches card_reader_id. Not persisted from the request body — the
+    # value stored in the DB is auto-generated at create time and stable.
+    pairing_pin: str | None = None
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -120,6 +137,8 @@ async def list_devices(
                        status, screen_profile_id, peak_start, peak_end,
                        off_peak_playlist_id, default_donate_amount, card_reader_id,
                        serial_number, ip_address, device_token,
+                       COALESCE(pairing_pin, '')  AS pairing_pin,
+                       COALESCE(profile_version, 1) AS profile_version,
                        kiosk_theme, org_name, org_logo_url,
                        device_username,
                        show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
@@ -179,7 +198,8 @@ async def get_device_by_token(token: str, ctx: OptionalSpace) -> dict[str, Any]:
                 RETURNING id, name, device_type, branch_id, location, status,
                           screen_profile_id, peak_start, peak_end,
                           off_peak_playlist_id, default_donate_amount, card_reader_id,
-                          kiosk_theme, org_name, org_logo_url, menu_profile_id
+                          kiosk_theme, org_name, org_logo_url, menu_profile_id,
+                          COALESCE(profile_version, 1) AS profile_version
             """),
             {"token": token},
         )
@@ -269,6 +289,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
 
     device_id = str(uuid.uuid4())
     token = _gen_token()
+    pairing_pin = _gen_pairing_pin()
     now = datetime.utcnow()
 
     import bcrypt as _bcrypt
@@ -280,7 +301,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                 (id, name, description, device_type, branch_id, location, latitude, longitude, status,
                  screen_profile_id, peak_start, peak_end, off_peak_playlist_id,
                  default_donate_amount, card_reader_id, serial_number, ip_address,
-                 device_token, notes, kiosk_theme, org_name, org_logo_url,
+                 device_token, pairing_pin, notes, kiosk_theme, org_name, org_logo_url,
                  device_username, device_password_hash,
                  show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
                  monthly_giving_text, monthly_giving_amount, confirmation_text,
@@ -290,7 +311,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                 (:id, :name, :desc, :dtype, :bid, :loc, :lat, :lng, :status,
                  :prof_id, :peak_s, :peak_e, :offpeak_pl,
                  :dda, :card_rid, :serial, :ip,
-                 :token, :notes, :ktheme, :oname, :ologo,
+                 :token, :ppin, :notes, :ktheme, :oname, :ologo,
                  :dev_user, :dev_pw_hash,
                  :show_monthly, :gift_aid, :tap_go, :donate_title,
                  :mg_text, :mg_amount, :confirm_text,
@@ -306,7 +327,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "dda": body.default_donate_amount,
             "card_rid": body.card_reader_id,
             "serial": body.serial_number, "ip": body.ip_address,
-            "token": token, "notes": body.notes,
+            "token": token, "ppin": pairing_pin, "notes": body.notes,
             "ktheme": body.kiosk_theme, "oname": body.org_name, "ologo": body.org_logo_url,
             "dev_user": body.device_username.lower().strip() if body.device_username else None,
             "dev_pw_hash": pw_hash,
@@ -323,7 +344,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
         })
         await db.commit()
 
-    return {"ok": True, "id": device_id, "device_token": token}
+    return {"ok": True, "id": device_id, "device_token": token, "pairing_pin": pairing_pin}
 
 
 # ── Update ────────────────────────────────────────────────────────────────────
@@ -344,6 +365,58 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
     pw_hash = _bcrypt.hashpw(body.device_password.encode(), _bcrypt.gensalt(12)).decode() if body.device_password else None
 
     async with SessionLocal() as db:
+        # Look up the current card_reader_id + pairing_pin so we can decide
+        # whether this edit needs a PIN check. We require the PIN ONLY when
+        # the admin is changing which reader is paired to the kiosk — any
+        # other edit (name, theme, flags) goes through without.
+        before_row = (await db.execute(
+            text("""
+                SELECT card_reader_id, pairing_pin, profile_version
+                FROM   kiosk_devices
+                WHERE  id = :id AND deleted_at IS NULL
+            """),
+            {"id": device_id},
+        )).mappings().first()
+        if not before_row:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        new_reader = str(body.card_reader_id) if body.card_reader_id else None
+        old_reader = str(before_row["card_reader_id"]) if before_row["card_reader_id"] else None
+        reader_changed = (new_reader or "") != (old_reader or "")
+
+        if reader_changed:
+            supplied = (body.pairing_pin or "").strip()
+            stored   = (before_row["pairing_pin"] or "").strip()
+            if not supplied:
+                raise HTTPException(
+                    status_code=428,
+                    detail={
+                        "error": "pairing_pin_required",
+                        "message": (
+                            "Changing the paired card reader requires the "
+                            "kiosk's pairing PIN (written on the back of "
+                            "the physical device). Read it off the kiosk "
+                            "and try again."
+                        ),
+                    },
+                )
+            if supplied != stored:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error": "pairing_pin_incorrect",
+                        "message": (
+                            "The pairing PIN you entered doesn't match "
+                            "this kiosk. Check you're reading the PIN off "
+                            "the back of the correct physical kiosk."
+                        ),
+                    },
+                )
+
+        # Bump the profile version so paired clients re-fetch their config
+        # on their next heartbeat. The version is a monotonic counter — not
+        # a hash — because it's compared with a stored client value which
+        # doesn't need a cryptographic equality check.
         result = await db.execute(text(f"""
             UPDATE kiosk_devices SET
                 name = :name, description = :desc, device_type = :dtype,
@@ -367,6 +440,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 bg_color = :bg_color,
                 menu_profile_id = :menu_profile_id,
                 menu_options = CAST(:menu_opts AS JSONB),
+                profile_version = profile_version + 1,
                 updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
         """), {
@@ -399,7 +473,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
         if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Device not found")
 
-    return {"ok": True}
+    return {"ok": True, "profile_version": (before_row["profile_version"] or 0) + 1}
 
 
 # ── Regenerate token ──────────────────────────────────────────────────────────
@@ -430,7 +504,8 @@ async def kiosk_heartbeat(device_id: str) -> dict[str, Any]:
         row = (await db.execute(
             text("""
                 WITH old AS (
-                    SELECT pending_command, pending_command_at
+                    SELECT pending_command, pending_command_at,
+                           COALESCE(profile_version, 1) AS profile_version
                     FROM   kiosk_devices
                     WHERE  id = CAST(:id AS UUID)
                       AND  deleted_at IS NULL
@@ -448,6 +523,7 @@ async def kiosk_heartbeat(device_id: str) -> dict[str, Any]:
                 )
                 SELECT old.pending_command AS prev_cmd,
                        old.pending_command_at AS prev_cmd_at,
+                       old.profile_version AS profile_version,
                        upd.id AS matched_id
                 FROM   upd LEFT JOIN old ON true
             """),
@@ -474,6 +550,10 @@ async def kiosk_heartbeat(device_id: str) -> dict[str, Any]:
         "updated": True,
         "command":  row.get("prev_cmd"),
         "queued_at": row["prev_cmd_at"].isoformat() if row.get("prev_cmd_at") else None,
+        # Client compares this against the value it stored at last login /
+        # refresh-config. Mismatch → trigger one /refresh-config call; equal
+        # → trust the cached config. No per-donation lookup needed.
+        "profile_version": int(row.get("profile_version") or 1),
     }
 
 
