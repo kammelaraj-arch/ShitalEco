@@ -50,6 +50,33 @@ def _gen_pairing_pin() -> str:
     return f"{secrets.randbelow(10000):04d}"
 
 
+async def _unique_pairing_pin(db) -> str:
+    """Generate a 4-digit pairing PIN that does not collide with any active
+    kiosk_devices row.
+
+    A unique partial index on (pairing_pin) WHERE deleted_at IS NULL is the
+    real guard — this loop is the cooperative half that avoids ever
+    tripping it. Caps at 50 attempts and raises 500 so a wedged DB can't
+    silently spin the request. In practice a temple runs tens of kiosks,
+    not thousands, so a fresh 4-digit value lands on the first draw.
+    """
+    for _ in range(50):
+        candidate = _gen_pairing_pin()
+        row = await db.execute(
+            text(
+                "SELECT 1 FROM kiosk_devices "
+                "WHERE pairing_pin = :p AND deleted_at IS NULL LIMIT 1"
+            ),
+            {"p": candidate},
+        )
+        if row.first() is None:
+            return candidate
+    raise HTTPException(
+        status_code=500,
+        detail="pairing_pin_space_exhausted — could not pick a unique 4-digit PIN after 50 attempts",
+    )
+
+
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 
 class DeviceIn(BaseModel):
@@ -289,13 +316,17 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
 
     device_id = str(uuid.uuid4())
     token = _gen_token()
-    pairing_pin = _gen_pairing_pin()
     now = datetime.utcnow()
 
     import bcrypt as _bcrypt
     pw_hash = _bcrypt.hashpw(body.device_password.encode(), _bcrypt.gensalt(12)).decode() if body.device_password else None
 
     async with SessionLocal() as db:
+        # Pick a pairing PIN that doesn't clash with any active kiosk.
+        # Cheap pre-check before INSERT; the unique partial index is the
+        # DB-level safety net if two concurrent creates both land on the
+        # same value.
+        pairing_pin = await _unique_pairing_pin(db)
         await db.execute(text("""
             INSERT INTO kiosk_devices
                 (id, name, description, device_type, branch_id, location, latitude, longitude, status,

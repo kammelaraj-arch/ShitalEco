@@ -1222,11 +1222,43 @@ async def _patch_schema() -> None:
         # re-pairing a reader to it. Not in any public response.
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS pairing_pin VARCHAR(10) NOT NULL DEFAULT ''",
         # Backfill a random 4-digit PIN for every existing row that doesn't
-        # have one yet. Idempotent — only touches rows where pairing_pin is
-        # blank. Run once at boot; new rows get theirs at create time.
-        "UPDATE kiosk_devices "
-        "SET pairing_pin = LPAD(FLOOR(RANDOM() * 10000)::int::text, 4, '0') "
-        "WHERE COALESCE(pairing_pin, '') = ''",
+        # have one yet. Collision-aware: loops per row, picking a fresh
+        # random value until it doesn't clash with an active row that
+        # already has one. Idempotent — only touches rows where
+        # pairing_pin is still blank, so repeated boots are a no-op.
+        """DO $$
+        DECLARE
+          r RECORD;
+          new_pin TEXT;
+          attempts INT;
+        BEGIN
+          FOR r IN
+            SELECT id FROM kiosk_devices
+            WHERE COALESCE(pairing_pin, '') = '' AND deleted_at IS NULL
+          LOOP
+            attempts := 0;
+            LOOP
+              new_pin := LPAD(FLOOR(RANDOM() * 10000)::int::text, 4, '0');
+              EXIT WHEN NOT EXISTS (
+                SELECT 1 FROM kiosk_devices
+                WHERE pairing_pin = new_pin AND deleted_at IS NULL
+              );
+              attempts := attempts + 1;
+              -- Belt-and-braces: with 10,000 slots and however few
+              -- kiosks a temple actually runs, this should never spin.
+              -- Bail at 100 so a bug can't deadlock startup.
+              EXIT WHEN attempts > 100;
+            END LOOP;
+            UPDATE kiosk_devices SET pairing_pin = new_pin WHERE id = r.id;
+          END LOOP;
+        END$$""",
+        # Unique partial index on pairing_pin, but only for live rows —
+        # soft-deleted rows can keep their old PIN without blocking future
+        # inserts. Created AFTER the backfill above so its own run can't
+        # fail on existing blank values. Index-build is cheap at this
+        # size and idempotent via IF NOT EXISTS.
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_kiosk_devices_pairing_pin "
+        "ON kiosk_devices(pairing_pin) WHERE deleted_at IS NULL AND pairing_pin <> ''",
         # Client-side profile cache invalidation marker. Every admin change
         # that affects what the client sees (card_reader_id, theme, flags,
         # texts, menu_options, etc.) bumps this. The kiosk + quick-donation
