@@ -1312,6 +1312,30 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS ix_tier_profiles_branch_id ON tier_profiles(branch_id)",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS tier_profile_id UUID",
+        # Non-payment pledges from the Project Donation flow. Volunteer +
+        # Professional Services + Materials + Business Sponsorship tiles
+        # all record what the donor is offering (a list of specific items /
+        # services) without a card payment. One row per pledge submission.
+        # selected_items is a jsonb array of strings matched against the
+        # client's per-category catalog.
+        """CREATE TABLE IF NOT EXISTS project_pledges (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            category        VARCHAR(40) NOT NULL,
+            selected_items  JSONB NOT NULL DEFAULT '[]'::jsonb,
+            donor_name      VARCHAR(200) NOT NULL DEFAULT '',
+            donor_email     VARCHAR(200) NOT NULL DEFAULT '',
+            donor_phone     VARCHAR(50)  NOT NULL DEFAULT '',
+            notes           TEXT         NOT NULL DEFAULT '',
+            branch_id       VARCHAR(50),
+            kiosk_device_id UUID,
+            project_id      UUID,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'NEW',
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_project_pledges_branch_id ON project_pledges(branch_id)",
+        "CREATE INDEX IF NOT EXISTS ix_project_pledges_category  ON project_pledges(category)",
+        "CREATE INDEX IF NOT EXISTS ix_project_pledges_created_at ON project_pledges(created_at DESC)",
         # Anonymous-donation marker on the donations table itself — a Gupt
         # Daan row saves contact_id=NULL and is_anonymous=true so finance
         # reports can treat it distinctly, no receipt email is sent, and

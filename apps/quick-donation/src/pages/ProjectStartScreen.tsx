@@ -51,9 +51,18 @@ export function ProjectStartScreen() {
 
   function tapTile(t: TileDef) {
     setPickedCategory(t.id)
-    // Anonymous path skips the contact form and jumps straight to tap-card.
-    // Everything else flows through the tier picker + contact form.
-    setScreen(t.anon ? 'tap' : 'project-tiers')
+    // Per-category routing. The flow a tile takes depends on whether it's
+    // a payment flow (brick, sqft, general, any) → tier picker + contact
+    // form + tap, a non-payment pledge (services, volunt, material,
+    // business) → checklist that saves to project_pledges with no card,
+    // or the anonymous Gupt Daan path → amount keypad → tap (no contact).
+    if (t.anon) {
+      setScreen('project-gupt')
+    } else if (['services', 'volunt', 'material', 'business'].includes(t.id)) {
+      setScreen('project-pledge')
+    } else {
+      setScreen('project-tiers')
+    }
   }
 
   // Compact header line matches the live Tap & Donate layout but appends

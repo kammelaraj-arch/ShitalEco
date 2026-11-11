@@ -140,6 +140,31 @@ const CATEGORY_TIERS: Record<string, Tier[]> = {
       sub: '≈7 ft² · family entrance tile',
       render: () => <SqFtSVG color="#1B5F85" highlight="#A9DBF5" /> },
   ],
+  general: [
+    { label: '£5',   price: 5,   render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£5" /> },
+    { label: '£10',  price: 10,  render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£10" /> },
+    { label: '£25',  price: 25,  render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£25" />,
+      featured: true },
+    { label: '£50',  price: 50,  render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£50" /> },
+    { label: '£100', price: 100, render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£100" /> },
+  ],
+}
+
+// Preset-amount card for General Donation — large stylised £ amount.
+function PresetSVG({ color, accent, label }: { color: string; accent: string; label: string }) {
+  return (
+    <svg viewBox="0 0 170 120" style={{ display: 'block', width: '100%', height: '100%' }}>
+      <defs>
+        <linearGradient id={`p-${label}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={accent} />
+          <stop offset="1" stopColor={color} />
+        </linearGradient>
+      </defs>
+      <circle cx="85" cy="60" r="50" fill={`url(#p-${label})`} stroke={accent} strokeWidth="2.5" />
+      <text x="85" y="72" textAnchor="middle" fontSize="36" fontFamily="serif"
+            fontWeight="900" fill="#180324">{label}</text>
+    </svg>
+  )
 }
 
 const SQFT_RATE = 351

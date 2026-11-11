@@ -9,6 +9,8 @@ import { AdminScreen } from './pages/AdminScreen'
 import { ProjectStartScreen } from './pages/ProjectStartScreen'
 import { ProjectTiersScreen } from './pages/ProjectTiersScreen'
 import { ProjectContactScreen } from './pages/ProjectContactScreen'
+import { ProjectPledgeScreen } from './pages/ProjectPledgeScreen'
+import { ProjectGuptScreen } from './pages/ProjectGuptScreen'
 import { unlockVoiceOnFirstGesture } from './lib/voice'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api/v1'
@@ -303,6 +305,8 @@ export function QuickDonationApp() {
           : <DonationScreen    key="donate" />
       case 'project-tiers':   return <ProjectTiersScreen   key="project-tiers" />
       case 'project-contact': return <ProjectContactScreen key="project-contact" />
+      case 'project-pledge':  return <ProjectPledgeScreen  key="project-pledge" />
+      case 'project-gupt':    return <ProjectGuptScreen    key="project-gupt" />
       case 'processing':      return <ProcessingScreen key="processing" />
       case 'tap':             return <TapScreen        key="tap" />
       case 'confirmation':    return <ConfirmationScreen key="confirmation" />

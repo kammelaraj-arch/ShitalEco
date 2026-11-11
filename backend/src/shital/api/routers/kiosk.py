@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -2473,6 +2474,108 @@ async def postcode_lookup(postcode: str):
     from shital.capabilities.giftaid.capabilities import lookup_postcode
     ctx = DigitalSpace(user_id="kiosk", user_email="kiosk@shital.org", role="KIOSK", branch_id="main", permissions=[], session_id=str(uuid.uuid4()))
     return await lookup_postcode(ctx, postcode)
+
+
+class ProjectPledgeInput(BaseModel):
+    """A non-payment pledge from the Project Donation flow.
+
+    Volunteer, Professional Services, Materials and Business Sponsorship
+    tiles all collect a list of specific offerings instead of a card
+    payment. The admin reviews pledges in the portal and reaches out.
+    """
+    category: str  # 'services' | 'volunt' | 'material' | 'business'
+    selected_items: list[str] = []
+    donor_name: str = ""
+    donor_email: str = ""
+    donor_phone: str = ""
+    notes: str = ""
+    branch_id: str | None = None
+    kiosk_device_id: str | None = None
+    project_id: str | None = None
+
+
+@router.post("/project-pledge")
+async def record_project_pledge(body: ProjectPledgeInput) -> dict[str, Any]:
+    """Record a non-payment pledge from a kiosk.
+
+    No auth — a kiosk is already identified by kiosk_device_id when it
+    logs in and that id rides along on the pledge. Validation is minimal
+    on purpose: a donor at the kiosk has already tapped through several
+    screens, so the admin would rather have a messy pledge to triage than
+    an empty one.
+    """
+    cat = (body.category or "").strip().lower()
+    if cat not in {"services", "volunt", "material", "business"}:
+        raise HTTPException(status_code=400, detail="Unknown pledge category")
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            INSERT INTO project_pledges
+                (category, selected_items, donor_name, donor_email, donor_phone,
+                 notes, branch_id, kiosk_device_id, project_id)
+            VALUES
+                (:cat,     CAST(:items AS JSONB), :name, :email, :phone,
+                 :notes,   :branch,
+                 NULLIF(:device, '')::uuid,
+                 NULLIF(:project, '')::uuid)
+            RETURNING id
+        """), {
+            "cat":    cat,
+            "items":  json.dumps(body.selected_items or []),
+            "name":   (body.donor_name or "").strip(),
+            "email":  (body.donor_email or "").strip().lower(),
+            "phone":  (body.donor_phone or "").strip(),
+            "notes":  (body.notes or "").strip(),
+            "branch": body.branch_id,
+            "device": (body.kiosk_device_id or "").strip(),
+            "project": (body.project_id or "").strip(),
+        })).first()
+        await db.commit()
+    return {"ok": True, "id": str(row[0])}
+
+
+@router.get("/project-pledges")
+async def list_project_pledges(
+    ctx: CurrentSpace,
+    limit: int = 100,
+    offset: int = 0,
+    category: str = "",
+    branch_id: str = "",
+    status: str = "",
+) -> dict[str, Any]:
+    """List pledges for the admin view."""
+    if ctx.role not in {"SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF"}:
+        raise HTTPException(status_code=403, detail="Not authorised")
+    conditions = ["TRUE"]
+    params: dict[str, Any] = {"lim": max(1, min(limit, 500)), "off": max(0, offset)}
+    if category:
+        conditions.append("category = :cat")
+        params["cat"] = category
+    if branch_id:
+        conditions.append("branch_id = :bid")
+        params["bid"] = branch_id
+    if status:
+        conditions.append("status = :st")
+        params["st"] = status
+    where = " AND ".join(conditions)
+    async with SessionLocal() as db:
+        rows = (await db.execute(text(f"""
+            SELECT id::text, category, selected_items,
+                   donor_name, donor_email, donor_phone, notes,
+                   branch_id, kiosk_device_id::text AS kiosk_device_id,
+                   project_id::text   AS project_id,
+                   status, created_at
+            FROM   project_pledges
+            WHERE  {where}
+            ORDER  BY created_at DESC
+            LIMIT  :lim OFFSET :off
+        """), params)).mappings().all()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if hasattr(d.get("created_at"), "isoformat"):
+            d["created_at"] = d["created_at"].isoformat()
+        out.append(d)
+    return {"pledges": out, "total": len(out)}
 
 
 class ReceiptInput(BaseModel):
