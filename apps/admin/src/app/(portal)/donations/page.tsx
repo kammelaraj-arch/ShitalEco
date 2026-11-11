@@ -108,6 +108,15 @@ export default function DonationsPage() {
   const [pageSize, setPageSize]           = useState(50)
   const [page, setPage]                   = useState(0)
   const [total, setTotal]                 = useState(0)
+  // Aggregates across the whole filter range (not just this page) — the
+  // summary cards used to sum donations[] which only covered the current
+  // 500-row slice, so Total/Completed/etc shrank when the filter returned
+  // more than one page. The backend now returns these server-side.
+  const [aggregates, setAggregates] = useState<{
+    by_status: Record<string, { count: number; sum: number }>
+    total:     { count: number; sum: number }
+    gift_aid:  { eligible_count: number; sum: number }
+  }>({ by_status: {}, total: { count: 0, sum: 0 }, gift_aid: { eligible_count: 0, sum: 0 } })
   const [giftAidOnly, setGiftAidOnly]     = useState(false)
   const [search, setSearch]               = useState('')
 
@@ -284,11 +293,22 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
       if (filterPurpose) qs.set('purpose',   filterPurpose)
       if (filterStatus)  qs.set('status',    filterStatus)
       const [donData, brData] = await Promise.all([
-        apiFetch<{ donations: Donation[]; total?: number }>(`/finance/donations?${qs}`),
+        apiFetch<{
+          donations: Donation[]
+          total?: number
+          aggregates?: {
+            by_status: Record<string, { count: number; sum: number }>
+            total:     { count: number; sum: number }
+            gift_aid:  { eligible_count: number; sum: number }
+          }
+        }>(`/finance/donations?${qs}`),
         apiFetch<{ branches: Branch[] }>('/branches'),
       ])
       setDonations(donData.donations || [])
       setTotal(donData.total ?? (donData.donations?.length || 0))
+      setAggregates(donData.aggregates ?? {
+        by_status: {}, total: { count: 0, sum: 0 }, gift_aid: { eligible_count: 0, sum: 0 },
+      })
       setBranches(brData.branches || [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load')
@@ -638,35 +658,62 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
         </div>
       </div>
 
-      {/* Summary cards — per-status breakdown + grand totals */}
+      {/* Summary cards.
+          When no client-side filter (search text or Gift Aid only) is on,
+          cards use server-side `aggregates` so they always reflect the
+          ENTIRE filter range (not just the paginated slice). When a
+          client-side filter IS on, cards sum `visibleDonations` so they
+          match what's shown, and a "(filtered)" suffix is appended to
+          flag that the totals reflect the client narrowing. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {[
-          { label: 'Completed',
-            value: `£${(byStatus.COMPLETED?.sum ?? 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
-            sub:   `${byStatus.COMPLETED?.count ?? 0} donation${(byStatus.COMPLETED?.count ?? 0) === 1 ? '' : 's'}`,
-            icon: '✅', color: 'from-green-600 to-emerald-500' },
-          { label: 'Pending',
-            value: `£${(byStatus.PENDING?.sum ?? 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
-            sub:   `${byStatus.PENDING?.count ?? 0} donation${(byStatus.PENDING?.count ?? 0) === 1 ? '' : 's'}`,
-            icon: '⏳', color: 'from-amber-500 to-orange-500' },
-          { label: 'Failed / Other',
-            value: `£${(donations.length - (byStatus.COMPLETED?.count ?? 0) - (byStatus.PENDING?.count ?? 0)) === 0
-                       ? '0.00'
-                       : Object.entries(byStatus)
-                           .filter(([k]) => !['COMPLETED','PENDING'].includes(k))
-                           .reduce((s, [, v]) => s + v.sum, 0)
-                           .toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
-            sub:   `${donations.length - (byStatus.COMPLETED?.count ?? 0) - (byStatus.PENDING?.count ?? 0)} record${donations.length - (byStatus.COMPLETED?.count ?? 0) - (byStatus.PENDING?.count ?? 0) === 1 ? '' : 's'}`,
-            icon: '⚠️', color: 'from-red-600 to-rose-500' },
-          { label: 'Total (all)',
-            value: `£${totalAmount.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
-            sub:   `${donations.length} donation${donations.length === 1 ? '' : 's'}`,
-            icon: '💰', color: 'from-saffron-600 to-orange-600' },
-          { label: 'Gift Aid',
-            value: `£${totalGiftAid.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
-            sub:   `${gaEligibleCount} of ${visibleDonations.length} eligible · 25% reclaim`,
-            icon: '🇬🇧', color: 'from-blue-600 to-indigo-500' },
-        ].map((s, i) => (
+        {(() => {
+          const clientFilter = giftAidOnly || q.length > 0
+          const sfx = clientFilter ? ' (filtered)' : ''
+          // Pick which source feeds each card
+          const comp = clientFilter ? byStatus.COMPLETED : aggregates.by_status.COMPLETED
+          const pend = clientFilter ? byStatus.PENDING   : aggregates.by_status.PENDING
+          const otherEntries = clientFilter
+            ? Object.entries(byStatus).filter(([k]) => !['COMPLETED', 'PENDING'].includes(k))
+            : Object.entries(aggregates.by_status).filter(([k]) => !['COMPLETED', 'PENDING'].includes(k))
+          const otherSum = otherEntries.reduce((s, [, v]) => s + v.sum, 0)
+          const otherN   = otherEntries.reduce((s, [, v]) => s + v.count, 0)
+          const grandSum = clientFilter ? totalAmount : aggregates.total.sum
+          const grandN   = clientFilter ? visibleDonations.length : aggregates.total.count
+          const gaSum    = clientFilter ? totalGiftAid : aggregates.gift_aid.sum
+          const gaN      = clientFilter ? gaEligibleCount : aggregates.gift_aid.eligible_count
+          return [
+            {
+              label: `Completed${sfx}`,
+              value: `£${(comp?.sum ?? 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+              sub:   `${comp?.count ?? 0} donation${(comp?.count ?? 0) === 1 ? '' : 's'}`,
+              icon: '✅', color: 'from-green-600 to-emerald-500',
+            },
+            {
+              label: `Pending${sfx}`,
+              value: `£${(pend?.sum ?? 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+              sub:   `${pend?.count ?? 0} donation${(pend?.count ?? 0) === 1 ? '' : 's'}`,
+              icon: '⏳', color: 'from-amber-500 to-orange-500',
+            },
+            {
+              label: `Failed / Other${sfx}`,
+              value: `£${otherSum.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+              sub:   `${otherN} record${otherN === 1 ? '' : 's'}`,
+              icon: '⚠️', color: 'from-red-600 to-rose-500',
+            },
+            {
+              label: `Total (all)${sfx}`,
+              value: `£${grandSum.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+              sub:   `${grandN} donation${grandN === 1 ? '' : 's'}`,
+              icon: '💰', color: 'from-saffron-600 to-orange-600',
+            },
+            {
+              label: `Gift Aid${sfx}`,
+              value: `£${gaSum.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`,
+              sub:   `${gaN} of ${grandN} eligible · 25% reclaim`,
+              icon: '🇬🇧', color: 'from-blue-600 to-indigo-500',
+            },
+          ]
+        })().map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
             className="glass rounded-2xl p-4 relative overflow-hidden">
             <div className={`absolute top-0 right-0 w-20 h-20 rounded-full bg-gradient-to-br ${s.color} opacity-10 blur-xl`} />
