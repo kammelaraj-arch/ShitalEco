@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -19,6 +20,8 @@ from shital.core.space.branches import resolve_branch_code
 from shital.core.space.context import DigitalSpace
 
 router = APIRouter(prefix="/kiosk", tags=["kiosk"])
+
+log = logging.getLogger(__name__)
 
 
 @router.get("/services")
@@ -2548,7 +2551,94 @@ async def record_project_pledge(body: ProjectPledgeInput) -> dict[str, Any]:
             "project": (body.project_id or "").strip(),
         })).first()
         await db.commit()
-    return {"ok": True, "id": str(row[0])}
+    pledge_id = str(row[0])
+
+    # Thank-you email — fire-and-forget. The email makes it explicit this
+    # is a VOLUNTEER offer with no payment required, so donors don't
+    # wonder later whether we'll bill them (or wonder whether we got it).
+    donor_email = (body.donor_email or "").strip().lower()
+    if donor_email and "@" in donor_email:
+        try:
+            await _send_pledge_thankyou(
+                to_email   = donor_email,
+                donor_name = (body.donor_name or "").strip() or "friend",
+                category   = cat,
+                items      = body.selected_items or [],
+                pledge_id  = pledge_id,
+            )
+        except Exception:
+            log.exception("pledge thank-you email failed for %s", pledge_id)
+
+    return {"ok": True, "id": pledge_id}
+
+
+_CATEGORY_LABEL = {
+    "services": "Professional Services",
+    "volunt":   "Volunteering",
+    "material": "Materials",
+    "business": "Business Sponsorship",
+}
+
+
+async def _send_pledge_thankyou(
+    *, to_email: str, donor_name: str, category: str,
+    items: list[str], pledge_id: str,
+) -> None:
+    """Thank-you email for a non-payment pledge.
+
+    The banner at the top of the email makes the no-payment nature of a
+    pledge impossible to miss — operators asked for this explicitly
+    because the volunteer path looked like a "charge" path from the
+    donor's perspective (same checkboxes → form → submit pattern).
+    """
+    from shital.api.routers.email_templates import send_raw_email
+
+    cat_label = _CATEGORY_LABEL.get(category, "offering")
+    first_name = donor_name.split()[0] if donor_name else "friend"
+    items_bullets_html = "".join(f"<li style='margin:4px 0'>{i}</li>" for i in items) or "<li>—</li>"
+    items_bullets_text = "\n".join(f"  • {i}" for i in items) or "  • —"
+
+    subject = f"Thank you for your {cat_label.lower()} pledge — Shital"
+    html_body = (
+        "<div style='font-family:Inter,Arial,sans-serif;max-width:600px;margin:auto;color:#2d1200'>"
+        "<h1 style='font-family:serif;color:#B8860B;margin-bottom:4px'>🙏 Dhanyavaad!</h1>"
+        f"<p style='font-size:16px'>Dear {first_name},</p>"
+        f"<p>Thank you for pledging <b>{cat_label}</b>. Someone from the temple will "
+        "be in touch shortly to arrange the details.</p>"
+        "<div style='background:#F0F8E8;border:2px solid #4CAF50;border-radius:12px;"
+        "padding:16px;margin:16px 0;font-size:15px'>"
+        "<b style='color:#2E7D32'>✓ This is a volunteer offer — no payment is required.</b>"
+        "<br/><span style='color:#2E7D32'>You will never be charged or asked to pay for this. "
+        "We're simply recording what you've kindly offered to help with.</span>"
+        "</div>"
+        "<p><b>What you offered:</b></p>"
+        f"<ul style='padding-left:20px'>{items_bullets_html}</ul>"
+        "<p style='margin-top:20px'>With gratitude,<br/><b>Shital Temple</b></p>"
+        f"<p style='font-size:11px;color:#999;margin-top:30px'>Reference: {pledge_id}</p>"
+        "</div>"
+    )
+    text_body = (
+        f"Dhanyavaad!\n\n"
+        f"Dear {first_name},\n\n"
+        f"Thank you for pledging {cat_label}. Someone from the temple will be in touch "
+        "shortly to arrange the details.\n\n"
+        "====================================================\n"
+        "✓ THIS IS A VOLUNTEER OFFER — NO PAYMENT IS REQUIRED.\n"
+        "You will never be charged or asked to pay for this. We're\n"
+        "simply recording what you've kindly offered to help with.\n"
+        "====================================================\n\n"
+        f"What you offered:\n{items_bullets_text}\n\n"
+        "With gratitude,\n"
+        "Shital Temple\n\n"
+        f"Reference: {pledge_id}\n"
+    )
+    await send_raw_email(
+        to_email=to_email, subject=subject,
+        html_body=html_body, text_body=text_body,
+        template_key="pledge_confirmation",
+        related_type="project_pledge", related_id=pledge_id,
+        triggered_by="kiosk_project_pledge",
+    )
 
 
 @router.get("/project-pledges")
