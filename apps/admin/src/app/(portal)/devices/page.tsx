@@ -53,8 +53,16 @@ interface KioskDevice {
   linked_project_ids?: string[]
   gupt_daan_enabled?: boolean
   enabled_tiles?: string[]
+  tier_profile_id?: string | null
   created_at: string
   updated_at: string
+}
+
+interface TierProfile {
+  id: string
+  name: string
+  branch_id: string | null
+  device_count: number
 }
 
 interface MenuProfile {
@@ -114,6 +122,7 @@ const EMPTY_FORM = {
   linked_project_ids: [] as string[],
   gupt_daan_enabled: false,
   enabled_tiles: [] as string[],
+  tier_profile_id: '' as string,
   // Typed into the UI only when the admin is changing the card reader on
   // an existing kiosk; backend ignores it on create and on an edit that
   // doesn't touch card_reader_id.
@@ -148,6 +157,7 @@ export default function DevicesPage() {
   // Fundraising projects, loaded for the project-mode multi-select below.
   // Shape: { id (uuid), name, branch_id }. Filtered to the device's branch.
   const [projects, setProjects] = useState<{ id: string; name: string; branch_id: string }[]>([])
+  const [tierProfiles, setTierProfiles] = useState<TierProfile[]>([])
   const [loading, setLoading]           = useState(true)
   const [drawerOpen, setDrawerOpen]     = useState(false)
   const [editing, setEditing]           = useState<KioskDevice | null>(null)
@@ -170,7 +180,7 @@ export default function DevicesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [devData, brData, profData, plData, crData, mpData, prjData] = await Promise.all([
+      const [devData, brData, profData, plData, crData, mpData, prjData, tpData] = await Promise.all([
         apiFetch<{ devices: KioskDevice[] }>('/kiosk-devices'),
         apiFetch<{ branches: Branch[] }>('/branches').catch(() => ({ branches: [] })),
         apiFetch<{ profiles: ScreenProfile[] }>('/screen/profiles').catch(() => ({ profiles: [] })),
@@ -178,6 +188,7 @@ export default function DevicesPage() {
         apiFetch<{ devices: CardReader[] }>('/terminal-devices/?active_only=true').catch(() => ({ devices: [] })),
         apiFetch<{ profiles: MenuProfile[] }>('/admin/menu-profiles?app_id=kiosk').catch(() => ({ profiles: [] })),
         apiFetch<{ projects: { id: string; name: string; branch_id: string }[] }>('/projects').catch(() => ({ projects: [] })),
+        apiFetch<{ profiles: TierProfile[] }>('/settings/tier-profiles').catch(() => ({ profiles: [] })),
       ])
       setDevices(devData.devices || [])
       setBranches(brData.branches || [])
@@ -186,6 +197,7 @@ export default function DevicesPage() {
       setCardReaders(crData.devices || [])
       setMenuProfiles(mpData.profiles || [])
       setProjects(prjData.projects || [])
+      setTierProfiles(tpData.profiles || [])
     } catch (e: unknown) {
       setError(String(e))
     }
@@ -244,6 +256,7 @@ export default function DevicesPage() {
       linked_project_ids: d.linked_project_ids || [],
       gupt_daan_enabled:  d.gupt_daan_enabled ?? false,
       enabled_tiles:      d.enabled_tiles || [],
+      tier_profile_id:    d.tier_profile_id || '',
       pairing_pin_input: '',
     })
     setError('')
@@ -279,6 +292,9 @@ export default function DevicesPage() {
         ...body,
         card_reader_id: form.card_reader_id || null,
         menu_profile_id: form.menu_profile_id || null,
+        // Empty string → send null so the backend clears the FK (device
+        // falls back to hardcoded tier defaults).
+        tier_profile_id: form.tier_profile_id || null,
         pairing_pin: readerChanged ? form.pairing_pin_input.trim() : null,
       }
       // `pairing_pin_input` is a UI-only field name; the server expects
@@ -1113,6 +1129,30 @@ export default function DevicesPage() {
                           <p className="text-white/50 text-[11px] mt-0.5">A 9th tile that takes a card tap without asking for name / email / Gift Aid — donation saves anonymously with no receipt. Traditional temple practice.</p>
                         </div>
                       </label>
+
+                      {/* Tier profile picker — shared across devices. Editable
+                          at Settings → Tier Profiles. Empty = hardcoded defaults. */}
+                      <div>
+                        <p className={lbl} style={{ color: '#FDBA74' }}>
+                          Tier Profile (brick labels, prices, images)
+                        </p>
+                        <select
+                          className={inp}
+                          value={form.tier_profile_id}
+                          onChange={e => setForm(f => ({ ...f, tier_profile_id: e.target.value }))}>
+                          <option value="">— Use defaults —</option>
+                          {tierProfiles
+                            .filter(p => !p.branch_id || p.branch_id === form.branch_id)
+                            .map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}{p.branch_id ? '' : ' (global)'} · {p.device_count} device{p.device_count === 1 ? '' : 's'}
+                              </option>
+                            ))}
+                        </select>
+                        <p className="text-white/30 text-[10px] mt-1">
+                          Attach a shared Tier Profile so this device uses admin-edited tier labels, prices and images instead of the hardcoded brick catalog. Manage profiles at <a href="/settings/tier-profiles" className="underline">Settings → Tier Profiles</a>.
+                        </p>
+                      </div>
                     </>
                   )}
                 </div>

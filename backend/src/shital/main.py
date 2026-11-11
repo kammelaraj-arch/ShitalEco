@@ -1285,6 +1285,33 @@ async def _patch_schema() -> None:
         # controlled by gupt_daan_enabled separately, and the any_amount
         # tile is always shown as the last single slot.
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS enabled_tiles TEXT[] NOT NULL DEFAULT '{}'::text[]",
+        # Tier profiles — editable per-category tier catalog (brick labels,
+        # prices, images, sub-text, featured flag, order) that one or more
+        # devices can share. Admin creates profiles once in Settings →
+        # Tier Profiles, then picks a profile on each device.
+        # config shape:
+        #   { brick:    [{label, price, sub, image_url, featured, order}, ...],
+        #     sqft:     [...],
+        #     material: [...],
+        #     volunt:   [...],
+        #     services: [...],
+        #     business: [...],
+        #     general:  [...] }
+        # An empty array for a category falls back to the client-side
+        # defaults for that category, so admins can override brick only
+        # and leave sqft on defaults.
+        """CREATE TABLE IF NOT EXISTS tier_profiles (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name        VARCHAR(100) NOT NULL,
+            description TEXT,
+            branch_id   VARCHAR(50),
+            config      JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at  TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_tier_profiles_branch_id ON tier_profiles(branch_id)",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS tier_profile_id UUID",
         # Anonymous-donation marker on the donations table itself — a Gupt
         # Daan row saves contact_id=NULL and is_anonymous=true so finance
         # reports can treat it distinctly, no receipt email is sent, and
@@ -4471,6 +4498,7 @@ _mount("shital.api.routers.finance_accounts",      "router")
 _mount("shital.api.routers.board_resolution_extras", "router")
 _mount("shital.api.routers.public_campaigns",      "router")
 _mount("shital.api.routers.public_darshan",        "router")
+_mount("shital.api.routers.tier_profiles",         "router")
 _mount("shital.api.routers.donor_wall",            "public_router")
 _mount("shital.api.routers.donor_wall",            "admin_router")
 
