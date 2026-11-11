@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -2503,11 +2504,9 @@ async def record_project_pledge(body: ProjectPledgeInput) -> dict[str, Any]:
     screens, so the admin would rather have a messy pledge to triage than
     an empty one.
     """
-    import json as _json
-    from fastapi import HTTPException as _HTTPException
     cat = (body.category or "").strip().lower()
     if cat not in {"services", "volunt", "material", "business"}:
-        raise _HTTPException(status_code=400, detail="Unknown pledge category")
+        raise HTTPException(status_code=400, detail="Unknown pledge category")
     async with SessionLocal() as db:
         row = (await db.execute(text("""
             INSERT INTO project_pledges
@@ -2521,7 +2520,7 @@ async def record_project_pledge(body: ProjectPledgeInput) -> dict[str, Any]:
             RETURNING id
         """), {
             "cat":    cat,
-            "items":  _json.dumps(body.selected_items or []),
+            "items":  json.dumps(body.selected_items or []),
             "name":   (body.donor_name or "").strip(),
             "email":  (body.donor_email or "").strip().lower(),
             "phone":  (body.donor_phone or "").strip(),
@@ -2545,8 +2544,7 @@ async def list_project_pledges(
 ) -> dict[str, Any]:
     """List pledges for the admin view."""
     if ctx.role not in {"SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF"}:
-        from fastapi import HTTPException as _HE
-        raise _HE(status_code=403, detail="Not authorised")
+        raise HTTPException(status_code=403, detail="Not authorised")
     conditions = ["TRUE"]
     params: dict[str, Any] = {"lim": max(1, min(limit, 500)), "off": max(0, offset)}
     if category:
