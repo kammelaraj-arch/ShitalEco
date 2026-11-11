@@ -1,7 +1,12 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
-export type Screen = 'donate' | 'processing' | 'tap' | 'confirmation' | 'admin' | 'project-tiers' | 'project-contact'
+export type Screen =
+  | 'donate' | 'processing' | 'tap' | 'confirmation' | 'admin'
+  | 'project-tiers'   // brick / sqft / any / general → amount tiles
+  | 'project-contact' // mandatory donor details before tap
+  | 'project-pledge'  // services / volunteering / materials / business — non-payment pledge checklist
+  | 'project-gupt'    // anonymous amount keypad → straight to tap (no contact)
 export type ReaderProvider = 'stripe_terminal' | 'sumup' | 'clover' | ''
 export type DonationMode = 'quick' | 'project'
 export interface LinkedProject { id: string; name: string }
