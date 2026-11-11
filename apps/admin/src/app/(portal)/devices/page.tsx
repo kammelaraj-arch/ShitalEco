@@ -965,23 +965,30 @@ export default function DevicesPage() {
                         <div className="rounded-xl p-2 max-h-56 overflow-y-auto space-y-1"
                              style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.08)' }}>
                           {(() => {
-                            const branchProjects = projects.filter(p => (p.branch_id || '') === (form.branch_id || ''))
+                            const branchProjects = projects.filter(p => {
+                              const pb = p.branch_id || ''
+                              return pb && (pb === (form.branch_id || '') || pb === 'main')
+                            })
                             if (projects.length === 0) {
                               return <p className="text-white/40 text-xs p-3 text-center">No projects yet. Create one at <a className="text-amber-400 underline" href="/projects">Admin → Projects</a>.</p>
                             }
                             if (branchProjects.length === 0) {
-                              return <p className="text-white/40 text-xs p-3 text-center">No projects at branch <span className="font-mono text-amber-300">{form.branch_id || '(unset)'}</span>. Create one at <a className="text-amber-400 underline" href="/projects">Admin → Projects</a>.</p>
+                              return <p className="text-white/40 text-xs p-3 text-center">No projects at branch <span className="font-mono text-amber-300">{form.branch_id || '(unset)'}</span> or at &apos;main&apos;. Create one at <a className="text-amber-400 underline" href="/projects">Admin → Projects</a>.</p>
                             }
                             return null
                           })()}
                           {projects
-                            // Strict branch match: only projects whose
-                            // branch_id matches the device's branch. A
-                            // project without a branch (back-office test
-                            // row) is hidden — the kiosk is always
-                            // physically at a specific branch so the
-                            // "unassigned" bucket shouldn't be offered.
-                            .filter(p => (p.branch_id || '') === (form.branch_id || ''))
+                            // Show projects at the device's branch, PLUS
+                            // projects marked 'main' which the operator
+                            // uses as the organisation-wide catch-all.
+                            // Projects with an empty branch_id are still
+                            // hidden (unassigned back-office rows).
+                            .filter(p => {
+                              const pb = p.branch_id || ''
+                              const db = form.branch_id || ''
+                              if (!pb) return false
+                              return pb === db || pb === 'main'
+                            })
                             .map(p => {
                               const checked = form.linked_project_ids.includes(p.id)
                               const atMax = !checked && form.linked_project_ids.length >= 6
