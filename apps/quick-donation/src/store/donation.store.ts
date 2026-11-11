@@ -94,6 +94,12 @@ export interface DonationState {
     featured?: boolean; order?: number
   }>> } | null
 
+  // Non-payment pledge handoff from ProjectPledgeScreen to
+  // ProjectContactScreen. Pledge screen just captures selections and
+  // routes to contact; contact screen posts /project-pledge with
+  // selectedPledgeItems + donor fields (bypassing the card tap).
+  selectedPledgeItems: string[]
+
   _hasHydrated: boolean
   setHasHydrated: (v: boolean) => void
 
@@ -106,6 +112,7 @@ export interface DonationState {
   setDonationMode: (mode: DonationMode, projects: LinkedProject[], guptDaanEnabled: boolean, enabledTiles: string[]) => void
   setPickedCategory: (cat: string) => void
   setTierProfile: (p: DonationState['tierProfile']) => void
+  setSelectedPledgeItems: (items: string[]) => void
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number; confirmationText: string; kioskTheme: string; orgLogoUrl: string; orgName: string; bgColor: string }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string, username?: string) => void
@@ -155,6 +162,7 @@ export const useDonationStore = create<DonationState>()(
       enabledTiles: [],
       pickedCategory: '',
       tierProfile: null,
+      selectedPledgeItems: [],
 
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
@@ -170,6 +178,7 @@ export const useDonationStore = create<DonationState>()(
         set({ donationMode, linkedProjects, guptDaanEnabled, enabledTiles }),
       setPickedCategory: (pickedCategory) => set({ pickedCategory }),
       setTierProfile: (tierProfile) => set({ tierProfile }),
+      setSelectedPledgeItems: (selectedPledgeItems) => set({ selectedPledgeItems }),
       setDeviceFlags: (flags) => set(flags),
       setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName, username) => set({
         isDeviceLoggedIn, loggedInName,
