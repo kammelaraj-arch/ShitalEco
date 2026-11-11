@@ -75,11 +75,23 @@ export function ProjectStartScreen() {
       ? ` · ${linkedProjects.length} projects`
       : ''
 
+  // Target vs raised totals aggregated across every linked project.
+  // Shown as a small line under the header so the donor can see where
+  // the campaign is at a glance, and (visually) how much a tap of theirs
+  // would move the needle.
+  const goalTotal   = linkedProjects.reduce((s, p) => s + Number(p.goal_amount   ?? 0), 0)
+  const raisedTotal = linkedProjects.reduce((s, p) => s + Number(p.raised_amount ?? 0), 0)
+  const showProgress = linkedProjects.length > 0 && goalTotal > 0
+  const pct = showProgress ? Math.min(100, (raisedTotal / goalTotal) * 100) : 0
+  const fmt = (n: number) =>
+    n >= 1000 ? `£${(n/1000).toLocaleString('en-GB', { maximumFractionDigits: 1 })}k`
+              : `£${Math.round(n).toLocaleString('en-GB')}`
+
   return (
     <div className="min-h-screen flex flex-col px-4 py-5"
          style={{ background: 'var(--qd-bg, #140606)', color: 'var(--qd-text-primary, #FFF8EC)' }}>
-      <header className="flex items-center justify-between mb-4">
-        <div>
+      <header className="flex items-center justify-between mb-2">
+        <div className="min-w-0">
           <h1 className="font-black text-4xl leading-none"
               style={{ color: 'var(--qd-accent, #F6C454)', fontFamily: 'serif', letterSpacing: '-0.02em' }}>
             Tap &amp; Donate
@@ -90,11 +102,36 @@ export function ProjectStartScreen() {
           </h1>
         </div>
         <button onClick={() => setScreen('admin')}
-                className="w-10 h-10 rounded-full flex items-center justify-center"
+                className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
                 style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
           ⚙
         </button>
       </header>
+
+      {/* Project progress — small, unobtrusive line + sliver bar.
+          Only renders when there's a linked project with a goal set in
+          admin → projects. The donor sees it reinforce the "we're
+          building something" message without a loud progress banner. */}
+      {showProgress && (
+        <div className="mb-3" aria-live="polite">
+          <div className="flex items-baseline justify-between text-xs"
+               style={{ color: 'var(--qd-text-muted, #E7C796)' }}>
+            <span>
+              <b style={{ color: 'var(--qd-accent, #F6C454)' }}>{fmt(raisedTotal)}</b>
+              {' '}raised of <b>{fmt(goalTotal)}</b> target
+            </span>
+            <span>{Math.round(pct)}%</span>
+          </div>
+          <div className="h-1.5 mt-1 rounded-full overflow-hidden"
+               style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <div className="h-full rounded-full transition-all"
+                 style={{
+                   width: `${pct}%`,
+                   background: 'var(--qd-accent, #F6C454)',
+                 }} />
+          </div>
+        </div>
+      )}
 
       {/* 3-col grid of vivid tiles — same bones as today's amount grid */}
       <div className="grid grid-cols-3 gap-3 flex-1" style={{ gridAutoRows: '1fr' }}>

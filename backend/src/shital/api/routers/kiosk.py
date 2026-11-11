@@ -1094,27 +1094,45 @@ async def sumup_checkout(body: SumUpCheckoutInput):
         return {"error": str(e)}
 
 
-async def _resolve_project_names(project_ids: list[str]) -> list[dict[str, str]]:
-    """Resolve [uuid, uuid, ...] → [{id, name}, ...] preserving the input order.
+async def _resolve_project_names(project_ids: list[str]) -> list[dict[str, Any]]:
+    """Resolve [uuid, uuid, ...] → [{id, name, goal_amount, raised_amount}, ...]
+    preserving the input order.
 
-    Called from the Quick Donation login so the client's header can show
-    the admin-linked project name (e.g. "— Temple Hall Expansion") without
-    a second network round-trip. Non-fatal — on any error we return an
-    empty list and the client falls back to showing just the branch name.
+    Called from the Quick Donation login so the client's landing screen can
+    show the admin-linked project name AND the raised/goal progress
+    without a second network round-trip. Non-fatal — on any error we
+    return an empty list and the client falls back to showing just the
+    branch name.
+
+    raised_amount sums COMPLETED donations tagged to each project id;
+    counts both the one-time donations row and the service portal's
+    orders tagged with that project. Pending / failed are excluded so
+    the number the donor sees is "pence in the bank" not optimistic.
     """
     if not project_ids:
         return []
     try:
         async with SessionLocal() as db:
             rows = (await db.execute(text("""
-                SELECT id::text AS id, name
-                FROM   projects
-                WHERE  id = ANY(CAST(:ids AS uuid[]))
-                  AND  COALESCE(is_active, true) = true
+                SELECT p.id::text                                 AS id,
+                       p.name                                     AS name,
+                       COALESCE(p.goal_amount, 0)::numeric        AS goal_amount,
+                       COALESCE((
+                           SELECT SUM(amount)::numeric FROM donations
+                            WHERE project_id = p.id
+                              AND UPPER(status) = 'COMPLETED'
+                              AND deleted_at IS NULL
+                       ), 0)                                      AS raised_amount
+                FROM   projects p
+                WHERE  p.id = ANY(CAST(:ids AS uuid[]))
+                  AND  COALESCE(p.is_active, true) = true
             """), {"ids": project_ids})).mappings().all()
-        # Preserve the admin's ordered list from linked_project_ids.
-        by_id = {r["id"]: r["name"] for r in rows}
-        return [{"id": pid, "name": by_id[pid]} for pid in project_ids if pid in by_id]
+        by_id = {r["id"]: {
+            "name":           r["name"],
+            "goal_amount":    float(r["goal_amount"] or 0),
+            "raised_amount":  float(r["raised_amount"] or 0),
+        } for r in rows}
+        return [{"id": pid, **by_id[pid]} for pid in project_ids if pid in by_id]
     except Exception:  # noqa: BLE001
         return []
 
