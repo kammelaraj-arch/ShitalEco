@@ -525,6 +525,30 @@ export default function DevicesPage() {
                     >
                       Edit
                     </button>
+                    {/* Open — launches the matching kiosk app URL in a new
+                        tab so the admin can jump straight to the device's
+                        login screen without typing the URL by hand. QD →
+                        donate.shital.org.uk/donate/, full kiosk → kiosk.
+                        shital.org.uk, smart display → screen.shital.org.uk.
+                        Hidden for device types that have no public URL. */}
+                    {(d.device_type === 'KIOSK' || d.device_type === 'QUICK_DONATION' || d.device_type === 'SMART_DISPLAY') && (() => {
+                      const url =
+                        d.device_type === 'QUICK_DONATION' ? 'https://donate.shital.org.uk/donate/' :
+                        d.device_type === 'KIOSK'          ? 'https://kiosk.shital.org.uk/'         :
+                                                             'https://screen.shital.org.uk/'
+                      return (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={`Open ${d.device_type.replace('_', ' ').toLowerCase()} in a new tab`}
+                          className="px-3 py-2 rounded-xl text-xs font-bold text-amber-400/80 hover:text-amber-300 hover:bg-amber-900/20 transition-colors inline-flex items-center gap-1"
+                          style={{ border: '1px solid rgba(245,158,11,0.25)' }}
+                        >
+                          ↗ Open
+                        </a>
+                      )
+                    })()}
                     <button
                       onClick={() => handleDelete(d.id)}
                       disabled={deleting === d.id}
