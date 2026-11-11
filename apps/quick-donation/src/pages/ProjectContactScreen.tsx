@@ -2,33 +2,42 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDonationStore } from '../store/donation.store'
 import { TILE_CATALOG } from './ProjectStartScreen'
+import { PLEDGE_CATEGORIES } from './ProjectPledgeScreen'
 
-// Mandatory donor-details form for the project donation flow.
+// Shared donor-details form for every Project Donation flow that needs
+// contact capture.
 //
-// Address capture uses the SAME postcode-lookup flow as the service
-// portal + kiosk Gift Aid form: /api/v1/kiosk/postcode/{postcode} →
-// getAddress.io through the backend proxy. Match the existing UX so
-// operators don't learn a second pattern:
-//   1. donor types postcode → taps "Find address"
-//   2. matches render as a <select> dropdown
-//   3. donor picks one → address is locked into the form
-//   4. donor can hit "Change" to re-search
+// Mode is derived from pickedCategory:
+//   PAYMENT: brick / sqft / general / any → fills pendingGiftAid + sets
+//           Amount → goes to the Tap screen for a card payment.
+//   PLEDGE:  services / volunt / material / business → posts
+//           /kiosk/project-pledge with selectedPledgeItems + donor
+//           fields, no card tap, no Gift Aid block (there's no payment
+//           to Gift-Aid).
 //
-// Gift Aid defaults ON. Continue enables once every mandatory field
-// is filled AND an address has been selected (no free typing).
+// Address capture is the SAME postcode-lookup flow the service portal
+// + kiosk Gift Aid form use.
 interface LookupAddress { formatted: string; uprn: string }
 
 export function ProjectContactScreen() {
-  const { pickedCategory, amount, setPendingGiftAid, setScreen } = useDonationStore()
+  const {
+    pickedCategory, amount, setPendingGiftAid, setScreen,
+    selectedPledgeItems, branchId, kioskDeviceId, setSelectedPledgeItems,
+  } = useDonationStore()
   const tile = TILE_CATALOG.find(t => t.id === pickedCategory)
   const accent = tile?.accent || '#F6C454'
+  const isPledge = PLEDGE_CATEGORIES.has(pickedCategory)
 
   const [firstName, setFirstName] = useState('')
   const [surname, setSurname]     = useState('')
   const [email, setEmail]         = useState('')
   const [phone, setPhone]         = useState('')
   const [postcode, setPostcode]   = useState('')
+  const [notes, setNotes]         = useState('')
   const [giftAid, setGiftAid]     = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitErr, setSubmitErr]   = useState('')
+  const [pledgeDone, setPledgeDone] = useState(false)
 
   // Address lookup state — mirrors apps/service AddressLookup.tsx
   const [results, setResults]   = useState<LookupAddress[]>([])
@@ -82,8 +91,47 @@ export function ProjectContactScreen() {
     postcode.trim().length > 0 &&
     address.length > 0
 
-  function submit() {
+  async function submit() {
     if (!canContinue) return
+    // Pledge flow — no card tap. Post the selections + donor fields to
+    // /kiosk/project-pledge, clear the staged items, show confirmation.
+    if (isPledge) {
+      setSubmitting(true)
+      setSubmitErr('')
+      try {
+        const r = await fetch('/api/v1/kiosk/project-pledge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            category:        pickedCategory,
+            selected_items:  selectedPledgeItems,
+            donor_name:      `${firstName.trim()} ${surname.trim()}`.trim(),
+            donor_email:     email.trim().toLowerCase(),
+            donor_phone:     phone.trim(),
+            notes:           [address, postcode.trim().toUpperCase(), notes.trim()]
+                               .filter(Boolean).join(' — '),
+            branch_id:       branchId || null,
+            kiosk_device_id: kioskDeviceId || null,
+          }),
+        })
+        if (!r.ok) {
+          const d = await r.json().catch(() => null)
+          setSubmitErr(d?.detail || 'Could not save — try again')
+          return
+        }
+        setSelectedPledgeItems([])
+        setPledgeDone(true)
+        // Auto-return to the tile grid after a few seconds so the next
+        // donor sees a clean screen.
+        setTimeout(() => setScreen('donate'), 3500)
+      } catch {
+        setSubmitErr('Save failed — try again')
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+    // Payment flow — stash Gift Aid payload, go to card tap.
     setPendingGiftAid({
       firstName: firstName.trim(),
       surname: surname.trim(),
@@ -100,18 +148,35 @@ export function ProjectContactScreen() {
 
   const addressSelected = address.length > 0
 
+  // Pledge thank-you — short "Dhanyavaad" overlay, auto-returns to the
+  // tile grid via the setTimeout above.
+  if (pledgeDone) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-6 text-white"
+           style={{ background: `linear-gradient(170deg, ${tile?.bg || '#140606'} 0%, #140606 100%)` }}>
+        <div className="text-7xl mb-4">🙏</div>
+        <h1 className="text-4xl font-black mb-3" style={{ fontFamily: 'serif' }}>Dhanyavaad!</h1>
+        <p className="text-lg opacity-80 text-center max-w-md">
+          Thank you for offering {tile?.name?.toLowerCase() ?? 'your support'}. Someone from the temple will be in touch soon.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen px-4 py-5 text-white"
          style={{ background: `linear-gradient(170deg, ${tile?.bg || '#140606'} 0%, #140606 100%)` }}>
       <header className="flex items-center mb-5">
-        <button onClick={() => setScreen('project-tiers')}
+        <button onClick={() => setScreen(isPledge ? 'project-pledge' : 'project-tiers')}
                 className="px-3 py-2 rounded-xl text-white/80 hover:bg-white/10 text-sm">
           ← Back
         </button>
         <div className="ml-3 flex-1">
           <div className="text-xs uppercase tracking-widest" style={{ color: accent }}>Your details</div>
           <div className="font-black text-2xl" style={{ fontFamily: 'serif' }}>
-            £{amount.toFixed(2)} · {tile?.name}
+            {isPledge
+              ? `${tile?.emoji ?? ''} ${tile?.name ?? ''} · ${selectedPledgeItems.length} selected`
+              : `£${amount.toFixed(2)} · ${tile?.name ?? ''}`}
           </div>
         </div>
       </header>
@@ -204,29 +269,54 @@ export function ProjectContactScreen() {
         </div>
       )}
 
-      {/* Gift Aid consent */}
-      <label className="flex items-center gap-3 rounded-2xl p-4 cursor-pointer mt-4"
-             style={{
-               background: giftAid ? 'rgba(74,222,128,0.12)' : 'rgba(255,255,255,0.03)',
-               border: `1px solid ${giftAid ? 'rgba(74,222,128,0.5)' : 'rgba(255,255,255,0.1)'}`,
-             }}>
-        <input type="checkbox" checked={giftAid} onChange={e => setGiftAid(e.target.checked)} className="w-5 h-5 accent-green-500" />
-        <div className="flex-1">
-          <div className="font-bold text-sm" style={{ color: giftAid ? '#BCE7CB' : '#FFF' }}>
-            🇬🇧 Gift Aid — boosts your donation by 25% at no cost
+      {/* Gift Aid consent — only on PAYMENT flows. Nothing to Gift-Aid
+          on a pledge (no card is tapped). */}
+      {!isPledge && (
+        <label className="flex items-center gap-3 rounded-2xl p-4 cursor-pointer mt-4"
+               style={{
+                 background: giftAid ? 'rgba(74,222,128,0.12)' : 'rgba(255,255,255,0.03)',
+                 border: `1px solid ${giftAid ? 'rgba(74,222,128,0.5)' : 'rgba(255,255,255,0.1)'}`,
+               }}>
+          <input type="checkbox" checked={giftAid} onChange={e => setGiftAid(e.target.checked)} className="w-5 h-5 accent-green-500" />
+          <div className="flex-1">
+            <div className="font-bold text-sm" style={{ color: giftAid ? '#BCE7CB' : '#FFF' }}>
+              🇬🇧 Gift Aid — boosts your donation by 25% at no cost
+            </div>
+            <div className="text-xs opacity-70 mt-0.5">
+              I confirm I pay enough UK Income Tax to cover the Gift Aid on my donation.
+            </div>
           </div>
-          <div className="text-xs opacity-70 mt-0.5">
-            I confirm I pay enough UK Income Tax to cover the Gift Aid on my donation.
-          </div>
+        </label>
+      )}
+
+      {/* Optional free-text notes — pledge flow only. The text rides along
+          on the project_pledges row so the admin has context when they
+          follow up (e.g. "available weekends", "20 years PQS experience"). */}
+      {isPledge && (
+        <div className="mt-4">
+          <div className="text-[10px] uppercase tracking-widest opacity-60 mb-1">Anything else (optional)</div>
+          <input
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="Availability, relevant experience, etc."
+            className="w-full bg-black/30 rounded-xl px-4 py-3 text-base text-white outline-none" />
         </div>
-      </label>
+      )}
+
+      {submitErr && (
+        <div className="mt-3 text-sm" style={{ color: '#FF9B9B' }}>{submitErr}</div>
+      )}
 
       <button
-        disabled={!canContinue}
+        disabled={!canContinue || submitting}
         onClick={submit}
         className="w-full mt-5 py-5 rounded-2xl font-black text-xl disabled:opacity-40"
         style={{ background: accent, color: '#180324' }}>
-        Continue to card tap →
+        {submitting
+          ? 'Saving…'
+          : isPledge
+            ? `Submit pledge (${selectedPledgeItems.length}) →`
+            : 'Continue to card tap →'}
       </button>
     </div>
   )
