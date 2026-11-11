@@ -35,7 +35,7 @@ export function AdminScreen() {
   const {
     branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, cloverDeviceId,
     isDeviceLoggedIn, loggedInName, loggedInUsername,
-    setBranchId, setReader, setKioskDeviceId, setDeviceFlags, setDeviceLoggedIn, setScreen, setProfileVersion, setDonationMode,
+    setBranchId, setReader, setKioskDeviceId, setDeviceFlags, setDeviceLoggedIn, setScreen, setProfileVersion, setDonationMode, setTierProfile,
   } = useDonationStore()
 
   const [syncing, setSyncing] = useState(false)
@@ -108,6 +108,17 @@ export function AdminScreen() {
       !!d2.gupt_daan_enabled,
       d2.enabled_tiles || [],
     )
+    // Admin-editable tier catalog (brick labels/prices/images) attached to
+    // this device via a shared tier_profile. Null → ProjectTiersScreen
+    // uses its hardcoded defaults.
+    const dTp = (data as unknown as { tier_profile?: {
+      id: string; name: string;
+      config: Record<string, Array<{
+        label: string; price: number; sub?: string;
+        image_url?: string; featured?: boolean; order?: number
+      }>>
+    } | null }).tier_profile
+    setTierProfile(dTp ?? null)
     // Persist login — survives reboots until explicit logout
     setDeviceLoggedIn(true, data.user?.name || enteredUsername, enteredUsername)
     setScreen('donate')

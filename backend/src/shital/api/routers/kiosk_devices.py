@@ -138,6 +138,9 @@ class DeviceIn(BaseModel):
     linked_project_ids: list[str] = []
     gupt_daan_enabled: bool = False
     enabled_tiles: list[str] = []                       # ordered tile ids
+    # Attach an editable tier-catalog profile. One profile can serve many
+    # devices. Empty string / null = use the client-side defaults.
+    tier_profile_id: str | None = None
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -180,6 +183,7 @@ async def list_devices(
                        COALESCE(linked_project_ids, '{{}}'::uuid[]) AS linked_project_ids,
                        COALESCE(gupt_daan_enabled, false) AS gupt_daan_enabled,
                        COALESCE(enabled_tiles, '{{}}'::text[]) AS enabled_tiles,
+                       tier_profile_id,
                        kiosk_theme, org_name, org_logo_url,
                        device_username,
                        show_monthly_giving, enable_gift_aid, tap_and_go, donate_title,
@@ -352,7 +356,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  monthly_giving_text, monthly_giving_amount, confirmation_text,
                  bg_color, menu_options,
                  donation_mode, linked_project_ids, gupt_daan_enabled,
-                 enabled_tiles,
+                 enabled_tiles, tier_profile_id,
                  created_at, updated_at)
             VALUES
                 (:id, :name, :desc, :dtype, :bid, :loc, :lat, :lng, :status,
@@ -364,7 +368,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
                  :mg_text, :mg_amount, :confirm_text,
                  :bg_color, CAST(:menu_opts AS JSONB),
                  :dmode, CAST(:projs AS UUID[]), :gupt,
-                 CAST(:tiles AS TEXT[]),
+                 CAST(:tiles AS TEXT[]), NULLIF(:tier_pid, '')::uuid,
                  :now, :now)
         """), {
             "id": device_id, "name": body.name, "desc": body.description,
@@ -396,6 +400,7 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "projs": (body.linked_project_ids or [])[:6],
             "gupt":  bool(body.gupt_daan_enabled),
             "tiles": (body.enabled_tiles or [])[:12],
+            "tier_pid": (body.tier_profile_id or "").strip(),
             "now": now,
         })
         await db.commit()
@@ -500,6 +505,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                 linked_project_ids = CAST(:projs AS UUID[]),
                 gupt_daan_enabled  = :gupt,
                 enabled_tiles      = CAST(:tiles AS TEXT[]),
+                tier_profile_id    = NULLIF(:tier_pid, '')::uuid,
                 profile_version = profile_version + 1,
                 updated_at = :now
             WHERE id = :id AND deleted_at IS NULL
@@ -531,6 +537,7 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
             "projs": (body.linked_project_ids or [])[:6],
             "gupt":  bool(body.gupt_daan_enabled),
             "tiles": (body.enabled_tiles or [])[:12],
+            "tier_pid": (body.tier_profile_id or "").strip(),
             "now": now,
         })
         await db.commit()

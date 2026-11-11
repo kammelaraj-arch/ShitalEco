@@ -215,11 +215,38 @@ function AnyAmountKeypad({ initial, accent, onCancel, onConfirm, hint }: {
 // Compact 3-column grid, label on TOP of each tile (per operator feedback),
 // photoreal brick fills the body of the tile, price badge in the corner.
 // No scroll — grid flexes to viewport.
+//
+// Tier source order (first non-empty wins):
+//   1. tierProfile.config[category] — admin-edited list from Settings →
+//      Tier Profiles, loaded at login and shared across devices.
+//   2. CATEGORY_TIERS[category] — hardcoded defaults, so a kiosk still
+//      works out of the box with no profile attached.
 export function ProjectTiersScreen() {
-  const { pickedCategory, setAmount, setScreen } = useDonationStore()
+  const { pickedCategory, setAmount, setScreen, tierProfile } = useDonationStore()
   const [keypadOpen, setKeypadOpen] = useState(false)
   const tile = TILE_CATALOG.find(t => t.id === pickedCategory)
-  const tiers = CATEGORY_TIERS[pickedCategory] || []
+  const overrides = tierProfile?.config?.[pickedCategory]
+  const tiers: Tier[] = (overrides && overrides.length > 0)
+    ? overrides
+        .slice()
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .map(t => ({
+          label: t.label,
+          price: Number(t.price) || 0,
+          sub:   t.sub,
+          featured: t.featured,
+          // Admin image URL takes precedence over the SVG renderer; when
+          // absent we fall back to the hardcoded SVG for the SAME label
+          // (so changing just the price keeps the illustration), else
+          // generic brick art for the first tier in that category.
+          render: () => (t.image_url
+            ? <img src={t.image_url} alt={t.label}
+                   style={{ display: 'block', width: '100%', height: '100%',
+                            objectFit: 'contain' }} />
+            : (CATEGORY_TIERS[pickedCategory]?.find(d => d.label === t.label)?.render?.()
+               ?? <BrickSVG color="#B96A1F" mortar="#4A2308" highlight="#F3B274" />)),
+        }))
+    : (CATEGORY_TIERS[pickedCategory] || [])
   const accent = tile?.accent || '#FFD089'
 
   function pickTier(amount: number) {

@@ -78,6 +78,17 @@ export interface DonationState {
   // gupt / any) — picks which tier list ProjectTiersScreen shows.
   pickedCategory: string
 
+  // Editable tier catalog sent by the backend at login time. Shape:
+  //   { brick:    [{label, price, sub, image_url, featured, order}, ...],
+  //     sqft:     [...], ... }
+  // Empty / missing category → ProjectTiersScreen uses its hardcoded
+  // defaults for that category. null = no profile attached, defaults
+  // used everywhere (zero-config kiosk still works out of the box).
+  tierProfile: { id: string; name: string; config: Record<string, Array<{
+    label: string; price: number; sub?: string; image_url?: string;
+    featured?: boolean; order?: number
+  }>> } | null
+
   _hasHydrated: boolean
   setHasHydrated: (v: boolean) => void
 
@@ -89,6 +100,7 @@ export interface DonationState {
   setProfileVersion: (v: number) => void
   setDonationMode: (mode: DonationMode, projects: LinkedProject[], guptDaanEnabled: boolean, enabledTiles: string[]) => void
   setPickedCategory: (cat: string) => void
+  setTierProfile: (p: DonationState['tierProfile']) => void
   setDeviceFlags: (flags: { showMonthlyGiving: boolean; enableGiftAid: boolean; tapAndGo: boolean; donateTitle: string; monthlyGivingText: string; monthlyGivingAmount: number; confirmationText: string; kioskTheme: string; orgLogoUrl: string; orgName: string; bgColor: string }) => void
   setOrderResult: (orderId: string, ref: string, piId: string, secret: string) => void
   setDeviceLoggedIn: (loggedIn: boolean, name: string, username?: string) => void
@@ -137,6 +149,7 @@ export const useDonationStore = create<DonationState>()(
       guptDaanEnabled: false,
       enabledTiles: [],
       pickedCategory: '',
+      tierProfile: null,
 
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
@@ -151,6 +164,7 @@ export const useDonationStore = create<DonationState>()(
       setDonationMode: (donationMode, linkedProjects, guptDaanEnabled, enabledTiles) =>
         set({ donationMode, linkedProjects, guptDaanEnabled, enabledTiles }),
       setPickedCategory: (pickedCategory) => set({ pickedCategory }),
+      setTierProfile: (tierProfile) => set({ tierProfile }),
       setDeviceFlags: (flags) => set(flags),
       setDeviceLoggedIn: (isDeviceLoggedIn, loggedInName, username) => set({
         isDeviceLoggedIn, loggedInName,
@@ -201,6 +215,7 @@ export const useDonationStore = create<DonationState>()(
         linkedProjects: state.linkedProjects,
         guptDaanEnabled: state.guptDaanEnabled,
         enabledTiles: state.enabledTiles,
+        tierProfile: state.tierProfile,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true)

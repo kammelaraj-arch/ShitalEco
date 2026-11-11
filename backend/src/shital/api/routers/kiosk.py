@@ -1118,6 +1118,36 @@ async def _resolve_project_names(project_ids: list[str]) -> list[dict[str, str]]
         return []
 
 
+async def _resolve_tier_profile(profile_id: Any) -> dict[str, Any] | None:
+    """Fetch a tier_profiles row for the kiosk login response.
+
+    Returns {id, name, config} or None if the device has no profile.
+    The client falls back to its hardcoded CATEGORY_TIERS defaults when
+    this is None or any key is missing, so a half-configured profile
+    still works — the admin can edit brick only and leave sqft on
+    defaults just by leaving sqft off the config.
+    """
+    if not profile_id:
+        return None
+    try:
+        async with SessionLocal() as db:
+            row = (await db.execute(text("""
+                SELECT id::text AS id, name, COALESCE(config, '{}'::jsonb) AS config
+                FROM   tier_profiles
+                WHERE  id = CAST(:id AS UUID)
+                  AND  deleted_at IS NULL
+            """), {"id": str(profile_id)})).mappings().first()
+        if not row:
+            return None
+        import json as _json
+        cfg = row["config"]
+        if not isinstance(cfg, dict):
+            cfg = _json.loads(cfg or "{}")
+        return {"id": row["id"], "name": row["name"], "config": cfg}
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def _send_donation_receipt_once(
     *,
     payment_ref: str | None = None,
@@ -3393,6 +3423,7 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
                        COALESCE(kd.linked_project_ids, '{}'::uuid[]) AS linked_project_ids,
                        COALESCE(kd.gupt_daan_enabled, false) AS gupt_daan_enabled,
                        COALESCE(kd.enabled_tiles, '{}'::text[]) AS enabled_tiles,
+                       kd.tier_profile_id,
                        td.stripe_reader_id, td.label AS reader_label,
                        COALESCE(td.provider, 'stripe_terminal') AS reader_provider,
                        COALESCE(td.sumup_reader_serial, '') AS sumup_reader_serial,
@@ -3500,6 +3531,10 @@ async def quick_kiosk_login(body: QuickKioskLoginInput):
             "linked_projects":    await _resolve_project_names(
                 [str(p) for p in (device["linked_project_ids"] or [])],
             ),
+            # Editable tier catalog for Project Donation. Returns {} when
+            # the device has no profile attached — client falls back to
+            # the hardcoded CATEGORY_TIERS defaults in that case.
+            "tier_profile":       await _resolve_tier_profile(device["tier_profile_id"]),
         }
 
     # ── Path 2: Legacy user-table login (quickkiosk-* accounts) ──────────────
