@@ -98,7 +98,7 @@ export function AdminScreen() {
     // Admin-configured project donation mode (empty → classic quick donation)
     const d2 = data as unknown as {
       donation_mode?: string;
-      linked_projects?: { id: string; name: string }[];
+      linked_projects?: { id: string; name: string; goal_amount?: number; raised_amount?: number }[];
       gupt_daan_enabled?: boolean;
       enabled_tiles?: string[];
     }

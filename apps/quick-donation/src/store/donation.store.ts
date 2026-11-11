@@ -9,7 +9,12 @@ export type Screen =
   | 'project-gupt'    // anonymous amount keypad → straight to tap (no contact)
 export type ReaderProvider = 'stripe_terminal' | 'sumup' | 'clover' | ''
 export type DonationMode = 'quick' | 'project'
-export interface LinkedProject { id: string; name: string }
+export interface LinkedProject {
+  id: string
+  name: string
+  goal_amount?: number
+  raised_amount?: number
+}
 
 export interface GiftAidData {
   firstName: string
