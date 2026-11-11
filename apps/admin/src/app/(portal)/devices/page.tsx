@@ -546,35 +546,46 @@ export default function DevicesPage() {
         )}
       </AnimatePresence>
 
-      {/* ── Side drawer (edit flow) ──────────────────────────────────────── */}
+      {/* ── Edit device modal ────────────────────────────────────────────────
+           Centered popup instead of a right-column drawer per operator's
+           ask. Backdrop covers the whole viewport and closes the dialog on
+           click; the panel is width-constrained and vertically centred with
+           its own max-height so a long form scrolls inside the modal rather
+           than the page. Esc also closes it on desktop (handled by the
+           default button focus; we don't wire a global key listener because
+           an unrelated modal underneath could swallow it). */}
       <AnimatePresence>
         {drawerOpen && (
           <>
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+              className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm"
               onClick={() => setDrawerOpen(false)}
             />
-            {/* Panel */}
+            {/* Centered modal panel */}
             <motion.div
-              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-              className="fixed right-0 top-0 h-full z-50 w-full max-w-xl flex flex-col overflow-hidden"
-              style={{ background: '#130606', borderLeft: '1px solid rgba(185,28,28,0.2)' }}
+              initial={{ opacity: 0, scale: 0.94, y: 12 }}
+              animate={{ opacity: 1, scale: 1,   y: 0  }}
+              exit   ={{ opacity: 0, scale: 0.96, y: 8  }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[92vw] max-w-3xl max-h-[90vh] flex flex-col overflow-hidden rounded-2xl"
+              style={{ background: '#130606', border: '1px solid rgba(185,28,28,0.3)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
             >
-              {/* Drawer header */}
-              <div className="px-6 py-5 flex items-center gap-3 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                <button onClick={() => setDrawerOpen(false)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors text-lg">
-                  ←
-                </button>
-                <div>
+              {/* Modal header */}
+              <div className="px-6 py-4 flex items-center justify-between gap-3 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="min-w-0">
                   <h2 className="text-white font-black text-lg">{editing ? 'Edit Device' : 'Add Device'}</h2>
-                  <p className="text-white/30 text-xs">{editing ? `ID: ${editing.id.slice(0, 8)}…` : 'Register a new kiosk or display'}</p>
+                  <p className="text-white/30 text-xs truncate">{editing ? `ID: ${editing.id.slice(0, 8)}…` : 'Register a new kiosk or display'}</p>
                 </div>
+                <button onClick={() => setDrawerOpen(false)}
+                        title="Close"
+                        className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-colors text-xl flex-shrink-0">
+                  ×
+                </button>
               </div>
 
-              {/* Drawer body */}
+              {/* Modal body */}
               <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
                 {/* ── Device type ─────────────────────────────────────── */}
