@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDonationStore } from '../store/donation.store'
 import { TILE_CATALOG } from './ProjectStartScreen'
+import { AmountKeypad } from '../components/AmountKeypad'
 
 // ---------- Photoreal "digital-twin" brick -----------------------------------
 // Layered gradients + chamfer + inner mortar shadow + top light sheen so the
@@ -169,72 +170,10 @@ function PresetSVG({ color, accent, label }: { color: string; accent: string; la
 
 const SQFT_RATE = 351
 
-// ---------- Any-Amount kiosk keypad overlay ----------------------------------
-function AnyAmountKeypad({ initial, accent, onCancel, onConfirm, hint }: {
-  initial: string
-  accent: string
-  hint?: string
-  onCancel: () => void
-  onConfirm: (amount: number) => void
-}) {
-  const [value, setValue] = useState(initial || '')
-
-  function press(k: string) {
-    setValue(v => {
-      if (k === '←') return v.slice(0, -1)
-      if (k === '.' && v.includes('.')) return v
-      if (v.length >= 10) return v
-      return (v + k).replace(/^0+(?=\d)/, '')
-    })
-  }
-
-  const amt = parseFloat(value)
-  const canConfirm = isFinite(amt) && amt > 0
-  const KEYS = ['1','2','3','4','5','6','7','8','9','.','0','←']
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.85)' }}
-    >
-      <motion.div
-        initial={{ scale: 0.92, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96 }}
-        className="w-full max-w-md rounded-3xl p-6 text-white"
-        style={{ background: '#140606', border: `2px solid ${accent}` }}
-      >
-        <div className="text-center mb-4">
-          <div className="text-xs uppercase tracking-widest" style={{ color: accent }}>Enter any amount</div>
-          <div className="font-black text-6xl mt-2" style={{ fontFamily: 'serif', color: accent }}>
-            £{value || '0'}
-          </div>
-          {hint && <div className="text-xs mt-2 opacity-70">{hint}</div>}
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          {KEYS.map(k => (
-            <motion.button key={k} whileTap={{ scale: 0.9 }}
-                           onClick={() => press(k)}
-                           className="aspect-square rounded-2xl text-3xl font-black bg-white/10 hover:bg-white/15">
-              {k}
-            </motion.button>
-          ))}
-        </div>
-        <div className="flex gap-3 mt-5">
-          <button onClick={onCancel}
-                  className="flex-1 py-4 rounded-2xl font-black text-lg bg-white/10 hover:bg-white/15">
-            Cancel
-          </button>
-          <button onClick={() => canConfirm && onConfirm(amt)}
-                  disabled={!canConfirm}
-                  className="flex-1 py-4 rounded-2xl font-black text-lg disabled:opacity-40"
-                  style={{ background: accent, color: '#180324' }}>
-            Continue →
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
-  )
-}
+// Any-Amount keypad is now the shared AmountKeypad component (imported
+// above) rendered in modal mode. Kept out of this file to stop the Gupt
+// Daan + Any-Amount flows diverging — operator feedback: "stop building
+// every time, use one across the eco system".
 
 // ---------- Main screen ------------------------------------------------------
 // Compact 3-column grid, label on TOP of each tile (per operator feedback),
@@ -385,9 +324,10 @@ export function ProjectTiersScreen() {
 
       <AnimatePresence>
         {keypadOpen && (
-          <AnyAmountKeypad
-            initial=""
+          <AmountKeypad
+            mode="modal"
             accent={accent}
+            title="Enter any amount"
             hint={sqftHint}
             onCancel={() => setKeypadOpen(false)}
             onConfirm={(amount) => { setKeypadOpen(false); pickTier(amount) }}
