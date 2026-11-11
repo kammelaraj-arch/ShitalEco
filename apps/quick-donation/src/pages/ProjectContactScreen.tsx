@@ -148,17 +148,39 @@ export function ProjectContactScreen() {
 
   const addressSelected = address.length > 0
 
-  // Pledge thank-you — short "Dhanyavaad" overlay, auto-returns to the
-  // tile grid via the setTimeout above.
+  // Pledge thank-you — short "Dhanyavaad" overlay with a very explicit
+  // "no payment" banner (operator asked for this — a donor who ticked
+  // Volunteering shouldn't be left wondering whether a card charge is
+  // coming), auto-returns to the tile grid via the setTimeout above.
   if (pledgeDone) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-6 text-white"
            style={{ background: `linear-gradient(170deg, ${tile?.bg || '#140606'} 0%, #140606 100%)` }}>
         <div className="text-7xl mb-4">🙏</div>
-        <h1 className="text-4xl font-black mb-3" style={{ fontFamily: 'serif' }}>Dhanyavaad!</h1>
-        <p className="text-lg opacity-80 text-center max-w-md">
+        <h1 className="text-4xl font-black mb-2" style={{ fontFamily: 'serif' }}>Dhanyavaad!</h1>
+        <p className="text-lg opacity-80 text-center max-w-md mb-5">
           Thank you for offering {tile?.name?.toLowerCase() ?? 'your support'}. Someone from the temple will be in touch soon.
         </p>
+        {/* No-payment banner — impossible to miss, mirrors the email we
+            send so the donor sees the same reassurance on both channels */}
+        <div className="rounded-2xl px-5 py-4 max-w-md text-center"
+             style={{
+               background: 'rgba(74,222,128,0.15)',
+               border: '2px solid rgba(74,222,128,0.6)',
+               boxShadow: '0 0 24px rgba(74,222,128,0.25)',
+             }}>
+          <div className="font-black text-base" style={{ color: '#BCE7CB' }}>
+            ✓ This is a volunteer offer — no payment required
+          </div>
+          <div className="text-sm mt-1 opacity-80" style={{ color: '#BCE7CB' }}>
+            You won't be charged. We're just recording what you kindly offered to help with.
+          </div>
+        </div>
+        {email.trim() && (
+          <p className="text-xs mt-4 opacity-60">
+            A confirmation has been emailed to {email.trim().toLowerCase()}.
+          </p>
+        )}
       </div>
     )
   }
@@ -180,6 +202,27 @@ export function ProjectContactScreen() {
           </div>
         </div>
       </header>
+
+      {/* Up-front "no payment" reassurance on the form itself, so donors
+          see it BEFORE they hand over contact details — not only on the
+          thank-you screen afterwards. Payment flows don't show this. */}
+      {isPledge && (
+        <div className="rounded-2xl px-4 py-3 mb-4 flex items-center gap-3"
+             style={{
+               background: 'rgba(74,222,128,0.1)',
+               border: '1px solid rgba(74,222,128,0.4)',
+             }}>
+          <div className="text-2xl">✓</div>
+          <div>
+            <div className="font-bold text-sm" style={{ color: '#BCE7CB' }}>
+              This is a volunteer offer — no payment required
+            </div>
+            <div className="text-xs opacity-80" style={{ color: '#BCE7CB' }}>
+              We just need a few details so the temple can get in touch.
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 mb-4">
         <Field label="First name *" value={firstName} onChange={setFirstName} placeholder="Raj" />
