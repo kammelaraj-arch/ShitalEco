@@ -376,6 +376,11 @@ export default function DevicesPage() {
         </button>
       </div>
 
+      {/* When editing, the list hides entirely and the edit form takes over
+          the main content. One click Edit → inline details tab; one click
+          Back → back to the list. Matches the operator's ask: "better is
+          add details tab on this page when you click edit show the tab." */}
+      {!drawerOpen && <>
       {/* ── Filters ─────────────────────────────────────────────────────── */}
       <div className="px-6 pb-4 flex flex-wrap gap-2">
         {/* Type filter */}
@@ -560,6 +565,8 @@ export default function DevicesPage() {
         )}
       </div>
 
+      </>}
+
       {/* ── Onboarding wizard (new-device create flow) ────────────────────── */}
       <AnimatePresence>
         {wizardOpen && (
@@ -570,36 +577,49 @@ export default function DevicesPage() {
         )}
       </AnimatePresence>
 
-      {/* ── Side drawer (edit flow) ──────────────────────────────────────── */}
+      {/* ── Inline edit panel (no popup, no drawer — same page tab) ──────── */}
       <AnimatePresence>
         {drawerOpen && (
           <>
-            {/* Backdrop */}
+            {/* Inline panel in place of the list. No backdrop, no fixed
+                positioning — the browser's own scroll handles a long form,
+                and the "← Back to devices" button in the header returns
+                to the list view. */}
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
-              onClick={() => setDrawerOpen(false)}
-            />
-            {/* Panel */}
-            <motion.div
-              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-              className="fixed right-0 top-0 h-full z-50 w-full max-w-xl flex flex-col overflow-hidden"
-              style={{ background: '#130606', borderLeft: '1px solid rgba(185,28,28,0.2)' }}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit   ={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="px-6 pb-10"
             >
-              {/* Drawer header */}
-              <div className="px-6 py-5 flex items-center gap-3 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                <button onClick={() => setDrawerOpen(false)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors text-lg">
-                  ←
-                </button>
-                <div>
-                  <h2 className="text-white font-black text-lg">{editing ? 'Edit Device' : 'Add Device'}</h2>
-                  <p className="text-white/30 text-xs">{editing ? `ID: ${editing.id.slice(0, 8)}…` : 'Register a new kiosk or display'}</p>
+              {/* Inline edit header + body wrapped in a rounded panel so it
+                  reads as a distinct "tab" within the devices page. */}
+              <div className="rounded-2xl overflow-hidden" style={{ background: '#130606', border: '1px solid rgba(185,28,28,0.25)' }}>
+                {/* Header */}
+                <div className="px-6 py-4 flex items-center justify-between gap-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <button onClick={() => setDrawerOpen(false)}
+                            title="Back to devices"
+                            className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors text-lg flex-shrink-0">
+                      ←
+                    </button>
+                    <div className="min-w-0">
+                      <h2 className="text-white font-black text-lg truncate">
+                        {editing ? `Edit · ${editing.name}` : 'Add Device'}
+                      </h2>
+                      <p className="text-white/30 text-xs truncate">
+                        {editing ? `ID: ${editing.id.slice(0, 8)}…` : 'Register a new kiosk or display'}
+                      </p>
+                    </div>
+                  </div>
+                  <button onClick={() => setDrawerOpen(false)}
+                          className="px-3 py-2 rounded-xl text-xs font-bold text-white/70 hover:text-white hover:bg-white/5 transition-colors">
+                    Back to devices
+                  </button>
                 </div>
-              </div>
 
-              {/* Drawer body */}
-              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                {/* Body */}
+                <div className="px-6 py-5 space-y-5">
 
                 {/* ── Device type ─────────────────────────────────────── */}
                 <div>
@@ -1316,6 +1336,7 @@ export default function DevicesPage() {
                   {saving ? 'Saving…' : editing ? 'Save Changes' : 'Create Device'}
                 </button>
               </div>
+              </div>{/* ← close rounded-2xl panel */}
             </motion.div>
           </>
         )}
