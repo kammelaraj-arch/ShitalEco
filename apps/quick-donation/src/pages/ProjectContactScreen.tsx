@@ -1,13 +1,23 @@
 import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useDonationStore } from '../store/donation.store'
 import { TILE_CATALOG } from './ProjectStartScreen'
 
-// Mandatory donor-details form for the project donation flow. Gift Aid
-// defaults ON (per operator direction) but can be unticked. On submit we
-// stash the data into pendingGiftAid + the amount already set from the
-// tier screen, then advance to the existing 'tap' screen which handles
-// the card reader + payment confirmation — same flow as today's Quick
-// Donation Other Amount path.
+// Mandatory donor-details form for the project donation flow.
+//
+// Address capture uses the SAME postcode-lookup flow as the service
+// portal + kiosk Gift Aid form: /api/v1/kiosk/postcode/{postcode} →
+// getAddress.io through the backend proxy. Match the existing UX so
+// operators don't learn a second pattern:
+//   1. donor types postcode → taps "Find address"
+//   2. matches render as a <select> dropdown
+//   3. donor picks one → address is locked into the form
+//   4. donor can hit "Change" to re-search
+//
+// Gift Aid defaults ON. Continue enables once every mandatory field
+// is filled AND an address has been selected (no free typing).
+interface LookupAddress { formatted: string; uprn: string }
+
 export function ProjectContactScreen() {
   const { pickedCategory, amount, setPendingGiftAid, setScreen } = useDonationStore()
   const tile = TILE_CATALOG.find(t => t.id === pickedCategory)
@@ -17,36 +27,78 @@ export function ProjectContactScreen() {
   const [surname, setSurname]     = useState('')
   const [email, setEmail]         = useState('')
   const [phone, setPhone]         = useState('')
-  const [houseNum, setHouseNum]   = useState('')
   const [postcode, setPostcode]   = useState('')
-  const [giftAid, setGiftAid]     = useState(true)   // defaults ON
+  const [giftAid, setGiftAid]     = useState(true)
+
+  // Address lookup state — mirrors apps/service AddressLookup.tsx
+  const [results, setResults]   = useState<LookupAddress[]>([])
+  const [address, setAddress]   = useState<string>('')
+  const [uprn, setUprn]         = useState<string>('')
+  const [lookupErr, setLookupErr] = useState('')
+  const [looking, setLooking]   = useState(false)
+
+  async function findAddress() {
+    setLookupErr('')
+    setResults([])
+    const pc = postcode.trim()
+    if (pc.length < 3) {
+      setLookupErr('Enter a postcode first')
+      return
+    }
+    setLooking(true)
+    try {
+      const r = await fetch(`/api/v1/kiosk/postcode/${encodeURIComponent(pc)}`)
+      if (!r.ok) {
+        setLookupErr('Lookup failed — try again')
+        return
+      }
+      const d = await r.json() as { addresses?: unknown[] }
+      const raw: unknown[] = d.addresses ?? []
+      const found: LookupAddress[] = raw.map((a) =>
+        typeof a === 'string'
+          ? { formatted: a, uprn: '' }
+          : { formatted: (a as { formatted?: string }).formatted ?? '',
+              uprn:      (a as { uprn?: string }).uprn ?? '' })
+      setResults(found)
+      if (!found.length) setLookupErr('No addresses found — check the postcode')
+    } catch {
+      setLookupErr('Lookup offline — try again')
+    } finally {
+      setLooking(false)
+    }
+  }
+
+  function clearAddress() {
+    setAddress('')
+    setUprn('')
+    setResults([])
+  }
 
   const canContinue =
     firstName.trim().length > 0 &&
     surname.trim().length > 0 &&
     email.trim().length > 3 &&
     phone.trim().length > 3 &&
-    houseNum.trim().length > 0 &&
-    postcode.trim().length > 0
+    postcode.trim().length > 0 &&
+    address.length > 0
 
   function submit() {
     if (!canContinue) return
     setPendingGiftAid({
       firstName: firstName.trim(),
       surname: surname.trim(),
-      houseNum: houseNum.trim(),
+      // Backend's gift_aid_declarations only has houseNum + postcode —
+      // we pass the picked (PAF-matched) formatted address as houseNum
+      // so the declaration always carries real PAF data.
+      houseNum: address,
       postcode: postcode.trim().toUpperCase(),
       email: email.trim().toLowerCase(),
     })
-    // Gift Aid elected? The existing /quick-donation/record path reads
-    // pendingGiftAid and records a gift_aid_declarations row when the
-    // user ticks it. We clear pendingGiftAid if they untick so the
-    // record call still succeeds but skips the declaration insert.
-    if (!giftAid) {
-      setPendingGiftAid(null)
-    }
+    if (!giftAid) setPendingGiftAid(null)
     setScreen('tap')
   }
+
+  const addressSelected = address.length > 0
 
   return (
     <div className="min-h-screen px-4 py-5 text-white"
@@ -68,12 +120,92 @@ export function ProjectContactScreen() {
         <Field label="First name *" value={firstName} onChange={setFirstName} placeholder="Raj" />
         <Field label="Surname *"    value={surname}   onChange={setSurname}   placeholder="Patel" />
         <Field label="Email *"      value={email}     onChange={setEmail}     placeholder="you@example.com" type="email" full />
-        <Field label="Phone *"      value={phone}     onChange={setPhone}     placeholder="07700 900 000" type="tel" />
-        <Field label="Postcode *"   value={postcode}  onChange={v => setPostcode(v.toUpperCase())} placeholder="HA9 0ZZ" />
-        <Field label="House / street *" value={houseNum} onChange={setHouseNum} placeholder="140 White Lion Rd" full />
+        <Field label="Phone *"      value={phone}     onChange={setPhone}     placeholder="07700 900 000" type="tel" full />
       </div>
 
-      <label className="flex items-center gap-3 rounded-2xl p-4 cursor-pointer"
+      {/* Postcode row + Find address — hidden once an address is picked */}
+      {!addressSelected && (
+        <div>
+          <div className="text-[10px] uppercase tracking-widest opacity-60 mb-1">Postcode *</div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={postcode}
+              onChange={e => setPostcode(e.target.value.toUpperCase())}
+              onKeyDown={e => e.key === 'Enter' && findAddress()}
+              placeholder="HA9 0ZZ"
+              className="flex-1 bg-black/30 rounded-xl px-4 py-3 text-base text-white outline-none uppercase"
+            />
+            <button
+              type="button"
+              disabled={looking || postcode.trim().length < 3}
+              onClick={findAddress}
+              className="px-4 py-3 rounded-xl font-black text-base disabled:opacity-40"
+              style={{ background: accent, color: '#180324' }}>
+              {looking ? 'Searching…' : 'Find address'}
+            </button>
+          </div>
+          {lookupErr && (
+            <div className="text-sm mt-2" style={{ color: '#FF9B9B' }}>{lookupErr}</div>
+          )}
+
+          {/* Dropdown of matching addresses */}
+          <AnimatePresence>
+            {results.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                className="mt-3">
+                <div className="text-[10px] uppercase tracking-widest opacity-60 mb-1">
+                  Select your address *
+                </div>
+                <select
+                  value={address}
+                  onChange={e => {
+                    const v = e.target.value
+                    const chosen = results.find(r => r.formatted === v)
+                    setAddress(v)
+                    setUprn(chosen?.uprn ?? '')
+                  }}
+                  className="w-full bg-black/30 rounded-xl px-4 py-3 text-base text-white outline-none">
+                  <option value="">— Select —</option>
+                  {results.map((a, i) => (
+                    <option key={i} value={a.formatted} style={{ background: '#1a0a0a' }}>
+                      {a.formatted}
+                    </option>
+                  ))}
+                </select>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* Locked address panel with Change button */}
+      {addressSelected && (
+        <div className="rounded-2xl p-4"
+             style={{ background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.35)' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-widest mb-1" style={{ color: '#BCE7CB' }}>
+                ✓ Address
+              </div>
+              <div className="font-bold text-base">{address}</div>
+              {uprn && (
+                <div className="text-[10px] opacity-60 font-mono mt-1">UPRN {uprn}</div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={clearAddress}
+              className="px-3 py-2 rounded-xl text-sm bg-white/10 hover:bg-white/15 shrink-0">
+              Change
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Gift Aid consent */}
+      <label className="flex items-center gap-3 rounded-2xl p-4 cursor-pointer mt-4"
              style={{
                background: giftAid ? 'rgba(74,222,128,0.12)' : 'rgba(255,255,255,0.03)',
                border: `1px solid ${giftAid ? 'rgba(74,222,128,0.5)' : 'rgba(255,255,255,0.1)'}`,
