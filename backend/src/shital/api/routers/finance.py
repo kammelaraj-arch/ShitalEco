@@ -127,6 +127,75 @@ async def list_donations(
     # When filtering by a one-time-only source, exclude recurring leg with 1=0
     rgs_exclude = "AND 1=0" if (source and source != "monthly-giving") else ""
 
+    # ── Aggregates across the WHOLE filtered set (not just this page) ─────────
+    # The donations page's summary cards used to sum the 500-row page in the
+    # client, which was wrong for any filter that returned more than one page
+    # — "Total" and "Completed" both shrank to whatever happened to be on the
+    # page. We now compute the sums + counts in SQL with the same filters as
+    # the list query, so the cards always reflect the full filter range.
+    agg_query = f"""
+        WITH all_rows AS (
+            SELECT d.amount::numeric                    AS amount,
+                   d.status                             AS status,
+                   COALESCE(d.gift_aid_eligible, false) AS ga_eligible,
+                   d.gift_aid_amount::numeric           AS ga_amount
+            FROM donations d
+            WHERE d.deleted_at IS NULL
+              AND d.created_at >= :from_dt
+              AND d.created_at <  :to_dt
+              {src_filter}
+              {branch_filter}
+              {purpose_filter}
+              {status_filter}
+
+            UNION ALL
+
+            SELECT rgs.amount::numeric                                   AS amount,
+                   rgs.status                                            AS status,
+                   COALESCE(rgs.gift_aid_declared, false)                AS ga_eligible,
+                   CASE WHEN rgs.gift_aid_declared
+                        THEN ROUND(rgs.amount * 0.25, 2) ELSE 0 END::numeric AS ga_amount
+            FROM recurring_giving_subscriptions rgs
+            WHERE rgs.created_at >= :from_dt
+              AND rgs.created_at <  :to_dt
+              {rgs_exclude}
+              {rgs_branch}
+              {rgs_status}
+        )
+        SELECT
+            status,
+            COUNT(*)                                     AS n,
+            COALESCE(SUM(amount), 0)::numeric            AS total,
+            COUNT(*) FILTER (WHERE ga_eligible)          AS ga_eligible_n,
+            COALESCE(SUM(ga_amount) FILTER (WHERE ga_eligible), 0)::numeric AS ga_amount
+        FROM all_rows
+        GROUP BY status
+    """
+    async with SessionLocal() as db:
+        agg_rows = (await db.execute(text(agg_query), params)).mappings().all()
+
+    by_status: dict[str, dict[str, float]] = {}
+    grand_count = 0
+    grand_sum   = 0.0
+    ga_eligible = 0
+    ga_sum      = 0.0
+    for r in agg_rows:
+        key = (r["status"] or "UNKNOWN").upper()
+        by_status[key] = {
+            "count":  int(r["n"] or 0),
+            "sum":    float(r["total"] or 0),
+        }
+        grand_count += int(r["n"] or 0)
+        grand_sum   += float(r["total"] or 0)
+        ga_eligible += int(r["ga_eligible_n"] or 0)
+        ga_sum      += float(r["ga_amount"] or 0)
+
+    aggregates = {
+        "by_status": by_status,
+        "total":     {"count": grand_count, "sum": grand_sum},
+        "gift_aid":  {"eligible_count": ga_eligible, "sum": ga_sum},
+    }
+
     async with SessionLocal() as db:
         result = await db.execute(text(f"""
             WITH all_rows AS (
@@ -217,10 +286,14 @@ async def list_donations(
         rows = result.mappings().all()
     total = int(rows[0]["_total"]) if rows else 0
     return {
-        "donations": [_row(r) for r in rows],
-        "total":     total,
-        "limit":     params["lim"],
-        "offset":    params["off"],
+        "donations":  [_row(r) for r in rows],
+        "total":      total,
+        "limit":      params["lim"],
+        "offset":     params["off"],
+        # Totals across the whole filter range, NOT the paginated slice.
+        # Used by the Donations admin page summary cards so "Total (all)"
+        # really means everything that matches the filter.
+        "aggregates": aggregates,
     }
 
 
