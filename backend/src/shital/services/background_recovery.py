@@ -1388,6 +1388,50 @@ async def stripe_giving_fast_loop_supervised() -> None:
         await asyncio.sleep(delay)
 
 
+async def stripe_import_daily_loop() -> None:
+    """Daily (24 h) Stripe → donations import.
+
+    Walks every succeeded Stripe charge in the last 2 days and mirrors it
+    into our donations table (idempotent on payment_ref = charge.id). This
+    is the one-direction sync we always should have had: Stripe is the
+    source of truth for money received, we mirror. Covers card-reader
+    taps, dashboard-created payments, and subscription charges that a
+    dropped webhook would otherwise never surface.
+
+    2-day window picks up anything the daily cadence might straddle (DST,
+    clock skew, a missed run) without ever being expensive — succeeded
+    charges in a day on a temple's cadence are a handful."""
+    await asyncio.sleep(120)  # Let boot + first fast loop finish.
+    while True:
+        try:
+            from shital.api.routers.stripe_giving import _stripe_import_once
+            await _run_sweep(
+                "stripe_import_daily",
+                lambda: _stripe_import_once(days=2),
+                timeout=180,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("stripe_import_daily_pass_failed", error=str(exc))
+        await asyncio.sleep(24 * 60 * 60)  # 24 hours
+
+
+async def stripe_import_daily_loop_supervised() -> None:
+    """Same restart policy as the other supervisors."""
+    delay = 10
+    while True:
+        try:
+            logger.info("stripe_import_daily_loop_starting")
+            await stripe_import_daily_loop()
+        except asyncio.CancelledError:
+            logger.info("stripe_import_daily_loop_cancelled")
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.error("stripe_import_daily_loop_crashed", error=str(exc))
+        delay = min(delay * 2, 600)
+        logger.info("stripe_import_daily_loop_restart_in", seconds=delay)
+        await asyncio.sleep(delay)
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Removed in #273:
