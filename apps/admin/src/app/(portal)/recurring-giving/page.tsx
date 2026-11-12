@@ -98,6 +98,20 @@ export default function RecurringGivingPage() {
   const [subFilter, setSubFilter] = useState<'live' | 'pending' | 'failed' | 'ended' | 'all'>('live')
   const [retryingId, setRetryingId] = useState<string | null>(null)
   const [retryNote, setRetryNote]   = useState<Record<string, string>>({})
+  // Failed view pulls straight from Stripe (not our DB), mirroring the
+  // Stripe Dashboard → Payments → Failed tab verbatim: the DB-backed
+  // view had Failed (0) because failed subscription-creation attempts
+  // never become rgs rows.
+  interface StripeCharge {
+    id: string; amount: number; currency: string; status: string
+    payment_type: string; card_brand: string; card_last4: string
+    customer_name: string; customer_email: string; postal_code: string
+    description: string; failure_message: string; failure_code: string
+    created: number; invoice_id: string; retry_email_sent_at: string
+  }
+  const [failedCharges,   setFailedCharges]   = useState<StripeCharge[]>([])
+  const [loadingFailed,   setLoadingFailed]   = useState(false)
+  const [failedError,     setFailedError]     = useState('')
   const [stats, setStats]     = useState<GivingStats | null>(null)
 
   async function syncPayPal() {
@@ -169,6 +183,52 @@ export default function RecurringGivingPage() {
       setSyncNote(e instanceof Error ? e.message : 'Import failed')
     } finally { setSyncing(false) }
   }
+
+  // Pulls Stripe charges live (default: failed only, last 90 days) so
+  // the Failed view mirrors Stripe Dashboard → Payments verbatim.
+  async function loadFailedCharges() {
+    setLoadingFailed(true); setFailedError('')
+    try {
+      const r = await fetch(`${API}/admin/giving/stripe/charges?status=failed&days=90`, { headers: authHeaders() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      const d = await r.json()
+      setFailedCharges((d.charges || []) as StripeCharge[])
+    } catch (e) {
+      setFailedError(e instanceof Error ? e.message : 'Failed to load')
+    } finally { setLoadingFailed(false) }
+  }
+
+  // Send a retry email directly against a Stripe charge (no rgs row
+  // needed). Covers failed subscription-creation attempts where there's
+  // no local row to attach to.
+  async function sendChargeRetryEmail(chargeId: string) {
+    setRetryingId(chargeId)
+    setRetryNote(p => ({ ...p, [chargeId]: '' }))
+    try {
+      const r = await fetch(`${API}/admin/giving/stripe/charges/${chargeId}/send-retry-email`, {
+        method: 'POST', headers: authHeaders(),
+      })
+      const d = await r.json()
+      if (!r.ok) {
+        setRetryNote(p => ({ ...p, [chargeId]: `✗ ${d?.detail || `HTTP ${r.status}`}` }))
+        return
+      }
+      if (d.sent === false && d.reason === 'already_sent') {
+        setRetryNote(p => ({ ...p, [chargeId]: `Already sent · ${new Date(d.sent_at).toLocaleString('en-GB')}` }))
+      } else {
+        setRetryNote(p => ({ ...p, [chargeId]: `✓ Sent to ${d.to}` }))
+        await loadFailedCharges()
+      }
+    } catch (e) {
+      setRetryNote(p => ({ ...p, [chargeId]: `✗ ${e instanceof Error ? e.message : 'send failed'}` }))
+    } finally { setRetryingId(null) }
+  }
+
+  // Auto-load the Failed view whenever the user switches to that chip.
+  useEffect(() => {
+    if (subFilter === 'failed') loadFailedCharges()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subFilter])
 
   // Send the donor a "please try again" email. Idempotent per-row —
   // server rejects a second click until retry_email_sent_at is cleared.
@@ -746,14 +806,109 @@ export default function RecurringGivingPage() {
                     </button>
                   ))}
                 </div>
-                {filtered.length === 0 && (
+                {/* Failed view = live pull from Stripe, same columns as
+                    Stripe Dashboard → Payments. Overrides the DB-backed
+                    sub cards for this filter only. */}
+                {subFilter === 'failed' && (
+                  <div className="space-y-2 mt-2">
+                    {loadingFailed && (
+                      <p className="text-white/40 text-sm">Loading from Stripe…</p>
+                    )}
+                    {failedError && (
+                      <p className="text-red-400 text-sm">{failedError}</p>
+                    )}
+                    {!loadingFailed && !failedError && failedCharges.length === 0 && (
+                      <p className="text-white/40 text-sm">No failed charges in Stripe in the last 90 days.</p>
+                    )}
+                    {!loadingFailed && failedCharges.length > 0 && (
+                      <div className="overflow-x-auto rounded-xl border border-white/8"
+                           style={{ background: 'rgba(255,255,255,0.03)' }}>
+                        <table className="w-full text-sm">
+                          <thead className="bg-white/[0.04]">
+                            <tr className="text-white/50 text-[11px] uppercase tracking-wide">
+                              <th className="text-left px-3 py-2 font-semibold">Amount</th>
+                              <th className="text-left px-3 py-2 font-semibold">Status</th>
+                              <th className="text-left px-3 py-2 font-semibold">Payment method</th>
+                              <th className="text-left px-3 py-2 font-semibold">Date</th>
+                              <th className="text-left px-3 py-2 font-semibold">Description</th>
+                              <th className="text-left px-3 py-2 font-semibold">Customer</th>
+                              <th className="text-left px-3 py-2 font-semibold">Reason</th>
+                              <th className="px-3 py-2" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {failedCharges.map(c => {
+                              const dt = c.created ? new Date(c.created * 1000) : null
+                              const canEmail = !!(c.customer_email && c.customer_email.trim())
+                              return (
+                                <tr key={c.id} className="border-t border-white/5 hover:bg-white/[0.03]">
+                                  <td className="px-3 py-2 font-mono text-white/90 whitespace-nowrap">
+                                    £{Number(c.amount).toFixed(2)} <span className="text-white/40 text-[10px]">{c.currency}</span>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-red-500/15 text-red-300 border-red-500/30">
+                                      {c.status}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-white/70 text-xs whitespace-nowrap">
+                                    {c.card_brand
+                                      ? <>{c.card_brand} •••• {c.card_last4}</>
+                                      : c.payment_type || '—'}
+                                  </td>
+                                  <td className="px-3 py-2 text-white/60 text-xs whitespace-nowrap">
+                                    {dt ? dt.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                                  </td>
+                                  <td className="px-3 py-2 text-white/70 text-xs max-w-[200px] truncate" title={c.description}>
+                                    {c.description || '—'}
+                                  </td>
+                                  <td className="px-3 py-2 text-white/80 text-xs">
+                                    {c.customer_name && <div className="font-semibold">{c.customer_name}</div>}
+                                    {c.customer_email ? (
+                                      <div className="text-white/50 text-[11px] font-mono truncate max-w-[180px]">{c.customer_email}</div>
+                                    ) : <span className="text-white/30 italic">no email</span>}
+                                  </td>
+                                  <td className="px-3 py-2 text-red-300/80 text-xs max-w-[220px] truncate" title={c.failure_message}>
+                                    {c.failure_message || c.failure_code || '—'}
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-right">
+                                    <button
+                                      onClick={() => sendChargeRetryEmail(c.id)}
+                                      disabled={retryingId === c.id || !canEmail}
+                                      title={!canEmail
+                                        ? 'No customer email on this charge — nowhere to send'
+                                        : c.retry_email_sent_at
+                                          ? `Already sent ${new Date(c.retry_email_sent_at).toLocaleString('en-GB')} — click to force resend`
+                                          : 'Send the donor a link to try the monthly gift again'}
+                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${
+                                        c.retry_email_sent_at
+                                          ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20'
+                                          : 'bg-amber-500/15 text-amber-200 border border-amber-500/30 hover:bg-amber-500/25'
+                                      }`}>
+                                      {retryingId === c.id ? '✉ Sending…'
+                                        : c.retry_email_sent_at ? '✉ Resend'
+                                        : '✉ Send retry'}
+                                    </button>
+                                    {retryNote[c.id] && (
+                                      <div className="text-[10px] text-emerald-400 mt-1">{retryNote[c.id]}</div>
+                                    )}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {subFilter !== 'failed' && filtered.length === 0 && (
                   <p className="text-white/40 text-sm mt-2">
                     {subFilter === 'live'
                       ? 'No live subscriptions. Switch to "Pending" or "All" to see donor-initiated rows that never paid.'
                       : 'No subscriptions in this view.'}
                   </p>
                 )}
-                {filtered.map(s => {
+                {subFilter !== 'failed' && filtered.map(s => {
                   const donorLabel = (s.donor_name && s.donor_name.trim())
                     || s.donor_email
                     || 'Anonymous'

@@ -2639,6 +2639,16 @@ async def _patch_schema() -> None:
         # first retry email is sent, then a timestamp. Operator can reset
         # via SQL if they want to resend.
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS retry_email_sent_at  TIMESTAMPTZ",
+        # Standalone audit table for retry emails sent against raw Stripe
+        # CHARGES (not rgs rows). Covers charges that failed during
+        # subscription creation and therefore have no rgs row to hang
+        # a retry claim on. charge_id is PK → hard dedup, one row per
+        # Stripe charge regardless of how many admins click the button.
+        """CREATE TABLE IF NOT EXISTS stripe_charge_retry_emails (
+            charge_id VARCHAR(200) PRIMARY KEY,
+            sent_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            to_email  VARCHAR(254) NOT NULL DEFAULT ''
+        )""",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancel_reason        VARCHAR(500) NOT NULL DEFAULT ''",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancelled_by         VARCHAR(255) NOT NULL DEFAULT ''",
         # Payment-tracking columns previously added only via the lazy webhook
