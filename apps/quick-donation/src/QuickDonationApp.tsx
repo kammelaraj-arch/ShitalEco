@@ -11,7 +11,16 @@ import { ProjectTiersScreen } from './pages/ProjectTiersScreen'
 import { ProjectContactScreen } from './pages/ProjectContactScreen'
 import { ProjectPledgeScreen } from './pages/ProjectPledgeScreen'
 import { ProjectGuptScreen } from './pages/ProjectGuptScreen'
+import { AppealScreen } from './pages/AppealScreen'
 import { unlockVoiceOnFirstGesture } from './lib/voice'
+
+// Wembley kiosk defaults to the Future Legacy Appeal basket flow
+// (shared tiles from @shital/appeal-ui, mirrors service portal). Other
+// branches keep whichever donationMode the admin set. Matching is
+// prefix-based so `wembley_main`, `wembley_two`, `wembley` all qualify
+// — admins can add/rename wembley kiosks without a code change.
+const isWembley = (branchId: string): boolean =>
+  branchId.toLowerCase().startsWith('wembley')
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api/v1'
 
@@ -297,12 +306,18 @@ export function QuickDonationApp() {
   // processing, confirmation, admin) flows through the same screens as
   // quick mode so the card reader + receipt pipeline doesn't fork.
   const donationMode = useDonationStore(s => s.donationMode)
+  const branchId = useDonationStore(s => s.branchId)
   const renderScreen = () => {
     switch (screen) {
       case 'donate':
+        // Wembley kiosks default to the Appeal basket flow. Classic and
+        // project modes stay the fallback for every other branch; the
+        // Appeal mode is strictly add-on, zero regression elsewhere.
+        if (isWembley(branchId)) return <AppealScreen key="appeal" />
         return donationMode === 'project'
           ? <ProjectStartScreen key="project-start" />
           : <DonationScreen    key="donate" />
+      case 'appeal':          return <AppealScreen         key="appeal" />
       case 'project-tiers':   return <ProjectTiersScreen   key="project-tiers" />
       case 'project-contact': return <ProjectContactScreen key="project-contact" />
       case 'project-pledge':  return <ProjectPledgeScreen  key="project-pledge" />
