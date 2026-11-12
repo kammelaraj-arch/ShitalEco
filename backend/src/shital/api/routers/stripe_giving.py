@@ -1751,11 +1751,21 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
                 # with default ''). Set it to "stripe:<charge_id>" so every
                 # import row is distinct on BOTH the legacy idempotency index
                 # and our new partial payment_ref index.
+                # source_status = charge["status"] verbatim (succeeded /
+                # pending / failed / refunded / canceled). Our internal
+                # `status` still reflects our state machine (COMPLETED here
+                # since we only insert succeeded charges); source_status is
+                # the audit trail answer to "what did the provider say".
+                # ON CONFLICT DO UPDATE (not DO NOTHING) backfills
+                # source_status on re-runs of the import against rows that
+                # already exist from the pre-column era — but only when
+                # the existing value is NULL, so admin edits aren't
+                # clobbered.
                 r = await db.execute(text("""
                     INSERT INTO donations
                         (id, branch_id, amount, currency, purpose,
                          payment_provider, payment_ref, idempotency_key, status,
-                         source, contact_id, gift_aid_eligible,
+                         source, source_status, contact_id, gift_aid_eligible,
                          created_at, updated_at)
                     VALUES
                         (gen_random_uuid(),
@@ -1768,6 +1778,7 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
                          :idem,
                          'COMPLETED',
                          :source,
+                         :src_status,
                          CAST(:contact AS uuid),
                          :ga,
                          :created,
@@ -1776,15 +1787,19 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
                         WHERE payment_provider = 'stripe'
                           AND payment_ref IS NOT NULL
                           AND payment_ref <> ''
-                        DO NOTHING
-                    RETURNING id
+                        DO UPDATE SET
+                            source_status = COALESCE(donations.source_status, EXCLUDED.source_status),
+                            updated_at    = NOW()
+                        WHERE donations.source_status IS NULL
+                    RETURNING id, (xmax = 0) AS inserted
                 """), {
                     "branch":   (rgs_row["branch_id"] if rgs_row else "main"),
                     "amount":   amount,
                     "currency": currency,
                     "purpose":  ("Monthly Giving" if rgs_row else "Stripe Payment"),
-                    "ref":      charge_id,
-                    "idem":     f"stripe:{charge_id}"[:200],
+                    "ref":        charge_id,
+                    "idem":       f"stripe:{charge_id}"[:200],
+                    "src_status": str(ch.get("status") or "")[:50] or None,
                     # Every row from the Stripe import carries source='stripe'
                     # so the Portal filter and audit queries can tell at a
                     # glance "where did this money come in from". The
@@ -1797,7 +1812,14 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
                     "ga":       bool(rgs_row and rgs_row["ga"]),
                     "created":  created_at,
                 })
-                if r.first():
+                # ON CONFLICT DO UPDATE can return a row even when it
+                # only backfilled source_status on an existing donation.
+                # `xmax = 0` is the canonical postgres trick for "was
+                # this a fresh INSERT vs an UPDATE of an existing row":
+                # xmax is 0 only when the row was never visible to
+                # another transaction, i.e. newly inserted.
+                row = r.mappings().first()
+                if row and bool(row.get("inserted")):
                     out["imported"] += 1
                 else:
                     out["skipped_duplicates"] += 1

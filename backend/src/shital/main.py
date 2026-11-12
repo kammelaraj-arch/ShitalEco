@@ -2664,6 +2664,15 @@ async def _patch_schema() -> None:
         # can't double-send. NULL means nothing's been sent yet; a timestamp
         # means a send was claimed by whichever path ran first.
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS receipt_sent_at TIMESTAMPTZ DEFAULT NULL",
+        # Source status — the status verbatim from the payment provider.
+        # Operator asked "why our status is different from Stripe": our
+        # internal `status` is our state machine (COMPLETED/PENDING/
+        # FAILED/REFUNDED/VOIDED), the provider's is its own vocabulary
+        # (Stripe: succeeded/pending/failed/refunded, PayPal: COMPLETED/
+        # PENDING/DENIED, etc). Carrying both lets the admin page show
+        # exactly what the provider said next to our interpretation, so
+        # a mismatch is obvious and auditable.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source_status VARCHAR(50) DEFAULT NULL",
         # Partial unique index to guarantee the Stripe import never
         # double-inserts a donation for the same charge, even under
         # concurrent runs (manual button + daily background task +

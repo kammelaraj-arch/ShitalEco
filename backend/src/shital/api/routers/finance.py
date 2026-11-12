@@ -243,6 +243,7 @@ async def list_donations(
                 d.gift_aid_eligible,
                 d.gift_aid_amount::numeric,
                 d.status,
+                d.source_status,
                 d.reference,
                 d.contact_id::text,
                 c.full_name      AS contact_name,
@@ -303,6 +304,7 @@ async def list_donations(
                      THEN ROUND(rgs.amount * 0.25, 2)
                      ELSE 0 END::numeric                  AS gift_aid_amount,
                 rgs.status,
+                NULL::varchar                             AS source_status,
                 COALESCE(
                     NULLIF(rgs.stripe_subscription_id, ''),
                     rgs.paypal_subscription_id
