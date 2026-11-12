@@ -31,6 +31,9 @@ interface Donation {
   gift_aid_eligible: boolean
   gift_aid_amount: number | string
   status: string
+  // Provider's own status verbatim (Stripe: succeeded/pending/failed,
+  // PayPal: COMPLETED/PENDING/DENIED). Null for manual rows.
+  source_status?: string | null
   reference: string
   contact_id: string | null
   contact_name: string | null
@@ -936,11 +939,21 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                     )}
                     {isVisible('status') && (
                       <td className="px-4 py-3">
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
-                          d.status === 'COMPLETED' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-                          d.status === 'PENDING'   ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
-                                                     'bg-red-500/20 text-red-400 border-red-500/30'
-                        }`}>{d.status}</span>
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                            d.status === 'COMPLETED' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                            d.status === 'PENDING'   ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                                                       'bg-red-500/20 text-red-400 border-red-500/30'
+                          }`}>{d.status}</span>
+                          {d.source_status && (
+                            <span
+                              title={`Source status (${d.payment_provider || 'provider'})`}
+                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-sky-500/10 text-sky-300/90 border border-sky-500/20 font-mono lowercase"
+                            >
+                              src: {d.source_status}
+                            </span>
+                          )}
+                        </div>
                       </td>
                     )}
                     {canEdit && (
