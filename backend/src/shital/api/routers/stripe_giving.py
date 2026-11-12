@@ -1587,14 +1587,68 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
     out["contacts_created"] = 0
     out["contacts_linked"] = 0
     out["addresses_created"] = 0
+    out["failures_captured"] = 0
 
     for raw in charge_iter:
         ch = _d(raw)
         out["scanned"] += 1
-        if ch.get("status") != "succeeded":
-            continue
+        ch_status = ch.get("status") or ""
         charge_id = str(ch.get("id") or "")[:200]
         if not charge_id:
+            continue
+        # Failed charges: capture the reason on the matching rgs row so the
+        # admin UI can show it + optionally email the donor to retry. We
+        # only do the invoice lookup here (not the full donation INSERT
+        # path) because there's no money to record.
+        if ch_status == "failed":
+            try:
+                invoice_id = str(ch.get("invoice") or "")[:200]
+                if not invoice_id:
+                    continue
+                inv = _d(stripe.Invoice.retrieve(invoice_id))
+                sub_id_f = str(inv.get("subscription") or "")[:255]
+                if not sub_id_f:
+                    continue
+                # Stripe records failure context in several places —
+                # failure_message is human-readable, outcome.seller_message
+                # adds decline reason, failure_code is machine-readable.
+                outcome = (ch.get("outcome") or {})
+                reason_parts = [
+                    str(ch.get("failure_message") or outcome.get("seller_message") or "")[:300],
+                    str(ch.get("failure_code") or outcome.get("reason") or "")[:60],
+                ]
+                reason = " · ".join(p for p in reason_parts if p)[:500]
+                failed_at = datetime.fromtimestamp(int(ch.get("created") or 0)) \
+                    if ch.get("created") else datetime.utcnow()
+                async with SessionLocal() as db:
+                    r = await db.execute(text("""
+                        UPDATE recurring_giving_subscriptions
+                        SET last_failure_at      = GREATEST(COALESCE(last_failure_at, :fat), :fat),
+                            last_failure_reason  = CASE WHEN :fat >= COALESCE(last_failure_at, :fat)
+                                                        THEN :reason ELSE last_failure_reason END,
+                            last_failure_code    = CASE WHEN :fat >= COALESCE(last_failure_at, :fat)
+                                                        THEN :code ELSE last_failure_code END,
+                            updated_at           = NOW()
+                        WHERE stripe_subscription_id = :sub
+                        RETURNING id
+                    """), {
+                        "sub":    sub_id_f,
+                        "reason": reason or "payment failed",
+                        "code":   str(ch.get("failure_code") or "")[:60],
+                        "fat":    failed_at,
+                    })
+                    if r.first():
+                        out["failures_captured"] += 1
+                    await db.commit()
+            except Exception as exc:  # noqa: BLE001
+                if len(out["error_samples"]) < 5:
+                    out["error_samples"].append({
+                        "charge_id": charge_id,
+                        "stage": "failure.capture",
+                        "error": f"{exc.__class__.__name__}: {str(exc)[:200]}",
+                    })
+            continue
+        if ch_status != "succeeded":
             continue
         amount = (ch.get("amount") or 0) / 100.0
         currency = str(ch.get("currency") or "gbp").upper()[:10]
@@ -1860,3 +1914,90 @@ async def admin_stripe_import(space: CurrentSpace, days: int = 30) -> dict[str, 
     any matching monthly-giving row. This is the proper one-direction sync
     we always should have had: Stripe → us. Admin-only."""
     return await _stripe_import_once(days=days)
+
+
+# ── Retry email for failed monthly-giving subscriptions ────────────────────────
+#
+# Operator asked: "include failed ones and re-capture the reason — we can send
+# an email to the failed contact for them to try again." The `_stripe_import_once`
+# path above captures the reason on the rgs row; this endpoint sends the
+# donor a "please try again" email through the same admin-editable template
+# pipeline that powers `recurring_giving_confirmation`.
+#
+# Idempotent via `retry_email_sent_at` — a second click is a no-op until the
+# column is manually cleared.
+
+
+@router.post("/admin/giving/stripe/send-retry-email/{rgs_id}")
+async def send_retry_email(rgs_id: str, space: CurrentSpace, force: bool = False) -> dict[str, Any]:  # noqa: ARG001
+    """Send the donor a retry link so they can start a fresh Stripe Checkout.
+    Idempotent on `retry_email_sent_at`; pass `?force=1` to resend."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT id::text AS id,
+                   donor_email, donor_name, donor_first_name,
+                   amount, frequency,
+                   last_failure_reason, last_failure_code,
+                   retry_email_sent_at
+            FROM   recurring_giving_subscriptions
+            WHERE  id = CAST(:id AS uuid)
+            LIMIT  1
+        """), {"id": rgs_id})).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    if not (row["donor_email"] or "").strip():
+        raise HTTPException(status_code=400, detail="This subscription has no donor email on file — no one to send to.")
+    if row["retry_email_sent_at"] and not force:
+        return {
+            "sent": False,
+            "reason": "already_sent",
+            "retry_email_sent_at": row["retry_email_sent_at"].isoformat() if row["retry_email_sent_at"] else None,
+        }
+
+    # Mark as sent BEFORE firing so a slow SMTP can't cause a duplicate on
+    # click-spam (webhook or admin double-click). If SMTP fails we clear it
+    # back below so the retry is allowed.
+    now = datetime.utcnow()
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            UPDATE recurring_giving_subscriptions
+            SET retry_email_sent_at = :now, updated_at = :now
+            WHERE id = CAST(:id AS uuid)
+        """), {"now": now, "id": rgs_id})
+        await db.commit()
+
+    try:
+        from shital.api.routers.email_templates import send_template
+        from shital.core.fabrics.config import settings
+        result = await send_template(
+            "recurring_giving_payment_failed",
+            row["donor_email"],
+            {
+                "donor_first_name": row["donor_first_name"] or row["donor_name"] or "Friend",
+                "amount":           f"{float(row['amount'] or 0):.2f}",
+                "frequency":        (row["frequency"] or "MONTH").lower(),
+                "failure_reason":   row["last_failure_reason"] or "your card was declined",
+                "retry_url":        "https://service.shital.org.uk/monthly-giving",
+                "logo_url":         "https://shirdisai.org.uk/Cnt/img/shital-logo-new.png",
+                "charity_number":   settings.CHARITY_NUMBER or "1138530",
+                "support_email":    "info@shirdisai.org.uk",
+            },
+            related_type="recurring_giving_subscription",
+            related_id=rgs_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Unwind the claim so the operator can retry.
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                UPDATE recurring_giving_subscriptions
+                SET retry_email_sent_at = NULL, updated_at = NOW()
+                WHERE id = CAST(:id AS uuid)
+            """), {"id": rgs_id})
+            await db.commit()
+        raise HTTPException(status_code=502, detail=f"Email send failed: {exc}") from exc
+
+    return {"sent": True, "to": row["donor_email"], "result": result}

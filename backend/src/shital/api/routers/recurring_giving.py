@@ -1428,6 +1428,11 @@ async def admin_list_subscriptions(space: CurrentSpace) -> dict[str, Any]:
                    s.amount, s.frequency, s.status,
                    s.donor_name, s.donor_email, s.branch_id, s.approved_at, s.created_at,
                    s.last_payment_at, s.total_payments, s.next_billing_date,
+                   -- Failed-payment surface for the admin "Failed" filter
+                   -- + retry-email button. Populated by the Stripe import
+                   -- when it sees a failed charge (or by webhook).
+                   s.last_failure_at, s.last_failure_reason, s.last_failure_code,
+                   s.failed_payment_count, s.retry_email_sent_at,
                    t.label AS tier_label
             FROM   recurring_giving_subscriptions s
             LEFT JOIN recurring_giving_tiers t ON t.id = s.tier_id

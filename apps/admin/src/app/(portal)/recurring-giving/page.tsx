@@ -15,6 +15,11 @@ interface Sub {
   status: string; donor_name: string; donor_email: string; branch_id: string
   approved_at: string; tier_label: string; created_at: string
   payment_provider?: string; stripe_subscription_id?: string
+  // Set by the Stripe import when it processes a failed charge for this
+  // subscription — surfaces on the Failed filter + drives the retry email.
+  last_failure_reason?: string | null; last_failure_at?: string | null
+  last_failure_code?: string | null; failed_payment_count?: number
+  retry_email_sent_at?: string | null
 }
 
 const EMPTY: Omit<Tier, 'id' | 'paypal_plan_id' | 'active_subscribers'> = {
@@ -90,7 +95,9 @@ export default function RecurringGivingPage() {
   // REQUEST_INITIATED / ABANDONED / EXPIRED rows that the diagnostic
   // already shows a count of up top. Matches how Stripe Dashboard →
   // Subscriptions opens: active first, status filter on the side.
-  const [subFilter, setSubFilter] = useState<'live' | 'pending' | 'ended' | 'all'>('live')
+  const [subFilter, setSubFilter] = useState<'live' | 'pending' | 'failed' | 'ended' | 'all'>('live')
+  const [retryingId, setRetryingId] = useState<string | null>(null)
+  const [retryNote, setRetryNote]   = useState<Record<string, string>>({})
   const [stats, setStats]     = useState<GivingStats | null>(null)
 
   async function syncPayPal() {
@@ -161,6 +168,31 @@ export default function RecurringGivingPage() {
     } catch (e) {
       setSyncNote(e instanceof Error ? e.message : 'Import failed')
     } finally { setSyncing(false) }
+  }
+
+  // Send the donor a "please try again" email. Idempotent per-row —
+  // server rejects a second click until retry_email_sent_at is cleared.
+  async function sendRetryEmail(subId: string) {
+    setRetryingId(subId)
+    setRetryNote(p => ({ ...p, [subId]: '' }))
+    try {
+      const r = await fetch(`${API}/admin/giving/stripe/send-retry-email/${subId}`, {
+        method: 'POST', headers: authHeaders(),
+      })
+      const d = await r.json()
+      if (!r.ok) {
+        setRetryNote(p => ({ ...p, [subId]: `✗ ${d?.detail || `HTTP ${r.status}`}` }))
+        return
+      }
+      if (d.sent === false && d.reason === 'already_sent') {
+        setRetryNote(p => ({ ...p, [subId]: `Already sent · ${new Date(d.retry_email_sent_at).toLocaleString('en-GB')}` }))
+      } else {
+        setRetryNote(p => ({ ...p, [subId]: `✓ Sent to ${d.to}` }))
+        await loadSubs()
+      }
+    } catch (e) {
+      setRetryNote(p => ({ ...p, [subId]: `✗ ${e instanceof Error ? e.message : 'send failed'}` }))
+    } finally { setRetryingId(null) }
   }
 
   // Nuclear-option repair: hits /admin/giving/stripe-force-link which
@@ -673,33 +705,43 @@ export default function RecurringGivingPage() {
           {/* Status filter — defaults to Live so the page opens on just the
               real billing subscriptions, same as Stripe Dashboard. */}
           {(() => {
-            const LIVE_STATES    = new Set(['ACTIVE', 'PAST_DUE', 'CANCELLING'])
+            const LIVE_STATES    = new Set(['ACTIVE', 'CANCELLING'])
             const PENDING_STATES = new Set(['REQUEST_INITIATED', 'AWAITING_PAYMENT', 'PENDING_APPROVAL', 'PENDING_CONTACT'])
             const ENDED_STATES   = new Set(['CANCELLED', 'EXPIRED', 'ABANDONED', 'SUSPENDED'])
+            // Failed = Stripe-declared PAST_DUE OR the import captured a
+            // payment failure OR our counter is above zero (covers
+            // historical rows that already had PayPal/Stripe failures
+            // before the captured-reason column existed).
+            const isFailed = (s: Sub) =>
+              s.status === 'PAST_DUE' ||
+              !!(s.last_failure_reason && s.last_failure_reason.trim()) ||
+              (s.failed_payment_count || 0) > 0
             const counts = {
               live:    subs.filter(s => LIVE_STATES.has(s.status)).length,
               pending: subs.filter(s => PENDING_STATES.has(s.status)).length,
-              ended:   subs.filter(s => ENDED_STATES.has(s.status)).length,
+              failed:  subs.filter(isFailed).length,
+              ended:   subs.filter(s => ENDED_STATES.has(s.status) && !isFailed(s)).length,
               all:     subs.length,
             }
-            const pick = (set: Set<string> | null) => set ? subs.filter(s => set.has(s.status)) : subs
-            const filtered = subFilter === 'live'    ? pick(LIVE_STATES)
-                           : subFilter === 'pending' ? pick(PENDING_STATES)
-                           : subFilter === 'ended'   ? pick(ENDED_STATES)
-                           :                            pick(null)
+            const filtered = subFilter === 'live'    ? subs.filter(s => LIVE_STATES.has(s.status))
+                           : subFilter === 'pending' ? subs.filter(s => PENDING_STATES.has(s.status))
+                           : subFilter === 'failed'  ? subs.filter(isFailed)
+                           : subFilter === 'ended'   ? subs.filter(s => ENDED_STATES.has(s.status) && !isFailed(s))
+                           :                           subs
             return (
               <>
-                <div className="flex items-center gap-2 pt-1">
-                  {(['live', 'pending', 'ended', 'all'] as const).map(f => (
+                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                  {(['live', 'pending', 'failed', 'ended', 'all'] as const).map(f => (
                     <button key={f} onClick={() => setSubFilter(f)}
                       className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
                         subFilter === f
                           ? 'bg-saffron-400/20 text-saffron-300 border border-saffron-400/40'
                           : 'bg-white/5 text-white/50 border border-white/10 hover:bg-white/10 hover:text-white/80'
                       }`}>
-                      {f === 'live'    ? `● Live (${counts.live})`    :
+                      {f === 'live'    ? `● Live (${counts.live})`        :
                        f === 'pending' ? `◐ Pending (${counts.pending})` :
-                       f === 'ended'   ? `○ Ended (${counts.ended})`  :
+                       f === 'failed'  ? `✗ Failed (${counts.failed})`    :
+                       f === 'ended'   ? `○ Ended (${counts.ended})`      :
                                          `All (${counts.all})`}
                     </button>
                   ))}
@@ -722,6 +764,10 @@ export default function RecurringGivingPage() {
                   const createdLabel = s.created_at
                     ? new Date(s.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
                     : '—'
+                  const rowFailed = s.status === 'PAST_DUE'
+                    || !!(s.last_failure_reason && s.last_failure_reason.trim())
+                    || (s.failed_payment_count || 0) > 0
+                  const canEmail = !!(s.donor_email && s.donor_email.trim())
                   return (
                     <div key={s.id} className="rounded-xl p-4 flex items-center gap-4"
                       style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -742,8 +788,17 @@ export default function RecurringGivingPage() {
                         <p className="text-xs text-white/40 mt-0.5 font-mono">
                           {shortRef} · {s.branch_id}
                         </p>
+                        {rowFailed && (s.last_failure_reason || s.failed_payment_count) && (
+                          <p className="text-xs text-red-300/80 mt-1" title={s.last_failure_at ? `at ${new Date(s.last_failure_at).toLocaleString('en-GB')}` : ''}>
+                            ✗ {s.last_failure_reason || 'Payment failed'}
+                            {(s.failed_payment_count || 0) > 1 && <span className="text-red-300/50"> · {s.failed_payment_count} attempts</span>}
+                          </p>
+                        )}
                         {refreshNote[s.id] && (
                           <p className="text-xs text-saffron-400 mt-1">↻ {refreshNote[s.id]}</p>
+                        )}
+                        {retryNote[s.id] && (
+                          <p className="text-xs text-emerald-400 mt-1">{retryNote[s.id]}</p>
                         )}
                       </div>
                       <div className="text-right text-xs text-white/40 flex-shrink-0 flex flex-col items-end gap-2">
@@ -751,6 +806,25 @@ export default function RecurringGivingPage() {
                           <p className="text-white/70 font-semibold">{createdLabel}</p>
                           <p className="text-white/30 text-[10px]">created</p>
                         </div>
+                        {rowFailed && (
+                          <button
+                            onClick={() => sendRetryEmail(s.id)}
+                            disabled={retryingId === s.id || !canEmail}
+                            title={!canEmail
+                              ? 'No donor email on file — nowhere to send'
+                              : s.retry_email_sent_at
+                                ? `Already sent ${new Date(s.retry_email_sent_at).toLocaleString('en-GB')} — click to force resend`
+                                : 'Email the donor a link to start monthly giving again with a fresh card. Carries over Gift Aid.'}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${
+                              s.retry_email_sent_at
+                                ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20'
+                                : 'bg-amber-500/15 text-amber-200 border border-amber-500/30 hover:bg-amber-500/25'
+                            }`}>
+                            {retryingId === s.id ? '✉ Sending…'
+                              : s.retry_email_sent_at ? '✉ Resend retry email'
+                              : '✉ Send retry email'}
+                          </button>
+                        )}
                         {s.payment_provider !== 'stripe' && (
                           <button
                             onClick={() => refreshFromPayPal(s.id)}
