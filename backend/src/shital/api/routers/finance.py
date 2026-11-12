@@ -576,8 +576,12 @@ async def update_donation(
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
-        raise HTTPException(status_code=403, detail="ADMIN required")
+    # Donation records are financial + auditable. Tightened to SUPER_ADMIN
+    # only (was SUPER_ADMIN + ADMIN) at operator request: edits must come
+    # from the top of the chain of command; ADMIN can still CREATE a new
+    # row to log a manual cash donation but can't rewrite history.
+    if ctx.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="SUPER_ADMIN required")
     sets = []
     params: dict[str, Any] = {"did": donation_id, "now": datetime.utcnow()}
     if body.amount is not None:
@@ -621,8 +625,11 @@ async def delete_donation(donation_id: str, ctx: CurrentSpace) -> None:
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
-        raise HTTPException(status_code=403, detail="ADMIN required")
+    # SUPER_ADMIN only (was SUPER_ADMIN + ADMIN) — defence-in-depth so
+    # the API matches the client, which also hides Edit from anyone
+    # below SUPER_ADMIN.
+    if ctx.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="SUPER_ADMIN required")
     async with SessionLocal() as db:
         result = await db.execute(text(
             "UPDATE donations SET deleted_at = :now WHERE id = :did AND deleted_at IS NULL"
