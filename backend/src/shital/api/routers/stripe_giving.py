@@ -1158,9 +1158,24 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
                 summary["linked_orphans"] += 1
             summary["activated"] += 1
         except Exception as exc:  # noqa: BLE001
+            # Surface the real error type + message to the admin UI
+            # so a silent swallow never masks a Pass C failure again
+            # (last two deploys hit expand-rejected and VARCHAR(255)
+            # overflow — both invisible without this).
+            err_type = exc.__class__.__name__
+            err_msg = str(exc)[:200]
             logger.warning("stripe_passC_link_failed",
-                           session_id=str(sess.get("id")), error=str(exc))
+                           session_id=str(sess.get("id")),
+                           rgs=rgs, err_type=err_type, error=err_msg)
             summary["errors"] += 1
+            summary.setdefault("error_samples", [])
+            if len(summary["error_samples"]) < 5:
+                summary["error_samples"].append({
+                    "session_id": str(sess.get("id") or ""),
+                    "rgs_id": rgs,
+                    "type": err_type,
+                    "message": err_msg,
+                })
 
     # Anything still unmatched and old → reap so it stops showing as pending.
     # Only PENDING_APPROVAL rows get reaped — EXPIRED rows that stayed in
@@ -1426,4 +1441,93 @@ async def stripe_diagnostic(space: CurrentSpace, days: int = 30) -> dict[str, An
         )
     else:
         out["verdict"] = "All paid Stripe sessions are linked in the DB. Monthly giving via Stripe is working."
+    return out
+
+
+@router.post("/admin/giving/stripe-force-link")
+async def stripe_force_link(space: CurrentSpace, days: int = 30) -> dict[str, Any]:  # noqa: ARG001
+    """Nuclear-option repair: for every paid Checkout Session in the window,
+    look up its `client_reference_id` (our rgs_id) and run a minimal targeted
+    UPDATE on the matching recurring_giving_subscriptions row — ACTIVE +
+    stripe_subscription_id + stripe_customer_id, nothing else. Bypasses the
+    whole `_handle_checkout_completed` → `_link_subscription_row` pipeline
+    so any bug lurking there (Stripe SDK dict-interface, VARCHAR overflow,
+    etc.) cannot block the repair.
+
+    Returns per-row outcome + a sample of raw Stripe payload so the operator
+    can diagnose if a row still refuses to update.
+    """
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    stripe = await _stripe()
+    if not stripe.api_key:
+        return {"skipped": "stripe_not_configured"}
+
+    since_ts = int((datetime.utcnow() - timedelta(days=days)).timestamp())
+    out: dict[str, Any] = {"days_window": days, "attempted": 0,
+                          "updated": 0, "skipped": 0, "errors": 0,
+                          "rows": []}
+    try:
+        sess_iter = stripe.checkout.Session.list(
+            created={"gte": since_ts}, limit=100,
+        ).auto_paging_iter()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"stripe_list_failed: {exc}"}
+
+    for raw_sess in sess_iter:
+        sess = _d(raw_sess)
+        status = sess.get("status") or ""
+        pay    = sess.get("payment_status") or ""
+        if status != "complete" and pay not in ("paid", "no_payment_required"):
+            continue
+        out["attempted"] += 1
+        rgs_id = (sess.get("client_reference_id") or
+                  (sess.get("metadata") or {}).get("rgs_id") or "")
+        sub_id = sess.get("subscription") or ""
+        # Be defensive: if a future change ever re-expands subscription,
+        # pull the id out of the nested dict instead of stringifying it.
+        if isinstance(sub_id, dict):
+            sub_id = sub_id.get("id") or ""
+        sub_id = str(sub_id)[:255]
+        cust_id = sess.get("customer") or ""
+        if isinstance(cust_id, dict):
+            cust_id = cust_id.get("id") or ""
+        cust_id = str(cust_id)[:255] if cust_id else None
+        cko_id = str(sess.get("id") or "")[:255]
+        row_info: dict[str, Any] = {
+            "session_id": cko_id, "rgs_id": str(rgs_id), "sub_id": sub_id,
+        }
+        if not rgs_id or not sub_id:
+            row_info["result"] = "missing_rgs_or_sub"
+            out["skipped"] += 1
+            out["rows"].append(row_info)
+            continue
+        try:
+            async with SessionLocal() as db:
+                r = await db.execute(text("""
+                    UPDATE recurring_giving_subscriptions
+                    SET stripe_subscription_id = :sub,
+                        stripe_customer_id = :cust,
+                        stripe_checkout_id = :cko,
+                        status = 'ACTIVE',
+                        approved_at = COALESCE(approved_at, NOW()),
+                        updated_at = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                    RETURNING id::text AS id
+                """), {"sub": sub_id, "cust": cust_id, "cko": cko_id, "id": str(rgs_id)})
+                hit = r.first()
+                await db.commit()
+            if hit:
+                row_info["result"] = "updated"
+                out["updated"] += 1
+            else:
+                row_info["result"] = "no_matching_row"
+                out["skipped"] += 1
+        except Exception as exc:  # noqa: BLE001
+            row_info["result"] = f"error: {exc.__class__.__name__}: {str(exc)[:200]}"
+            out["errors"] += 1
+        out["rows"].append(row_info)
+
     return out

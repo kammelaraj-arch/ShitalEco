@@ -107,12 +107,39 @@ export default function RecurringGivingPage() {
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
       const d = await r.json()
       const x = d.result || {}
+      const samples = (x.error_samples as Array<{ type?: string; message?: string }> | undefined) || []
+      const errDetail = x.errors && samples.length
+        ? ` · first error: ${samples[0]?.type || '?'} — ${samples[0]?.message || '?'}`
+        : ''
       setSyncNote(x.skipped
         ? `Skipped: ${x.skipped}`
-        : `Stripe · scanned ${x.scanned ?? 0} · ${x.status_updated ?? 0} status updates · ${x.activated ?? 0} activated · ${x.linked_orphans ?? 0} linked · ${x.payments_recorded ?? 0} payments recorded · ${(x.stale_reaped ?? 0) + (x.orphans_expired ?? 0)} stale expired${x.errors ? ` · ${x.errors} errors` : ''}`)
+        : `Stripe · scanned ${x.scanned ?? 0} · ${x.status_updated ?? 0} status updates · ${x.activated ?? 0} activated · ${x.linked_orphans ?? 0} linked · ${x.payments_recorded ?? 0} payments recorded · ${(x.stale_reaped ?? 0) + (x.orphans_expired ?? 0)} stale expired${x.errors ? ` · ${x.errors} errors${errDetail}` : ''}`)
       await loadSubs()
     } catch (e) {
       setSyncNote(e instanceof Error ? e.message : 'Sync failed')
+    } finally { setSyncing(false) }
+  }
+
+  // Nuclear-option repair: hits /admin/giving/stripe-force-link which
+  // bypasses _handle_checkout_completed entirely and just runs a minimal
+  // targeted UPDATE per paid Stripe session → matching rgs row. Use when
+  // "Sync from Stripe" reports errors and you need to see the per-row
+  // outcome spelled out instead of a silent aggregate.
+  async function stripeForceLink() {
+    setSyncing(true); setSyncNote('')
+    try {
+      const r = await fetch(`${API}/admin/giving/stripe-force-link?days=30`, { method: 'POST', headers: authHeaders() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      const d = await r.json()
+      const rows = (d.rows as Array<{ result?: string; rgs_id?: string }> | undefined) || []
+      const firstFail = rows.find(row => row.result && !row.result.startsWith('updated'))
+      const tail = firstFail ? ` · first non-update: ${firstFail.rgs_id || '?'} → ${firstFail.result}` : ''
+      setSyncNote(
+        `Force-link · attempted ${d.attempted ?? 0} · ${d.updated ?? 0} updated · ${d.skipped ?? 0} skipped · ${d.errors ?? 0} errors${tail}`
+      )
+      await loadSubs()
+    } catch (e) {
+      setSyncNote(e instanceof Error ? e.message : 'Force-link failed')
     } finally { setSyncing(false) }
   }
 
@@ -565,6 +592,14 @@ export default function RecurringGivingPage() {
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#0ea5e9,#0369a1)' }}>
                 {syncing ? 'Checking…' : '🔍 Stripe diagnostic'}
+              </button>
+              {/* Nuclear-option repair. Bypasses _handle_checkout_completed
+                  and runs a minimal targeted UPDATE per paid Stripe session. */}
+              <button onClick={stripeForceLink} disabled={syncing}
+                title="For every paid Stripe Checkout session in the last 30 days, forcibly links its rgs row ACTIVE with a minimal UPDATE. Use when Sync reports errors — reports per-row outcome in the response."
+                className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#ef4444,#b91c1c)' }}>
+                {syncing ? 'Forcing…' : '🔧 Force-link stuck Stripe'}
               </button>
               {/* Time-only reap of stale PENDING Stripe rows. Clears the
                   historical pile that Pass B's windowed reap missed. */}
