@@ -1312,6 +1312,20 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS ix_tier_profiles_branch_id ON tier_profiles(branch_id)",
         "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS tier_profile_id UUID",
+        # Monthly-giving lifecycle rename: Stripe rows that were written
+        # as PENDING_APPROVAL at /create-checkout time (donor clicked
+        # "Pay by Card") are really just "request initiated" — no money
+        # has moved yet. REQUEST_INITIATED makes that obvious and stops
+        # them appearing in the Donations admin list as phantom pending
+        # money. Only Stripe rows that are still unlinked (no
+        # stripe_subscription_id) get renamed; genuine PENDING_APPROVAL
+        # rows carrying a PayPal subscription id stay as they are.
+        """UPDATE recurring_giving_subscriptions
+              SET status     = 'REQUEST_INITIATED',
+                  updated_at = NOW()
+            WHERE payment_provider = 'stripe'
+              AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')
+              AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'""",
         # Non-payment pledges from the Project Donation flow. Volunteer +
         # Professional Services + Materials + Business Sponsorship tiles
         # all record what the donor is offering (a list of specific items /

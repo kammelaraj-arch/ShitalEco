@@ -23,8 +23,34 @@ const EMPTY: Omit<Tier, 'id' | 'paypal_plan_id' | 'active_subscribers'> = {
 }
 
 const STATUS_COLOURS: Record<string, string> = {
-  ACTIVE: '#4ade80', PENDING_APPROVAL: '#fbbf24',
-  CANCELLED: '#f87171', SUSPENDED: '#fb923c', EXPIRED: '#94a3b8',
+  // Lifecycle v2
+  REQUEST_INITIATED:  '#94a3b8',   // slate   — donor clicked, nothing charged
+  AWAITING_PAYMENT:   '#fbbf24',   // amber   — at Stripe hosted checkout
+  ACTIVE:             '#4ade80',   // green   — first payment settled, live
+  PAST_DUE:           '#fb923c',   // orange  — payment failed, grace
+  CANCELLING:         '#fdba74',   // orange  — donor cancelled, serving out period
+  CANCELLED:          '#f87171',   // red
+  EXPIRED:            '#94a3b8',   // slate
+  ABANDONED:          '#64748b',   // dark slate — donor never finished Checkout
+  // legacy
+  PENDING_APPROVAL:   '#fbbf24',
+  SUSPENDED:          '#fb923c',
+}
+
+// Short, human-readable labels for the pills. Kept here so backend
+// status codes stay ALLCAPS + stable while the UI explains them.
+const STATUS_LABELS: Record<string, string> = {
+  REQUEST_INITIATED:  'Request initiated',
+  AWAITING_PAYMENT:   'Awaiting payment',
+  ACTIVE:             'Active',
+  PAST_DUE:           'Past due',
+  CANCELLING:         'Cancelling',
+  CANCELLED:          'Cancelled',
+  EXPIRED:            'Expired',
+  ABANDONED:          'Abandoned',
+  PENDING_APPROVAL:   'Pending approval',
+  SUSPENDED:          'Suspended',
+  PENDING_CONTACT:    'Pending contact',
 }
 
 interface Charge {
@@ -558,7 +584,11 @@ export default function RecurringGivingPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-bold text-white">£{Number(s.amount).toFixed(0)}/{s.frequency.toLowerCase()}</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: `${STATUS_COLOURS[s.status] || '#94a3b8'}20`, color: STATUS_COLOURS[s.status] || '#94a3b8' }}>{s.status}</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                        title={s.status}
+                        style={{ background: `${STATUS_COLOURS[s.status] || '#94a3b8'}20`, color: STATUS_COLOURS[s.status] || '#94a3b8' }}>
+                    {STATUS_LABELS[s.status] || s.status}
+                  </span>
                   {(s.payment_provider === 'stripe')
                     ? <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#635bff20', color: '#a5a1ff' }}>💳 Stripe</span>
                     : <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#0070ba20', color: '#4aa3e0' }}>PayPal</span>}
