@@ -498,7 +498,11 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
           <p className="text-white/40 mt-1">Track and manage all temple donations</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={openNew} className="btn-primary">+ New Donation</button>
+          {/* New Donation is a write to the auditable finance record —
+              SUPER_ADMIN only, matching Edit / Tag / Delete. */}
+          {canEdit && (
+            <button onClick={openNew} className="btn-primary">+ New Donation</button>
+          )}
           <button
             onClick={downloadCsv}
             disabled={csvDownloading}

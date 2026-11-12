@@ -53,6 +53,13 @@ async def post_journal(body: PostJournalInput, ctx: CurrentSpace):
 
 @router.post("/donations")
 async def create_donation(body: DonationInput, ctx: CurrentSpace):
+    # Manual cash-donation entry is a write to the auditable finance
+    # record — restricted to SUPER_ADMIN at operator request. Previously
+    # ADMIN could create a manual row too via the underlying capability
+    # permission; tightened to match PUT + DELETE which are also
+    # SUPER_ADMIN only after #368.
+    if ctx.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="SUPER_ADMIN required")
     return await record_donation(ctx, body)
 
 
@@ -409,8 +416,11 @@ async def import_donations_csv(
     from sqlalchemy import text
 
     from shital.core.fabrics.database import SessionLocal
-    if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
-        raise HTTPException(status_code=403, detail="ADMIN required")
+    # Bulk donation import — SUPER_ADMIN only (writes many auditable
+    # finance records at once; strictest of the lot). Previously ADMIN
+    # was also allowed.
+    if ctx.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="SUPER_ADMIN required")
 
     raw = await file.read()
     try:
