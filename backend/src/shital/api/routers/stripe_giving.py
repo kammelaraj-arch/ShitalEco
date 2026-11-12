@@ -1110,16 +1110,17 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
     # re-processing an already-linked session is a no-op.
     # The list response already carries every field _handle_checkout_completed
     # reads (metadata, customer_details, custom_fields, amount_total,
-    # client_reference_id, subscription-id string). Expanding `data.subscription`
-    # is cheap insurance — PR #377 reproduced the field-access error only
-    # because the previous retrieve() here passed `expand=["customer_details",
-    # "custom_fields"]`, and Stripe rejects both of those as unsupported expand
-    # targets (they are nested objects, not references). Every iteration hit
-    # the except, so `activated` stayed 0 even with paid sessions in the window.
+    # client_reference_id, and subscription as an id STRING). We deliberately
+    # do NOT pass `expand=["data.subscription"]` here — expanding turns
+    # session["subscription"] into a nested object. Downstream
+    # _link_subscription_row does `str(session.get("subscription"))`, which
+    # stringifies the whole dict ("{'id': 'sub_...', 'object': ...}") and
+    # overflows the stripe_subscription_id text column, raising and silently
+    # bumping `errors`. The id is all we need; the unexpanded response gives
+    # us exactly that.
     try:
         sess_iter = stripe.checkout.Session.list(
             created={"gte": since}, limit=100,
-            expand=["data.subscription"],
         ).auto_paging_iter()
     except Exception:  # noqa: BLE001
         sess_iter = iter(())
