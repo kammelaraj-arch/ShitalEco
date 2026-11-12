@@ -2664,6 +2664,15 @@ async def _patch_schema() -> None:
         # can't double-send. NULL means nothing's been sent yet; a timestamp
         # means a send was claimed by whichever path ran first.
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS receipt_sent_at TIMESTAMPTZ DEFAULT NULL",
+        # Partial unique index to guarantee the Stripe import never
+        # double-inserts a donation for the same charge, even under
+        # concurrent runs (manual button + daily background task +
+        # Pass C's _record_invoice_donation all write here). The SELECT-
+        # first guard in _stripe_import_once stays for fast path; this
+        # catches the TOCTOU gap at the DB level.
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_donations_stripe_ref "
+        "ON donations(payment_ref) "
+        "WHERE payment_provider = 'stripe' AND payment_ref IS NOT NULL AND payment_ref <> ''",
         # ── Webhook event audit log ───────────────────────────────────────────
         # Every PayPal webhook gets stored here, idempotent on event_id, before
         # we touch any business state. Lets us replay a failed handler without
