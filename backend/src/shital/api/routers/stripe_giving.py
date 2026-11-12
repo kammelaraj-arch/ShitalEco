@@ -1916,6 +1916,193 @@ async def admin_stripe_import(space: CurrentSpace, days: int = 30) -> dict[str, 
     return await _stripe_import_once(days=days)
 
 
+@router.get("/admin/giving/stripe/charges")
+async def admin_stripe_charges(
+    space: CurrentSpace,  # noqa: ARG001
+    status: str = "failed",  # succeeded | failed | pending | all
+    days: int = 90,
+) -> dict[str, Any]:
+    """Thin passthrough to `stripe.Charge.list` so the admin UI can mirror
+    Stripe Dashboard → Payments verbatim (columns, statuses, donor emails,
+    failure reasons) instead of fabricating a filter on top of our own DB
+    — which only knows about rgs rows and misses every failed
+    subscription-creation attempt. Returns the fields Stripe shows on
+    its grid plus a precomputed `retry_email_sent_at` the UI uses to
+    toggle the resend button."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    stripe = await _stripe()
+    if not stripe.api_key:
+        return {"skipped": "stripe_not_configured", "charges": []}
+
+    since_ts = int((datetime.utcnow() - timedelta(days=days)).timestamp())
+    out: list[dict[str, Any]] = []
+    try:
+        ch_iter = stripe.Charge.list(
+            created={"gte": since_ts}, limit=100,
+        ).auto_paging_iter()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"stripe_list_failed: {exc}", "charges": []}
+
+    want = status.lower()
+    wanted_statuses = (
+        {"succeeded"} if want == "succeeded" else
+        {"failed"}    if want == "failed"    else
+        {"pending"}   if want == "pending"   else
+        {"succeeded", "failed", "pending"}
+    )
+
+    retry_claims: dict[str, str] = {}
+
+    for raw in ch_iter:
+        ch = _d(raw)
+        st = str(ch.get("status") or "").lower()
+        if st not in wanted_statuses:
+            continue
+        bd = ch.get("billing_details") or {}
+        addr = bd.get("address") or {}
+        pm = (ch.get("payment_method_details") or {})
+        card = pm.get("card") or {}
+        outcome = ch.get("outcome") or {}
+        row = {
+            "id":              str(ch.get("id") or ""),
+            "amount":          (ch.get("amount") or 0) / 100.0,
+            "currency":        str(ch.get("currency") or "gbp").upper(),
+            "status":          st,
+            "payment_type":    str(pm.get("type") or ""),
+            "card_brand":      str(card.get("brand") or ""),
+            "card_last4":      str(card.get("last4") or ""),
+            "customer_name":   str(bd.get("name") or "")[:200],
+            "customer_email":  str(bd.get("email") or "")[:254].lower(),
+            "customer_phone":  str(bd.get("phone") or "")[:50],
+            "postal_code":     str((addr.get("postal_code") if isinstance(addr, dict) else "") or "").upper()[:20],
+            "description":     str(ch.get("description") or ""),
+            "failure_message": str(ch.get("failure_message") or outcome.get("seller_message") or ""),
+            "failure_code":    str(ch.get("failure_code") or outcome.get("reason") or ""),
+            "created":         ch.get("created") or 0,
+            "invoice_id":      str(ch.get("invoice") or ""),
+            "receipt_url":     str(ch.get("receipt_url") or ""),
+        }
+        out.append(row)
+
+    # One batched DB lookup for retry-email claims against this result's
+    # charge ids so the UI can render "Resend" vs "Send" button state.
+    if out:
+        ids = [r["id"] for r in out if r["id"]]
+        if ids:
+            async with SessionLocal() as db:
+                res = (await db.execute(text("""
+                    SELECT charge_id, sent_at
+                    FROM   stripe_charge_retry_emails
+                    WHERE  charge_id = ANY(:ids)
+                """), {"ids": ids})).mappings().all()
+            retry_claims = {
+                r["charge_id"]: (r["sent_at"].isoformat() if r["sent_at"] else "")
+                for r in res
+            }
+    for r in out:
+        r["retry_email_sent_at"] = retry_claims.get(r["id"], "")
+
+    return {"status": status, "days_window": days, "count": len(out), "charges": out}
+
+
+@router.post("/admin/giving/stripe/charges/{charge_id}/send-retry-email")
+async def send_charge_retry_email(
+    charge_id: str,
+    space: CurrentSpace,  # noqa: ARG001
+    force: bool = False,
+) -> dict[str, Any]:
+    """Send the customer on a failed Stripe charge a "please try again"
+    email with a link back to the monthly-giving / donation page. One-off,
+    not tied to any rgs row — this covers charges that failed during
+    subscription creation and therefore have no rgs row to attach to.
+    Idempotent via a tiny `stripe_charge_retry_emails` table keyed by
+    charge_id."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    stripe = await _stripe()
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe is not configured")
+
+    # Pull the charge fresh from Stripe so we have the latest email/name
+    # and the UI never has to trust its own cache.
+    try:
+        ch = _d(stripe.Charge.retrieve(charge_id))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail=f"Charge not found: {exc}") from exc
+
+    bd = ch.get("billing_details") or {}
+    email = str(bd.get("email") or "").strip().lower()
+    name  = str(bd.get("name") or "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="This charge has no customer email on file — nowhere to send.")
+
+    # Check prior send.
+    async with SessionLocal() as db:
+        prior = (await db.execute(text("""
+            SELECT sent_at FROM stripe_charge_retry_emails
+            WHERE  charge_id = :id LIMIT 1
+        """), {"id": charge_id})).mappings().first()
+    if prior and prior["sent_at"] and not force:
+        return {
+            "sent": False,
+            "reason": "already_sent",
+            "sent_at": prior["sent_at"].isoformat() if prior["sent_at"] else None,
+        }
+
+    now = datetime.utcnow()
+    amount_gbp = (ch.get("amount") or 0) / 100.0
+    reason = str(
+        ch.get("failure_message")
+        or (ch.get("outcome") or {}).get("seller_message")
+        or "your card was declined"
+    )
+    first_name = name.split(" ", 1)[0] if name else ""
+
+    # Claim first so a slow SMTP can't cause duplicates on click-spam.
+    async with SessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO stripe_charge_retry_emails (charge_id, sent_at, to_email)
+            VALUES (:id, :now, :to)
+            ON CONFLICT (charge_id) DO UPDATE
+                SET sent_at = EXCLUDED.sent_at, to_email = EXCLUDED.to_email
+        """), {"id": charge_id, "now": now, "to": email})
+        await db.commit()
+
+    try:
+        from shital.api.routers.email_templates import send_template
+        from shital.core.fabrics.config import settings
+        result = await send_template(
+            "recurring_giving_payment_failed",
+            email,
+            {
+                "donor_first_name": first_name or name or "Friend",
+                "amount":           f"{amount_gbp:.2f}",
+                "frequency":        "month",
+                "failure_reason":   reason,
+                "retry_url":        "https://service.shital.org.uk/monthly-giving",
+                "logo_url":         "https://shirdisai.org.uk/Cnt/img/shital-logo-new.png",
+                "charity_number":   settings.CHARITY_NUMBER or "1138530",
+                "support_email":    "info@shirdisai.org.uk",
+            },
+            related_type="stripe_charge",
+            related_id=charge_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                DELETE FROM stripe_charge_retry_emails WHERE charge_id = :id
+            """), {"id": charge_id})
+            await db.commit()
+        raise HTTPException(status_code=502, detail=f"Email send failed: {exc}") from exc
+
+    return {"sent": True, "to": email, "result": result}
+
+
 # ── Retry email for failed monthly-giving subscriptions ────────────────────────
 #
 # Operator asked: "include failed ones and re-capture the reason — we can send
