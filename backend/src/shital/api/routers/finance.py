@@ -84,6 +84,12 @@ async def list_donations(
     branch_id: str = "",
     purpose: str = "",
     status: str = "",
+    # Per-kiosk filter so the admin can see "just the WQKK2 kiosk",
+    # "just the Wembley Quick-Donation 1 kiosk", etc. Empty string =
+    # no filter. Recurring-giving rows have no kiosk_device_id so they
+    # are implicitly filtered OUT whenever this is set (not a donation
+    # that came through a kiosk by definition).
+    kiosk_device_id: str = "",
 ) -> dict[str, Any]:
     from datetime import date as _date
     from datetime import datetime as _dt
@@ -106,6 +112,7 @@ async def list_donations(
     branch_filter = "AND d.branch_id = :branch_id" if branch_id else ""
     purpose_filter= "AND d.purpose ILIKE :purpose" if purpose else ""
     status_filter = "AND d.status = :status" if status else ""
+    device_filter = "AND d.kiosk_device_id = CAST(:device_id AS uuid)" if kiosk_device_id else ""
 
     params: dict[str, Any] = {
         "from_dt": from_dt, "to_dt": to_dt,
@@ -120,6 +127,8 @@ async def list_donations(
         params["purpose"] = f"%{purpose}%"
     if status:
         params["status"] = status
+    if kiosk_device_id:
+        params["device_id"] = kiosk_device_id
 
     # Idempotently add source column — must commit DDL before running the query
     async with SessionLocal() as db:
@@ -131,8 +140,13 @@ async def list_donations(
     rgs_branch = "AND rgs.branch_id = :branch_id" if branch_id else ""
     rgs_status  = "AND rgs.status = :status"        if status    else ""
 
-    # When filtering by a one-time-only source, exclude recurring leg with 1=0
-    rgs_exclude = "AND 1=0" if (source and source != "monthly-giving") else ""
+    # When filtering by a one-time-only source, exclude recurring leg with 1=0.
+    # Same if the admin is filtering by a specific kiosk — a recurring-giving
+    # subscription doesn't come through a kiosk, so it never matches that
+    # filter.
+    rgs_exclude = "AND 1=0" if (
+        (source and source != "monthly-giving") or kiosk_device_id
+    ) else ""
 
     # ── Aggregates across the WHOLE filtered set (not just this page) ─────────
     # The donations page's summary cards used to sum the 500-row page in the
@@ -154,6 +168,7 @@ async def list_donations(
               {branch_filter}
               {purpose_filter}
               {status_filter}
+              {device_filter}
 
             UNION ALL
 
@@ -251,6 +266,7 @@ async def list_donations(
               {branch_filter}
               {purpose_filter}
               {status_filter}
+              {device_filter}
 
             UNION ALL
 

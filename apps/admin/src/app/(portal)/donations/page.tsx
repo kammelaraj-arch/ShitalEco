@@ -105,6 +105,12 @@ export default function DonationsPage() {
   const [filterSource, setFilterSource]   = useState('')
   const [filterPurpose, setFilterPurpose] = useState('')
   const [filterStatus, setFilterStatus]   = useState('')
+  // Per-kiosk filter: shows ONLY donations taken on the picked kiosk
+  // (e.g. "WQKK2" or "Wembley-1"). Value is the UUID of the
+  // kiosk_devices row; empty = no filter. Lookup list comes from
+  // /kiosk-devices.
+  const [filterDevice, setFilterDevice] = useState('')
+  const [devices, setDevices] = useState<Array<{ id: string; name: string; branch_id: string; device_type: string }>>([])
   const [pageSize, setPageSize]           = useState(50)
   const [page, setPage]                   = useState(0)
   const [total, setTotal]                 = useState(0)
@@ -292,7 +298,8 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
       if (filterSource)  qs.set('source',    filterSource)
       if (filterPurpose) qs.set('purpose',   filterPurpose)
       if (filterStatus)  qs.set('status',    filterStatus)
-      const [donData, brData] = await Promise.all([
+      if (filterDevice)  qs.set('kiosk_device_id', filterDevice)
+      const [donData, brData, dvData] = await Promise.all([
         apiFetch<{
           donations: Donation[]
           total?: number
@@ -303,6 +310,9 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
           }
         }>(`/finance/donations?${qs}`),
         apiFetch<{ branches: Branch[] }>('/branches'),
+        apiFetch<{ devices: Array<{ id: string; name: string; branch_id: string; device_type: string }> }>(
+          '/kiosk-devices',
+        ).catch(() => ({ devices: [] })),
       ])
       setDonations(donData.donations || [])
       setTotal(donData.total ?? (donData.donations?.length || 0))
@@ -310,12 +320,13 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
         by_status: {}, total: { count: 0, sum: 0 }, gift_aid: { eligible_count: 0, sum: 0 },
       })
       setBranches(brData.branches || [])
+      setDevices(dvData.devices || [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
       setLoading(false)
     }
-  }, [fromDate, toDate, filterBranch, filterSource, filterPurpose, filterStatus, pageSize, page])
+  }, [fromDate, toDate, filterBranch, filterSource, filterPurpose, filterStatus, filterDevice, pageSize, page])
 
   useEffect(() => { load() }, [load])
 
@@ -589,9 +600,26 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
             </select>
           </div>
           <div className="min-w-0">
-            <label className={lbl}>Source</label>
+            <label className={lbl}>Portal</label>
             <select value={filterSource} onChange={e => { setFilterSource(e.target.value); setPage(0) }} className={inp + ' min-w-[150px]'}>
-              {SOURCES.map(s => <option key={s} value={s}>{s || 'All sources'}</option>)}
+              {SOURCES.map(s => <option key={s} value={s}>{s || 'All portals'}</option>)}
+            </select>
+          </div>
+          <div className="min-w-0">
+            <label className={lbl}>Kiosk</label>
+            <select
+              value={filterDevice}
+              onChange={e => { setFilterDevice(e.target.value); setPage(0) }}
+              className={inp + ' min-w-[180px]'}>
+              <option value="">All kiosks</option>
+              {devices
+                .filter(d => !filterBranch || d.branch_id === filterBranch)
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(d => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.device_type.replace('_', ' ')})
+                  </option>
+                ))}
             </select>
           </div>
           <div className="min-w-0">
@@ -618,7 +646,7 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
             <button onClick={() => {
               setFromDate(firstOfMonth); setToDate(today)
               setFilterBranch(''); setFilterSource(''); setFilterPurpose('')
-              setFilterStatus(''); setPageSize(50); setPage(0); setGiftAidOnly(false); setSearch('')
+              setFilterStatus(''); setFilterDevice(''); setPageSize(50); setPage(0); setGiftAidOnly(false); setSearch('')
             }}
               className="px-4 py-2.5 rounded-xl border border-white/10 text-white/50 text-sm font-semibold hover:bg-white/5">Reset</button>
           </div>
