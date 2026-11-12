@@ -132,7 +132,12 @@ export default function RecurringGivingPage() {
   async function stripeImport() {
     setSyncing(true); setSyncNote('')
     try {
-      const r = await fetch(`${API}/admin/giving/stripe-import?days=30`, { method: 'POST', headers: authHeaders() })
+      // 3650 days = 10 years. The temple's Stripe account has ~335 lifetime
+      // charges to backfill; the previous 30-day default only ever caught
+      // the last ~2 weeks of activity. The daily background task stays
+      // at 2 days (cheap, deltas only); this on-demand button is the
+      // "pull everything ever" path for first-run / re-sync.
+      const r = await fetch(`${API}/admin/giving/stripe-import?days=3650`, { method: 'POST', headers: authHeaders() })
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
       const d = await r.json()
       if (d.skipped) { setSyncNote(`Skipped: ${d.skipped}`); return }
