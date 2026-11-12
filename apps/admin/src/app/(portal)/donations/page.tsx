@@ -68,7 +68,7 @@ const ALL_COLUMNS = [
   { key: 'source',           label: 'Source',         default: false, always: false },
   { key: 'donation_type',    label: 'Type',           default: false, always: false },
   { key: 'payment_provider', label: 'Method',         default: true,  always: false },
-  { key: 'device',           label: 'Device',         default: true,  always: false },
+  { key: 'device',           label: 'Kiosk',          default: true,  always: false },
   { key: 'payment_ref',      label: 'Payment Ref',    default: false, always: false },
   { key: 'reference',        label: 'Reference',      default: false, always: false },
   { key: 'status',           label: 'Status',         default: true,  always: true  },
@@ -882,9 +882,20 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                       <td className="px-4 py-3 text-white/50 text-xs capitalize">{d.payment_provider}</td>
                     )}
                     {isVisible('device') && (
-                      <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap font-mono uppercase"
-                        title={d.device_name ? `${d.device_name}${d.operator_email ? ` · ${d.operator_email}` : ''}` : (d.operator_email || '')}>
-                        {d.operator_email || d.device_name || <span className="text-white/25 font-sans normal-case">—</span>}
+                      <td className="px-4 py-3 text-xs whitespace-nowrap"
+                          title={d.device_name ? `${d.device_name}${d.operator_email ? ` · ${d.operator_email}` : ''}` : (d.operator_email || '')}>
+                        {d.device_name ? (
+                          <>
+                            <span className="text-white/80 font-semibold">{d.device_name}</span>
+                            {d.operator_email && (
+                              <span className="block text-white/35 text-[10px] font-mono mt-0.5">{d.operator_email}</span>
+                            )}
+                          </>
+                        ) : d.operator_email ? (
+                          <span className="text-white/50 font-mono text-[11px]">{d.operator_email}</span>
+                        ) : (
+                          <span className="text-white/25">—</span>
+                        )}
                       </td>
                     )}
                     {isVisible('payment_ref') && (
@@ -1068,15 +1079,20 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
         )}
       </AnimatePresence>
 
-      {/* Full end-to-end donation detail */}
+      {/* Full end-to-end donation detail.
+          Was a narrow right-side slide-in drawer which the operator
+          found cramped; now a centred wide modal so everything fits on
+          one screen. The content layout below renders the five sections
+          as a responsive 2-column grid when there's room. */}
       <AnimatePresence>
         {detail && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setDetail(null)} className="fixed inset-0 bg-black/70 z-40" />
-            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+            <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed right-0 top-0 h-full w-full sm:max-w-[540px] bg-temple-deep border-l border-temple-border z-50 flex flex-col overflow-hidden">
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+              <div className="w-full max-w-4xl max-h-[92vh] rounded-2xl bg-temple-deep border border-temple-border flex flex-col overflow-hidden pointer-events-auto shadow-2xl">
               <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between flex-shrink-0">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1092,7 +1108,7 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                 <button onClick={() => setDetail(null)} className="text-white/40 hover:text-white text-2xl">✕</button>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 text-sm">
+              <div className="flex-1 overflow-y-auto px-6 py-5 grid grid-cols-1 lg:grid-cols-2 gap-5 text-sm">
                 {/* helper row renderer via inline map */}
                 {[
                   { title: '💳 Payment', rows: [
@@ -1146,6 +1162,7 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                     </div>
                   </div>
                 ))}
+              </div>
               </div>
             </motion.div>
           </>
