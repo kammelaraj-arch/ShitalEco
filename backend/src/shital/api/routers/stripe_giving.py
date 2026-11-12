@@ -1596,7 +1596,6 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
         currency = str(ch.get("currency") or "gbp").upper()[:10]
         created_at = datetime.fromtimestamp(int(ch.get("created") or 0)) \
             if ch.get("created") else datetime.utcnow()
-        payment_intent_id = str(ch.get("payment_intent") or "")[:200]
         invoice_id = str(ch.get("invoice") or "")[:200]
 
         # Match to a monthly-giving row via the invoice → subscription → rgs.
