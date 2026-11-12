@@ -1108,9 +1108,18 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
     # forever. _handle_checkout_completed is fully idempotent — it
     # SELECTs by stripe_subscription_id before INSERTing — so
     # re-processing an already-linked session is a no-op.
+    # The list response already carries every field _handle_checkout_completed
+    # reads (metadata, customer_details, custom_fields, amount_total,
+    # client_reference_id, subscription-id string). Expanding `data.subscription`
+    # is cheap insurance — PR #377 reproduced the field-access error only
+    # because the previous retrieve() here passed `expand=["customer_details",
+    # "custom_fields"]`, and Stripe rejects both of those as unsupported expand
+    # targets (they are nested objects, not references). Every iteration hit
+    # the except, so `activated` stayed 0 even with paid sessions in the window.
     try:
         sess_iter = stripe.checkout.Session.list(
             created={"gte": since}, limit=100,
+            expand=["data.subscription"],
         ).auto_paging_iter()
     except Exception:  # noqa: BLE001
         sess_iter = iter(())
@@ -1142,12 +1151,7 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
         # the fix for the stuck "paid with rgs but unlinked" diagnostic
         # that would never clear otherwise.
         try:
-            full = stripe.checkout.Session.retrieve(
-                sess.get("id"),
-                expand=["customer_details", "subscription", "custom_fields"],
-            )
-            data = full if isinstance(full, dict) else full.to_dict()
-            await _handle_checkout_completed(data)
+            await _handle_checkout_completed(sess)
             if rgs and rgs in want:
                 want.discard(rgs)
                 summary["linked_orphans"] += 1
@@ -1157,24 +1161,24 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
                            session_id=str(sess.get("id")), error=str(exc))
             summary["errors"] += 1
 
-        # Anything still unmatched and old → reap so it stops showing as pending.
-        # Only PENDING_APPROVAL rows get reaped — EXPIRED rows that stayed in
-        # `want` (because we scanned them above but Stripe has no matching
-        # metadata.rgs_id for them) are already in their terminal state, so
-        # re-expiring is a no-op but we leave them alone for clarity.
-        # Per-id UPDATEs (CAST(:id AS uuid)) — avoids a fragile array bind that
-        # could throw and 500 the whole sync.
-        for rgs_id in want:
-            async with SessionLocal() as db:
-                reaped = await db.execute(text("""
-                    UPDATE recurring_giving_subscriptions
-                    SET status = 'ABANDONED', updated_at = NOW()
-                    WHERE id = CAST(:id AS uuid)
-                      AND created_at < NOW() - INTERVAL '2 days'
-                      AND UPPER(COALESCE(status,'')) IN ('REQUEST_INITIATED','PENDING_APPROVAL','AWAITING_PAYMENT')
-                """), {"id": rgs_id})
-                await db.commit()
-                summary["orphans_expired"] += (reaped.rowcount or 0)
+    # Anything still unmatched and old → reap so it stops showing as pending.
+    # Only PENDING_APPROVAL rows get reaped — EXPIRED rows that stayed in
+    # `want` (because we scanned them above but Stripe has no matching
+    # metadata.rgs_id for them) are already in their terminal state, so
+    # re-expiring is a no-op but we leave them alone for clarity.
+    # Per-id UPDATEs (CAST(:id AS uuid)) — avoids a fragile array bind that
+    # could throw and 500 the whole sync.
+    for rgs_id in want:
+        async with SessionLocal() as db:
+            reaped = await db.execute(text("""
+                UPDATE recurring_giving_subscriptions
+                SET status = 'ABANDONED', updated_at = NOW()
+                WHERE id = CAST(:id AS uuid)
+                  AND created_at < NOW() - INTERVAL '2 days'
+                  AND UPPER(COALESCE(status,'')) IN ('REQUEST_INITIATED','PENDING_APPROVAL','AWAITING_PAYMENT')
+            """), {"id": rgs_id})
+            await db.commit()
+            summary["orphans_expired"] += (reaped.rowcount or 0)
 
     return summary
 
