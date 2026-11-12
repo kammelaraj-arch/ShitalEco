@@ -28,6 +28,26 @@ from shital.api.deps import CurrentSpace
 logger = structlog.get_logger()
 router = APIRouter(tags=["stripe-giving"])
 
+
+def _d(obj: Any) -> dict[str, Any]:
+    """Coerce a Stripe-SDK object to a plain dict so `.get(...)` works.
+
+    Newer stripe-python versions dropped the dict-like interface on
+    StripeObject — `sub.get("status")` now raises
+    "'get' is a dict method, but a Subscription is not a dict. Use
+    .to_dict() to convert it." Wrapping every Stripe retrieve/list
+    iteration with _d(...) keeps the rest of the code reading cleanly
+    and stays backwards-compatible with older SDK builds (where the
+    object IS already dict-like).
+    """
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return obj
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    return {}
+
 # Where the donor lands after a successful/cancelled Checkout. The thank-you
 # page is the static hub page; ?provider=stripe&session_id lets it call the
 # confirm endpoint so the first record happens even before the webhook.
@@ -538,9 +558,10 @@ async def tap_setup_status(setup_intent_id: str) -> dict[str, Any]:
 
     try:
         existing = stripe.Subscription.list(customer=cust_id, limit=5)
-        for s in existing.auto_paging_iter():
-            if (s.metadata or {}).get("rgs_id") == rgs_id:
-                return {"status": "subscribed", "rgs_id": rgs_id, "subscription_id": s.id}
+        for raw_s in existing.auto_paging_iter():
+            s = _d(raw_s)
+            if ((s.get("metadata") or {}).get("rgs_id")) == rgs_id:
+                return {"status": "subscribed", "rgs_id": rgs_id, "subscription_id": s.get("id")}
     except Exception as exc:  # noqa: BLE001
         logger.warning("tap_sub_lookup_failed", error=str(exc), rgs_id=rgs_id)
 
@@ -699,7 +720,8 @@ async def _link_subscription_row(*, rgs_id: str | None, stripe_sub_id: str,
     await _send_recurring_confirmation_once(stripe_sub_id, fallback_amount=amount)
 
 
-async def _handle_checkout_completed(session: dict[str, Any]) -> None:
+async def _handle_checkout_completed(session: Any) -> None:
+    session = _d(session)
     meta = session.get("metadata") or {}
     details = session.get("customer_details") or {}
     amount_total = session.get("amount_total")
@@ -733,7 +755,8 @@ async def _handle_checkout_completed(session: dict[str, Any]) -> None:
     )
 
 
-async def _record_invoice_donation(invoice: dict[str, Any]) -> None:
+async def _record_invoice_donation(invoice: Any) -> None:  # noqa: PLR0915
+    invoice = _d(invoice)
     """Insert a COMPLETED donation for a paid subscription invoice (idempotent
     by payment_ref) and bump the subscription's payment counters.
 
@@ -770,7 +793,7 @@ async def _record_invoice_donation(invoice: dict[str, Any]) -> None:
         try:
             stripe = await _stripe()
             sub_obj = stripe.Subscription.retrieve(sub_id, expand=["customer"])
-            s = sub_obj if isinstance(sub_obj, dict) else sub_obj.to_dict()
+            s = _d(sub_obj)
             meta = s.get("metadata") or {}
             rgs_id = meta.get("rgs_id") or ""
             cust = s.get("customer")
@@ -831,7 +854,8 @@ async def _record_invoice_donation(invoice: dict[str, Any]) -> None:
         await db.commit()
 
 
-async def _handle_invoice_failed(invoice: dict[str, Any]) -> None:
+async def _handle_invoice_failed(invoice: Any) -> None:
+    invoice = _d(invoice)
     sub_id = str(invoice.get("subscription") or "")
     if not sub_id:
         return
@@ -850,7 +874,8 @@ async def _handle_invoice_failed(invoice: dict[str, Any]) -> None:
         await db.commit()
 
 
-async def _handle_subscription_cancelled(sub: dict[str, Any]) -> None:
+async def _handle_subscription_cancelled(sub: Any) -> None:
+    sub = _d(sub)
     sub_id = str(sub.get("id") or "")
     if not sub_id:
         return
@@ -937,7 +962,8 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
             invs = stripe.Invoice.list(subscription=sub_id, status="paid", limit=100)
         except Exception:  # noqa: BLE001
             return
-        for inv in invs.auto_paging_iter():
+        for raw_inv in invs.auto_paging_iter():
+            inv = _d(raw_inv)
             ref = str(inv.get("charge") or inv.get("payment_intent") or inv.get("id") or "")
             if not ref:
                 continue
@@ -963,7 +989,7 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
     for r in rows:
         summary["scanned"] += 1
         try:
-            sub = stripe.Subscription.retrieve(r["sub_id"])
+            sub = _d(stripe.Subscription.retrieve(r["sub_id"]))
         except Exception as exc:  # noqa: BLE001
             # resource_missing → Stripe never really created it; reap old rows.
             if "resource_missing" in str(exc).lower() or "no such subscription" in str(exc).lower():
@@ -1027,7 +1053,8 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
                 created={"gte": since}, status="all", limit=100).auto_paging_iter()
         except Exception:  # noqa: BLE001
             sub_iter = iter(())
-        for sub in sub_iter:
+        for raw_sub in sub_iter:
+            sub = _d(raw_sub)
             rgs = ((sub.get("metadata") or {}).get("rgs_id")) or ""
             if rgs not in want:
                 continue
@@ -1087,7 +1114,8 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
         ).auto_paging_iter()
     except Exception:  # noqa: BLE001
         sess_iter = iter(())
-    for sess in sess_iter:
+    for raw_sess in sess_iter:
+        sess = _d(raw_sess)
         status = sess.get("status") or ""
         pay    = sess.get("payment_status") or ""
         # Accept paid OR status=complete (same test the diagnostic
@@ -1176,8 +1204,9 @@ async def stripe_webhook(request: Request) -> dict[str, Any]:
         logger.warning("stripe_webhook_bad_signature", error=str(exc))
         raise HTTPException(400, detail="invalid signature") from exc
 
-    etype = event.get("type") if isinstance(event, dict) else event["type"]
-    obj = (event.get("data") or {}).get("object") if isinstance(event, dict) else event["data"]["object"]
+    ev = _d(event)
+    etype = ev.get("type") or ""
+    obj = _d((ev.get("data") or {}).get("object"))
     try:
         if etype == "checkout.session.completed":
             await _handle_checkout_completed(obj)
