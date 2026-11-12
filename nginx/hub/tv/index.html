@@ -103,13 +103,12 @@
         <div class="donate">
           <h3>🙏 Donate while you watch</h3>
           <p>Your gift supports daily aarti, bhajans, and the temple's outreach.</p>
-          <div class="amounts">
-            <a href="https://service.shital.org.uk/?amount=5">£5</a>
-            <a href="https://service.shital.org.uk/?amount=11">£11</a>
-            <a href="https://service.shital.org.uk/?amount=21">£21</a>
-            <a href="https://service.shital.org.uk/?amount=51">£51</a>
-          </div>
-          <a class="custom" href="https://service.shital.org.uk/">Choose amount →</a>
+          <!-- Quick-amount chips removed 2026-11-12: they used
+               ?amount=N to auto-create PayPal subscriptions server-side
+               (every click = one PENDING_CONTACT row on the admin
+               Recurring Giving list). Monthly Giving is now Stripe-only;
+               the single CTA takes donors to the Stripe-only picker. -->
+          <a class="custom" href="https://service.shital.org.uk/">Donate →</a>
         </div>
 
         <div class="panel">

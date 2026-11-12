@@ -341,11 +341,13 @@
       <div class="monthly">
         <h3>Nitya Seva · नित्य सेवा — the steady flame</h3>
         <p>Daily, unbroken service. Every month, every devotee, every heart — together we achieve. A regular gift the trustees can build on.</p>
+        <!-- Quick-amount chips removed 2026-11-12: ?amount=N auto-
+             creates PayPal subscriptions server-side and leaves a
+             PENDING_CONTACT row for every abandoned click. Monthly
+             Giving is now Stripe-only; this single CTA sends donors
+             to the Stripe-only picker. -->
         <div class="m-row">
-          <a class="mchip num" href="https://service.shital.org.uk/?amount=11">£11<small>/mo</small></a>
-          <a class="mchip num" href="https://service.shital.org.uk/?amount=21">£21<small>/mo</small></a>
-          <a class="mchip num" href="https://service.shital.org.uk/?amount=31">£31<small>/mo</small></a>
-          <a class="mchip num" href="https://service.shital.org.uk/?amount=51">£51<small>/mo</small></a>
+          <a class="mchip num" href="https://service.shital.org.uk/?screen=monthly-giving">Set up a monthly gift →</a>
         </div>
       </div>
     </div>
