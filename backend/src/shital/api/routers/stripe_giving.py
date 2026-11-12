@@ -1747,11 +1747,15 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
         # tells us whether this call was the one that actually inserted.
         try:
             async with SessionLocal() as db:
+                # idempotency_key MUST be set (donations has UNIQUE(idempotency_key)
+                # with default ''). Set it to "stripe:<charge_id>" so every
+                # import row is distinct on BOTH the legacy idempotency index
+                # and our new partial payment_ref index.
                 r = await db.execute(text("""
                     INSERT INTO donations
                         (id, branch_id, amount, currency, purpose,
-                         payment_provider, payment_ref, status, source,
-                         contact_id, gift_aid_eligible,
+                         payment_provider, payment_ref, idempotency_key, status,
+                         source, contact_id, gift_aid_eligible,
                          created_at, updated_at)
                     VALUES
                         (gen_random_uuid(),
@@ -1761,6 +1765,7 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
                          :purpose,
                          'stripe',
                          :ref,
+                         :idem,
                          'COMPLETED',
                          :source,
                          CAST(:contact AS uuid),
@@ -1779,6 +1784,7 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
                     "currency": currency,
                     "purpose":  ("Monthly Giving" if rgs_row else "Stripe Payment"),
                     "ref":      charge_id,
+                    "idem":     f"stripe:{charge_id}"[:200],
                     # Every row from the Stripe import carries source='stripe'
                     # so the Portal filter and audit queries can tell at a
                     # glance "where did this money come in from". The
