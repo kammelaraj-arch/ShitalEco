@@ -2630,6 +2630,15 @@ async def _patch_schema() -> None:
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS failed_payment_count INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_at      TIMESTAMPTZ",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_reason  VARCHAR(500) NOT NULL DEFAULT ''",
+        # Machine-readable failure code from Stripe (e.g. 'card_declined',
+        # 'insufficient_funds', 'expired_card'). Keeps `last_failure_reason`
+        # as the human-readable blob and lets the admin UI render a
+        # categorical chip + filter by it in future.
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS last_failure_code    VARCHAR(60)",
+        # Admin "Resend retry email" idempotency marker — null until the
+        # first retry email is sent, then a timestamp. Operator can reset
+        # via SQL if they want to resend.
+        "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS retry_email_sent_at  TIMESTAMPTZ",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancel_reason        VARCHAR(500) NOT NULL DEFAULT ''",
         "ALTER TABLE recurring_giving_subscriptions ADD COLUMN IF NOT EXISTS cancelled_by         VARCHAR(255) NOT NULL DEFAULT ''",
         # Payment-tracking columns previously added only via the lazy webhook
@@ -4041,6 +4050,68 @@ _{{ branch_name }} — Registered UK Charity_"""
                 "Registered UK Charity No. {{ charity_number }}"
             ),
             "variables": '["donor_first_name","amount","frequency","tier_label","subscription_id","gift_aid_declared","logo_url","charity_number","manage_url","support_email"]',
+        },
+        # ── Monthly giving payment-failed / retry email ──────────────────────
+        # Sent from the admin panel when the operator clicks "Send retry
+        # email" on a failed subscription row. Templates admin-editable
+        # like every other one — tweaks via Admin → Settings → Email
+        # Templates → recurring_giving_payment_failed.
+        {
+            "key": "recurring_giving_payment_failed",
+            "name": "Monthly Giving — Payment Failed, Please Retry",
+            "subject": "Your monthly gift to SHITAL — please try again",
+            "html_body": (
+                '<div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:auto;color:#222">'
+                '  <div style="text-align:center;margin-bottom:24px">'
+                '    <img src="{{ logo_url }}" alt="SHITAL" style="width:64px;height:64px;border-radius:12px"/>'
+                '    <h1 style="font-size:20px;margin:12px 0 4px;color:#9b1c1c">🙏 Namaste, {{ donor_first_name }}</h1>'
+                '    <p style="font-size:13px;color:#666;margin:0">Your monthly gift of £{{ amount }} did not go through</p>'
+                '  </div>'
+                '  <div style="background:#fef3f2;border:1px solid #f8d7da;border-radius:12px;padding:16px;margin:20px 0">'
+                '    <p style="font-size:13px;color:#842029;margin:0"><strong>Reason:</strong> {{ failure_reason }}</p>'
+                '  </div>'
+                '  <p style="font-size:14px;line-height:1.6">'
+                '    No money was taken. This usually just means the card expired or the bank '
+                '    declined the recurring charge. You can set it up again in two minutes '
+                '    with a fresh card — your Gift Aid declaration carries over automatically.'
+                '  </p>'
+                '  <p style="text-align:center;margin:28px 0">'
+                '    <a href="{{ retry_url }}" '
+                '       style="display:inline-block;background:linear-gradient(135deg,#D4AF37,#C5A028);'
+                '              color:#3B0000;font-weight:700;text-decoration:none;'
+                '              padding:14px 28px;border-radius:12px;font-size:15px">'
+                '      Start monthly giving again — £{{ amount }}'
+                '    </a>'
+                '  </p>'
+                '  <p style="font-size:13px;color:#666">'
+                '    If you no longer want to give monthly, you don\'t need to do anything — '
+                '    no further charges will be attempted.<br>'
+                '    Any questions? Email <a href="mailto:{{ support_email }}">{{ support_email }}</a>.'
+                '  </p>'
+                '  <p style="font-size:12px;color:#999;margin-top:24px;border-top:1px solid #eee;padding-top:12px">'
+                '    SHITAL — Shri Shirdi Saibaba Temple Association<br>'
+                '    Registered UK Charity No. {{ charity_number }}<br>'
+                '    <a href="https://shital.org.uk">shital.org.uk</a>'
+                '  </p>'
+                '</div>'
+            ),
+            "text_body": (
+                "Namaste, {{ donor_first_name }}\n\n"
+                "Your monthly gift of £{{ amount }} per {{ frequency }} did not go through.\n\n"
+                "Reason: {{ failure_reason }}\n\n"
+                "No money was taken. This usually just means the card expired or the bank "
+                "declined the recurring charge. You can set it up again in two minutes "
+                "with a fresh card — your Gift Aid declaration carries over.\n\n"
+                "Start monthly giving again:\n"
+                "{{ retry_url }}\n\n"
+                "If you no longer want to give monthly, you don't need to do anything — no "
+                "further charges will be attempted.\n\n"
+                "Questions? Email {{ support_email }}\n\n"
+                "— SHITAL\n"
+                "Shri Shirdi Saibaba Temple Association\n"
+                "Registered UK Charity No. {{ charity_number }}"
+            ),
+            "variables": '["donor_first_name","amount","frequency","failure_reason","retry_url","logo_url","charity_number","support_email"]',
         },
         # ── Volunteer reference request ─────────────────────────────────────
         # Sent to ref1_email and ref2_email when the trustee clicks
