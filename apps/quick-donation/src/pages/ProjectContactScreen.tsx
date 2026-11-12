@@ -190,7 +190,8 @@ export function ProjectContactScreen() {
          style={{ background: `linear-gradient(170deg, ${tile?.bg || '#140606'} 0%, #140606 100%)` }}>
       <header className="flex items-center mb-5">
         <button onClick={() => setScreen(isPledge ? 'project-pledge' : 'project-tiers')}
-                className="px-3 py-2 rounded-xl text-white/80 hover:bg-white/10 text-sm">
+                className="px-4 py-2 rounded-xl text-white font-bold text-sm hover:bg-white/15 border border-white/25"
+                style={{ background: 'rgba(255,255,255,0.08)' }}>
           ← Back
         </button>
         <div className="ml-3 flex-1">
@@ -248,8 +249,12 @@ export function ProjectContactScreen() {
               type="button"
               disabled={looking || postcode.trim().length < 3}
               onClick={findAddress}
-              className="px-4 py-3 rounded-xl font-black text-base disabled:opacity-40"
-              style={{ background: accent, color: '#180324' }}>
+              className="px-5 py-3 rounded-xl font-black text-base disabled:opacity-40 border border-white/30 hover:brightness-110 shadow-lg"
+              style={{
+                background: '#F6C454',
+                color: '#180324',
+                boxShadow: '0 4px 14px rgba(246,196,84,0.35)',
+              }}>
               {looking ? 'Searching…' : 'Find address'}
             </button>
           </div>
@@ -353,8 +358,12 @@ export function ProjectContactScreen() {
       <button
         disabled={!canContinue || submitting}
         onClick={submit}
-        className="w-full mt-5 py-5 rounded-2xl font-black text-xl disabled:opacity-40"
-        style={{ background: accent, color: '#180324' }}>
+        className="w-full mt-5 py-5 rounded-2xl font-black text-xl disabled:opacity-40 border-2 border-white/40 hover:brightness-110"
+        style={{
+          background: '#F6C454',
+          color: '#180324',
+          boxShadow: '0 8px 28px rgba(246,196,84,0.45)',
+        }}>
         {submitting
           ? 'Saving…'
           : isPledge

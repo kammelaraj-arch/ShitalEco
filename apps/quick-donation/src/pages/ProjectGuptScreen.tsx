@@ -29,7 +29,8 @@ export function ProjectGuptScreen() {
 
       <header className="flex items-center mb-3 shrink-0">
         <button onClick={() => setScreen('donate')}
-                className="px-3 py-2 rounded-xl text-white/85 hover:bg-white/10 text-sm">
+                className="px-4 py-2 rounded-xl text-white font-bold text-sm hover:bg-white/15 border border-white/25"
+                style={{ background: 'rgba(255,255,255,0.08)' }}>
           ← Back
         </button>
         <div className="ml-3 flex-1 min-w-0">
