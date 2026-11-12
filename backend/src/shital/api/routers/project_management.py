@@ -1364,7 +1364,13 @@ class DonationProjectIn(BaseModel):
 
 @router.patch("/admin/donations/{donation_id}/project")
 async def tag_donation_to_project(donation_id: str, body: DonationProjectIn, ctx: CurrentSpace) -> dict[str, Any]:
-    _require_admin(ctx)
+    # Tagging a donation to a project mutates the donation row's
+    # project_id — same "edit the finance record" footprint as PUT.
+    # SUPER_ADMIN only (previously ADMIN + SUPER_ADMIN via
+    # _require_admin). Matches the client, where the Tag button now
+    # lives inside the canEdit (SUPER_ADMIN-only) gate.
+    if ctx.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="SUPER_ADMIN required")
     new = (body.project_id or "").strip() or None
     async with SessionLocal() as db:
         result = await db.execute(text("""
