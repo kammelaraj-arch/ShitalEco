@@ -158,6 +158,10 @@ async def list_donations(
             FROM recurring_giving_subscriptions rgs
             WHERE rgs.created_at >= :from_dt
               AND rgs.created_at <  :to_dt
+              -- Same intent-not-a-donation exclusion as the list query
+              -- so aggregates stay consistent with the visible rows.
+              AND UPPER(COALESCE(rgs.status,'')) NOT IN
+                  ('REQUEST_INITIATED', 'AWAITING_PAYMENT', 'ABANDONED')
               {rgs_exclude}
               {rgs_branch}
               {rgs_status}
@@ -296,6 +300,14 @@ async def list_donations(
             LEFT JOIN contacts              c2  ON c2.id = rgs.contact_id
             WHERE rgs.created_at >= :from_dt
               AND rgs.created_at < :to_dt
+              -- A "request-initiated" subscription is not a donation yet:
+              -- the donor clicked but hasn't paid a penny. Hiding these
+              -- stops a misleading PENDING_APPROVAL row from sitting in
+              -- the Donations list pretending to be money.
+              -- ABANDONED rows (donor never finished Stripe) are also
+              -- excluded; both only show on Recurring Giving admin.
+              AND UPPER(COALESCE(rgs.status,'')) NOT IN
+                  ('REQUEST_INITIATED', 'AWAITING_PAYMENT', 'ABANDONED')
               {rgs_exclude}
               {rgs_branch}
               {rgs_status}

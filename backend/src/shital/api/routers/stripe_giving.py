@@ -186,6 +186,18 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
                 row = c.mappings().first()
                 contact_id = str(row["id"]) if row else None
 
+            # Lifecycle v2:
+            #   REQUEST_INITIATED  — donor clicked, Checkout Session exists,
+            #                        NOTHING charged. Not a donation; invisible
+            #                        on the Donations admin list.
+            #   AWAITING_PAYMENT   — donor completed Stripe hosted checkout,
+            #                        waiting for first invoice to settle.
+            #   ACTIVE             — first payment succeeded; recurring charge live.
+            #   PAST_DUE / CANCELLING / CANCELLED / ABANDONED — later states.
+            # Previously this row was written as PENDING_APPROVAL, which both
+            # (a) implied the admin had to approve something (they don't) and
+            # (b) caused the row to appear in the Donations admin list as if
+            # the donor had already paid.
             await db.execute(text("""
                 INSERT INTO recurring_giving_subscriptions
                     (id, payment_provider, amount, frequency, status, branch_id,
@@ -193,7 +205,7 @@ async def create_checkout(body: CheckoutBody) -> dict[str, Any]:
                      donor_postcode, donor_address, contact_id,
                      gift_aid_declared, gift_aid_declared_at, created_at, updated_at)
                 VALUES
-                    (:id, 'stripe', :amount, 'MONTH', 'PENDING_APPROVAL', :branch,
+                    (:id, 'stripe', :amount, 'MONTH', 'REQUEST_INITIATED', :branch,
                      :name, :email, :first, :surname, :postcode, :address, :cid,
                      :ga, :ga_at, :now, :now)
             """), {
@@ -420,7 +432,7 @@ async def tap_start_subscription(body: TapStartBody) -> dict[str, Any]:
                      donor_name, donor_email, donor_first_name, donor_surname,
                      created_at, updated_at)
                 VALUES
-                    (:id, 'stripe', :amount, 'MONTH', 'PENDING_APPROVAL', :branch,
+                    (:id, 'stripe', :amount, 'MONTH', 'REQUEST_INITIATED', :branch,
                      :name, :email, :first, :surname, :now, :now)
             """), {
                 "id": rgs_id, "amount": amount, "branch": body.branch_id,
@@ -857,9 +869,12 @@ async def _handle_subscription_cancelled(sub: dict[str, Any]) -> None:
 # ── Admin reconcile (mirror of the PayPal monthly-giving sync) ──────────────────
 
 _STRIPE_SUB_STATUS_MAP = {
-    "active": "ACTIVE", "trialing": "ACTIVE", "past_due": "ACTIVE",
-    "canceled": "CANCELLED", "unpaid": "CANCELLED",
-    "incomplete": "PENDING_APPROVAL", "incomplete_expired": "EXPIRED",
+    "active": "ACTIVE", "trialing": "ACTIVE", "past_due": "PAST_DUE",
+    "canceled": "CANCELLED", "unpaid": "PAST_DUE",
+    # incomplete = payment method requires further action. Donor has
+    # gone to Stripe but hasn't finished the hosted-checkout page yet.
+    "incomplete":         "AWAITING_PAYMENT",
+    "incomplete_expired": "ABANDONED",
 }
 
 
@@ -901,12 +916,17 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
     # calls — and clears anything that's been stuck > 2 days regardless of
     # the sync window. 2 days matches the existing reap threshold in Pass B.
     async with SessionLocal() as db:
+        # Reap stale "donor clicked, never paid" rows — these are
+        # REQUEST_INITIATED (new name) or the legacy PENDING_APPROVAL
+        # from before the rename. 2 days with no Stripe subscription id
+        # means the donor abandoned the Checkout session; mark ABANDONED
+        # instead of leaving it as if they were still mid-signup.
         reaped = await db.execute(text("""
             UPDATE recurring_giving_subscriptions
-            SET status = 'EXPIRED', updated_at = NOW()
+            SET status = 'ABANDONED', updated_at = NOW()
             WHERE payment_provider = 'stripe'
               AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')
-              AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'
+              AND UPPER(COALESCE(status,'')) IN ('REQUEST_INITIATED','PENDING_APPROVAL')
               AND created_at < NOW() - INTERVAL '2 days'
         """))
         await db.commit()
@@ -996,7 +1016,7 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
             SELECT id::text AS id FROM recurring_giving_subscriptions
             WHERE payment_provider = 'stripe'
               AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')
-              AND UPPER(COALESCE(status,'')) IN ('PENDING_APPROVAL','EXPIRED')
+              AND UPPER(COALESCE(status,'')) IN ('REQUEST_INITIATED','PENDING_APPROVAL','AWAITING_PAYMENT','EXPIRED','ABANDONED')
               AND created_at >= NOW() - (:days || ' days')::interval
         """), {"days": str(days)})).mappings().all()
     want = {o["id"] for o in orphans}
@@ -1120,10 +1140,10 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
             async with SessionLocal() as db:
                 reaped = await db.execute(text("""
                     UPDATE recurring_giving_subscriptions
-                    SET status = 'EXPIRED', updated_at = NOW()
+                    SET status = 'ABANDONED', updated_at = NOW()
                     WHERE id = CAST(:id AS uuid)
                       AND created_at < NOW() - INTERVAL '2 days'
-                      AND UPPER(COALESCE(status,'')) = 'PENDING_APPROVAL'
+                      AND UPPER(COALESCE(status,'')) IN ('REQUEST_INITIATED','PENDING_APPROVAL','AWAITING_PAYMENT')
                 """), {"id": rgs_id})
                 await db.commit()
                 summary["orphans_expired"] += (reaped.rowcount or 0)
