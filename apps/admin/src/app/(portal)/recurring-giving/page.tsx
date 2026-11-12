@@ -139,7 +139,9 @@ export default function RecurringGivingPage() {
         : ''
       setSyncNote(
         `Stripe import · scanned ${d.scanned ?? 0} charges · ${d.imported ?? 0} new donations · ` +
-        `${d.linked_subs ?? 0} subs flipped ACTIVE · ${d.skipped_duplicates ?? 0} duplicates skipped${d.errors ? ` · ${d.errors} errors${errTail}` : ''}`
+        `${d.contacts_created ?? 0} new contacts · ${d.contacts_linked ?? 0} contacts linked · ` +
+        `${d.addresses_created ?? 0} addresses · ${d.linked_subs ?? 0} subs flipped ACTIVE · ` +
+        `${d.skipped_duplicates ?? 0} duplicates skipped${d.errors ? ` · ${d.errors} errors${errTail}` : ''}`
       )
       await loadSubs()
     } catch (e) {

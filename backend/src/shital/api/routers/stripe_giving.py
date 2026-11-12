@@ -1584,6 +1584,10 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
         out["error_samples"].append({"stage": "charge.list", "error": str(exc)[:200]})
         return out
 
+    out["contacts_created"] = 0
+    out["contacts_linked"] = 0
+    out["addresses_created"] = 0
+
     for raw in charge_iter:
         ch = _d(raw)
         out["scanned"] += 1
@@ -1623,47 +1627,167 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
                     })
                 # Not fatal — we still insert the donation, just unlinked.
 
-        # Idempotent insert (payment_ref is the Stripe charge id).
+        # Extract donor details from the charge's billing_details. Stripe
+        # populates this on every real payment (card, wallet, Link) — the
+        # donor's name, email, phone and home address are already here, no
+        # extra retrieve needed.
+        bd = ch.get("billing_details") or {}
+        bd_name  = str(bd.get("name")  or "").strip()[:400]
+        bd_email = str(bd.get("email") or "").strip().lower()[:254]
+        bd_phone = str(bd.get("phone") or "").strip()[:50]
+        bd_addr  = bd.get("address") or {}
+        bd_pc    = str((bd_addr.get("postal_code") if isinstance(bd_addr, dict) else "") or "").strip().upper()[:20]
+        bd_line1 = str((bd_addr.get("line1") if isinstance(bd_addr, dict) else "") or "").strip()
+        bd_line2 = str((bd_addr.get("line2") if isinstance(bd_addr, dict) else "") or "").strip()
+        bd_city  = str((bd_addr.get("city")  if isinstance(bd_addr, dict) else "") or "").strip()
+        bd_formatted = ", ".join(p for p in [bd_line1, bd_line2, bd_city, bd_pc] if p)[:500]
+        # House number falls out of line1 — first whitespace-delimited token
+        # that contains a digit (e.g. "42A Acacia Avenue" → "42A"). Used as
+        # the dedup key in the addresses table.
+        bd_house = ""
+        for tok in bd_line1.split():
+            if any(c.isdigit() for c in tok):
+                bd_house = tok[:50]
+                break
+        first_name, _, surname = bd_name.partition(" ")
+
+        # Upsert the contact (keyed by email — the only natural dedup key
+        # Stripe gives us). Missing email → we can't dedup, so we skip the
+        # contact and the donation goes in with contact_id=NULL. Rows
+        # already linked to a monthly-giving contact keep that link
+        # (rgs_row.contact_id takes precedence — it's the one the donor
+        # actively consented to on the service portal).
+        contact_id: str | None = (rgs_row["contact_id"] if rgs_row else None)
+        if not contact_id and bd_email:
+            try:
+                async with SessionLocal() as db:
+                    existing = (await db.execute(text(
+                        "SELECT id::text AS id FROM contacts WHERE email = :e LIMIT 1"
+                    ), {"e": bd_email})).first()
+                    if existing:
+                        contact_id = existing[0]
+                        out["contacts_linked"] += 1
+                        # Backfill name / phone if the existing row is blank
+                        # — a stripe-only contact that later paid again
+                        # with name on file gets upgraded without clobbering
+                        # anything the admin already curated.
+                        await db.execute(text("""
+                            UPDATE contacts
+                            SET first_name = COALESCE(NULLIF(first_name,''), :first),
+                                surname    = COALESCE(NULLIF(surname,''),    :surname),
+                                full_name  = COALESCE(NULLIF(full_name,''),  :full),
+                                phone      = COALESCE(NULLIF(phone,''),      :phone),
+                                updated_at = NOW()
+                            WHERE id = CAST(:id AS uuid)
+                        """), {
+                            "first": first_name, "surname": surname, "full": bd_name,
+                            "phone": bd_phone, "id": contact_id,
+                        })
+                    else:
+                        new_row = (await db.execute(text("""
+                            INSERT INTO contacts
+                                (id, email, first_name, surname, full_name,
+                                 phone, first_source, first_branch_id,
+                                 created_at, updated_at)
+                            VALUES
+                                (gen_random_uuid(), :email, :first, :surname,
+                                 :full, :phone, 'stripe', :branch, NOW(), NOW())
+                            ON CONFLICT (email) DO UPDATE
+                                SET first_name = COALESCE(NULLIF(contacts.first_name,''), EXCLUDED.first_name),
+                                    surname    = COALESCE(NULLIF(contacts.surname,''),    EXCLUDED.surname),
+                                    full_name  = COALESCE(NULLIF(contacts.full_name,''),  EXCLUDED.full_name),
+                                    phone      = COALESCE(NULLIF(contacts.phone,''),      EXCLUDED.phone),
+                                    updated_at = NOW()
+                            RETURNING id::text AS id
+                        """), {
+                            "email": bd_email, "first": first_name, "surname": surname,
+                            "full": bd_name, "phone": bd_phone,
+                            "branch": (rgs_row["branch_id"] if rgs_row else "main"),
+                        })).mappings().first()
+                        contact_id = new_row["id"] if new_row else None
+                        if contact_id:
+                            out["contacts_created"] += 1
+                    # Address upsert — only if we got a usable postcode.
+                    # Partial unique index (contact_id, postcode, house_number)
+                    # prevents duplicates when a donor pays twice from the
+                    # same card-on-file.
+                    if contact_id and bd_pc:
+                        addr_row = await db.execute(text("""
+                            INSERT INTO addresses
+                                (id, contact_id, formatted, postcode,
+                                 house_number, lookup_source, is_primary,
+                                 created_at)
+                            VALUES
+                                (gen_random_uuid(), CAST(:cid AS uuid),
+                                 :formatted, :pc, :house, 'stripe', true, NOW())
+                            ON CONFLICT (contact_id, postcode, house_number)
+                                WHERE contact_id IS NOT NULL
+                                DO NOTHING
+                            RETURNING id
+                        """), {
+                            "cid": contact_id, "formatted": bd_formatted,
+                            "pc": bd_pc, "house": bd_house,
+                        })
+                        if addr_row.first():
+                            out["addresses_created"] += 1
+                    await db.commit()
+            except Exception as exc:  # noqa: BLE001
+                if len(out["error_samples"]) < 5:
+                    out["error_samples"].append({
+                        "charge_id": charge_id,
+                        "stage": "contacts.upsert",
+                        "error": f"{exc.__class__.__name__}: {str(exc)[:200]}",
+                    })
+                # Non-fatal — donation still inserts with contact_id=NULL.
+
+        # Idempotent insert — ON CONFLICT on the partial unique index
+        # `idx_donations_stripe_ref` (payment_ref WHERE payment_provider =
+        # 'stripe' AND payment_ref <> ''). The DB rejects a second INSERT
+        # for the same charge_id even under concurrent imports; RETURNING
+        # tells us whether this call was the one that actually inserted.
         try:
             async with SessionLocal() as db:
-                exists = (await db.execute(text(
-                    "SELECT 1 FROM donations WHERE payment_ref = :ref LIMIT 1"
-                ), {"ref": charge_id})).first()
-                if exists:
-                    out["skipped_duplicates"] += 1
-                else:
-                    await db.execute(text("""
-                        INSERT INTO donations
-                            (id, branch_id, amount, currency, purpose,
-                             payment_provider, payment_ref, status, source,
-                             contact_id, gift_aid_eligible,
-                             created_at, updated_at)
-                        VALUES
-                            (gen_random_uuid(),
-                             :branch,
-                             :amount,
-                             :currency,
-                             :purpose,
-                             'stripe',
-                             :ref,
-                             'COMPLETED',
-                             :source,
-                             CAST(:contact AS uuid),
-                             :ga,
-                             :created,
-                             NOW())
-                    """), {
-                        "branch":   (rgs_row["branch_id"] if rgs_row else "main"),
-                        "amount":   amount,
-                        "currency": currency,
-                        "purpose":  ("Monthly Giving" if rgs_row else "Stripe Payment"),
-                        "ref":      charge_id,
-                        "source":   ("monthly-giving" if rgs_row else "stripe_dashboard"),
-                        "contact":  (rgs_row["contact_id"] if rgs_row else None),
-                        "ga":       bool(rgs_row and rgs_row["ga"]),
-                        "created":  created_at,
-                    })
+                r = await db.execute(text("""
+                    INSERT INTO donations
+                        (id, branch_id, amount, currency, purpose,
+                         payment_provider, payment_ref, status, source,
+                         contact_id, gift_aid_eligible,
+                         created_at, updated_at)
+                    VALUES
+                        (gen_random_uuid(),
+                         :branch,
+                         :amount,
+                         :currency,
+                         :purpose,
+                         'stripe',
+                         :ref,
+                         'COMPLETED',
+                         :source,
+                         CAST(:contact AS uuid),
+                         :ga,
+                         :created,
+                         NOW())
+                    ON CONFLICT (payment_ref)
+                        WHERE payment_provider = 'stripe'
+                          AND payment_ref IS NOT NULL
+                          AND payment_ref <> ''
+                        DO NOTHING
+                    RETURNING id
+                """), {
+                    "branch":   (rgs_row["branch_id"] if rgs_row else "main"),
+                    "amount":   amount,
+                    "currency": currency,
+                    "purpose":  ("Monthly Giving" if rgs_row else "Stripe Payment"),
+                    "ref":      charge_id,
+                    "source":   ("monthly-giving" if rgs_row else "stripe_dashboard"),
+                    "contact":  contact_id,
+                    "ga":       bool(rgs_row and rgs_row["ga"]),
+                    "created":  created_at,
+                })
+                if r.first():
                     out["imported"] += 1
+                else:
+                    out["skipped_duplicates"] += 1
                 # Link + flip ACTIVE on the rgs row (idempotent).
                 if rgs_row:
                     r = await db.execute(text("""
