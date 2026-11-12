@@ -27,9 +27,14 @@ export function MonthlyGivingPage() {
   const [stripeEnabled, setStripeEnabled] = useState(false)
   const [stripeBusy, setStripeBusy] = useState(false)
 
-  const [firstName, setFirstName]   = useState('')
-  const [surname, setSurname]       = useState('')
-  const [donorEmail, setDonorEmail] = useState('')
+  // Pre-fill donor fields from the signed-in session when available,
+  // so a returning donor doesn't have to retype their own name / email
+  // on the details step. The strings below only run once on mount.
+  const _preName  = acctName || ''
+  const _preEmail = acctEmail || ''
+  const [firstName, setFirstName]   = useState(() => _preName.split(' ')[0] || '')
+  const [surname,   setSurname]     = useState(() => _preName.split(' ').slice(1).join(' ') || '')
+  const [donorEmail, setDonorEmail] = useState(() => _preEmail)
   const [donorPhone, setDonorPhone] = useState('')
   const [postcode, setPostcode]     = useState('')
   const [addresses, setAddresses]   = useState<Array<{ formatted: string; uprn: string }>>([])
@@ -168,6 +173,16 @@ export function MonthlyGivingPage() {
           donor_first_name: (firstName || (acctName || '').split(' ')[0] || '').trim(),
           donor_surname: (surname || (acctName || '').split(' ').slice(1).join(' ') || '').trim(),
           donor_phone: donorPhone.trim(),
+          // Carry the on-portal Gift Aid answer + address through to the
+          // Stripe create-checkout call so the RGS row is stamped with the
+          // donor's declared answer at click time. Previously these were
+          // captured on the details step and then dropped before Stripe
+          // was called — donors who ticked "Gift Aid — I am a UK taxpayer"
+          // on the portal and skipped the same question on Stripe's hosted
+          // page ended up with gift_aid_declared=false in our DB.
+          donor_postcode:    postcode.trim(),
+          donor_address:     selectedAddress,
+          gift_aid_declared: !!giftAidDeclared,
         }),
       })
       const d = await r.json()
@@ -280,16 +295,19 @@ export function MonthlyGivingPage() {
             )}
           </div>
 
-          {/* Stripe card — the ONLY path. Straight to Stripe Checkout,
-              which collects name/email/address on its hosted page.
-              The PayPal button has been removed per operator decision —
-              reconciliation stays clean when every monthly is Stripe. */}
-          <button onClick={payByStripe}
-            disabled={!selected || (customMode && !customAmountValid) || stripeBusy}
+          {/* Monthly Giving is Stripe-only (PayPal removed per operator).
+              The donor goes through the details step first so we capture
+              name / email / phone / UK address and the Gift Aid
+              declaration BEFORE redirecting to Stripe. Earlier this
+              button jumped straight to Stripe, which meant Stripe's own
+              page was the only place the donor could tick Gift Aid — if
+              they skipped it there, the £5 /month we paid to HMRC per
+              £100 Gift Aid on their donations was lost. */}
+          <button onClick={() => setStep('details')}
+            disabled={!selected || (customMode && !customAmountValid)}
             className="w-full py-4 rounded-2xl font-black text-base disabled:opacity-40 transition-all active:scale-[0.99] flex items-center justify-center gap-2"
             style={{ background: 'linear-gradient(135deg,#D4AF37,#FFD700,#C5A028)', color: '#3B0000' }}>
-            {stripeBusy ? 'Connecting to secure card checkout…'
-              : `💳 Pay by Card — £${selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month`}
+            Continue — £{selected ? Number(selected.amount).toFixed(2).replace(/\.00$/, '') : '—'}/month →
           </button>
 
           {error && (
