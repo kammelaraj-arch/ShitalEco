@@ -250,14 +250,36 @@ async def list_donations(
                 'GBP'::varchar                            AS currency,
                 'monthly-giving'::varchar                 AS source,
                 COALESCE(t.label, 'Monthly Giving')       AS purpose,
-                'paypal'::varchar                         AS payment_provider,
-                rgs.paypal_subscription_id                AS payment_ref,
+                -- Was hardcoded 'paypal' which mislabelled every Stripe
+                -- monthly subscription as a PayPal payment on the admin
+                -- donations list. Now reads the subscription row's own
+                -- payment_provider column (populated at subscribe time),
+                -- and falls back to inferring from which provider-id is
+                -- set so legacy rows written before the column existed
+                -- still label correctly.
+                COALESCE(
+                    NULLIF(rgs.payment_provider, ''),
+                    CASE
+                        WHEN rgs.stripe_subscription_id IS NOT NULL
+                             AND rgs.stripe_subscription_id <> '' THEN 'stripe'
+                        WHEN rgs.paypal_subscription_id  IS NOT NULL
+                             AND rgs.paypal_subscription_id  <> '' THEN 'paypal'
+                        ELSE 'unknown'
+                    END
+                )                                         AS payment_provider,
+                COALESCE(
+                    NULLIF(rgs.stripe_subscription_id, ''),
+                    rgs.paypal_subscription_id
+                )                                         AS payment_ref,
                 COALESCE(rgs.gift_aid_declared, false)    AS gift_aid_eligible,
                 CASE WHEN rgs.gift_aid_declared
                      THEN ROUND(rgs.amount * 0.25, 2)
                      ELSE 0 END::numeric                  AS gift_aid_amount,
                 rgs.status,
-                rgs.paypal_subscription_id                AS reference,
+                COALESCE(
+                    NULLIF(rgs.stripe_subscription_id, ''),
+                    rgs.paypal_subscription_id
+                )                                         AS reference,
                 rgs.contact_id::text,
                 COALESCE(c2.full_name, rgs.donor_name)   AS contact_name,
                 COALESCE(c2.email,     rgs.donor_email)  AS contact_email,
