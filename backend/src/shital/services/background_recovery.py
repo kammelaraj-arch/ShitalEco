@@ -1391,23 +1391,28 @@ async def stripe_giving_fast_loop_supervised() -> None:
 async def stripe_import_daily_loop() -> None:
     """Daily (24 h) Stripe → donations import.
 
-    Walks every succeeded Stripe charge in the last 2 days and mirrors it
+    Walks every succeeded Stripe charge in the last 7 days and mirrors it
     into our donations table (idempotent on payment_ref = charge.id). This
     is the one-direction sync we always should have had: Stripe is the
     source of truth for money received, we mirror. Covers card-reader
     taps, dashboard-created payments, and subscription charges that a
     dropped webhook would otherwise never surface.
 
-    2-day window picks up anything the daily cadence might straddle (DST,
-    clock skew, a missed run) without ever being expensive — succeeded
-    charges in a day on a temple's cadence are a handful."""
+    7-day window gives us safety margin against: missed daily runs
+    (container restart that happens to land on the 24 h boundary), DST
+    straddles, clock skew, and operator's own "the backend was down
+    yesterday, catch up today". Idempotent ON CONFLICT means re-scanning
+    the last week is effectively free (every row after the first day
+    just increments skipped_duplicates). The on-demand Import button
+    uses the same window, so clicking it never pulls old records —
+    the historical backfill was a one-off and it's done."""
     await asyncio.sleep(120)  # Let boot + first fast loop finish.
     while True:
         try:
             from shital.api.routers.stripe_giving import _stripe_import_once
             await _run_sweep(
                 "stripe_import_daily",
-                lambda: _stripe_import_once(days=2),
+                lambda: _stripe_import_once(days=7),
                 timeout=180,
             )
         except Exception as exc:  # noqa: BLE001

@@ -85,6 +85,12 @@ export default function RecurringGivingPage() {
   // Separate line for the auto-polling diagnostic so it doesn't overwrite
   // the Import / Force-link / Sync result the operator just clicked.
   const [diagNote, setDiagNote] = useState('')
+  // Status filter for the Subscriptions list. Default is 'live' so the
+  // page opens on just the real billing subscriptions — not the
+  // REQUEST_INITIATED / ABANDONED / EXPIRED rows that the diagnostic
+  // already shows a count of up top. Matches how Stripe Dashboard →
+  // Subscriptions opens: active first, status filter on the side.
+  const [subFilter, setSubFilter] = useState<'live' | 'pending' | 'ended' | 'all'>('live')
   const [stats, setStats]     = useState<GivingStats | null>(null)
 
   async function syncPayPal() {
@@ -132,12 +138,12 @@ export default function RecurringGivingPage() {
   async function stripeImport() {
     setSyncing(true); setSyncNote('')
     try {
-      // 3650 days = 10 years. The temple's Stripe account has ~335 lifetime
-      // charges to backfill; the previous 30-day default only ever caught
-      // the last ~2 weeks of activity. The daily background task stays
-      // at 2 days (cheap, deltas only); this on-demand button is the
-      // "pull everything ever" path for first-run / re-sync.
-      const r = await fetch(`${API}/admin/giving/stripe-import?days=3650`, { method: 'POST', headers: authHeaders() })
+      // 7-day window — enough to cover a week of outage / missed daily
+      // cadence without pulling the full history every click. Operator
+      // explicitly asked not to re-scan old records; the historical
+      // backfill was a one-off and it's already done. The daily
+      // background task uses the same 7-day window.
+      const r = await fetch(`${API}/admin/giving/stripe-import?days=7`, { method: 'POST', headers: authHeaders() })
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
       const d = await r.json()
       if (d.skipped) { setSyncNote(`Skipped: ${d.skipped}`); return }
@@ -639,7 +645,7 @@ export default function RecurringGivingPage() {
                   Stripe is the source of truth, we pull. Daily background
                   task does the same with a 2-day window. */}
               <button onClick={stripeImport} disabled={syncing}
-                title="Walks every succeeded Stripe charge in the last 30 days and mirrors it into our donations table (idempotent). Also links + flips ACTIVE any matching monthly-giving row. A daily background task does the same automatically."
+                title="Pulls the last 7 days of Stripe charges and mirrors them into our donations table (idempotent — duplicates are skipped). A daily background task does the same automatically every 24 h, so clicking this is only needed if you want the next tick right now. Does NOT re-pull historical records."
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#8b5cf6,#5b21b6)' }}>
                 {syncing ? 'Importing…' : '⬇ Import from Stripe'}
@@ -664,47 +670,103 @@ export default function RecurringGivingPage() {
           </div>
           {syncNote && <p className="text-xs rounded-lg px-3 py-2 bg-cyan-500/10 text-cyan-200 border border-cyan-500/20 whitespace-pre-wrap break-all">{syncNote}</p>}
           {diagNote && diagNote !== syncNote && <p className="text-xs rounded-lg px-3 py-2 bg-amber-500/10 text-amber-200 border border-amber-500/20">{diagNote}</p>}
-          {subs.length === 0 && <p className="text-white/40 text-sm">No subscriptions yet.</p>}
-          {subs.map(s => (
-            <div key={s.id} className="rounded-xl p-4 flex items-center gap-4"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-white">£{Number(s.amount).toFixed(0)}/{s.frequency.toLowerCase()}</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
-                        title={s.status}
-                        style={{ background: `${STATUS_COLOURS[s.status] || '#94a3b8'}20`, color: STATUS_COLOURS[s.status] || '#94a3b8' }}>
-                    {STATUS_LABELS[s.status] || s.status}
-                  </span>
-                  {(s.payment_provider === 'stripe')
-                    ? <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#635bff20', color: '#a5a1ff' }}>💳 Stripe</span>
-                    : <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#0070ba20', color: '#4aa3e0' }}>PayPal</span>}
-                  {s.tier_label && <span className="text-xs text-white/50">{s.tier_label}</span>}
+          {/* Status filter — defaults to Live so the page opens on just the
+              real billing subscriptions, same as Stripe Dashboard. */}
+          {(() => {
+            const LIVE_STATES    = new Set(['ACTIVE', 'PAST_DUE', 'CANCELLING'])
+            const PENDING_STATES = new Set(['REQUEST_INITIATED', 'AWAITING_PAYMENT', 'PENDING_APPROVAL', 'PENDING_CONTACT'])
+            const ENDED_STATES   = new Set(['CANCELLED', 'EXPIRED', 'ABANDONED', 'SUSPENDED'])
+            const counts = {
+              live:    subs.filter(s => LIVE_STATES.has(s.status)).length,
+              pending: subs.filter(s => PENDING_STATES.has(s.status)).length,
+              ended:   subs.filter(s => ENDED_STATES.has(s.status)).length,
+              all:     subs.length,
+            }
+            const pick = (set: Set<string> | null) => set ? subs.filter(s => set.has(s.status)) : subs
+            const filtered = subFilter === 'live'    ? pick(LIVE_STATES)
+                           : subFilter === 'pending' ? pick(PENDING_STATES)
+                           : subFilter === 'ended'   ? pick(ENDED_STATES)
+                           :                            pick(null)
+            return (
+              <>
+                <div className="flex items-center gap-2 pt-1">
+                  {(['live', 'pending', 'ended', 'all'] as const).map(f => (
+                    <button key={f} onClick={() => setSubFilter(f)}
+                      className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                        subFilter === f
+                          ? 'bg-saffron-400/20 text-saffron-300 border border-saffron-400/40'
+                          : 'bg-white/5 text-white/50 border border-white/10 hover:bg-white/10 hover:text-white/80'
+                      }`}>
+                      {f === 'live'    ? `● Live (${counts.live})`    :
+                       f === 'pending' ? `◐ Pending (${counts.pending})` :
+                       f === 'ended'   ? `○ Ended (${counts.ended})`  :
+                                         `All (${counts.all})`}
+                    </button>
+                  ))}
                 </div>
-                <p className="text-sm text-white/70 mt-0.5">{s.donor_name || 'Anonymous'}{s.donor_email && ` · ${s.donor_email}`}</p>
-                <p className="text-xs text-white/40 mt-0.5">
-                  {(s.payment_provider === 'stripe')
-                    ? `Stripe: ${s.stripe_subscription_id || '—'}`
-                    : `PayPal: ${s.paypal_subscription_id || '—'}`} · {s.branch_id}
-                </p>
-                {refreshNote[s.id] && (
-                  <p className="text-xs text-saffron-400 mt-1">↻ {refreshNote[s.id]}</p>
+                {filtered.length === 0 && (
+                  <p className="text-white/40 text-sm mt-2">
+                    {subFilter === 'live'
+                      ? 'No live subscriptions. Switch to "Pending" or "All" to see donor-initiated rows that never paid.'
+                      : 'No subscriptions in this view.'}
+                  </p>
                 )}
-              </div>
-              <div className="text-right text-xs text-white/40 flex-shrink-0 flex flex-col items-end gap-2">
-                <p>{s.approved_at ? new Date(s.approved_at).toLocaleDateString('en-GB') : 'Pending'}</p>
-                {s.payment_provider !== 'stripe' && (
-                  <button
-                    onClick={() => refreshFromPayPal(s.id)}
-                    disabled={refreshingId === s.id || !s.paypal_subscription_id}
-                    title="Ask PayPal what the real status is — use when a sub is stuck on PENDING_APPROVAL but the donor says they signed up"
-                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/8 text-white/70 hover:bg-white/15 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">
-                    {refreshingId === s.id ? '↻ Checking…' : '↻ Refresh from PayPal'}
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+                {filtered.map(s => {
+                  const donorLabel = (s.donor_name && s.donor_name.trim())
+                    || s.donor_email
+                    || 'Anonymous'
+                  const subRef = s.payment_provider === 'stripe'
+                    ? (s.stripe_subscription_id || '')
+                    : (s.paypal_subscription_id || '')
+                  const shortRef = subRef ? `${subRef.slice(0, 14)}…${subRef.slice(-4)}` : '—'
+                  const createdLabel = s.created_at
+                    ? new Date(s.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : '—'
+                  return (
+                    <div key={s.id} className="rounded-xl p-4 flex items-center gap-4"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-white">£{Number(s.amount).toFixed(0)}/{s.frequency.toLowerCase()}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                                title={s.status}
+                                style={{ background: `${STATUS_COLOURS[s.status] || '#94a3b8'}20`, color: STATUS_COLOURS[s.status] || '#94a3b8' }}>
+                            {STATUS_LABELS[s.status] || s.status}
+                          </span>
+                          {(s.payment_provider === 'stripe')
+                            ? <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#635bff20', color: '#a5a1ff' }}>💳 Stripe</span>
+                            : <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#0070ba20', color: '#4aa3e0' }}>PayPal</span>}
+                          {s.tier_label && <span className="text-xs text-white/50">{s.tier_label}</span>}
+                        </div>
+                        <p className="text-sm text-white/80 mt-0.5">{donorLabel}</p>
+                        <p className="text-xs text-white/40 mt-0.5 font-mono">
+                          {shortRef} · {s.branch_id}
+                        </p>
+                        {refreshNote[s.id] && (
+                          <p className="text-xs text-saffron-400 mt-1">↻ {refreshNote[s.id]}</p>
+                        )}
+                      </div>
+                      <div className="text-right text-xs text-white/40 flex-shrink-0 flex flex-col items-end gap-2">
+                        <div>
+                          <p className="text-white/70 font-semibold">{createdLabel}</p>
+                          <p className="text-white/30 text-[10px]">created</p>
+                        </div>
+                        {s.payment_provider !== 'stripe' && (
+                          <button
+                            onClick={() => refreshFromPayPal(s.id)}
+                            disabled={refreshingId === s.id || !s.paypal_subscription_id}
+                            title="Ask PayPal what the real status is — use when a sub is stuck on PENDING_APPROVAL but the donor says they signed up"
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/8 text-white/70 hover:bg-white/15 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">
+                            {refreshingId === s.id ? '↻ Checking…' : '↻ Refresh from PayPal'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            )
+          })()}
         </div>
       )}
 
