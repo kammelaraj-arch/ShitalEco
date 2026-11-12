@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState, useCallback, useRef, type ComponentType } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import {
-  PayPalScriptProvider as _PPP,
-  PayPalButtons as _PPB,
-  type PayPalButtonsComponentProps,
-  type ReactPayPalScriptOptions,
-} from '@paypal/react-paypal-js'
 import { useStore } from '../store'
 import { api, type GivingTier } from '../api'
+
+// PayPal was removed from the Monthly Giving flow at operator request:
+// every monthly must go through Stripe Checkout so reconciliation + the
+// recurring-giving dashboard have a single source of truth. The old
+// PayPal buttons + subscription handlers have been deleted from this
+// file; backend PayPal endpoints are left intact for admin cleanup of
+// legacy subscriptions.
 
 const DEFAULT_TIERS: GivingTier[] = [
   { id: 'default-5',  amount: 5,  label: 'Lamp Supporter',  description: 'Supports daily lamp lighting at the temple',   frequency: 'MONTH', is_default: false, display_order: 1 },
@@ -16,18 +17,13 @@ const DEFAULT_TIERS: GivingTier[] = [
   { id: 'default-51', amount: 51, label: 'Festival Friend', description: 'Helps cover special festival and event costs', frequency: 'MONTH', is_default: false, display_order: 4 },
 ]
 
-const PayPalScriptProvider = _PPP as ComponentType<{ options: ReactPayPalScriptOptions; children: React.ReactNode }>
-const PayPalButtons = _PPB as ComponentType<PayPalButtonsComponentProps>
-
 export function MonthlyGivingPage() {
   const { branchId, setScreen } = useStore()
   const acctEmail = useStore(s => s.donorEmail)
   const acctName = useStore(s => s.donorName)
   const [tiers, setTiers]           = useState<GivingTier[]>([])
   const [selected, setSelected]     = useState<GivingTier | null>(null)
-  const [clientId, setClientId]     = useState('')
   const [loading, setLoading]       = useState(true)
-  const [planId, setPlanId]         = useState('')
   const [stripeEnabled, setStripeEnabled] = useState(false)
   const [stripeBusy, setStripeBusy] = useState(false)
 
@@ -41,7 +37,7 @@ export function MonthlyGivingPage() {
   const [lookingUp, setLookingUp]   = useState(false)
   const [addressError, setAddressError] = useState('')
 
-  const [step, setStep]             = useState<'pick' | 'details' | 'pay' | 'done'>('pick')
+  const [step, setStep]             = useState<'pick' | 'details' | 'done'>('pick')
   const [error, setError]           = useState('')
 
   const [giftAidDeclared, setGiftAidDeclared] = useState(false)
@@ -83,7 +79,6 @@ export function MonthlyGivingPage() {
         const def = tiers.find(t => t.is_default) ?? tiers[0]
         if (def) setSelected(def)
       }),
-      api.paypalConfig().then(cfg => setClientId(cfg.client_id)),
       // Is Stripe recurring available? (enabled only once the webhook secret is set)
       fetch(`${import.meta.env.VITE_API_URL ?? '/api/v1'}/service/stripe/config`)
         .then(r => r.json()).then(c => setStripeEnabled(!!c?.enabled)).catch(() => {}),
@@ -194,163 +189,11 @@ export function MonthlyGivingPage() {
     else setAddresses(found)
   }
 
+  // "Proceed to Payment" from the details step now goes straight to
+  // Stripe Checkout. There's no on-site intermediate step any more.
   async function goToPay() {
-    if (!selected) return
-    setError('')
-    try {
-      const isCustom = selected.id === 'custom'
-      const res = await api.givingSubscribe(
-        selected.id, branchId,
-        firstName.trim(), surname.trim(), donorEmail.trim(),
-        postcode.trim(), selectedAddress,
-        donorPhone.trim(),
-        isCustom ? Number(selected.amount) : null,
-        isCustom ? selected.label : '',
-      )
-      setPlanId(res.plan_id)
-      setStep('pay')
-    } catch {
-      setError('Could not set up subscription. Please try again.')
-    }
+    return payByStripe()
   }
-
-  const approveRef = useRef({
-    selected, planId, branchId, firstName, surname,
-    donorEmail, donorPhone, postcode, selectedAddress, giftAidDeclared,
-  })
-  useEffect(() => {
-    approveRef.current = {
-      selected, planId, branchId, firstName, surname,
-      donorEmail, donorPhone, postcode, selectedAddress, giftAidDeclared,
-    }
-  })
-
-  const handleApprove = useCallback(async (data: { subscriptionID?: string }) => {
-    const s = approveRef.current
-    if (!data.subscriptionID || !s.selected || !s.planId) return
-    setError('')
-    try {
-      await api.givingApprove({
-        subscription_id: data.subscriptionID,
-        plan_id: s.planId,
-        tier_id: s.selected.id,
-        amount: s.selected.amount,
-        frequency: s.selected.frequency,
-        branch_id: s.branchId,
-        donor_first_name: s.firstName.trim(),
-        donor_surname: s.surname.trim(),
-        donor_email: s.donorEmail.trim(),
-        donor_phone: s.donorPhone.trim(),
-        donor_postcode: s.postcode.trim(),
-        donor_address: s.selectedAddress,
-        gift_aid_declared: s.giftAidDeclared,
-        tier_label: s.selected.label,
-      })
-      setStep('done')
-    } catch {
-      // The donor's PayPal subscription is already active at this point — we
-      // failed only to record it server-side. Surface the subscription ID so
-      // they can email it to us; never silently advance to 'done' or they'll
-      // think everything's fine and we'll have a phantom charge with no DB row.
-      setError(
-        `Your PayPal subscription (${data.subscriptionID}) is active, but we couldn't record it on our side. ` +
-        `Please email info@shital.org.uk with this reference so we can confirm your monthly support and send your receipt.`,
-      )
-    }
-  }, [])
-
-  // PayPalScriptProvider's `options` prop must keep the same object
-  // identity across renders or the SDK keeps tearing down + remounting
-  // the buttons iframe — the user sees "Payment was interrupted" the
-  // moment they finally click Subscribe. PR #77 stabilised the
-  // callbacks but missed this object literal.
-  const paypalScriptOptions = useMemo(() => ({
-    clientId, vault: true, intent: 'subscription', currency: 'GBP', enableFunding: 'card',
-  }), [clientId])
-
-  // Identity-stable PayPalButtons callbacks. Inline arrow functions =
-  // fresh reference every keystroke in the donor fields, which made the
-  // SDK remount the Subscribe button mid-typing — next click then failed
-  // with the postrobot interrupted error.
-  const handleOnApprove = useCallback((data: unknown) => {
-    const d = data as { subscriptionID?: string } | null
-    return handleApprove({ subscriptionID: d?.subscriptionID })
-  }, [handleApprove])
-  const handlePayPalError = useCallback(() => setError('PayPal encountered an error. Please try again.'), [])
-  const handlePayPalCancel = useCallback(() => setStep('details'), [])
-
-  // Shared subscription builder for both the Card and PayPal buttons. Reads
-  // from approveRef so it stays identity-stable (the SDK remounts the buttons
-  // iframe if this changes identity mid-typing — same issue PR #77 fixed).
-  const handleCreateSubscription = useCallback<NonNullable<PayPalButtonsComponentProps['createSubscription']>>((_data, actions) => {
-    const s = approveRef.current
-    const trimmedAddr = s.selectedAddress.trim()
-    const parts = trimmedAddr.split(',').map(p => p.trim()).filter(Boolean)
-    const ukPostRe = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
-    const nonPcParts = parts.filter(p => !ukPostRe.test(p))
-    const addressL1 = nonPcParts[0] || ''
-    const city      = nonPcParts.length >= 2 ? nonPcParts[nonPcParts.length - 1] : ''
-    const addressL2 = nonPcParts.length >= 3 ? nonPcParts[1] : ''
-
-    const givenName  = s.firstName.trim()
-    const familyName = s.surname.trim()
-    const haveName   = !!(givenName && familyName)
-    const havePostcode = !!s.postcode.trim()
-    const haveAddress  = !!(addressL1 && havePostcode)
-    const fullName     = haveName ? `${givenName} ${familyName}` : ''
-
-    const email = s.donorEmail.trim()
-    const haveEmail = !!email && email.includes('@') && email.split('@')[1].includes('.')
-
-    let phoneDigits = s.donorPhone.replace(/\D/g, '')
-    if (phoneDigits.startsWith('44') && phoneDigits.length >= 12) phoneDigits = phoneDigits.slice(2)
-    if (phoneDigits.startsWith('0')) phoneDigits = phoneDigits.slice(1)
-    const havePhone = phoneDigits.length >= 9 && phoneDigits.length <= 11
-
-    const addressBlock = haveAddress ? {
-      address_line_1: addressL1,
-      ...(addressL2 && addressL2 !== city && { address_line_2: addressL2 }),
-      ...(city && { admin_area_2: city }),
-      postal_code: s.postcode.trim(),
-      country_code: 'GB',
-    } : null
-
-    const subscriber: Record<string, unknown> = {
-      ...(haveName  && { name: { given_name: givenName, surname: familyName } }),
-      ...(haveEmail && { email_address: email }),
-      ...(addressBlock && {
-        shipping_address: {
-          ...(fullName && { name: { full_name: fullName } }),
-          address: addressBlock,
-        },
-      }),
-    }
-    const payer: Record<string, unknown> = {
-      ...(haveName  && { name: { given_name: givenName, surname: familyName } }),
-      ...(haveEmail && { email_address: email }),
-      ...(havePhone && {
-        phone: {
-          phone_type: 'MOBILE',
-          phone_number: { national_number: phoneDigits },
-        },
-      }),
-      ...(addressBlock && { address: addressBlock }),
-    }
-    return actions.subscription.create({
-      plan_id: s.planId,
-      subscriber,
-      payer,
-      application_context: {
-        brand_name:          'Shital Temple',
-        locale:              'en-GB',
-        shipping_preference: addressBlock ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
-        user_action:         'SUBSCRIBE_NOW',
-        landing_page:        'BILLING',
-        return_url: `${window.location.origin}/?screen=monthly-giving&status=approved&branch=${encodeURIComponent(branchId)}`,
-        cancel_url: `${window.location.origin}/?screen=monthly-giving&status=cancelled&branch=${encodeURIComponent(branchId)}`,
-      },
-    } as Parameters<typeof actions.subscription.create>[0])
-  }, [])
 
   if (loading) {
     return (
@@ -498,7 +341,7 @@ export function MonthlyGivingPage() {
             <input type="tel" value={donorPhone} onChange={e => setDonorPhone(e.target.value)}
               placeholder="07123 456789" autoComplete="tel"
               className="w-full px-4 py-3 rounded-xl text-sm" />
-            <p className="text-xs mt-1 ml-1" style={{ color: 'rgba(255,248,220,0.4)' }}>Optional — speeds up PayPal checkout</p>
+            <p className="text-xs mt-1 ml-1" style={{ color: 'rgba(255,248,220,0.4)' }}>Optional</p>
           </div>
 
           <div>
@@ -574,46 +417,6 @@ export function MonthlyGivingPage() {
             style={{ background: 'linear-gradient(135deg,#D4AF37,#C5A028)', color: '#3B0000' }}>
             Proceed to Payment →
           </button>
-        </motion.div>
-      )}
-
-      {step === 'pay' && planId && clientId && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="temple-card p-4 mb-4">
-            <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(212,175,55,0.6)' }}>Monthly donation</p>
-            <p className="font-black text-2xl text-gold-400">£{selected ? Number(selected.amount).toFixed(0) : '—'}/month</p>
-            <p className="text-xs text-ivory-200 mt-0.5">{firstName} {surname} · {donorEmail}</p>
-            <button onClick={() => setStep('details')} className="text-xs font-bold mt-2" style={{ color: 'rgba(212,175,55,0.6)' }}>Change details</button>
-          </div>
-
-          <PayPalScriptProvider options={paypalScriptOptions}>
-            {/* Dedicated Debit/Credit Card button — opens PayPal's guest card
-                screen directly (no login-first). */}
-            <PayPalButtons
-              fundingSource="card"
-              style={{ layout: 'vertical', color: 'black', shape: 'rect', label: 'pay', height: 48 }}
-              createSubscription={handleCreateSubscription}
-              onApprove={handleOnApprove}
-              onError={handlePayPalError}
-              onCancel={handlePayPalCancel}
-            />
-            {/* PayPal button for donors who prefer to log in. */}
-            <PayPalButtons
-              fundingSource="paypal"
-              style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'subscribe', height: 48 }}
-              createSubscription={handleCreateSubscription}
-              onApprove={handleOnApprove}
-              onError={handlePayPalError}
-              onCancel={handlePayPalCancel}
-            />
-          </PayPalScriptProvider>
-
-          {error && (
-            <p className="text-sm font-medium mt-3 rounded-xl px-4 py-3"
-              style={{ background: 'rgba(198,40,40,0.15)', color: '#f87171', border: '1px solid rgba(198,40,40,0.3)' }}>
-              {error}
-            </p>
-          )}
         </motion.div>
       )}
 
