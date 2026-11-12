@@ -9,8 +9,9 @@ import { AmountKeypad } from '../components/AmountKeypad'
 // contact_id = NULL and is_anonymous = true via the existing
 // /quick-donation/record path.
 //
-// Uses the shared AmountKeypad component so the look + feel matches the
-// Any-Amount keypad on ProjectTiersScreen — no bespoke keypad here.
+// Uses the shared AmountKeypad in landscape 2-col mode, inside an
+// h-screen page (NOT min-h-screen) so the keypad's h-full actually
+// resolves to a bounded height — fits any tablet without scrolling.
 export function ProjectGuptScreen() {
   const { setAmount, setPendingGiftAid, setScreen } = useDonationStore()
   const accent = GUPT_DAAN_TILE.accent
@@ -23,10 +24,10 @@ export function ProjectGuptScreen() {
   }
 
   return (
-    <div className="min-h-screen px-4 py-4 text-white flex flex-col"
+    <div className="h-screen px-4 py-3 text-white flex flex-col overflow-hidden"
          style={{ background: `linear-gradient(170deg, ${bg} 0%, #140606 100%)` }}>
 
-      <header className="flex items-center mb-4 shrink-0">
+      <header className="flex items-center mb-3 shrink-0">
         <button onClick={() => setScreen('donate')}
                 className="px-3 py-2 rounded-xl text-white/85 hover:bg-white/10 text-sm">
           ← Back
@@ -41,7 +42,9 @@ export function ProjectGuptScreen() {
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 flex items-center justify-center">
+      {/* flex-1 min-h-0 bounds the keypad so h-full inside it resolves
+          correctly and the whole thing fits the viewport. */}
+      <div className="flex-1 min-h-0">
         <AmountKeypad
           mode="full"
           accent={accent}
