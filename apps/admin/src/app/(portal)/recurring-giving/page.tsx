@@ -120,6 +120,33 @@ export default function RecurringGivingPage() {
     } finally { setSyncing(false) }
   }
 
+  // Full Stripe → donations mirror. Walks every succeeded Stripe charge
+  // in the window and upserts it into donations (idempotent on
+  // payment_ref). Links subscription rows when the charge belongs to an
+  // invoice we can match. This is the proper direction: Stripe is the
+  // source of truth, we mirror. A daily background task does the same
+  // with a 2-day window.
+  async function stripeImport() {
+    setSyncing(true); setSyncNote('')
+    try {
+      const r = await fetch(`${API}/admin/giving/stripe-import?days=30`, { method: 'POST', headers: authHeaders() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      const d = await r.json()
+      if (d.skipped) { setSyncNote(`Skipped: ${d.skipped}`); return }
+      const samples = (d.error_samples as Array<{ stage?: string; error?: string }> | undefined) || []
+      const errTail = d.errors && samples.length
+        ? ` · first error: ${samples[0]?.stage || '?'} — ${samples[0]?.error || '?'}`
+        : ''
+      setSyncNote(
+        `Stripe import · scanned ${d.scanned ?? 0} charges · ${d.imported ?? 0} new donations · ` +
+        `${d.linked_subs ?? 0} subs flipped ACTIVE · ${d.skipped_duplicates ?? 0} duplicates skipped${d.errors ? ` · ${d.errors} errors${errTail}` : ''}`
+      )
+      await loadSubs()
+    } catch (e) {
+      setSyncNote(e instanceof Error ? e.message : 'Import failed')
+    } finally { setSyncing(false) }
+  }
+
   // Nuclear-option repair: hits /admin/giving/stripe-force-link which
   // bypasses _handle_checkout_completed entirely and just runs a minimal
   // targeted UPDATE per paid Stripe session → matching rgs row. Use when
@@ -592,6 +619,15 @@ export default function RecurringGivingPage() {
                 className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#0ea5e9,#0369a1)' }}>
                 {syncing ? 'Checking…' : '🔍 Stripe diagnostic'}
+              </button>
+              {/* Full Stripe → donations mirror. The proper direction:
+                  Stripe is the source of truth, we pull. Daily background
+                  task does the same with a 2-day window. */}
+              <button onClick={stripeImport} disabled={syncing}
+                title="Walks every succeeded Stripe charge in the last 30 days and mirrors it into our donations table (idempotent). Also links + flips ACTIVE any matching monthly-giving row. A daily background task does the same automatically."
+                className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#8b5cf6,#5b21b6)' }}>
+                {syncing ? 'Importing…' : '⬇ Import from Stripe'}
               </button>
               {/* Nuclear-option repair. Bypasses _handle_checkout_completed
                   and runs a minimal targeted UPDATE per paid Stripe session. */}

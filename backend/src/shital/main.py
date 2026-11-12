@@ -115,10 +115,12 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     # "stops after ~5 min" symptom). Set RECOVERY_LOOP_ENABLED=0 to disable.
     _recovery_task: _asyncio.Task[None] | None = None
     _stripe_giving_fast_task: _asyncio.Task[None] | None = None
+    _stripe_import_daily_task: _asyncio.Task[None] | None = None
     if os.environ.get("RECOVERY_LOOP_ENABLED", "1") == "1":
         from shital.services.background_recovery import (
             recovery_loop_supervised,
             stripe_giving_fast_loop_supervised,
+            stripe_import_daily_loop_supervised,
         )
         _recovery_task = _asyncio.create_task(recovery_loop_supervised())
         # Dedicated 60 s cadence for Stripe monthly-giving reconcile so a
@@ -127,8 +129,15 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
         # the main 15-min recovery sweep. Independent task so a stuck
         # sweep elsewhere doesn't delay it.
         _stripe_giving_fast_task = _asyncio.create_task(stripe_giving_fast_loop_supervised())
+        # Daily Stripe → donations mirror. Stripe is the source of truth
+        # for money received; we pull every succeeded charge in the last
+        # 2 days and upsert into donations (idempotent on payment_ref).
+        # Catches card-reader taps, dashboard payments, and subscription
+        # charges whose webhook went missing.
+        _stripe_import_daily_task = _asyncio.create_task(stripe_import_daily_loop_supervised())
         logger.info("recovery_loop_started")
         logger.info("stripe_giving_fast_loop_started")
+        logger.info("stripe_import_daily_loop_started")
     else:
         logger.info("recovery_loop_disabled_via_env")
 

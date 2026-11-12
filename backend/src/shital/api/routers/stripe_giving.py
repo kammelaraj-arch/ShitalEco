@@ -1531,3 +1531,174 @@ async def stripe_force_link(space: CurrentSpace, days: int = 30) -> dict[str, An
         out["rows"].append(row_info)
 
     return out
+
+
+# ── Import from Stripe ─────────────────────────────────────────────────────────
+#
+# Stripe is the source of truth for money received. Historically our only path
+# in was "donor hits our Checkout, we pre-create a row, we wait for the
+# subscription webhook". That path misses:
+#   * Card-reader taps (Terminal) that have no rgs row.
+#   * Payments created directly in Stripe Dashboard.
+#   * Historical subscription charges whose original rgs row never got linked
+#     because the webhook was dropped.
+#
+# This endpoint pulls `stripe.Charge.list()` for the window and upserts every
+# SUCCEEDED charge into `donations`, keyed by `payment_ref = charge.id`. When
+# the charge belongs to a subscription invoice and we can match the Stripe
+# subscription id to a `recurring_giving_subscriptions` row, we link the
+# donation to that row's contact + branch and flip the subscription ACTIVE in
+# the same transaction. When the charge is loose (no invoice, no matching sub)
+# we insert a stand-alone donation with `source='stripe_dashboard'` so the
+# admin page still sees the money.
+#
+# Idempotent: `payment_ref` is a VARCHAR(200) non-unique column but we SELECT
+# existence first. Rerunning any number of times (or overlapping with a
+# shorter daily window) produces zero duplicates.
+
+
+async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
+    """Pull every succeeded Stripe charge in the last `days` days and mirror
+    it into our donations table. Returns per-pass counters so the operator
+    can see exactly what moved."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    stripe = await _stripe()
+    out: dict[str, Any] = {
+        "days_window": days, "scanned": 0, "imported": 0, "linked_subs": 0,
+        "skipped_duplicates": 0, "errors": 0, "error_samples": [],
+    }
+    if not stripe.api_key:
+        out["skipped"] = "stripe_not_configured"
+        return out
+
+    since_ts = int((datetime.utcnow() - timedelta(days=days)).timestamp())
+    try:
+        charge_iter = stripe.Charge.list(
+            created={"gte": since_ts}, limit=100,
+        ).auto_paging_iter()
+    except Exception as exc:  # noqa: BLE001
+        out["errors"] += 1
+        out["error_samples"].append({"stage": "charge.list", "error": str(exc)[:200]})
+        return out
+
+    for raw in charge_iter:
+        ch = _d(raw)
+        out["scanned"] += 1
+        if ch.get("status") != "succeeded":
+            continue
+        charge_id = str(ch.get("id") or "")[:200]
+        if not charge_id:
+            continue
+        amount = (ch.get("amount") or 0) / 100.0
+        currency = str(ch.get("currency") or "gbp").upper()[:10]
+        created_at = datetime.fromtimestamp(int(ch.get("created") or 0)) \
+            if ch.get("created") else datetime.utcnow()
+        payment_intent_id = str(ch.get("payment_intent") or "")[:200]
+        invoice_id = str(ch.get("invoice") or "")[:200]
+
+        # Match to a monthly-giving row via the invoice → subscription → rgs.
+        rgs_row = None
+        if invoice_id:
+            try:
+                inv = _d(stripe.Invoice.retrieve(invoice_id))
+                sub_id = str(inv.get("subscription") or "")[:255]
+                if sub_id:
+                    async with SessionLocal() as db:
+                        rgs_row = (await db.execute(text("""
+                            SELECT id::text AS id, branch_id,
+                                   contact_id::text AS contact_id,
+                                   COALESCE(gift_aid_declared,false) AS ga
+                            FROM   recurring_giving_subscriptions
+                            WHERE  stripe_subscription_id = :sub
+                            LIMIT  1
+                        """), {"sub": sub_id})).mappings().first()
+            except Exception as exc:  # noqa: BLE001
+                if len(out["error_samples"]) < 5:
+                    out["error_samples"].append({
+                        "charge_id": charge_id,
+                        "stage": "invoice.retrieve",
+                        "error": str(exc)[:200],
+                    })
+                # Not fatal — we still insert the donation, just unlinked.
+
+        # Idempotent insert (payment_ref is the Stripe charge id).
+        try:
+            async with SessionLocal() as db:
+                exists = (await db.execute(text(
+                    "SELECT 1 FROM donations WHERE payment_ref = :ref LIMIT 1"
+                ), {"ref": charge_id})).first()
+                if exists:
+                    out["skipped_duplicates"] += 1
+                else:
+                    await db.execute(text("""
+                        INSERT INTO donations
+                            (id, branch_id, amount, currency, purpose,
+                             payment_provider, payment_ref, status, source,
+                             contact_id, gift_aid_eligible,
+                             created_at, updated_at)
+                        VALUES
+                            (gen_random_uuid(),
+                             :branch,
+                             :amount,
+                             :currency,
+                             :purpose,
+                             'stripe',
+                             :ref,
+                             'COMPLETED',
+                             :source,
+                             CAST(:contact AS uuid),
+                             :ga,
+                             :created,
+                             NOW())
+                    """), {
+                        "branch":   (rgs_row["branch_id"] if rgs_row else "main"),
+                        "amount":   amount,
+                        "currency": currency,
+                        "purpose":  ("Monthly Giving" if rgs_row else "Stripe Payment"),
+                        "ref":      charge_id,
+                        "source":   ("monthly-giving" if rgs_row else "stripe_dashboard"),
+                        "contact":  (rgs_row["contact_id"] if rgs_row else None),
+                        "ga":       bool(rgs_row and rgs_row["ga"]),
+                        "created":  created_at,
+                    })
+                    out["imported"] += 1
+                # Link + flip ACTIVE on the rgs row (idempotent).
+                if rgs_row:
+                    r = await db.execute(text("""
+                        UPDATE recurring_giving_subscriptions
+                        SET status              = 'ACTIVE',
+                            last_payment_at     = :paid,
+                            last_payment_amount = :amount,
+                            total_payments      = COALESCE(total_payments,0) + 1,
+                            approved_at         = COALESCE(approved_at, :paid),
+                            updated_at          = NOW()
+                        WHERE id = CAST(:id AS uuid)
+                          AND UPPER(COALESCE(status,'')) <> 'CANCELLED'
+                          AND (last_payment_at IS NULL OR last_payment_at < :paid)
+                        RETURNING id
+                    """), {"id": rgs_row["id"], "paid": created_at, "amount": amount})
+                    if r.first():
+                        out["linked_subs"] += 1
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            out["errors"] += 1
+            if len(out["error_samples"]) < 5:
+                out["error_samples"].append({
+                    "charge_id": charge_id,
+                    "stage": "donations.insert",
+                    "error": f"{exc.__class__.__name__}: {str(exc)[:200]}",
+                })
+
+    return out
+
+
+@router.post("/admin/giving/stripe-import")
+async def admin_stripe_import(space: CurrentSpace, days: int = 30) -> dict[str, Any]:  # noqa: ARG001
+    """Admin-triggered import. Walks every succeeded Stripe charge in the
+    window and mirrors it into donations (idempotent). Also links + activates
+    any matching monthly-giving row. This is the proper one-direction sync
+    we always should have had: Stripe → us. Admin-only."""
+    return await _stripe_import_once(days=days)
