@@ -82,6 +82,9 @@ export default function RecurringGivingPage() {
   const [copied, setCopied]   = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncNote, setSyncNote] = useState('')
+  // Separate line for the auto-polling diagnostic so it doesn't overwrite
+  // the Import / Force-link / Sync result the operator just clicked.
+  const [diagNote, setDiagNote] = useState('')
   const [stats, setStats]     = useState<GivingStats | null>(null)
 
   async function syncPayPal() {
@@ -244,12 +247,17 @@ export default function RecurringGivingPage() {
       const r = await fetch(`${API}/admin/giving/stripe-diagnostic?days=30`, { headers: authHeaders() })
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
       const d = await r.json()
-      setSyncNote(
+      const line = (
         `Diag · ${d.stripe_session_count ?? 0} Stripe sessions · ` +
         `${d.paid_sessions_with_rgs ?? 0} paid · ` +
         `${(d.paid_but_unlinked?.length ?? 0)} unlinked. ` +
         `${d.verdict || ''}`
       )
+      // Silent auto-poll goes to diagNote only — never clobbers the Import/
+      // Force-link/Sync output the operator just clicked. Explicit click
+      // still writes to the main syncNote.
+      if (silent) setDiagNote(line)
+      else { setSyncNote(line); setDiagNote(line) }
     } catch (e) {
       if (!silent) setSyncNote(e instanceof Error ? e.message : 'Diagnostic failed')
     } finally { if (!silent) setSyncing(false) }
@@ -649,7 +657,8 @@ export default function RecurringGivingPage() {
               </button>
             </div>
           </div>
-          {syncNote && <p className="text-xs rounded-lg px-3 py-2 bg-cyan-500/10 text-cyan-200 border border-cyan-500/20">{syncNote}</p>}
+          {syncNote && <p className="text-xs rounded-lg px-3 py-2 bg-cyan-500/10 text-cyan-200 border border-cyan-500/20 whitespace-pre-wrap break-all">{syncNote}</p>}
+          {diagNote && diagNote !== syncNote && <p className="text-xs rounded-lg px-3 py-2 bg-amber-500/10 text-amber-200 border border-amber-500/20">{diagNote}</p>}
           {subs.length === 0 && <p className="text-white/40 text-sm">No subscriptions yet.</p>}
           {subs.map(s => (
             <div key={s.id} className="rounded-xl p-4 flex items-center gap-4"
