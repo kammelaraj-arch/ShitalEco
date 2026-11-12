@@ -1779,7 +1779,14 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
                     "currency": currency,
                     "purpose":  ("Monthly Giving" if rgs_row else "Stripe Payment"),
                     "ref":      charge_id,
-                    "source":   ("monthly-giving" if rgs_row else "stripe_dashboard"),
+                    # Every row from the Stripe import carries source='stripe'
+                    # so the Portal filter and audit queries can tell at a
+                    # glance "where did this money come in from". The
+                    # one-off vs recurring split lives on `purpose`
+                    # (Monthly Giving vs Stripe Payment) — one filter, one
+                    # column, no overlap with 'monthly-giving' which the
+                    # legacy service portal used for its own flow.
+                    "source":   "stripe",
                     "contact":  contact_id,
                     "ga":       bool(rgs_row and rgs_row["ga"]),
                     "created":  created_at,
