@@ -33,11 +33,17 @@ export const GUPT_DAAN_TILE: TileDef = {
   bg: '#5B2A99', accent: '#CDA4DF', anon: true,
 }
 
+// Default logo if the device hasn't been configured with one. Points at
+// the same asset the service portal + email templates already use, so
+// there's one Shital mark across every surface.
+const DEFAULT_LOGO_URL = 'https://shirdisai.org.uk/Cnt/img/shital-logo-new.png'
+
 export function ProjectStartScreen() {
   const {
     enabledTiles, guptDaanEnabled, linkedProjects, branchId,
-    setPickedCategory, setScreen,
+    setPickedCategory, setScreen, orgLogoUrl,
   } = useDonationStore()
+  const logoUrl = (orgLogoUrl || '').trim() || DEFAULT_LOGO_URL
 
   // Resolve the ordered list of tiles the admin picked. Empty config
   // means render every project-type tile in catalog order.
@@ -97,9 +103,25 @@ export function ProjectStartScreen() {
   return (
     <div className="min-h-screen flex flex-col px-4 py-5"
          style={{ background: 'var(--qd-bg, #140606)', color: 'var(--qd-text-primary, #FFF8EC)' }}>
-      <header className="flex items-center justify-between mb-2">
-        <div className="min-w-0">
-          <h1 className="font-black text-4xl leading-none"
+      <header className="flex items-center justify-between gap-3 mb-2">
+        {/* Shital logo + title. Logo loads device-configured URL first
+            (orgLogoUrl from the admin profile), falling back to the
+            canonical Shital mark served from shirdisai.org.uk. onError
+            hides the img so a broken config never leaves a torn icon
+            in the header. */}
+        <div className="flex items-center gap-3 min-w-0">
+          <img
+            src={logoUrl}
+            alt="Shital"
+            className="w-12 h-12 rounded-xl shrink-0 object-contain"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              padding: '4px',
+            }}
+            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+          />
+          <h1 className="font-black text-4xl leading-none min-w-0"
               style={{ color: 'var(--qd-accent, #F6C454)', fontFamily: 'serif', letterSpacing: '-0.02em' }}>
             Tap &amp; Donate
             <span className="ml-2 font-medium text-sm align-middle"
