@@ -1,8 +1,9 @@
 import { useState, type ReactElement } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { AnimatePresence } from 'framer-motion'
 import { useDonationStore } from '../store/donation.store'
 import { TILE_CATALOG } from './ProjectStartScreen'
 import { AmountKeypad } from '../components/AmountKeypad'
+import { TierGrid } from '@shital/donation-blocks'
 
 // ---------- Photoreal "digital-twin" brick -----------------------------------
 // Layered gradients + chamfer + inner mortar shadow + top light sheen so the
@@ -244,74 +245,17 @@ export function ProjectTiersScreen() {
         </div>
       </header>
 
-      {/* Tier grid: 3 cols × 2 rows → 6 tiles visible without scroll */}
-      <div className="grid grid-cols-3 gap-3 flex-1 min-h-0">
-        {tiers.map(tier => (
-          <motion.button key={tier.label} whileTap={{ scale: 0.96 }}
-                         onClick={() => pickTier(tier.price)}
-                         className="rounded-2xl text-left relative flex flex-col overflow-hidden"
-                         style={{
-                           background: tier.featured
-                             ? `linear-gradient(160deg, ${accent}30 0%, rgba(255,255,255,0.03) 100%)`
-                             : 'rgba(255,255,255,0.04)',
-                           border: tier.featured
-                             ? `2px solid ${accent}`
-                             : '1.5px solid rgba(255,255,255,0.12)',
-                           boxShadow: tier.featured
-                             ? `0 0 28px ${accent}40, inset 0 1px 0 rgba(255,255,255,0.05)`
-                             : 'inset 0 1px 0 rgba(255,255,255,0.05)',
-                         }}>
-            {/* Top header: label + price on one line + sub */}
-            <div className="px-3 pt-3 pb-2 border-b border-white/10 shrink-0">
-              <div className="flex items-baseline justify-between gap-2">
-                <div className="font-black text-base leading-tight truncate" style={{ fontFamily: 'serif' }}>
-                  {tier.label}
-                </div>
-                <div className="font-black text-xl shrink-0" style={{ color: accent, fontFamily: 'serif' }}>
-                  £{tier.price.toLocaleString()}
-                </div>
-              </div>
-              {tier.sub && <div className="text-[10px] opacity-60 leading-snug mt-0.5">{tier.sub}</div>}
-            </div>
-            {/* Digital-twin brick fills the rest of the tile */}
-            <div className="flex-1 min-h-0 p-3 flex items-center justify-center"
-                 style={{ filter: 'drop-shadow(0 8px 18px rgba(0,0,0,0.7))' }}>
-              {tier.render()}
-            </div>
-            {tier.featured && (
-              <div className="absolute top-2 right-2 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full z-10"
-                   style={{ background: accent, color: '#180324' }}>Most chosen</div>
-            )}
-          </motion.button>
-        ))}
-
-        {/* Any Amount tile — same shape, pencil glyph, label on top */}
-        <motion.button whileTap={{ scale: 0.96 }}
-                       onClick={() => setKeypadOpen(true)}
-                       className="rounded-2xl text-left relative flex flex-col overflow-hidden"
-                       style={{
-                         background: 'rgba(255,255,255,0.03)',
-                         border: `2px dashed ${accent}80`,
-                       }}>
-          <div className="px-3 pt-3 pb-2 border-b border-white/10 shrink-0">
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="font-black text-base leading-tight" style={{ fontFamily: 'serif' }}>
-                Any Amount
-              </div>
-              <div className="font-black text-xl shrink-0" style={{ color: accent, fontFamily: 'serif' }}>
-                £ …
-              </div>
-            </div>
-            <div className="text-[10px] opacity-60 leading-snug mt-0.5">
-              Enter what you&apos;d like to give
-            </div>
-          </div>
-          <div className="flex-1 min-h-0 p-3 flex items-center justify-center text-7xl"
-               style={{ filter: 'drop-shadow(0 8px 18px rgba(0,0,0,0.7))' }}>
-            ✏️
-          </div>
-        </motion.button>
-      </div>
+      {/* Global LEGO — <TierGrid> from @shital/donation-blocks. Same
+          markup/animation as before, imported instead of inlined so
+          the service portal and campaign pages can mount the same tier
+          grid with their own tier list. */}
+      <TierGrid
+        tiers={tiers}
+        accent={accent}
+        onPick={price => pickTier(price)}
+        onAnyAmount={() => setKeypadOpen(true)}
+        cols={3}
+      />
 
       {/* Highlighted back pill */}
       <button onClick={() => setScreen('donate')}

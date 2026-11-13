@@ -6,6 +6,10 @@ export default {
     // Shared LEGO package used by the Wembley Appeal flow. Without this
     // entry Tailwind would purge every class the package emits.
     '../../packages/appeal-ui/src/**/*.{js,ts,jsx,tsx}',
+    // Global donation LEGO (<DonationPicker>, CategoryGrid, TierGrid).
+    // Same purge story — without this the grid buttons lose their
+    // classes in the production build.
+    '../../packages/donation-blocks/src/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {
