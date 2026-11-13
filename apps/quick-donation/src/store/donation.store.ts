@@ -7,6 +7,10 @@ export type Screen =
   | 'project-contact' // mandatory donor details before tap
   | 'project-pledge'  // services / volunteering / materials / business — non-payment pledge checklist
   | 'project-gupt'    // anonymous amount keypad → straight to tap (no contact)
+  | 'appeal'          // Future Legacy Appeal basket — Wembley branch only.
+                      // Mounts <AppealGrid> + <BasketBadge> from
+                      // @shital/appeal-ui. Tap → add to basket → total
+                      // amount → existing TapScreen for card tap.
 export type ReaderProvider = 'stripe_terminal' | 'sumup' | 'clover' | ''
 export type DonationMode = 'quick' | 'project'
 export interface LinkedProject {
@@ -105,6 +109,16 @@ export interface DonationState {
   // selectedPledgeItems + donor fields (bypassing the card tap).
   selectedPledgeItems: string[]
 
+  // ── Future Legacy Appeal basket (Wembley branch only) ───────────────
+  // Donors can pick multiple tiers (Square Foot × 1, Red Brick × 3, …)
+  // and tap once at the end to pay the total — kiosk mirrors the
+  // service-portal basket exactly, same tiers, same prices. Cleared on
+  // successful tap OR explicit reset. Keys are AppealProduct['key']
+  // from @shital/appeal-ui.
+  appealBasket: Record<string, number>
+  appealSetQty: (key: string, qty: number) => void
+  appealReset: () => void
+
   _hasHydrated: boolean
   setHasHydrated: (v: boolean) => void
 
@@ -169,6 +183,16 @@ export const useDonationStore = create<DonationState>()(
       tierProfile: null,
       selectedPledgeItems: [],
 
+      appealBasket: {},
+      appealSetQty: (key, qty) =>
+        set(state => {
+          const next = { ...state.appealBasket }
+          if (qty <= 0) delete next[key]
+          else next[key] = qty
+          return { appealBasket: next }
+        }),
+      appealReset: () => set({ appealBasket: {} }),
+
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
@@ -201,6 +225,11 @@ export const useDonationStore = create<DonationState>()(
           paymentIntentId: null,
           clientSecret: null,
           pendingGiftAid: null,
+          // Session state — a new donor shouldn't inherit the last one's
+          // Appeal basket. partialize deliberately excludes this so the
+          // basket also dies on page reload.
+          appealBasket: {},
+          selectedPledgeItems: [],
         }),
     }),
     {
