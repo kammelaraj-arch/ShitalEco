@@ -4,12 +4,23 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
 
-COPY apps/service/package.json ./
+# Workspace-root files + the package manifests of every workspace dep
+# the service pulls in. pnpm needs these in place BEFORE the install so
+# `--filter @shital/service...` can walk the dep graph. Add new
+# workspace deps to this block.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY apps/service/package.json apps/service/
+COPY packages/appeal-ui/package.json packages/appeal-ui/
 
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
-RUN pnpm install --no-frozen-lockfile --ignore-scripts
+RUN pnpm install --no-frozen-lockfile --ignore-scripts --filter @shital/service...
 
-COPY apps/service/ ./
+COPY apps/service/ apps/service/
+# Full source of workspace deps AFTER install so tsc / vite can import
+# from them during build.
+COPY packages/appeal-ui/ packages/appeal-ui/
+
+WORKDIR /app/apps/service
 
 ARG VITE_API_URL=/api/v1
 # Default to root '/' — the service app is served at its own subdomain
@@ -38,7 +49,7 @@ ENV BUILD_TIME=${BUILD_TIME}
 
 RUN rm /etc/nginx/conf.d/default.conf
 
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/apps/service/dist /usr/share/nginx/html
 RUN printf '%s\n' "${GIT_SHA}" > /usr/share/nginx/html/version.txt \
  && printf '{"git_sha":"%s","build_time":"%s"}\n' "${GIT_SHA}" "${BUILD_TIME}" \
       > /usr/share/nginx/html/version.json

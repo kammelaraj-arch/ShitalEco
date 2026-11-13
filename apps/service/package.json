@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^8.7.0",
+    "@shital/appeal-ui": "workspace:*",
     "framer-motion": "^11.3.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

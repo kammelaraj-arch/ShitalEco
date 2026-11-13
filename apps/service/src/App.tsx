@@ -17,6 +17,7 @@ import { MyGivingPage } from './pages/MyGivingPage'
 import { VolunteerRegistrationPage } from './pages/VolunteerRegistrationPage'
 import { SevaPage } from './pages/SevaPage'
 import { SqFtPage } from './pages/SqFtPage'
+import { SqFtPageV2 } from './pages/SqFtPageV2'
 import { DonorWallPage } from './pages/DonorWallPage'
 import { DarshanPage } from './pages/DarshanPage'
 import { ReferenceResponsePage } from './pages/ReferenceResponsePage'
@@ -199,6 +200,7 @@ export default function App() {
       case 'volunteer': return <VolunteerRegistrationPage />
       case 'seva': return <SevaPage />
       case 'sqft': return <SqFtPage />
+      case 'sqft-v2': return <SqFtPageV2 />
       case 'donor-wall': return <DonorWallPage />
       case 'darshan': return <DarshanPage />
       case 'reference': return <ReferenceResponsePage />

@@ -1,6 +1,13 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  content: [
+    './index.html',
+    './src/**/*.{js,ts,jsx,tsx}',
+    // Global donation LEGO (AppealTile, AppealGrid, BasketBadge,
+    // QtyStepper) shared with the kiosk. Without this entry Tailwind
+    // would purge the package's classes from the production build.
+    '../../packages/appeal-ui/src/**/*.{js,ts,jsx,tsx}',
+  ],
   theme: {
     extend: {
       colors: {
