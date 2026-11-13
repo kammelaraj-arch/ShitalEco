@@ -11,16 +11,13 @@ import { ProjectTiersScreen } from './pages/ProjectTiersScreen'
 import { ProjectContactScreen } from './pages/ProjectContactScreen'
 import { ProjectPledgeScreen } from './pages/ProjectPledgeScreen'
 import { ProjectGuptScreen } from './pages/ProjectGuptScreen'
+// AppealScreen stays imported so the 'appeal' Screen route still works
+// (admin can route to it explicitly later), but the automatic Wembley
+// branch gate from PR #391 is intentionally removed — operator will
+// specify when/how to show it. For now, all branches default back to
+// the original ProjectStartScreen / DonationScreen flow.
 import { AppealScreen } from './pages/AppealScreen'
 import { unlockVoiceOnFirstGesture } from './lib/voice'
-
-// Wembley kiosk defaults to the Future Legacy Appeal basket flow
-// (shared tiles from @shital/appeal-ui, mirrors service portal). Other
-// branches keep whichever donationMode the admin set. Matching is
-// prefix-based so `wembley_main`, `wembley_two`, `wembley` all qualify
-// — admins can add/rename wembley kiosks without a code change.
-const isWembley = (branchId: string): boolean =>
-  branchId.toLowerCase().startsWith('wembley')
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api/v1'
 
@@ -306,14 +303,9 @@ export function QuickDonationApp() {
   // processing, confirmation, admin) flows through the same screens as
   // quick mode so the card reader + receipt pipeline doesn't fork.
   const donationMode = useDonationStore(s => s.donationMode)
-  const branchId = useDonationStore(s => s.branchId)
   const renderScreen = () => {
     switch (screen) {
       case 'donate':
-        // Wembley kiosks default to the Appeal basket flow. Classic and
-        // project modes stay the fallback for every other branch; the
-        // Appeal mode is strictly add-on, zero regression elsewhere.
-        if (isWembley(branchId)) return <AppealScreen key="appeal" />
         return donationMode === 'project'
           ? <ProjectStartScreen key="project-start" />
           : <DonationScreen    key="donate" />
