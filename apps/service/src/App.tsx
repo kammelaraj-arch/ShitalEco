@@ -199,8 +199,8 @@ export default function App() {
       case 'my-giving':      return <MyGivingPage />
       case 'volunteer': return <VolunteerRegistrationPage />
       case 'seva': return <SevaPage />
-      case 'sqft': return <SqFtPage />
-      case 'sqft-v2': return <SqFtPageV2 />
+      case 'sqft': return <SqFtPageV2 />
+      case 'sqft-classic': return <SqFtPage />
       case 'donor-wall': return <DonorWallPage />
       case 'darshan': return <DarshanPage />
       case 'reference': return <ReferenceResponsePage />
