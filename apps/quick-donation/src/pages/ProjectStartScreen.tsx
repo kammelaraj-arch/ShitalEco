@@ -67,10 +67,17 @@ export function ProjectStartScreen() {
 
   // Compact header line matches the live Tap & Donate layout but appends
   // the admin-linked project name(s) so the donor knows what they're
-  // supporting without a separate ribbon. One project → its name;
+  // supporting without a separate ribbon. One project → its title;
   // multiple → "N projects"; none → branch alone.
+  //
+  // Prefer `display_title` (donor-facing marketing title, e.g.
+  // "Future Legacy Appeal") over `name` (internal admin lookup, e.g.
+  // "wembley"). Falls back to `name` for legacy projects where
+  // display_title hasn't been filled in yet.
+  const titleOf = (p: { name: string; display_title?: string }) =>
+    p.display_title?.trim() || p.name
   const projectSuffix = linkedProjects.length === 1
-    ? ` · ${linkedProjects[0].name}`
+    ? ` · ${titleOf(linkedProjects[0])}`
     : linkedProjects.length > 1
       ? ` · ${linkedProjects.length} projects`
       : ''

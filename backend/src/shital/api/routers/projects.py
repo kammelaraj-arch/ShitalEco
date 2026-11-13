@@ -22,6 +22,10 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 class ProjectIn(BaseModel):
     name: str
+    # Donor-facing title shown on the kiosk / donation pages. Optional —
+    # when empty the kiosk falls back to `name` so existing projects
+    # don't need any admin action.
+    display_title: str = ""
     description: str = ""
     branch_id: str = "main"
     goal_amount: float = 0
@@ -211,16 +215,17 @@ async def create_project(body: ProjectIn, ctx: CurrentSpace) -> dict[str, Any]:
             new_id = str(uuid.uuid4())
             await db.execute(text("""
                 INSERT INTO projects
-                    (id, project_id, name, description, branch_id, goal_amount,
-                     image_url, start_date, end_date, is_active, sort_order,
-                     created_at, updated_at)
+                    (id, project_id, name, display_title, description, branch_id,
+                     goal_amount, image_url, start_date, end_date, is_active,
+                     sort_order, created_at, updated_at)
                 VALUES
-                    (:id, :pid, :name, :desc, :bid, :goal,
+                    (:id, :pid, :name, :dtitle, :desc, :bid, :goal,
                      :img, :start, :end, :active, :sort,
                      :now, :now)
             """), {
                 "id": new_id, "pid": project_id,
-                "name": body.name, "desc": body.description, "bid": body.branch_id,
+                "name": body.name, "dtitle": body.display_title,
+                "desc": body.description, "bid": body.branch_id,
                 "goal": body.goal_amount, "img": body.image_url,
                 "start": body.start_date or None, "end": body.end_date or None,
                 "active": body.is_active, "sort": body.sort_order, "now": now,
@@ -256,14 +261,16 @@ async def update_project(project_id: str, body: ProjectIn, ctx: CurrentSpace) ->
                 raise HTTPException(status_code=404, detail="Project not found")
             await db.execute(text("""
                 UPDATE projects SET
-                    name = :name, description = :desc, branch_id = :bid,
+                    name = :name, display_title = :dtitle,
+                    description = :desc, branch_id = :bid,
                     goal_amount = :goal, image_url = :img,
                     start_date = :start, end_date = :end,
                     is_active = :active, sort_order = :sort,
                     updated_at = :now
                 WHERE id = :id
             """), {
-                "name": body.name, "desc": body.description, "bid": body.branch_id,
+                "name": body.name, "dtitle": body.display_title,
+                "desc": body.description, "bid": body.branch_id,
                 "goal": body.goal_amount, "img": body.image_url,
                 "start": body.start_date or None, "end": body.end_date or None,
                 "active": body.is_active, "sort": body.sort_order,

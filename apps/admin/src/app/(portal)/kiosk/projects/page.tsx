@@ -10,6 +10,10 @@ interface Project {
   id: string
   project_id: string
   name: string
+  // Donor-facing marketing title — "Future Legacy Appeal", "Phase 2 —
+  // New Hall". Falls back to `name` on the kiosk when empty, so legacy
+  // projects keep working without any admin action.
+  display_title: string
   description: string
   branch_id: string
   goal_amount: number
@@ -40,7 +44,7 @@ interface ProjectItem {
 interface Branch { branch_id: string; name: string; is_active?: boolean }
 
 const EMPTY: Omit<Project, 'id' | 'project_id'> = {
-  name: '', description: '', branch_id: 'main', goal_amount: 0,
+  name: '', display_title: '', description: '', branch_id: 'main', goal_amount: 0,
   image_url: '', start_date: null, end_date: null, is_active: true, sort_order: 0,
 }
 
@@ -111,7 +115,8 @@ export default function ProjectsPage() {
   const openEdit = (p: Project) => {
     setEditing(p)
     setForm({
-      name: p.name, description: p.description, branch_id: p.branch_id,
+      name: p.name, display_title: p.display_title || '',
+      description: p.description, branch_id: p.branch_id,
       goal_amount: p.goal_amount, image_url: p.image_url,
       start_date: p.start_date ? p.start_date.slice(0, 10) : null,
       end_date: p.end_date ? p.end_date.slice(0, 10) : null,
@@ -522,9 +527,15 @@ export default function ProjectsPage() {
                 {error && <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
 
                 <div>
-                  <label className={lbl}>Project Name *</label>
+                  <label className={lbl}>Project Name * <span className="text-white/35 font-normal normal-case tracking-normal">(internal — how you'll find this project)</span></label>
                   <input value={form.name} onChange={e => f('name', e.target.value)}
-                    placeholder="e.g. Temple Hall Construction" className={inp} />
+                    placeholder="e.g. wembley, phase2" className={inp} />
+                </div>
+
+                <div>
+                  <label className={lbl}>Display Title <span className="text-white/35 font-normal normal-case tracking-normal">(donor-facing — shown on the kiosk header; falls back to Name if empty)</span></label>
+                  <input value={form.display_title} onChange={e => f('display_title', e.target.value)}
+                    placeholder="e.g. Future Legacy Appeal · Secure Our Ground" className={inp} />
                 </div>
 
                 <div>
