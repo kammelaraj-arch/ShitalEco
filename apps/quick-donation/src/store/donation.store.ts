@@ -15,7 +15,13 @@ export type ReaderProvider = 'stripe_terminal' | 'sumup' | 'clover' | ''
 export type DonationMode = 'quick' | 'project'
 export interface LinkedProject {
   id: string
+  /** Internal admin lookup — "wembley", "phase2". Stays stable so admins
+   *  find their projects. */
   name: string
+  /** Donor-facing marketing title — "Future Legacy Appeal",
+   *  "Phase 2 — New Hall". Falls back to `name` on the kiosk when
+   *  empty, so legacy projects keep working. */
+  display_title?: string
   goal_amount?: number
   raised_amount?: number
 }

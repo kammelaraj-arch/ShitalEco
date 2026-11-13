@@ -1119,6 +1119,7 @@ async def _resolve_project_names(project_ids: list[str]) -> list[dict[str, Any]]
             rows = (await db.execute(text("""
                 SELECT p.id::text                                 AS id,
                        p.name                                     AS name,
+                       COALESCE(p.display_title, '')              AS display_title,
                        COALESCE(p.goal_amount, 0)::numeric        AS goal_amount,
                        COALESCE((
                            SELECT SUM(amount)::numeric FROM donations
@@ -1132,6 +1133,10 @@ async def _resolve_project_names(project_ids: list[str]) -> list[dict[str, Any]]
             """), {"ids": project_ids})).mappings().all()
         by_id = {r["id"]: {
             "name":           r["name"],
+            # Donor-facing title. Empty string on legacy rows → client
+            # falls back to `name` so nothing visible changes until the
+            # admin fills this in.
+            "display_title":  r["display_title"] or "",
             "goal_amount":    float(r["goal_amount"] or 0),
             "raised_amount":  float(r["raised_amount"] or 0),
         } for r in rows}

@@ -735,6 +735,13 @@ async def _patch_schema() -> None:
         # an early-stage project doesn't have to fill every slot).
         # Plus budget_total (committed budget), status (lifecycle), and
         # risk_level (operator-set RAG).
+        # Donor-facing title shown on the kiosk / donation pages. Internal
+        # `name` stays as the operator-friendly admin lookup string
+        # (e.g. "wembley", "phase2"); display_title carries the longer
+        # marketing title ("Future Legacy Appeal", "Phase 2 — New Hall")
+        # so donors see a branded header without the operator having to
+        # rename the project. NULL/empty → kiosk falls back to `name`.
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_title VARCHAR(200) NOT NULL DEFAULT ''",
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_manager_id UUID DEFAULT NULL",
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS business_owner_id  UUID DEFAULT NULL",
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS tech_owner_id      UUID DEFAULT NULL",
