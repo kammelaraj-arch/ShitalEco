@@ -13,6 +13,7 @@ COPY apps/quick-donation/package.json apps/quick-donation/
 # needs the package.json of every workspace dep present on disk BEFORE
 # the install step so it can resolve them. Add new workspace deps here.
 COPY packages/appeal-ui/package.json packages/appeal-ui/
+COPY packages/donation-blocks/package.json packages/donation-blocks/
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile --filter @shital/quick-donation... || pnpm install --filter @shital/quick-donation...
@@ -21,6 +22,7 @@ COPY apps/quick-donation/ apps/quick-donation/
 # Copy the full source of workspace deps AFTER install so tsc / vite
 # can import from them during build.
 COPY packages/appeal-ui/ packages/appeal-ui/
+COPY packages/donation-blocks/ packages/donation-blocks/
 
 WORKDIR /app/apps/quick-donation
 
