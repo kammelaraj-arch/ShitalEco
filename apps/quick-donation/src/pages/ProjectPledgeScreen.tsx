@@ -127,7 +127,8 @@ export function ProjectPledgeScreen() {
 
       <header className="flex items-center mb-4 shrink-0">
         <button onClick={() => setScreen('donate')}
-                className="px-3 py-2 rounded-xl text-white/85 hover:bg-white/10 text-sm">
+                className="px-4 py-2 rounded-xl text-white font-bold text-sm hover:bg-white/15 border border-white/25"
+                style={{ background: 'rgba(255,255,255,0.08)' }}>
           ← Back
         </button>
         <div className="ml-3 flex-1 min-w-0">
@@ -171,8 +172,12 @@ export function ProjectPledgeScreen() {
       <button
         disabled={!canContinue}
         onClick={next}
-        className="w-full mt-4 py-5 rounded-2xl font-black text-xl disabled:opacity-40 shrink-0"
-        style={{ background: accent, color: '#180324' }}>
+        className="w-full mt-4 py-5 rounded-2xl font-black text-xl disabled:opacity-40 shrink-0 border-2 border-white/40 hover:brightness-110"
+        style={{
+          background: '#F6C454',
+          color: '#180324',
+          boxShadow: '0 8px 28px rgba(246,196,84,0.45)',
+        }}>
         Continue ({selected.size}) →
       </button>
     </div>
