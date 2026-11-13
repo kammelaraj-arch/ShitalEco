@@ -29,20 +29,38 @@ import {
   type CategoryTile,
   type TierCard,
 } from '@shital/donation-blocks'
-import { useStore } from '../store'
+import { useStore, t, type Language } from '../store'
 
-// Exactly the kiosk's TILE_CATALOG — same ids, colours, emojis and
-// captions. A future tweak lands on both surfaces with one edit.
-const CATEGORIES: CategoryTile[] = [
-  { id: 'brick',    name: 'Brick',                 emoji: '🧱', caption: 'Red to Founder · as you wish',    bg: '#D45030', accent: '#FFB899' },
-  { id: 'sqft',     name: 'Square Feet',           emoji: '📏', caption: 'Any size · as you can afford',   bg: '#2E86AB', accent: '#A0D8F1' },
-  { id: 'material', name: 'Materials',             emoji: '🗿', caption: 'Help supply the build',          bg: '#C06C00', accent: '#FFD28B' },
-  { id: 'volunt',   name: 'Volunteering',          emoji: '🤝', caption: 'Help supply the build',          bg: '#14B8A6', accent: '#A7F3D0' },
-  { id: 'services', name: 'Professional Services', emoji: '🛠️', caption: 'Share your skill or sponsor it',  bg: '#7B2CBF', accent: '#D8B4FE' },
-  { id: 'business', name: 'Business Sponsorship',  emoji: '💼', caption: 'A lasting partnership',          bg: '#2E7D32', accent: '#A6E0A9' },
-  { id: 'general',  name: 'General Donation',      emoji: '🪔', caption: "Where it's needed most",         bg: '#E63E7F', accent: '#FFC3DA' },
-  { id: 'any',      name: 'Any Amount',            emoji: '£',  caption: 'Give what you wish',             bg: '#FF9933', accent: '#FFE0B2' },
+// Category skeleton — ids and colours only. Name/caption are resolved
+// per-render through the store's t() so the page follows the donor's
+// selected language.
+interface CatSkel {
+  id: string
+  nameKey: string
+  capKey: string
+  emoji: string
+  bg: string
+  accent: string
+}
+const CATEGORY_SKELS: CatSkel[] = [
+  { id: 'brick',    nameKey: 'cat_brick',    capKey: 'cap_brick',    emoji: '🧱', bg: '#D45030', accent: '#FFB899' },
+  { id: 'sqft',     nameKey: 'cat_sqft',     capKey: 'cap_sqft',     emoji: '📏', bg: '#2E86AB', accent: '#A0D8F1' },
+  { id: 'material', nameKey: 'cat_material', capKey: 'cap_material', emoji: '🗿', bg: '#C06C00', accent: '#FFD28B' },
+  { id: 'volunt',   nameKey: 'cat_volunt',   capKey: 'cap_volunt',   emoji: '🤝', bg: '#14B8A6', accent: '#A7F3D0' },
+  { id: 'services', nameKey: 'cat_services', capKey: 'cap_services', emoji: '🛠️', bg: '#7B2CBF', accent: '#D8B4FE' },
+  { id: 'business', nameKey: 'cat_business', capKey: 'cap_business', emoji: '💼', bg: '#2E7D32', accent: '#A6E0A9' },
+  { id: 'general',  nameKey: 'cat_general',  capKey: 'cap_general',  emoji: '🪔', bg: '#E63E7F', accent: '#FFC3DA' },
+  { id: 'any',      nameKey: 'cat_any',      capKey: 'cap_any',      emoji: '£',  bg: '#FF9933', accent: '#FFE0B2' },
 ]
+const buildCategories = (lang: Language): CategoryTile[] =>
+  CATEGORY_SKELS.map(s => ({
+    id: s.id,
+    name: t(s.nameKey, lang),
+    caption: t(s.capKey, lang),
+    emoji: s.emoji,
+    bg: s.bg,
+    accent: s.accent,
+  }))
 
 // Priced tiers, matching kiosk ProjectTiersScreen.CATEGORY_TIERS.
 const TIERS: Record<string, TierCard[]> = {
@@ -136,8 +154,8 @@ type AnySheet = { category: CategoryTile; subLabel?: string } | null
 // here each tile acts as a single-select launch pad: tap → open the
 // Any-Amount sheet pre-seeded with that pledge item as the basket label.
 function PledgeGrid({
-  items, accent, onPick,
-}: { items: PledgeItem[]; accent: string; onPick: (item: PledgeItem) => void }) {
+  items, accent, cta, onPick,
+}: { items: PledgeItem[]; accent: string; cta: string; onPick: (item: PledgeItem) => void }) {
   return (
     <div className="grid grid-cols-3 gap-3 flex-1 min-h-0">
       {items.map(it => (
@@ -163,7 +181,7 @@ function PledgeGrid({
             className="mt-auto pt-2 text-[10px] uppercase tracking-widest"
             style={{ color: accent }}
           >
-            Tap to pledge £…
+            {cta}
           </div>
         </motion.button>
       ))}
@@ -174,6 +192,8 @@ function PledgeGrid({
 export function SqFtPageV2() {
   const addItem = useStore(s => s.addItem)
   const setScreen = useStore(s => s.setScreen)
+  const language = useStore(s => s.language)
+  const categories = buildCategories(language)
   const [picked, setPicked] = useState<CategoryTile | null>(null)
   const [anySheet, setAnySheet] = useState<AnySheet>(null)
   const [raw, setRaw] = useState('')
@@ -247,14 +267,14 @@ export function SqFtPageV2() {
       <div className="text-center mb-5">
         <p className="text-xs font-bold tracking-widest uppercase"
           style={{ color: 'rgba(212,175,55,0.85)' }}>
-          Future Legacy Appeal
+          {t('sqft_eyebrow', language)}
         </p>
         <h1 className="font-display text-2xl sm:text-3xl font-black mt-1"
           style={{ color: 'var(--text)' }}>
-          Secure our ground · build our future
+          {t('sqft_title', language)}
         </h1>
         <p className="text-sm mt-2 max-w-xl mx-auto" style={{ color: 'var(--text-muted)' }}>
-          Pick a category, then a tier — or enter any amount. Every gift is Gift-Aided (+25%).
+          {t('sqft_subtitle', language)}
         </p>
       </div>
 
@@ -267,12 +287,12 @@ export function SqFtPageV2() {
               className="px-4 py-2 rounded-xl text-white font-bold text-sm hover:bg-white/15 border border-white/25"
               style={{ background: 'rgba(255,255,255,0.08)' }}
             >
-              ← Back
+              ← {t('back', language)}
             </button>
             <div className="ml-3 flex-1 min-w-0">
               <div className="text-[10px] uppercase tracking-widest"
                 style={{ color: picked.accent }}>
-                {isPledgeCat ? 'Select what you can offer' : 'Choose a tier'}
+                {t(isPledgeCat ? 'sqft_select_offer' : 'sqft_choose_tier', language)}
               </div>
               <div
                 className="font-black text-xl truncate text-white"
@@ -292,7 +312,7 @@ export function SqFtPageV2() {
               className="px-4 py-2 rounded-xl text-white font-bold text-sm hover:bg-white/15 border border-white/25"
               style={{ background: 'rgba(255,255,255,0.08)' }}
             >
-              ← Back
+              ← {t('back', language)}
             </button>
           </div>
         )}
@@ -307,7 +327,7 @@ export function SqFtPageV2() {
               transition={{ duration: 0.18 }}
               className="flex-1 flex flex-col min-h-0"
             >
-              <CategoryGrid tiles={CATEGORIES} cols={3} onPick={pickCategory} />
+              <CategoryGrid tiles={categories} cols={3} onPick={pickCategory} />
             </motion.div>
           ) : (
             <motion.div
@@ -322,6 +342,7 @@ export function SqFtPageV2() {
                 <PledgeGrid
                   items={PLEDGES[picked.id].items}
                   accent={picked.accent}
+                  cta={t('sqft_tap_pledge', language)}
                   onPick={item => openAmountSheet(picked, item.label)}
                 />
               ) : isTierCat ? (
@@ -343,7 +364,7 @@ export function SqFtPageV2() {
                       color: '#180324',
                     }}
                   >
-                    Enter an amount →
+                    {t('sqft_enter_amount', language)} →
                   </button>
                 </div>
               )}
@@ -385,7 +406,7 @@ export function SqFtPageV2() {
                 {anySheet.subLabel ? ` · ${anySheet.subLabel}` : ''}
               </div>
               <div className="font-black text-xl mb-4" style={{ color: 'var(--text)', fontFamily: 'serif' }}>
-                {anySheet.category.emoji} Enter an amount
+                {anySheet.category.emoji} {t('sqft_enter_amount', language)}
               </div>
 
               <div className="flex items-center gap-2">
@@ -420,7 +441,7 @@ export function SqFtPageV2() {
                     border: '1.5px solid rgba(255,255,255,0.15)',
                   }}
                 >
-                  Cancel
+                  {t('cancel', language)}
                 </button>
                 <button
                   onClick={submitAmountSheet}
@@ -434,7 +455,9 @@ export function SqFtPageV2() {
                     boxShadow: amountValid ? `0 6px 20px ${anySheet.category.accent}40` : 'none',
                   }}
                 >
-                  {amountValid ? `Add £${(Math.round(amountNum * 100) / 100).toLocaleString('en-GB')} →` : 'Enter amount'}
+                  {amountValid
+                    ? `${t('add', language)} £${(Math.round(amountNum * 100) / 100).toLocaleString('en-GB')} →`
+                    : t('sqft_enter_amount', language)}
                 </button>
               </div>
             </motion.div>
