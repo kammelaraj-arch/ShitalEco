@@ -255,6 +255,9 @@ importers:
       '@paypal/react-paypal-js':
         specifier: ^8.7.0
         version: 8.9.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@shital/appeal-ui':
+        specifier: workspace:*
+        version: link:../../packages/appeal-ui
       framer-motion:
         specifier: ^11.3.0
         version: 11.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
