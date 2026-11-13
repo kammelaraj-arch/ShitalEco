@@ -34,9 +34,22 @@ interface AzureConfig { client_id: string; authority: string }
 export function AdminScreen() {
   const {
     branchId, stripeReaderId, stripeReaderLabel, readerProvider, sumupReaderId, cloverDeviceId,
-    isDeviceLoggedIn, loggedInName, loggedInUsername,
+    isDeviceLoggedIn, loggedInName, loggedInUsername, kioskDeviceId,
     setBranchId, setReader, setKioskDeviceId, setDeviceFlags, setDeviceLoggedIn, setScreen, setProfileVersion, setDonationMode, setTierProfile,
   } = useDonationStore()
+
+  // Pairing code — the short human-readable form of this device's
+  // kioskDeviceId that the operator at the kiosk can read out to an
+  // admin on the phone when a reader needs pairing. Admin finds the
+  // matching device row by this suffix in Admin → Devices. Formatted
+  // "XXXX-XXXX" for phone legibility.
+  const pairingCode = (() => {
+    const id = (kioskDeviceId || '').replace(/[^a-f0-9]/gi, '').toUpperCase()
+    if (id.length < 8) return ''
+    const tail = id.slice(-8)
+    return `${tail.slice(0, 4)}-${tail.slice(4)}`
+  })()
+  const [copiedPair, setCopiedPair] = useState(false)
 
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<'idle' | 'ok' | 'fail'>('idle')
@@ -398,6 +411,40 @@ export function AdminScreen() {
                 pair a SumUp Solo in Admin → Devices → Edit, then press
                 &quot;Sync from server&quot; above.
               </p>
+              {/* Pairing code — short human-readable suffix of the
+                  kioskDeviceId so the operator can read it out to the
+                  admin on the phone ("device ending 4F-A3B2"). Tap to
+                  copy for ops that log in from the same machine. */}
+              {pairingCode && (
+                <div className="mt-3 pt-3 border-t border-white/10">
+                  <p className="text-[10px] font-bold uppercase tracking-widest mb-1"
+                     style={{ color: 'rgba(255,248,220,0.4)' }}>
+                    🔑 Pairing code (tell admin)
+                  </p>
+                  <button
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(pairingCode).catch(() => {})
+                      setCopiedPair(true)
+                      setTimeout(() => setCopiedPair(false), 1500)
+                    }}
+                    className="text-left px-3 py-2 rounded-lg font-mono font-black text-2xl tracking-widest hover:brightness-110"
+                    style={{
+                      background: 'rgba(212,175,55,0.12)',
+                      border: '1px solid rgba(212,175,55,0.35)',
+                      color: '#F6C454',
+                      letterSpacing: '0.1em',
+                    }}
+                    title="Tap to copy"
+                  >
+                    {pairingCode}
+                  </button>
+                  <p className="text-[10px] mt-1" style={{ color: 'rgba(255,248,220,0.4)' }}>
+                    {copiedPair
+                      ? '✓ Copied — paste in Admin → Devices to find this kiosk'
+                      : 'Admin can find this kiosk in Admin → Devices by this code.'}
+                  </p>
+                </div>
+              )}
             </>
           )}
         </div>
