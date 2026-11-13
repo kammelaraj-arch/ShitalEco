@@ -11,6 +11,7 @@ RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
 COPY apps/service/package.json apps/service/
 COPY packages/appeal-ui/package.json packages/appeal-ui/
+COPY packages/donation-blocks/package.json packages/donation-blocks/
 
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN pnpm install --no-frozen-lockfile --ignore-scripts --filter @shital/service...
@@ -19,6 +20,7 @@ COPY apps/service/ apps/service/
 # Full source of workspace deps AFTER install so tsc / vite can import
 # from them during build.
 COPY packages/appeal-ui/ packages/appeal-ui/
+COPY packages/donation-blocks/ packages/donation-blocks/
 
 WORKDIR /app/apps/service
 

@@ -7,6 +7,7 @@ export default {
     // QtyStepper) shared with the kiosk. Without this entry Tailwind
     // would purge the package's classes from the production build.
     '../../packages/appeal-ui/src/**/*.{js,ts,jsx,tsx}',
+    '../../packages/donation-blocks/src/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {
