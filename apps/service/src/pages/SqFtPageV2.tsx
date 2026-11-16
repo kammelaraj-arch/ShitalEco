@@ -21,7 +21,7 @@
 // to the 'basket' screen; the downstream contact → gift-aid → PayPal
 // checkout is untouched.
 
-import { useState } from 'react'
+import { useState, type ReactElement } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   CategoryGrid,
@@ -30,6 +30,99 @@ import {
   type TierCard,
 } from '@shital/donation-blocks'
 import { useStore, t, type Language } from '../store'
+
+// ---- Tier illustrations ---------------------------------------------------
+// Ported from the kiosk's ProjectTiersScreen so service-portal tier cards
+// have the same photoreal brick / sqft / preset body art — otherwise the
+// cards have empty bodies and the "MOST CHOSEN" chip overlaps the price on
+// the featured tile.
+let __gid = 0
+function BrickSVG({ color, mortar, highlight, shimmer }: {
+  color: string; mortar: string; highlight: string; shimmer?: string
+}) {
+  const uid = (__gid++).toString(36)
+  const body = `bk-${uid}`
+  const sheen = `sh-${uid}`
+  const bevel = `bv-${uid}`
+  return (
+    <svg viewBox="0 0 170 120" style={{ display: 'block', width: '100%', height: '100%' }}>
+      <defs>
+        <linearGradient id={body} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0"    stopColor={highlight} />
+          <stop offset="0.15" stopColor={color} />
+          <stop offset="0.85" stopColor={color} />
+          <stop offset="1"    stopColor={mortar} />
+        </linearGradient>
+        <linearGradient id={sheen} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0"   stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="0.4" stopColor="#ffffff" stopOpacity="0.28" />
+          <stop offset="0.6" stopColor="#ffffff" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id={bevel} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0"   stopColor="#ffffff" stopOpacity="0.45" />
+          <stop offset="0.5" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="1"   stopColor="#000000" stopOpacity="0.45" />
+        </linearGradient>
+      </defs>
+      <rect x="6" y="6" width="158" height="48" rx="5" fill={`url(#${body})`} stroke={mortar} strokeWidth="1" />
+      <rect x="6" y="6" width="158" height="48" rx="5" fill={`url(#${bevel})`} />
+      <rect x="6" y="6" width="158" height="48" rx="5" fill={`url(#${sheen})`} />
+      <rect x="10" y="8" width="150" height="2.5" rx="1" fill={highlight} opacity="0.75" />
+      {shimmer && <rect x="6" y="24" width="158" height="6" fill={shimmer} opacity="0.22" />}
+      <rect x="6"  y="62" width="74" height="52" rx="5" fill={`url(#${body})`} stroke={mortar} strokeWidth="1" />
+      <rect x="6"  y="62" width="74" height="52" rx="5" fill={`url(#${bevel})`} />
+      <rect x="6"  y="62" width="74" height="52" rx="5" fill={`url(#${sheen})`} />
+      <rect x="10" y="64" width="66" height="2.5" rx="1" fill={highlight} opacity="0.75" />
+      <rect x="90" y="62" width="74" height="52" rx="5" fill={`url(#${body})`} stroke={mortar} strokeWidth="1" />
+      <rect x="90" y="62" width="74" height="52" rx="5" fill={`url(#${bevel})`} />
+      <rect x="90" y="62" width="74" height="52" rx="5" fill={`url(#${sheen})`} />
+      <rect x="94" y="64" width="66" height="2.5" rx="1" fill={highlight} opacity="0.75" />
+    </svg>
+  )
+}
+function SqFtSVG({ color, highlight, label }: { color: string; highlight: string; label: string }) {
+  const uid = (__gid++).toString(36)
+  return (
+    <svg viewBox="0 0 170 120" style={{ display: 'block', width: '100%', height: '100%' }}>
+      <defs>
+        <linearGradient id={`sq-${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={highlight} />
+          <stop offset="1" stopColor={color} />
+        </linearGradient>
+      </defs>
+      <rect x="18" y="12" width="134" height="96" rx="6" fill={`url(#sq-${uid})`} stroke={highlight} strokeWidth="2.5" />
+      <text x="85" y="78" textAnchor="middle" fontSize="40" fill="#180324" fontFamily="serif" fontWeight="900">{label}</text>
+    </svg>
+  )
+}
+function PresetSVG({ color, accent, label }: { color: string; accent: string; label: string }) {
+  const uid = (__gid++).toString(36)
+  return (
+    <svg viewBox="0 0 170 120" style={{ display: 'block', width: '100%', height: '100%' }}>
+      <defs>
+        <linearGradient id={`p-${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={accent} />
+          <stop offset="1" stopColor={color} />
+        </linearGradient>
+      </defs>
+      <circle cx="85" cy="60" r="50" fill={`url(#p-${uid})`} stroke={accent} strokeWidth="2.5" />
+      <text x="85" y="72" textAnchor="middle" fontSize="36" fontFamily="serif" fontWeight="900" fill="#180324">{label}</text>
+    </svg>
+  )
+}
+function EmojiArt({ emoji, bg }: { emoji: string; bg: string }): ReactElement {
+  return (
+    <div style={{
+      width: '100%', height: '100%',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: `radial-gradient(circle at 50% 45%, ${bg}55, transparent 65%)`,
+      fontSize: '4rem',
+      filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))',
+    }}>
+      {emoji}
+    </div>
+  )
+}
 
 // Category skeleton — ids and colours only. Name/caption are resolved
 // per-render through the store's t() so the page follows the donor's
@@ -62,28 +155,43 @@ const buildCategories = (lang: Language): CategoryTile[] =>
     accent: s.accent,
   }))
 
-// Priced tiers, matching kiosk ProjectTiersScreen.CATEGORY_TIERS.
+// Priced tiers, matching kiosk ProjectTiersScreen.CATEGORY_TIERS, now with
+// photoreal body art so the TierGrid cards fill properly and the featured
+// "Most chosen" chip doesn't overlap the price.
 const TIERS: Record<string, TierCard[]> = {
   brick: [
-    { label: 'Red Brick',     price: 51,   sub: 'Name on the donor wall' },
-    { label: 'Bronze Brick',  price: 151,  sub: 'Family name · annual mention' },
-    { label: 'Silver Brick',  price: 508,  sub: 'Patron plaque · lifetime pass' },
-    { label: 'Gold Brick',    price: 1008, sub: 'Centrepiece plaque · trustee letter', featured: true },
-    { label: 'Founder Brick', price: 5008, sub: 'Named in opening ceremony' },
+    { label: 'Red Brick',     price: 51,   sub: 'Name on the donor wall',
+      render: () => <BrickSVG color="#D83921" mortar="#5B1507" highlight="#FFA384" /> },
+    { label: 'Bronze Brick',  price: 151,  sub: 'Family name · annual mention',
+      render: () => <BrickSVG color="#B96A1F" mortar="#4A2308" highlight="#F3B274" /> },
+    { label: 'Silver Brick',  price: 508,  sub: 'Patron plaque · lifetime pass',
+      render: () => <BrickSVG color="#B9C1C7" mortar="#4B5257" highlight="#F3F7FA" shimmer="#FFFFFF" /> },
+    { label: 'Gold Brick',    price: 1008, sub: 'Centrepiece plaque · trustee letter', featured: true,
+      render: () => <BrickSVG color="#E5B320" mortar="#5A4106" highlight="#FFF1A8" shimmer="#FFFFFF" /> },
+    { label: 'Founder Brick', price: 5008, sub: 'Named in opening ceremony',
+      render: () => <BrickSVG color="#9E1244" mortar="#3E041A" highlight="#F0C072" shimmer="#F0C072" /> },
   ],
   sqft: [
-    { label: '1 sq ft',     price: 351,  sub: 'One foot of hall floor · name engraved', featured: true },
-    { label: 'Family plot', price: 2501, sub: '≈7 ft² · family entrance tile' },
+    { label: '1 sq ft',     price: 351,  sub: 'One foot of hall floor · name engraved', featured: true,
+      render: () => <SqFtSVG color="#2C7FB8" highlight="#A9DBF5" label="ft²" /> },
+    { label: 'Family plot', price: 2501, sub: '≈7 ft² · family entrance tile',
+      render: () => <SqFtSVG color="#1B5F85" highlight="#A9DBF5" label="7 ft²" /> },
   ],
   general: [
-    { label: '£5',   price: 5 },
-    { label: '£10',  price: 10 },
-    { label: '£25',  price: 25, featured: true },
-    { label: '£50',  price: 50 },
-    { label: '£100', price: 100 },
+    { label: '£5',   price: 5,
+      render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£5" /> },
+    { label: '£10',  price: 10,
+      render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£10" /> },
+    { label: '£25',  price: 25, featured: true,
+      render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£25" /> },
+    { label: '£50',  price: 50,
+      render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£50" /> },
+    { label: '£100', price: 100,
+      render: () => <PresetSVG color="#E63E7F" accent="#FFC3DA" label="£100" /> },
   ],
   business: [
-    { label: 'Business Sponsorship', price: 2501, sub: 'Dedicated panel · invoice provided' },
+    { label: 'Business Sponsorship', price: 2501, sub: 'Dedicated panel · invoice provided',
+      render: () => <EmojiArt emoji="💼" bg="#2E7D32" /> },
   ],
 }
 
