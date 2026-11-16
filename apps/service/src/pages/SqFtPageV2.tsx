@@ -262,8 +262,8 @@ type AnySheet = { category: CategoryTile; subLabel?: string } | null
 // here each tile acts as a single-select launch pad: tap → open the
 // Any-Amount sheet pre-seeded with that pledge item as the basket label.
 function PledgeGrid({
-  items, accent, cta, onPick,
-}: { items: PledgeItem[]; accent: string; cta: string; onPick: (item: PledgeItem) => void }) {
+  items, bg, accent, cta, onPick,
+}: { items: PledgeItem[]; bg: string; accent: string; cta: string; onPick: (item: PledgeItem) => void }) {
   return (
     <div className="grid grid-cols-3 gap-3 flex-1 min-h-0">
       {items.map(it => (
@@ -271,23 +271,34 @@ function PledgeGrid({
           key={it.id}
           whileTap={{ scale: 0.96 }}
           onClick={() => onPick(it)}
-          className="rounded-2xl text-left relative flex flex-col overflow-hidden p-3"
+          className="rounded-2xl text-left relative flex flex-col overflow-hidden p-3 text-white"
           style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1.5px solid rgba(255,255,255,0.12)',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
+            // Same gradient language as the Level 0 CategoryGrid tiles:
+            // radial accent glow in the top-left + linear bg from the
+            // category colour. Keeps Level 1 visually in the same world
+            // as the kiosk / CategoryGrid instead of neutral grey cards
+            // on the maroon page bg.
+            background: `
+              radial-gradient(ellipse 60% 55% at 15% 0%, ${accent}70 0%, transparent 65%),
+              linear-gradient(170deg, ${bg} 0%, ${bg}B0 100%)
+            `,
+            border: `2px solid ${accent}80`,
+            boxShadow: `0 6px 18px rgba(0,0,0,0.35), 0 0 0 1px ${accent}40 inset`,
+            textShadow: '0 1px 4px rgba(0,0,0,0.25)',
           }}
         >
-          <div className="text-3xl mb-2">{it.icon}</div>
+          <div className="text-3xl mb-2" style={{ filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.4))' }}>
+            {it.icon}
+          </div>
           <div
-            className="font-black text-sm leading-tight text-white"
+            className="font-black text-sm leading-tight"
             style={{ fontFamily: 'serif' }}
           >
             {it.label}
           </div>
           <div
-            className="mt-auto pt-2 text-[10px] uppercase tracking-widest"
-            style={{ color: accent }}
+            className="mt-auto pt-2 text-[10px] uppercase tracking-widest font-black"
+            style={{ color: accent, textShadow: 'none' }}
           >
             {cta}
           </div>
@@ -449,6 +460,7 @@ export function SqFtPageV2() {
               {isPledgeCat ? (
                 <PledgeGrid
                   items={PLEDGES[picked.id].items}
+                  bg={picked.bg}
                   accent={picked.accent}
                   cta={t('sqft_tap_pledge', language)}
                   onPick={item => openAmountSheet(picked, item.label)}
