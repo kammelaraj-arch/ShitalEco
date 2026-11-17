@@ -3462,6 +3462,14 @@ async def _patch_schema() -> None:
         "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS refunded BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS refund_amount_pence BIGINT NOT NULL DEFAULT 0",
         "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS disputed BOOLEAN NOT NULL DEFAULT false",
+        # Provider-reported failure context. Stripe writes
+        # charge.failure_code + charge.failure_message (or
+        # charge.outcome.{reason, seller_message}). SumUp writes
+        # transaction.status_detail + transaction.decline_reason. Both
+        # are surfaced as the hover tooltip on the Outcome pill so an
+        # operator sees *why* a Failed row failed without clicking in.
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_code    VARCHAR(80)  NOT NULL DEFAULT ''",
+        "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_message VARCHAR(500) NOT NULL DEFAULT ''",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't
