@@ -341,7 +341,7 @@ export default function DevicesPage() {
     setTimeout(() => setCopied(null), 2000)
   }
 
-  // ── Last seen helper ─────────────────────────────────────────────────────────
+  // ── Last seen + live-status helpers ─────────────────────────────────────────
   const lastSeen = (ts: string | null) => {
     if (!ts) return 'Never'
     const diff = Date.now() - new Date(ts).getTime()
@@ -350,6 +350,49 @@ export default function DevicesPage() {
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
     return `${Math.floor(diff / 86400000)}d ago`
   }
+
+  // Live-status derivation. Thresholds match the kiosk heartbeat cadence
+  // (`UPDATE kiosk_devices SET last_seen_at = NOW()` fires every ~30 s on
+  // the device, see backend/src/shital/api/routers/kiosk.py :3664).
+  //   < 90 s  → 🟢 online (device is actively heart-beating)
+  //   < 10 m  → 🟡 idle   (missed a few heartbeats, usually a sleeping tablet)
+  //   else    → ⚫ offline / never seen
+  type LiveStatus =
+    | { kind: 'online';  label: 'Online';       color: '#22C55E'; bg: 'rgba(34,197,94,0.15)'  }
+    | { kind: 'idle';    label: 'Idle';         color: '#FACC15'; bg: 'rgba(250,204,21,0.15)' }
+    | { kind: 'offline'; label: 'Offline';      color: '#94A3B8'; bg: 'rgba(148,163,184,0.15)' }
+    | { kind: 'never';   label: 'Never seen';   color: '#94A3B8'; bg: 'rgba(148,163,184,0.15)' }
+  const liveStatus = (ts: string | null): LiveStatus => {
+    if (!ts) return { kind: 'never',   label: 'Never seen', color: '#94A3B8', bg: 'rgba(148,163,184,0.15)' }
+    const diff = Date.now() - new Date(ts).getTime()
+    if (diff < 90_000)   return { kind: 'online',  label: 'Online',  color: '#22C55E', bg: 'rgba(34,197,94,0.15)' }
+    if (diff < 600_000)  return { kind: 'idle',    label: 'Idle',    color: '#FACC15', bg: 'rgba(250,204,21,0.15)' }
+    return               { kind: 'offline', label: 'Offline', color: '#94A3B8', bg: 'rgba(148,163,184,0.15)' }
+  }
+
+  // Tick every second so the badges re-derive — a device that was Online a
+  // moment ago flips to Idle without the caller refetching.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  // Satisfy the exhaustive-deps lint — liveStatus/lastSeen read Date.now()
+  // but the lint sees them as pure. We depend on `now` for the badge
+  // colour to animate in; the formatter helpers still read Date.now()
+  // live, so this is just the handle.
+  void now
+
+  // Poll the /kiosk-devices endpoint every 15 s so last_seen_at updates
+  // land in the UI without a page reload.
+  useEffect(() => {
+    const id = setInterval(() => {
+      apiFetch<{ devices: KioskDevice[] }>('/kiosk-devices')
+        .then(d => setDevices(d.devices || []))
+        .catch(() => { /* silent — keep last snapshot on transient failure */ })
+    }, 15_000)
+    return () => clearInterval(id)
+  }, [])
 
   // ── Branch name ──────────────────────────────────────────────────────────────
   const branchName = (id: string) => branches.find(b => b.branch_id === id || b.id === id)?.name || id
@@ -486,9 +529,29 @@ export default function DevicesPage() {
                         💳 {cardReaders.find(r => r.id === d.card_reader_id)?.label}
                       </span>
                     )}
-                    <span className="text-[10px] font-medium px-2 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.4)' }}>
-                      Last seen: {lastSeen(d.last_seen_at)}
-                    </span>
+                    {/* Live-status pill — derived from last_seen_at every
+                        second via the `now` ticker above. Pulses when the
+                        device is actively heart-beating. */}
+                    {(() => {
+                      const ls = liveStatus(d.last_seen_at)
+                      return (
+                        <span
+                          title={`Live status · ${lastSeen(d.last_seen_at)}`}
+                          className="text-[10px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1.5"
+                          style={{ background: ls.bg, color: ls.color }}
+                        >
+                          <span
+                            className={`inline-block w-1.5 h-1.5 rounded-full ${ls.kind === 'online' ? 'animate-pulse' : ''}`}
+                            style={{
+                              background: ls.color,
+                              boxShadow: ls.kind === 'online' ? `0 0 6px ${ls.color}` : 'none',
+                            }}
+                          />
+                          {ls.label}
+                          <span className="opacity-60 font-normal">· {lastSeen(d.last_seen_at)}</span>
+                        </span>
+                      )
+                    })()}
                   </div>
 
                   {/* Device token */}
