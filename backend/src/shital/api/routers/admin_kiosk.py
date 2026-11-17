@@ -34,26 +34,45 @@ async def get_stats():
         total_items = items_r.mappings().first()["cnt"]
 
         # Orders
-        orders_r = await db.execute(
-            text("SELECT COUNT(*) AS cnt, COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) AS rev FROM orders")
-        )
+        # Total Revenue = money we actually received. Orders start PENDING
+        # and get promoted to COMPLETED on payment success, so PENDING /
+        # CANCELLED / REFUNDED / FAILED rows must NOT count toward
+        # revenue (operator: 'check this should only that we received, not
+        # include the failed or other reasons'). The count stays unfiltered
+        # for 'orders total' (donors who initiated an order), but Revenue
+        # is scoped to COMPLETED.
+        orders_r = await db.execute(text("""
+            SELECT
+                COUNT(*)                                                               AS cnt_total,
+                COUNT(*) FILTER (WHERE UPPER(COALESCE(status,'')) = 'COMPLETED')       AS cnt_completed,
+                COALESCE(SUM(CAST(total_amount AS NUMERIC))
+                         FILTER (WHERE UPPER(COALESCE(status,'')) = 'COMPLETED'), 0)   AS rev
+            FROM orders
+        """))
         orow = orders_r.mappings().first()
-        total_orders = orow["cnt"]
-        total_revenue = float(orow["rev"] or 0)
+        # Keep total_orders = EVERY order so the 'all time' subtitle still
+        # reads the full volume. completed_orders is sent alongside so the
+        # dashboard can show both numbers side-by-side without a second query.
+        total_orders     = orow["cnt_total"]
+        completed_orders = orow["cnt_completed"]
+        total_revenue    = float(orow["rev"] or 0)
 
-        # Today's orders
+        # Today's orders (same semantic as before: every order started today).
         today_r = await db.execute(
             text("SELECT COUNT(*) AS cnt FROM orders WHERE DATE(created_at) = :today"),
             {"today": today},
         )
         today_orders = today_r.mappings().first()["cnt"]
 
-        # Monthly revenue (last 12 months)
+        # Monthly revenue (last 12 months) — same COMPLETED-only filter as
+        # Total Revenue so the chart lines up with the strip and no bar
+        # inflates on cancelled / pending orders.
         monthly_r = await db.execute(text("""
             SELECT TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') AS month,
                    SUM(CAST(total_amount AS NUMERIC)) AS amount
             FROM orders
             WHERE created_at >= NOW() - INTERVAL '12 months'
+              AND UPPER(COALESCE(status,'')) = 'COMPLETED'
             GROUP BY DATE_TRUNC('month', created_at)
             ORDER BY DATE_TRUNC('month', created_at)
         """))
@@ -93,6 +112,11 @@ async def get_stats():
         "total_items": total_items,
         "live_items": live_items,
         "total_orders": total_orders,
+        # Number of orders that actually settled — surfaced as the
+        # Revenue sub-line on the dashboard so the operator sees the
+        # split between 'donors who started an order' vs 'orders that
+        # produced money'.
+        "completed_orders": completed_orders,
         "today_orders": today_orders,
         "total_revenue": total_revenue,
         "total_employees": total_employees,

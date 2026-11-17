@@ -8,6 +8,7 @@ interface Stats {
   total_items: number
   live_items: number
   total_orders: number
+  completed_orders: number
   today_orders: number
   total_revenue: number
   total_employees: number
@@ -88,9 +89,13 @@ export default function DashboardPage() {
   const statCards = stats
     ? [
         {
+          // Operator: 'should only [count what] we received, not include
+          // failed or other reasons'. The sub-line now reads the
+          // completed-order count so it's obvious which denominator
+          // produced this number. 'XYZ of N' makes the exclusion visible.
           label: 'Total Revenue',
           value: fmt(stats.total_revenue),
-          sub: `${stats.total_orders} orders total`,
+          sub: `${stats.completed_orders.toLocaleString('en-GB')} of ${stats.total_orders.toLocaleString('en-GB')} orders settled`,
           icon: '💰',
           color: 'from-amber-600 to-orange-500',
         },
