@@ -20,6 +20,10 @@ interface Sub {
   last_failure_reason?: string | null; last_failure_at?: string | null
   last_failure_code?: string | null; failed_payment_count?: number
   retry_email_sent_at?: string | null
+  // Next scheduled billing date from the provider — shown in the
+  // 'Reason / Next billing' column on healthy rows.
+  next_billing_date?: string | null
+  last_payment_at?: string | null
 }
 
 const EMPTY: Omit<Tier, 'id' | 'paypal_plan_id' | 'active_subscribers'> = {
@@ -81,7 +85,11 @@ function fmtGBP(n: number): string {
 export default function RecurringGivingPage() {
   const [tiers, setTiers]     = useState<Tier[]>([])
   const [subs, setSubs]       = useState<Sub[]>([])
-  const [tab, setTab]         = useState<'tiers' | 'subs' | 'charges' | 'links'>('tiers')
+  const [tab, setTab]         = useState<'tiers' | 'subs' | 'links'>('tiers')
+  // Prominent sticky toast for the Send Retry Email flow. The old tiny
+  // inline note was easy to miss ("send email still blank"); this fires
+  // a visible banner at the top of the Subscriptions tab.
+  const [retryToast, setRetryToast] = useState<string>('')
   const [linkAmount, setLinkAmount] = useState('11')
   const [linkBranch, setLinkBranch] = useState('')
   const [copied, setCopied]   = useState('')
@@ -211,12 +219,17 @@ export default function RecurringGivingPage() {
       const d = await r.json()
       if (!r.ok) {
         setRetryNote(p => ({ ...p, [chargeId]: `✗ ${d?.detail || `HTTP ${r.status}`}` }))
+        setRetryToast(`✗ Send failed: ${d?.detail || `HTTP ${r.status}`}`)
         return
       }
       if (d.sent === false && d.reason === 'already_sent') {
-        setRetryNote(p => ({ ...p, [chargeId]: `Already sent · ${new Date(d.sent_at).toLocaleString('en-GB')}` }))
+        const msg = `Already sent · ${new Date(d.sent_at).toLocaleString('en-GB')}`
+        setRetryNote(p => ({ ...p, [chargeId]: msg }))
+        setRetryToast(`ℹ ${msg}`)
       } else {
-        setRetryNote(p => ({ ...p, [chargeId]: `✓ Sent to ${d.to}` }))
+        const msg = `✓ Retry email sent to ${d.to}`
+        setRetryNote(p => ({ ...p, [chargeId]: msg }))
+        setRetryToast(msg)
         await loadFailedCharges()
       }
     } catch (e) {
@@ -242,12 +255,17 @@ export default function RecurringGivingPage() {
       const d = await r.json()
       if (!r.ok) {
         setRetryNote(p => ({ ...p, [subId]: `✗ ${d?.detail || `HTTP ${r.status}`}` }))
+        setRetryToast(`✗ Send failed: ${d?.detail || `HTTP ${r.status}`}`)
         return
       }
       if (d.sent === false && d.reason === 'already_sent') {
-        setRetryNote(p => ({ ...p, [subId]: `Already sent · ${new Date(d.retry_email_sent_at).toLocaleString('en-GB')}` }))
+        const msg = `Already sent · ${new Date(d.retry_email_sent_at).toLocaleString('en-GB')}`
+        setRetryNote(p => ({ ...p, [subId]: msg }))
+        setRetryToast(`ℹ ${msg}`)
       } else {
-        setRetryNote(p => ({ ...p, [subId]: `✓ Sent to ${d.to}` }))
+        const msg = `✓ Retry email sent to ${d.to}`
+        setRetryNote(p => ({ ...p, [subId]: msg }))
+        setRetryToast(msg)
         await loadSubs()
       }
     } catch (e) {
@@ -457,6 +475,14 @@ export default function RecurringGivingPage() {
     return () => clearInterval(iv)
   }, [])
 
+  // Auto-dismiss the Send-Retry toast after 10 s so a stale banner
+  // doesn't linger when the operator moves on.
+  useEffect(() => {
+    if (!retryToast) return
+    const id = setTimeout(() => setRetryToast(''), 10_000)
+    return () => clearTimeout(id)
+  }, [retryToast])
+
   // Track which sub-id is currently being refreshed (per-row spinner) and
   // the most recent refresh result for the inline status note.
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
@@ -568,7 +594,7 @@ export default function RecurringGivingPage() {
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-white/10 flex-wrap">
-        {(['tiers', 'subs', 'charges', 'links'] as const).map(t => (
+        {(['tiers', 'subs', 'links'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${tab === t ? 'border-saffron-400 text-saffron-400' : 'border-transparent text-white/50 hover:text-white/80'}`}>
             {t === 'tiers'   ? `Donation Tiers (${tiers.length})` :
@@ -587,78 +613,10 @@ export default function RecurringGivingPage() {
                  .replace(active + ' active', `${active} active`)
                  + (expired + canceled > 0 ? ` (· ${expired + canceled} ended)` : '')
              })() :
-             t === 'charges' ? `Recent Charges (${stats?.recent_charges.length ?? 0})` :
                                '🔗 Share Links'}
           </button>
         ))}
       </div>
-
-      {/* Recent monthly-giving charges — the Stripe-style transaction list
-          the operator asked for. Pulled from the `donations` table where
-          purpose='Monthly Giving' (same rows the finance ledger shows). */}
-      {tab === 'charges' && (
-        <div className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <h2 className="text-white font-bold">Recent monthly-giving charges</h2>
-            <p className="text-white/40 text-xs">Updates every 60 s · purpose=Monthly Giving · status=COMPLETED</p>
-          </div>
-          {(!stats || stats.recent_charges.length === 0) ? (
-            <p className="text-sm text-white/40 py-6 text-center">No monthly-giving charges yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-white/50 border-b border-white/10 uppercase text-[11px] tracking-wider">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-semibold">Date / time</th>
-                    <th className="px-3 py-2 text-left font-semibold">Donor</th>
-                    <th className="px-3 py-2 text-left font-semibold">Provider</th>
-                    <th className="px-3 py-2 text-right font-semibold">Amount</th>
-                    <th className="px-3 py-2 text-center font-semibold">🇬🇧</th>
-                    <th className="px-3 py-2 text-left font-semibold">Branch</th>
-                    <th className="px-3 py-2 text-left font-semibold">Payment ref</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.recent_charges.map(c => {
-                    const d = new Date(c.created_at)
-                    const donorLabel = (c.donor_name || c.donor_email || '—').toString()
-                    return (
-                      <tr key={c.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                        <td className="px-3 py-2 text-white/80 text-xs whitespace-nowrap">
-                          {d.toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}
-                        </td>
-                        <td className="px-3 py-2 text-white/80 text-xs max-w-[220px] truncate" title={c.donor_email || ''}>
-                          {donorLabel}
-                        </td>
-                        <td className="px-3 py-2 text-xs capitalize">
-                          <span className="px-2 py-0.5 rounded-full border text-[11px] font-bold"
-                            style={{
-                              background: c.payment_provider?.toLowerCase() === 'stripe' ? 'rgba(99,91,255,0.15)' : 'rgba(0,70,193,0.15)',
-                              color:      c.payment_provider?.toLowerCase() === 'stripe' ? '#9FA8FF' : '#60A5FA',
-                              borderColor:c.payment_provider?.toLowerCase() === 'stripe' ? 'rgba(99,91,255,0.4)' : 'rgba(0,70,193,0.4)',
-                            }}>
-                            {c.payment_provider}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-sm font-bold text-green-400">
-                          {fmtGBP(c.amount)}
-                        </td>
-                        <td className="px-3 py-2 text-center text-xs">
-                          {c.gift_aid_eligible ? <span className="text-blue-300 font-bold">Yes</span> : <span className="text-white/20">—</span>}
-                        </td>
-                        <td className="px-3 py-2 text-white/60 text-xs">{c.branch_id}</td>
-                        <td className="px-3 py-2 text-white/40 text-[11px] font-mono truncate max-w-[180px]" title={c.payment_ref || ''}>
-                          {c.payment_ref || '—'}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Tiers tab */}
       {tab === 'tiers' && (
@@ -694,6 +652,28 @@ export default function RecurringGivingPage() {
       {/* Subscriptions tab */}
       {tab === 'subs' && (
         <div className="space-y-2">
+          {/* Prominent Send-Retry-Email toast. Fixes 'why send email still
+              blank' — the previous tiny inline note (`text-xs`, below the
+              row) was easy to miss, especially on a long list. Auto-clears
+              after 10 s via the useEffect further down. */}
+          {retryToast && (
+            <div
+              role="status"
+              className={`rounded-xl px-4 py-3 text-sm font-bold flex items-center justify-between gap-3 border ${
+                retryToast.startsWith('✗')
+                  ? 'bg-red-500/15 text-red-200 border-red-500/40'
+                  : retryToast.startsWith('ℹ')
+                    ? 'bg-amber-500/15 text-amber-200 border-amber-500/40'
+                    : 'bg-emerald-500/15 text-emerald-200 border-emerald-500/40'
+              }`}
+            >
+              <span>{retryToast}</span>
+              <button
+                onClick={() => setRetryToast('')}
+                className="text-xs opacity-70 hover:opacity-100 px-2 py-1 rounded"
+                aria-label="Dismiss">✕</button>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-white/40 text-xs">PayPal &amp; Stripe are the source of truth — sync pulls live statuses + records any payments.</p>
             <div className="flex items-center gap-2 flex-wrap">
@@ -908,91 +888,132 @@ export default function RecurringGivingPage() {
                       : 'No subscriptions in this view.'}
                   </p>
                 )}
-                {subFilter !== 'failed' && filtered.map(s => {
-                  const donorLabel = (s.donor_name && s.donor_name.trim())
-                    || s.donor_email
-                    || 'Anonymous'
-                  const subRef = s.payment_provider === 'stripe'
-                    ? (s.stripe_subscription_id || '')
-                    : (s.paypal_subscription_id || '')
-                  const shortRef = subRef ? `${subRef.slice(0, 14)}…${subRef.slice(-4)}` : '—'
-                  const createdLabel = s.created_at
-                    ? new Date(s.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-                    : '—'
-                  const rowFailed = s.status === 'PAST_DUE'
-                    || !!(s.last_failure_reason && s.last_failure_reason.trim())
-                    || (s.failed_payment_count || 0) > 0
-                  const canEmail = !!(s.donor_email && s.donor_email.trim())
-                  return (
-                    <div key={s.id} className="rounded-xl p-4 flex items-center gap-4"
-                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-white">£{Number(s.amount).toFixed(0)}/{s.frequency.toLowerCase()}</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
-                                title={s.status}
-                                style={{ background: `${STATUS_COLOURS[s.status] || '#94a3b8'}20`, color: STATUS_COLOURS[s.status] || '#94a3b8' }}>
-                            {STATUS_LABELS[s.status] || s.status}
-                          </span>
-                          {(s.payment_provider === 'stripe')
-                            ? <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#635bff20', color: '#a5a1ff' }}>💳 Stripe</span>
-                            : <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#0070ba20', color: '#4aa3e0' }}>PayPal</span>}
-                          {s.tier_label && <span className="text-xs text-white/50">{s.tier_label}</span>}
-                        </div>
-                        <p className="text-sm text-white/80 mt-0.5">{donorLabel}</p>
-                        <p className="text-xs text-white/40 mt-0.5 font-mono">
-                          {shortRef} · {s.branch_id}
-                        </p>
-                        {rowFailed && (s.last_failure_reason || s.failed_payment_count) && (
-                          <p className="text-xs text-red-300/80 mt-1" title={s.last_failure_at ? `at ${new Date(s.last_failure_at).toLocaleString('en-GB')}` : ''}>
-                            ✗ {s.last_failure_reason || 'Payment failed'}
-                            {(s.failed_payment_count || 0) > 1 && <span className="text-red-300/50"> · {s.failed_payment_count} attempts</span>}
-                          </p>
-                        )}
-                        {refreshNote[s.id] && (
-                          <p className="text-xs text-saffron-400 mt-1">↻ {refreshNote[s.id]}</p>
-                        )}
-                        {retryNote[s.id] && (
-                          <p className="text-xs text-emerald-400 mt-1">{retryNote[s.id]}</p>
-                        )}
-                      </div>
-                      <div className="text-right text-xs text-white/40 flex-shrink-0 flex flex-col items-end gap-2">
-                        <div>
-                          <p className="text-white/70 font-semibold">{createdLabel}</p>
-                          <p className="text-white/30 text-[10px]">created</p>
-                        </div>
-                        {rowFailed && (
-                          <button
-                            onClick={() => sendRetryEmail(s.id)}
-                            disabled={retryingId === s.id || !canEmail}
-                            title={!canEmail
-                              ? 'No donor email on file — nowhere to send'
-                              : s.retry_email_sent_at
-                                ? `Already sent ${new Date(s.retry_email_sent_at).toLocaleString('en-GB')} — click to force resend`
-                                : 'Email the donor a link to start monthly giving again with a fresh card. Carries over Gift Aid.'}
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${
-                              s.retry_email_sent_at
-                                ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20'
-                                : 'bg-amber-500/15 text-amber-200 border border-amber-500/30 hover:bg-amber-500/25'
-                            }`}>
-                            {retryingId === s.id ? '✉ Sending…'
-                              : s.retry_email_sent_at ? '✉ Resend retry email'
-                              : '✉ Send retry email'}
-                          </button>
-                        )}
-                        {s.payment_provider !== 'stripe' && (
-                          <button
-                            onClick={() => refreshFromPayPal(s.id)}
-                            disabled={refreshingId === s.id || !s.paypal_subscription_id}
-                            title="Ask PayPal what the real status is — use when a sub is stuck on PENDING_APPROVAL but the donor says they signed up"
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/8 text-white/70 hover:bg-white/15 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">
-                            {refreshingId === s.id ? '↻ Checking…' : '↻ Refresh from PayPal'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
+                {/* Unified Stripe-Dashboard-style table for Live / Pending /
+                    Ended / All. Replaced the old card-tile format (operator:
+                    'remove the old format and fields'). Columns mirror the
+                    Failed view directly below so switching filters only
+                    changes the rows, not the shape. */}
+                {subFilter !== 'failed' && filtered.length > 0 && (
+                  <div className="overflow-x-auto rounded-xl border border-white/8 mt-2"
+                       style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    <table className="w-full text-sm">
+                      <thead className="bg-white/[0.04]">
+                        <tr className="text-white/50 text-[11px] uppercase tracking-wide">
+                          <th className="text-left px-3 py-2 font-semibold">Amount</th>
+                          <th className="text-left px-3 py-2 font-semibold">Status</th>
+                          <th className="text-left px-3 py-2 font-semibold">Payment method</th>
+                          <th className="text-left px-3 py-2 font-semibold">Date</th>
+                          <th className="text-left px-3 py-2 font-semibold">Description</th>
+                          <th className="text-left px-3 py-2 font-semibold">Customer</th>
+                          <th className="text-left px-3 py-2 font-semibold">Reason / Next billing</th>
+                          <th className="px-3 py-2" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map(s => {
+                          const donorLabel = (s.donor_name && s.donor_name.trim())
+                            || s.donor_email
+                            || 'Anonymous'
+                          const subRef = s.payment_provider === 'stripe'
+                            ? (s.stripe_subscription_id || '')
+                            : (s.paypal_subscription_id || '')
+                          const shortRef = subRef ? `${subRef.slice(0, 10)}…${subRef.slice(-4)}` : ''
+                          const createdLabel = s.created_at
+                            ? new Date(s.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            : '—'
+                          const rowFailed = s.status === 'PAST_DUE'
+                            || !!(s.last_failure_reason && s.last_failure_reason.trim())
+                            || (s.failed_payment_count || 0) > 0
+                          const canEmail = !!(s.donor_email && s.donor_email.trim())
+                          const nextBilling = s.next_billing_date
+                          const reasonCell = rowFailed
+                            ? (s.last_failure_reason || 'Payment failed')
+                            : (nextBilling ? `Next: ${new Date(nextBilling).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : '—')
+                          return (
+                            <tr key={s.id} className="border-t border-white/5 hover:bg-white/[0.03]">
+                              <td className="px-3 py-2 font-mono text-white/90 whitespace-nowrap">
+                                £{Number(s.amount).toFixed(2)} <span className="text-white/40 text-[10px]">/ {s.frequency.toLowerCase()}</span>
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                                      title={s.status}
+                                      style={{
+                                        background:  `${STATUS_COLOURS[s.status] || '#94a3b8'}20`,
+                                        color:        STATUS_COLOURS[s.status] || '#94a3b8',
+                                        borderColor: `${STATUS_COLOURS[s.status] || '#94a3b8'}40`,
+                                      }}>
+                                  {STATUS_LABELS[s.status] || s.status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-white/70 text-xs whitespace-nowrap">
+                                {s.payment_provider === 'stripe'
+                                  ? <span>💳 Stripe · card</span>
+                                  : <span>💰 PayPal</span>}
+                              </td>
+                              <td className="px-3 py-2 text-white/60 text-xs whitespace-nowrap">
+                                {createdLabel}
+                              </td>
+                              <td className="px-3 py-2 text-white/70 text-xs max-w-[220px] truncate"
+                                  title={`${s.tier_label || ''} · ${shortRef || ''} · ${s.branch_id || ''}`}>
+                                {s.tier_label || 'Monthly Giving'}
+                                {shortRef && <span className="block text-[10px] text-white/30 font-mono">{shortRef}</span>}
+                              </td>
+                              <td className="px-3 py-2 text-white/80 text-xs">
+                                <div className="font-semibold">{donorLabel}</div>
+                                {s.donor_email
+                                  ? <div className="text-white/50 text-[11px] font-mono truncate max-w-[180px]">{s.donor_email}</div>
+                                  : <span className="text-white/30 italic">no email</span>}
+                              </td>
+                              <td className={`px-3 py-2 text-xs max-w-[220px] truncate ${rowFailed ? 'text-red-300/80' : 'text-white/60'}`}
+                                  title={rowFailed && s.last_failure_at ? `at ${new Date(s.last_failure_at).toLocaleString('en-GB')}` : ''}>
+                                {rowFailed && '✗ '}{reasonCell}
+                                {rowFailed && (s.failed_payment_count || 0) > 1 && (
+                                  <span className="text-red-300/50"> · {s.failed_payment_count} attempts</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap text-right">
+                                {rowFailed && (
+                                  <button
+                                    onClick={() => sendRetryEmail(s.id)}
+                                    disabled={retryingId === s.id || !canEmail}
+                                    title={!canEmail
+                                      ? 'No donor email on file — nowhere to send'
+                                      : s.retry_email_sent_at
+                                        ? `Already sent ${new Date(s.retry_email_sent_at).toLocaleString('en-GB')} — click to force resend`
+                                        : 'Email the donor a link to start monthly giving again. Carries over Gift Aid.'}
+                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${
+                                      s.retry_email_sent_at
+                                        ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20'
+                                        : 'bg-amber-500/15 text-amber-200 border border-amber-500/30 hover:bg-amber-500/25'
+                                    }`}>
+                                    {retryingId === s.id ? '✉ Sending…'
+                                      : s.retry_email_sent_at ? '✉ Resend'
+                                      : '✉ Send retry'}
+                                  </button>
+                                )}
+                                {!rowFailed && s.payment_provider !== 'stripe' && (
+                                  <button
+                                    onClick={() => refreshFromPayPal(s.id)}
+                                    disabled={refreshingId === s.id || !s.paypal_subscription_id}
+                                    title="Ask PayPal what the real status is — use when a sub is stuck on PENDING_APPROVAL but the donor says they signed up"
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/8 text-white/70 hover:bg-white/15 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">
+                                    {refreshingId === s.id ? '↻ Checking…' : '↻ Refresh'}
+                                  </button>
+                                )}
+                                {retryNote[s.id] && (
+                                  <div className="text-[10px] text-emerald-400 mt-1">{retryNote[s.id]}</div>
+                                )}
+                                {refreshNote[s.id] && (
+                                  <div className="text-[10px] text-saffron-400 mt-1">↻ {refreshNote[s.id]}</div>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </>
             )
           })()}
