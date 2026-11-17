@@ -151,7 +151,7 @@ export default function RecurringGivingPage() {
         : ''
       setSyncNote(x.skipped
         ? `Skipped: ${x.skipped}`
-        : `Stripe · scanned ${x.scanned ?? 0} · ${x.status_updated ?? 0} status updates · ${x.activated ?? 0} activated · ${x.linked_orphans ?? 0} linked · ${x.payments_recorded ?? 0} payments recorded · ${(x.stale_reaped ?? 0) + (x.orphans_expired ?? 0)} stale expired${x.errors ? ` · ${x.errors} errors${errDetail}` : ''}`)
+        : `Stripe · scanned ${x.scanned ?? 0} · ${x.status_updated ?? 0} status updates · ${x.activated ?? 0} activated · ${x.linked_orphans ?? 0} linked · ${x.payments_recorded ?? 0} payments recorded · ${x.donor_backfilled ?? 0} donors backfilled · ${(x.stale_reaped ?? 0) + (x.orphans_expired ?? 0)} stale expired${x.errors ? ` · ${x.errors} errors${errDetail}` : ''}`)
       await loadSubs()
     } catch (e) {
       setSyncNote(e instanceof Error ? e.message : 'Sync failed')
