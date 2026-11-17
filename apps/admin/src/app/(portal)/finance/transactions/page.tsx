@@ -48,6 +48,11 @@ interface Txn {
   refunded: boolean
   refund_amount_pence: number
   disputed: boolean
+  // Provider-reported failure reason — populated by the Stripe +
+  // SumUp sync paths for any row that didn't settle. Rendered as a
+  // hover tooltip on the Outcome pill and in the drawer.
+  failure_code: string
+  failure_message: string
 }
 
 interface FinanceAccount {
@@ -569,15 +574,37 @@ export default function TransactionsPage() {
                   {/* Outcome — pill shows the payment outcome so SumUp's
                       SUCCESSFUL and Stripe's succeeded charge both read the
                       same way, and a Stripe clearing-window row no longer
-                      reads "pending" when the charge already went through. */}
+                      reads "pending" when the charge already went through.
+                      For Failed/Pending rows, the provider's failure_reason
+                      is folded into the native title tooltip + rendered as
+                      a small mono sub-line underneath the pill so the
+                      operator sees WHY without opening the drawer. */}
                   <td className="px-4 py-3 text-xs">
                     {(() => {
                       const o = outcomeOf(t)
+                      const hasReason = !!(t.failure_message || t.failure_code)
+                      const tipParts = [
+                        o.detail,
+                        hasReason && [t.failure_code, t.failure_message].filter(Boolean).join(' · '),
+                      ].filter(Boolean)
                       return (
-                        <span title={o.detail}
-                              className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${o.cls}`}>
-                          {o.label}
-                        </span>
+                        <div className="flex flex-col gap-1 items-start">
+                          <span
+                            title={tipParts.join('\n')}
+                            className={`px-2 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1 ${o.cls} ${hasReason ? 'cursor-help' : ''}`}
+                          >
+                            {o.label}
+                            {hasReason && <span className="opacity-70 text-[10px]" aria-hidden>ⓘ</span>}
+                          </span>
+                          {hasReason && (
+                            <span
+                              className="text-[10px] text-red-300/80 max-w-[200px] truncate font-mono"
+                              title={[t.failure_code, t.failure_message].filter(Boolean).join(' · ')}
+                            >
+                              {t.failure_message || t.failure_code}
+                            </span>
+                          )}
+                        </div>
                       )
                     })()}
                   </td>
@@ -751,6 +778,22 @@ function TxnDetail({ txn, onClose }: { txn: Txn; onClose: () => void }) {
                 the table columns, so the drawer matches what the operator
                 just clicked on. */}
             <KV label="Outcome" value={outcomeOf(txn).label} />
+            {(txn.failure_message || txn.failure_code) && (
+              <>
+                <KV
+                  label="Reason"
+                  value={txn.failure_message || '—'}
+                  tone="red"
+                />
+                {txn.failure_code && (
+                  <KV
+                    label="Reason code"
+                    value={txn.failure_code}
+                    tone="red"
+                  />
+                )}
+              </>
+            )}
             <KV label="Payout"  value={(() => { const p = payoutStateOf(txn); return p.when ? `${p.label} ${p.when}` : p.label })()} />
             {txn.refunded && <KV label="Refunded" value={money(txn.refund_amount_pence)} tone="red" />}
             {txn.disputed && <KV label="Disputed" value="⚠ Yes" tone="red" />}

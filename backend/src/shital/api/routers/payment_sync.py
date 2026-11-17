@@ -223,6 +223,11 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
         "refunded":       bool(row.get("refunded", False)),
         "refund_amount":  int(row.get("refund_amount_pence", 0) or 0),
         "disputed":       bool(row.get("disputed", False)),
+        # Provider-reported failure context. Stripe writes failure_code +
+        # failure_message straight on the charge; SumUp wraps it in
+        # status_detail / decline_reason. Both empty on a successful row.
+        "failure_code":    (row.get("failure_code") or "")[:80],
+        "failure_message": (row.get("failure_message") or "")[:500],
     }
     if existed:
         await db.execute(text("""
@@ -250,7 +255,12 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
               available_at      = COALESCE(:available_at, available_at),
               refunded          = CASE WHEN :refunded THEN true ELSE refunded END,
               refund_amount_pence = GREATEST(refund_amount_pence, :refund_amount),
-              disputed          = CASE WHEN :disputed THEN true ELSE disputed END
+              disputed          = CASE WHEN :disputed THEN true ELSE disputed END,
+              -- Never clobber a populated reason with a blank re-sync:
+              -- Stripe can return the charge later without failure_message
+              -- once the merchant acked it. Upsert only widens.
+              failure_code      = CASE WHEN :failure_code    <> '' THEN :failure_code    ELSE failure_code    END,
+              failure_message   = CASE WHEN :failure_message <> '' THEN :failure_message ELSE failure_message END
             WHERE provider = :provider AND external_id = :eid
         """), params)
         return "updated"
@@ -264,7 +274,8 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
            billing_country, billing_postcode,
            payment_method_type, card_brand, card_last4, card_country, card_funding,
            receipt_url, statement_descriptor, available_at,
-           refunded, refund_amount_pence, disputed)
+           refunded, refund_amount_pence, disputed,
+           failure_code, failure_message)
         VALUES
           (:provider, :eid, :kind, :status, :amount, :currency,
            :fee, :net, :desc, :cust,
@@ -274,7 +285,8 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
            :bill_country, :bill_postcode,
            :pm_type, :card_brand, :card_last4, :card_country, :card_funding,
            :receipt_url, :stmt_desc, :available_at,
-           :refunded, :refund_amount, :disputed)
+           :refunded, :refund_amount, :disputed,
+           :failure_code, :failure_message)
     """), params)
     return "inserted"
 
@@ -361,6 +373,24 @@ async def _sync_stripe(since: datetime, until: datetime | None, triggered_by: st
                                 "refunded":             bool(ch.get("refunded")),
                                 "refund_amount_pence":  ch.get("amount_refunded") or 0,
                                 "disputed":             bool(ch.get("disputed")),
+                                # Failure context — surfaced on the admin
+                                # Transactions grid as a hover tooltip on
+                                # the red Failed pill. Stripe spells the
+                                # reason in a couple of places; prefer
+                                # failure_message (human) then outcome.
+                                # seller_message (also human, includes
+                                # 'Try another card' phrasing), falling
+                                # back to failure_code.
+                                "failure_code":    (
+                                    ch.get("failure_code")
+                                    or ((ch.get("outcome") or {}).get("reason") if isinstance(ch.get("outcome"), dict) else "")
+                                    or ""
+                                ),
+                                "failure_message": (
+                                    ch.get("failure_message")
+                                    or ((ch.get("outcome") or {}).get("seller_message") if isinstance(ch.get("outcome"), dict) else "")
+                                    or ""
+                                ),
                             }
                         except Exception:
                             extra = {}
@@ -552,10 +582,28 @@ async def _sync_sumup(since: datetime, until: datetime | None, triggered_by: str
                             "available_at":        payout_date,
                             "refunded":            is_refund,
                             "refund_amount_pence": abs(amount_pence) if is_refund else 0,
+                            # Failure context — SumUp's reason for a
+                            # Failed / Cancelled row. SumUp spells it in
+                            # a couple of places; try the common ones.
+                            "failure_code":    (
+                                it.get("status_detail")
+                                or it.get("decline_code")
+                                or it.get("error_code")
+                                or ""
+                            ),
+                            "failure_message": (
+                                it.get("decline_reason")
+                                or it.get("failure_reason")
+                                or it.get("error_message")
+                                or (it.get("status_detail") if (it.get("status") or "").upper() in ("FAILED", "CANCELLED", "CANCELED") else "")
+                                or ""
+                            ),
                             "raw": {
                                 "payment_type":  it.get("payment_type"),
                                 "entry_mode":    entry_mode,
                                 "installments_count": it.get("installments_count"),
+                                "status_detail": it.get("status_detail"),
+                                "decline_reason": it.get("decline_reason"),
                             },
                         })
                         counts[outcome] += 1
@@ -1239,6 +1287,7 @@ async def list_transactions(
                    pt.card_country, pt.card_funding,
                    pt.receipt_url, pt.statement_descriptor, pt.available_at,
                    pt.refunded, pt.refund_amount_pence, pt.disputed,
+                   pt.failure_code, pt.failure_message,
                    d.id::text       AS donation_id,
                    COALESCE(d.gift_aid_eligible, false) AS gift_aid_eligible,
                    d.gift_aid_amount::numeric            AS gift_aid_amount,
@@ -1314,6 +1363,11 @@ async def list_transactions(
                 "refunded":             bool(r["refunded"]),
                 "refund_amount_pence":  int(r["refund_amount_pence"] or 0),
                 "disputed":             bool(r["disputed"]),
+                # Provider-reported failure reason — shown as the hover
+                # tooltip on the Failed pill in the admin grid, or as
+                # the Outcome detail line in the drawer.
+                "failure_code":         r["failure_code"] or "",
+                "failure_message":      r["failure_message"] or "",
             }
             for r in rows
         ],
