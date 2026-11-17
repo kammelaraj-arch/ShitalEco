@@ -34,6 +34,11 @@ interface Donation {
   // Provider's own status verbatim (Stripe: succeeded/pending/failed,
   // PayPal: COMPLETED/PENDING/DENIED). Null for manual rows.
   source_status?: string | null
+  // Raw failure context from the provider — populated by Stripe/PayPal
+  // webhook + the Stripe import for any charge that didn't settle. Shown
+  // inline in the Reason column on the admin grid.
+  failure_code?: string | null
+  failure_message?: string | null
   reference: string
   contact_id: string | null
   contact_name: string | null
@@ -75,6 +80,12 @@ const ALL_COLUMNS = [
   { key: 'payment_ref',      label: 'Payment Ref',    default: false, always: false },
   { key: 'reference',        label: 'Reference',      default: false, always: false },
   { key: 'status',           label: 'Status',         default: true,  always: true  },
+  // Raw provider-reported failure / pending reason — default OFF so the
+  // table stays compact. The Status cell itself carries a native-tooltip
+  // + ⓘ indicator with the same message, so the information is one
+  // hover away without stealing a column. Operators who want the full
+  // reason inline can toggle it on from the column picker.
+  { key: 'reason',           label: 'Reason',         default: false, always: false },
 ] as const
 
 type ColumnKey = typeof ALL_COLUMNS[number]['key']
@@ -85,7 +96,7 @@ const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 tex
 const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1'
 
 const PURPOSES = ['General', 'Building Fund', 'Education', 'Food Bank', 'Festival', 'Specific', 'Sponsorship', 'Zakat', 'Sadaqah']
-const STATUSES = ['COMPLETED', 'PENDING', 'CANCELLED', 'REFUNDED']
+const STATUSES = ['COMPLETED', 'PENDING', 'FAILED', 'CANCELLED', 'REFUNDED', 'PAST_DUE']
 
 export default function DonationsPage() {
   const [donations, setDonations] = useState<Donation[]>([])
@@ -833,6 +844,9 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                       Status {sortBy === 'status' && <span className="ml-1 text-saffron-400">{sortDir === 'asc' ? '↑' : '↓'}</span>}
                     </th>
                   )}
+                  {isVisible('reason') && (
+                    <th className="text-left px-4 py-3 text-white/40 text-xs font-semibold uppercase">Reason</th>
+                  )}
                   {canEdit && <th className="px-4 py-3" />}
                 </tr>
               </thead>
@@ -937,23 +951,59 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
                     {isVisible('reference') && (
                       <td className="px-4 py-3 text-white/50 text-xs">{d.reference || '—'}</td>
                     )}
-                    {isVisible('status') && (
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col gap-1 items-start">
-                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
-                            d.status === 'COMPLETED' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-                            d.status === 'PENDING'   ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
-                                                       'bg-red-500/20 text-red-400 border-red-500/30'
-                          }`}>{d.status}</span>
-                          {d.source_status && (
+                    {isVisible('status') && (() => {
+                      // Hover-first failure/pending reason. When the row
+                      // has failure_message / failure_code we show a ⓘ
+                      // badge on the Status pill and attach the full
+                      // reason as the native title tooltip. Operators
+                      // see the status compactly, hover for detail, and
+                      // can still toggle the dedicated Reason column on
+                      // from the column picker when they want it inline.
+                      const reasonText = [d.failure_code, d.failure_message].filter(Boolean).join(' · ')
+                      return (
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-1 items-start">
                             <span
-                              title={`Source status (${d.payment_provider || 'provider'})`}
-                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-sky-500/10 text-sky-300/90 border border-sky-500/20 font-mono lowercase"
-                            >
-                              src: {d.source_status}
+                              title={reasonText || undefined}
+                              className={`text-xs font-bold px-2 py-0.5 rounded-full border inline-flex items-center gap-1 ${
+                                d.status === 'COMPLETED' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                                d.status === 'PENDING'   ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                                d.status === 'FAILED' ||
+                                d.status === 'PAST_DUE'  ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                                                           'bg-slate-500/20 text-slate-300 border-slate-500/30'
+                              } ${reasonText ? 'cursor-help' : ''}`}>
+                              {d.status}
+                              {reasonText && <span className="opacity-70 text-[10px]" aria-hidden>ⓘ</span>}
                             </span>
-                          )}
-                        </div>
+                            {d.source_status && (
+                              <span
+                                title={`Source status (${d.payment_provider || 'provider'})`}
+                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-sky-500/10 text-sky-300/90 border border-sky-500/20 font-mono lowercase"
+                              >
+                                src: {d.source_status}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      )
+                    })()}
+                    {isVisible('reason') && (
+                      <td className="px-4 py-3">
+                        {(d.failure_message || d.failure_code) ? (
+                          <div
+                            className="text-xs max-w-[240px] text-red-300/90"
+                            title={[d.failure_code, d.failure_message].filter(Boolean).join(' · ')}
+                          >
+                            <div className="font-semibold truncate">{d.failure_message || '—'}</div>
+                            {d.failure_code && (
+                              <div className="text-[10px] text-red-400/60 font-mono truncate">{d.failure_code}</div>
+                            )}
+                          </div>
+                        ) : d.status === 'PENDING' ? (
+                          <span className="text-[11px] text-amber-300/60 italic">awaiting provider</span>
+                        ) : (
+                          <span className="text-white/20">—</span>
+                        )}
                       </td>
                     )}
                     {canEdit && (

@@ -244,6 +244,14 @@ async def list_donations(
                 d.gift_aid_amount::numeric,
                 d.status,
                 d.source_status,
+                -- Raw provider-reported failure context. Populated by the
+                -- Stripe/PayPal webhooks + the Stripe import for any row
+                -- that didn't settle. Surfaced directly on the admin
+                -- donations grid so the operator sees the Stripe reason
+                -- ("card_declined · insufficient_funds") without
+                -- clicking into the detail drawer.
+                d.last_failure_code    AS failure_code,
+                d.last_failure_message AS failure_message,
                 d.reference,
                 d.contact_id::text,
                 c.full_name      AS contact_name,
@@ -304,7 +312,13 @@ async def list_donations(
                      THEN ROUND(rgs.amount * 0.25, 2)
                      ELSE 0 END::numeric                  AS gift_aid_amount,
                 rgs.status,
-                NULL::varchar                             AS source_status,
+                -- The recurring-giving leg uses the subscription's status
+                -- verbatim as source_status, so Stripe's provider status
+                -- ('past_due', 'incomplete') comes through alongside our
+                -- lifecycle status.
+                LOWER(rgs.status)                         AS source_status,
+                rgs.last_failure_code                     AS failure_code,
+                rgs.last_failure_reason                   AS failure_message,
                 COALESCE(
                     NULLIF(rgs.stripe_subscription_id, ''),
                     rgs.paypal_subscription_id
