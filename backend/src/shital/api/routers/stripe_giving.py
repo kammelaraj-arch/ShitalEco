@@ -927,6 +927,11 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
         "scanned": 0, "status_updated": 0, "activated": 0, "cancelled": 0,
         "payments_recorded": 0, "linked_orphans": 0, "orphans_expired": 0,
         "stale_reaped": 0,
+        # Number of rgs rows whose previously-blank donor_name / donor_email
+        # got backfilled from the Stripe Customer in Pass A. Surfaced in
+        # the admin 'Sync from Stripe' toast so the operator sees why
+        # 'Anonymous · no email' rows now have real names after a sync.
+        "donor_backfilled": 0,
         "errors": 0, "days_window": days,
     }
     now = datetime.utcnow()
@@ -942,16 +947,21 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
     # the sync window. 2 days matches the existing reap threshold in Pass B.
     async with SessionLocal() as db:
         # Reap stale "donor clicked, never paid" rows — these are
-        # REQUEST_INITIATED (new name) or the legacy PENDING_APPROVAL
-        # from before the rename. 2 days with no Stripe subscription id
-        # means the donor abandoned the Checkout session; mark ABANDONED
-        # instead of leaving it as if they were still mid-signup.
+        # REQUEST_INITIATED (new name), the legacy PENDING_APPROVAL from
+        # before the rename, AWAITING_PAYMENT (donor landed on Stripe's
+        # hosted checkout but closed the tab without paying — Checkout
+        # sessions expire on Stripe's side after 24 h so after 2 days
+        # these are definitely dead), and PENDING_CONTACT (legacy
+        # PayPal anonymous rows from before the Stripe-only migration).
+        # All four used to pile into the admin 'Pending' tab so the
+        # operator saw 15 pending while only 2 were live.
         reaped = await db.execute(text("""
             UPDATE recurring_giving_subscriptions
             SET status = 'ABANDONED', updated_at = NOW()
             WHERE payment_provider = 'stripe'
               AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')
-              AND UPPER(COALESCE(status,'')) IN ('REQUEST_INITIATED','PENDING_APPROVAL')
+              AND UPPER(COALESCE(status,'')) IN
+                  ('REQUEST_INITIATED','PENDING_APPROVAL','AWAITING_PAYMENT','PENDING_CONTACT')
               AND created_at < NOW() - INTERVAL '2 days'
         """))
         await db.commit()
@@ -989,7 +999,11 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
     for r in rows:
         summary["scanned"] += 1
         try:
-            sub = _d(stripe.Subscription.retrieve(r["sub_id"]))
+            # expand=['customer'] lets us backfill donor identity on rgs
+            # rows that came back from the import with blank donor_name /
+            # donor_email — happens for subs created directly in Stripe
+            # Dashboard (no Checkout session carries billing_details).
+            sub = _d(stripe.Subscription.retrieve(r["sub_id"], expand=["customer"]))
         except Exception as exc:  # noqa: BLE001
             # resource_missing → Stripe never really created it; reap old rows.
             if "resource_missing" in str(exc).lower() or "no such subscription" in str(exc).lower():
@@ -1004,6 +1018,54 @@ async def _stripe_giving_reconcile_once(days: int = 90) -> dict[str, Any]:
             else:
                 summary["errors"] += 1
             continue
+        # ── Donor identity backfill ──────────────────────────────────────
+        # Stripe Customer object (expanded above) carries name/email/phone
+        # + billing address. If our rgs row is anonymous (blank donor_*),
+        # take what Stripe has and COALESCE-fill it. COALESCE(NULLIF(...))
+        # means we never clobber values the admin or the Checkout webhook
+        # already set — pure backfill. One UPDATE per sub; cheap.
+        _c = sub.get("customer")
+        if isinstance(_c, dict):
+            _c_name  = str(_c.get("name")  or "").strip()[:400]
+            _c_email = str(_c.get("email") or "").strip().lower()[:254]
+            _c_phone = str(_c.get("phone") or "").strip()[:50]
+            _addr    = _c.get("address") or {}
+            _line1   = str((_addr.get("line1") if isinstance(_addr, dict) else "") or "").strip()
+            _line2   = str((_addr.get("line2") if isinstance(_addr, dict) else "") or "").strip()
+            _city    = str((_addr.get("city")  if isinstance(_addr, dict) else "") or "").strip()
+            _pc      = str((_addr.get("postal_code") if isinstance(_addr, dict) else "") or "").strip().upper()[:20]
+            _fmt_addr = ", ".join(p for p in [_line1, _line2, _city, _pc] if p)[:500]
+            _first, _, _surname = _c_name.partition(" ")
+            if _c_name or _c_email or _c_phone or _fmt_addr:
+                async with SessionLocal() as db:
+                    bk = await db.execute(text("""
+                        UPDATE recurring_giving_subscriptions
+                        SET donor_name       = COALESCE(NULLIF(donor_name,''),       :name),
+                            donor_email      = COALESCE(NULLIF(donor_email,''),      :email),
+                            donor_first_name = COALESCE(NULLIF(donor_first_name,''), :first),
+                            donor_surname    = COALESCE(NULLIF(donor_surname,''),    :surname),
+                            donor_phone      = COALESCE(NULLIF(donor_phone,''),      :phone),
+                            donor_address    = COALESCE(NULLIF(donor_address,''),    :addr),
+                            donor_postcode   = COALESCE(NULLIF(donor_postcode,''),   :pc),
+                            updated_at       = NOW()
+                        WHERE id = CAST(:id AS uuid)
+                          AND (
+                            NULLIF(donor_name,'')  IS NULL OR
+                            NULLIF(donor_email,'') IS NULL OR
+                            NULLIF(donor_phone,'') IS NULL OR
+                            NULLIF(donor_address,'') IS NULL OR
+                            NULLIF(donor_postcode,'') IS NULL
+                          )
+                        RETURNING id
+                    """), {
+                        "name": _c_name, "email": _c_email, "first": _first,
+                        "surname": _surname, "phone": _c_phone,
+                        "addr": _fmt_addr, "pc": _pc, "id": r["id"],
+                    })
+                    if bk.first():
+                        summary["donor_backfilled"] += 1
+                    await db.commit()
+
         mapped = _STRIPE_SUB_STATUS_MAP.get((sub.get("status") or "").lower())
         if mapped and mapped != r["status"]:
             async with SessionLocal() as db:
@@ -1877,6 +1939,31 @@ async def _stripe_import_once(days: int = 30) -> dict[str, Any]:
                     out["imported"] += 1
                 else:
                     out["skipped_duplicates"] += 1
+
+                # ── Reclassify legacy 'Stripe Payment' → 'Monthly Giving' ──
+                # Historical rows were ingested before the subscription
+                # existed in our DB, so they landed with purpose='Stripe
+                # Payment' and are invisible to the Monthly Giving stats
+                # ('totals are wrong' / '0 invoices settled'). Now that
+                # rgs_row is matched, flip the purpose + branch so the
+                # totals pick them up on the next render. Idempotent — a
+                # row already marked 'Monthly Giving' stays as-is.
+                if rgs_row:
+                    await db.execute(text("""
+                        UPDATE donations
+                        SET purpose    = 'Monthly Giving',
+                            branch_id  = COALESCE(NULLIF(branch_id,''), :branch),
+                            contact_id = COALESCE(contact_id, CAST(:cid AS uuid)),
+                            updated_at = NOW()
+                        WHERE payment_ref = :ref
+                          AND payment_provider = 'stripe'
+                          AND purpose <> 'Monthly Giving'
+                    """), {
+                        "branch": rgs_row["branch_id"],
+                        "cid":    contact_id,
+                        "ref":    charge_id,
+                    })
+
                 # Link + flip ACTIVE on the rgs row (idempotent).
                 if rgs_row:
                     r = await db.execute(text("""
