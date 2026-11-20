@@ -20,7 +20,13 @@ export function ProjectGuptScreen() {
   function go(amount: number) {
     setPendingGiftAid(null)   // never Gift Aid on an anonymous donation
     setAmount(amount)
-    setScreen('tap')
+    // Route via ProcessingScreen so it creates the SumUp (or Clover)
+    // checkout with the picked amount before the Tap screen starts
+    // polling. The old 'tap' jump skipped the checkout-create call
+    // that only ProcessingScreen owns, so the Solo reader never
+    // received the amount — same bug PR #418 fixed on the project
+    // flow, just this time for Gupt Daan.
+    setScreen('processing')
   }
 
   return (
