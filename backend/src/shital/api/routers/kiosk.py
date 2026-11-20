@@ -2224,11 +2224,37 @@ async def list_sumup_readers():
     """List SumUp readers registered to the merchant."""
 
 
-    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
-    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+    # Operator reported 'already there u must reuse' — the kiosk's
+    # SumUp payments work, so at least one of these two keys is set
+    # somewhere. Give a precise error so we can see which one is
+    # actually missing or mis-named instead of a vague 'not configured'.
+    sm_token    = await SecretsManager.get("SUMUP_ACCESS_TOKEN")
+    sm_merchant = await SecretsManager.get("SUMUP_MERCHANT_CODE")
+    env_token    = settings.SUMUP_ACCESS_TOKEN
+    env_merchant = settings.SUMUP_MERCHANT_CODE
+    access_token  = sm_token    or env_token
+    merchant_code = sm_merchant or env_merchant
 
     if not access_token or not merchant_code:
-        return {"readers": [], "error": "SumUp not configured. Add SUMUP_ACCESS_TOKEN and SUMUP_MERCHANT_CODE."}
+        missing = []
+        if not access_token:
+            missing.append("SUMUP_ACCESS_TOKEN")
+        if not merchant_code:
+            missing.append("SUMUP_MERCHANT_CODE")
+        return {
+            "readers": [],
+            "error": f"SumUp not configured — missing: {', '.join(missing)}.",
+            "diag": {
+                "secrets_manager": {
+                    "SUMUP_ACCESS_TOKEN":  bool(sm_token),
+                    "SUMUP_MERCHANT_CODE": bool(sm_merchant),
+                },
+                "settings_env": {
+                    "SUMUP_ACCESS_TOKEN":  bool(env_token),
+                    "SUMUP_MERCHANT_CODE": bool(env_merchant),
+                },
+            },
+        }
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
