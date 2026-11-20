@@ -1,5 +1,23 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
+import { speak } from '../lib/voice'
+
+// Large-donation voice-prompt threshold. When the donor confirms an
+// amount at or above this, we speak it out loud as an acoustic
+// double-check — guards against the "donor meant £30 but typed 300"
+// class of mistake. Operator: 'use voice prompt if the amount is above
+// 250'. Kept small so it's easy to tweak per-branch if asked later.
+const VOICE_PROMPT_THRESHOLD = 250
+
+function speakAmountPrompt(amount: number): void {
+  // e.g. "Three hundred pounds. Please confirm on the card reader."
+  // Two sentences so the engine inserts a natural pause between
+  // amount and instruction; "pounds" (not "GBP" / "£") so the TTS
+  // reads it right. Integer-only — fractional confirmations are rare
+  // on kiosk donations and would blur the announcement.
+  const pounds = Math.round(amount)
+  speak(`${pounds} pounds. Please confirm on the card reader.`)
+}
 
 // Shared on-screen numeric amount keypad for Quick Donation kiosks.
 //
@@ -83,7 +101,10 @@ export function AmountKeypad({
         <motion.button
           key={p}
           whileTap={{ scale: 0.95 }}
-          onClick={() => onConfirm(p)}
+          onClick={() => {
+            if (p >= VOICE_PROMPT_THRESHOLD) speakAmountPrompt(p)
+            onConfirm(p)
+          }}
           className="py-2 rounded-xl font-black text-sm"
           style={{
             background: 'rgba(255,255,255,0.05)',
@@ -122,7 +143,11 @@ export function AmountKeypad({
         </button>
       )}
       <button
-        onClick={() => canConfirm && onConfirm(amt)}
+        onClick={() => {
+          if (!canConfirm) return
+          if (amt >= VOICE_PROMPT_THRESHOLD) speakAmountPrompt(amt)
+          onConfirm(amt)
+        }}
         disabled={!canConfirm}
         className="flex-1 py-3 rounded-xl font-black text-base disabled:opacity-40"
         style={{ background: accent, color: '#180324' }}>
