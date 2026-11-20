@@ -67,17 +67,21 @@ export const PROVIDERS: ProviderMeta[] = [
     tagline: 'SumUp Solo / Solo Lite — standalone Wi-Fi card reader with its own screen.',
     accent: '#06B6D4',
     bg: 'rgba(6,182,212,0.08)',
-    idFieldLabel: 'SumUp Reader Pair-Code',
+    idFieldLabel: 'SumUp Reader',
     idFieldName: 'sumup_reader_serial',
-    idPlaceholder: 'yellow-river-stone',
-    idShapeHint: 'Three lowercase words joined by hyphens, e.g. "yellow-river-stone".',
+    idPlaceholder: 'rdr_72KS21AbCdEf',
+    // The wizard's picker populates this field with the SumUp Reader
+    // API id (rdr_...) — same shape the backend validator accepts and
+    // the same form the production SOLO1-WEM / SOLO2-WEM rows store.
+    // The old three-hyphenated-words pair-code shape is also allowed
+    // for the manual pair-code path, in case the picker is skipped.
+    idShapeHint: 'Picked from the list above — reads as rdr_… (or a three-word pair-code if typed by hand).',
     whereToFindId: [
-      'On the SumUp Solo, swipe down from the top and tap Settings → Device info.',
-      'Look for "Pair-code" or "Reader code" — it reads as three words joined by hyphens.',
-      'Type it exactly as shown (all lowercase, hyphens between each word).',
-      'If the device is already paired, you can also read the code off the sticker on its back.',
+      'Click "Pull readers from SumUp" above to see every reader bound to the SHITAL merchant account.',
+      'Pick one — the picker fills this field with the SumUp Reader API id (rdr_…).',
+      'If the picker is empty: pair the device from the SumUp app against the same merchant, then click Refresh.',
     ],
-    idPattern: /^[a-z]+-[a-z]+-[a-z]+$/,
+    idPattern: /^(rdr_[A-Za-z0-9_-]{4,}|[a-z]+-[a-z]+-[a-z]+)$/,
     docUrl: 'https://help.sumup.com/hc/en-gb/articles/13944787898524-Setting-up-your-SumUp-Solo',
     docLabel: 'Open SumUp\'s Solo setup guide ↗',
   },
