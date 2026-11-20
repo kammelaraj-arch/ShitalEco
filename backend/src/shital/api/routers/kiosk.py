@@ -2267,10 +2267,28 @@ async def list_sumup_readers():
         data = resp.json()
         # SumUp returns {"items": [...]} — not a bare list and not "readers"
         rd_list = data if isinstance(data, list) else data.get("items", data.get("readers", []))
+        # The wizard's picker writes `serial` straight into
+        # sumup_reader_serial on the device row — so the value HAS to be
+        # one the backend `_SUMUP_SERIAL_RE` accepts. SumUp returns a
+        # numeric device identifier (e.g. '200101774729') which fails
+        # that regex; the existing working devices in production store
+        # the `rdr_...` Reader API id instead. Prefer that, and fall
+        # back to pairing_code / device.identifier only when the API
+        # doesn't return an id.
         return {"readers": [
             {
                 "id":     r.get("id", ""),
-                "serial": r.get("device", {}).get("identifier", r.get("serial_number", "")),
+                "serial": (
+                    r.get("id")                                       # rdr_...
+                    or r.get("pairing_code")                          # three-word fallback
+                    or (r.get("device", {}) or {}).get("identifier")  # numeric physical serial
+                    or r.get("serial_number", "")
+                ),
+                # Keep the physical device serial too so the picker can
+                # render it under the name for operator confidence —
+                # e.g. 'solo-03 · 200101774729' — without using it as
+                # the save value.
+                "device_identifier": (r.get("device", {}) or {}).get("identifier", "") or r.get("serial_number", ""),
                 "name":   r.get("name", ""),
                 "status": r.get("status", "unknown"),
             }
