@@ -62,11 +62,43 @@ const EMPTY_FORM: WizardForm = {
 const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-amber-500/50 transition-colors'
 const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5'
 
+// Shape of a reader row returned by /kiosk/sumup/readers. Mirrors what
+// backend/src/shital/api/routers/kiosk.py :list_sumup_readers emits.
+interface SumUpReader {
+  id: string
+  serial: string
+  name: string
+  status: string
+}
+
 export function ReaderOnboardingWizard({ onClose, onCreated }: ReaderOnboardingWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
   const [form, setForm] = useState<WizardForm>({ ...EMPTY_FORM })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // SumUp reader picker — pulls the list of readers bound to our
+  // merchant account so the volunteer can click to select instead of
+  // typing the pair-code by hand. Manual input stays available.
+  const [sumupReaders, setSumupReaders] = useState<SumUpReader[]>([])
+  const [sumupLoading, setSumupLoading] = useState(false)
+  const [sumupError, setSumupError] = useState('')
+  const [sumupFetched, setSumupFetched] = useState(false)
+
+  async function pullSumupReaders() {
+    setSumupLoading(true)
+    setSumupError('')
+    try {
+      const r = await apiFetch<{ readers: SumUpReader[]; error?: string }>('/kiosk/sumup/readers')
+      if (r.error) { setSumupError(r.error); setSumupReaders([]) }
+      else { setSumupReaders(r.readers || []) }
+    } catch (e: unknown) {
+      setSumupError(e instanceof Error ? e.message : 'Could not reach SumUp')
+      setSumupReaders([])
+    } finally {
+      setSumupLoading(false)
+      setSumupFetched(true)
+    }
+  }
 
   const providerMeta = useMemo(() => (form.provider ? getProvider(form.provider) : undefined), [form.provider])
 
@@ -283,7 +315,89 @@ export function ReaderOnboardingWizard({ onClose, onCreated }: ReaderOnboardingW
                   )}
                 </div>
 
-                {providerMeta.id !== 'cash' && (
+                {/* SumUp provider: pull the list of readers bound to the
+                    merchant and let the volunteer click to select. Avoids
+                    the typo class entirely (operator asked to drop the
+                    manual Pair-Code input — a reader can only be
+                    registered through this list now). */}
+                {providerMeta.id === 'sumup' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className={lbl + ' mb-0'}>Pick from your SumUp account *</p>
+                      <button
+                        type="button"
+                        onClick={pullSumupReaders}
+                        disabled={sumupLoading}
+                        className="text-[11px] font-bold px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50"
+                        style={{
+                          background: `${providerMeta.accent}20`,
+                          color: providerMeta.accent,
+                          borderColor: `${providerMeta.accent}50`,
+                        }}
+                      >
+                        {sumupLoading
+                          ? 'Loading…'
+                          : sumupFetched ? '↻ Refresh' : 'Pull readers from SumUp'}
+                      </button>
+                    </div>
+
+                    {sumupError && (
+                      <div className="text-xs text-red-300/90 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 mb-2">
+                        {sumupError}
+                      </div>
+                    )}
+
+                    {!sumupFetched && !sumupLoading && !sumupError && (
+                      <div className="text-xs text-white/50 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                        Click <b>Pull readers from SumUp</b> to see every reader bound to the SHITAL SumUp merchant account.
+                      </div>
+                    )}
+
+                    {sumupFetched && !sumupError && sumupReaders.length === 0 && !sumupLoading && (
+                      <div className="text-xs text-white/70 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                        <b>No readers on the SumUp account.</b> Pair the device from the SumUp app against the same merchant, then click <b>↻ Refresh</b>.
+                      </div>
+                    )}
+
+                    {sumupReaders.length > 0 && (
+                      <div className="rounded-xl border border-white/10 overflow-hidden" style={{ background: 'rgba(0,0,0,0.25)' }}>
+                        {sumupReaders.map(r => {
+                          const selected = (form.sumup_reader_serial || '').trim() === (r.serial || '').trim() && !!r.serial
+                          const dotColor = (r.status || '').toLowerCase() === 'online' || (r.status || '').toLowerCase() === 'paired' ? '#22C55E' : '#FBBF24'
+                          return (
+                            <button
+                              key={r.id}
+                              type="button"
+                              onClick={() => setCurrentIdValue(r.serial || '')}
+                              className={`w-full text-left px-3 py-2.5 border-b border-white/5 last:border-b-0 flex items-center gap-3 hover:bg-white/5 transition-colors ${
+                                selected ? 'bg-amber-500/10' : ''
+                              }`}
+                            >
+                              <span className="w-2 h-2 rounded-full shrink-0"
+                                    title={r.status}
+                                    style={{ background: dotColor, boxShadow: `0 0 6px ${dotColor}` }} />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm text-white font-semibold truncate">
+                                  {r.name || '(unnamed reader)'}
+                                </div>
+                                <div className="text-[11px] font-mono text-white/50 truncate">
+                                  {r.serial || r.id}
+                                </div>
+                              </div>
+                              {selected && (
+                                <span className="text-[10px] font-black uppercase tracking-widest text-amber-300">
+                                  Selected
+                                </span>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {providerMeta.id !== 'cash' && providerMeta.id !== 'sumup' && (
                   <div>
                     <p className={lbl}>{providerMeta.idFieldLabel} *</p>
                     <input
