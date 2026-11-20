@@ -32,11 +32,18 @@ router = APIRouter(prefix="/terminal-devices", tags=["terminal-devices"])
 # into a row where Provider was pre-selected as something else; from today the
 # row refuses to save in either direction.
 _STRIPE_READER_ID_PREFIX = "tmr_"
-# SumUp Solo readers are named "three-hyphenated-lowercase-english-words" by
-# SumUp's onboarding (e.g. "yellow-river-stone"). That three-token lowercase
-# shape is the pair-code the volunteer reads off the device; anything else
-# landing in sumup_reader_serial is a typo or a wrong-field paste.
-_SUMUP_SERIAL_RE = re.compile(r"^[a-z]+-[a-z]+-[a-z]+$")
+# A SumUp reader identifier can land in two shapes:
+#   * Three-hyphenated-lowercase-english-words (e.g. "yellow-river-stone") —
+#     the "Pair-Code" a volunteer reads off the back of the Solo device.
+#   * A SumUp Reader API id — "rdr_<base-32-ish>" or "rdr_<id>" — returned
+#     by SumUp's /v0.1/merchants/{code}/readers list. The in-app picker
+#     writes this one straight in (operator asked for no manual pair-code,
+#     just select-to-onboard).
+# Anything that matches neither is a typo / wrong-field paste and is
+# rejected the same way as before.
+_SUMUP_PAIR_RE  = re.compile(r"^[a-z]+-[a-z]+-[a-z]+$")
+_SUMUP_READER_RE = re.compile(r"^rdr_[A-Za-z0-9_-]{4,}$")
+_SUMUP_SERIAL_RE = re.compile(f"({_SUMUP_PAIR_RE.pattern})|({_SUMUP_READER_RE.pattern})")
 
 
 def _validate_provider_id_match(provider: str, stripe_reader_id: str, sumup_reader_serial: str) -> None:
@@ -99,9 +106,10 @@ def _validate_provider_id_match(provider: str, stripe_reader_id: str, sumup_read
             detail={
                 "error": "sumup_serial_shape",
                 "message": (
-                    "SumUp Solo serials are three hyphenated lowercase words "
-                    f"(e.g. 'yellow-river-stone'); got '{su}'. Re-read the "
-                    "pair-code from the back of the SumUp Solo device."
+                    "SumUp reader identifier should be either three hyphenated "
+                    "lowercase words (e.g. 'yellow-river-stone') or a Reader "
+                    f"API id (e.g. 'rdr_XXXXXX'); got '{su}'. Use the picker "
+                    "to select a reader from your SumUp account."
                 ),
             },
         )

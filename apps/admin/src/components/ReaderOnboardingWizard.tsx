@@ -64,9 +64,15 @@ const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide m
 
 // Shape of a reader row returned by /kiosk/sumup/readers. Mirrors what
 // backend/src/shital/api/routers/kiosk.py :list_sumup_readers emits.
+// `serial` is the value we write into sumup_reader_serial on the
+// device row — in practice the SumUp Reader API id (rdr_...), since
+// that's what passes the backend shape check and matches existing
+// production entries. `device_identifier` is shown under the name for
+// operator confidence but is NOT what gets saved.
 interface SumUpReader {
   id: string
   serial: string
+  device_identifier?: string
   name: string
   status: string
 }
@@ -381,6 +387,9 @@ export function ReaderOnboardingWizard({ onClose, onCreated }: ReaderOnboardingW
                                   {r.name || '(unnamed reader)'}
                                 </div>
                                 <div className="text-[11px] font-mono text-white/50 truncate">
+                                  {r.device_identifier || r.serial || r.id}
+                                </div>
+                                <div className="text-[10px] text-white/30 font-mono truncate" title={r.serial || r.id}>
                                   {r.serial || r.id}
                                 </div>
                               </div>
