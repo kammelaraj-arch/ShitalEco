@@ -143,7 +143,13 @@ export function ProjectContactScreen() {
       email: email.trim().toLowerCase(),
     })
     if (!giftAid) setPendingGiftAid(null)
-    setScreen('tap')
+    // Route through ProcessingScreen so it creates the SumUp (or
+    // Clover) checkout with the picked tier amount before the Tap
+    // screen starts polling. The old `setScreen('tap')` jumped
+    // straight past the checkout-create call that only
+    // ProcessingScreen owns (TapScreen#38 then polls a nonexistent
+    // checkout), so the donor's amount never reached the SumUp Solo.
+    setScreen('processing')
   }
 
   const addressSelected = address.length > 0
