@@ -36,7 +36,7 @@ the only authentication.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -74,7 +74,7 @@ DEFAULT_EXPIRY_DAYS = 90
 # ─── Token helpers ────────────────────────────────────────────────────────────
 def mint_prefs_token(contact_id: str, days: int = DEFAULT_EXPIRY_DAYS) -> str:
     """Sign a preference-centre JWT for the given contact id."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(contact_id),
         "p":   TOKEN_PURPOSE,
