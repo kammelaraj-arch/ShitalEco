@@ -447,27 +447,19 @@ def _default_vars() -> dict[str, Any]:
 
 
 async def _smtp_send(from_email: str, password: str, to_email: str, subject: str, html_body: str, text_body: str) -> None:
-    """SMTP send via Office 365. Synchronous; call via run_in_executor."""
-    import asyncio
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-
-    def _send() -> None:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = from_email
-        msg["To"]      = to_email
-        if text_body:
-            msg.attach(MIMEText(text_body, "plain"))
-        msg.attach(MIMEText(html_body, "html"))
-        with smtplib.SMTP("smtp.office365.com", 587, timeout=20) as srv:
-            srv.ehlo()
-            srv.starttls()
-            srv.login(from_email, password)
-            srv.sendmail(from_email, to_email, msg.as_string())
-
-    await asyncio.get_event_loop().run_in_executor(None, _send)
+    """Legacy SMTP send — kept as a thin wrapper over the new
+    `dispatch_email` service so existing call sites work unchanged.
+    Raises on any error (callers already wrap in try/except)."""
+    # The legacy signature passes creds explicitly, but the dispatcher
+    # reads from env / SecretsManager — which admin UI rotates. Prefer
+    # the dispatcher so a key rotation takes effect here too.
+    from shital.services.mail import dispatch_email
+    result = await dispatch_email(
+        to_email=to_email, subject=subject,
+        html_body=html_body, text_body=text_body,
+    )
+    if not result.get("ok"):
+        raise RuntimeError(str(result.get("error") or "mail dispatch failed"))
 
 
 async def _record_pending(
