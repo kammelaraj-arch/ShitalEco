@@ -18,6 +18,7 @@ import { VolunteerRegistrationPage } from './pages/VolunteerRegistrationPage'
 import { SevaPage } from './pages/SevaPage'
 import { SqFtPage } from './pages/SqFtPage'
 import { SqFtPageV2 } from './pages/SqFtPageV2'
+import { PrefsPage } from './pages/PrefsPage'
 import { DonorWallPage } from './pages/DonorWallPage'
 import { DarshanPage } from './pages/DarshanPage'
 import { ReferenceResponsePage } from './pages/ReferenceResponsePage'
@@ -142,9 +143,19 @@ export default function App() {
     if (
       urlScreen === 'monthly-giving' || urlScreen === 'browse' ||
       urlScreen === 'volunteer'      || urlScreen === 'reference' ||
-      urlScreen === 'seva'           || urlScreen === 'sqft'
+      urlScreen === 'seva'           || urlScreen === 'sqft'     ||
+      urlScreen === 'prefs'
     ) {
       setScreen(urlScreen)
+    }
+
+    // Pretty-URL shortcut for the marketing preference centre:
+    //   /prefs?t=<jwt>  →  setScreen('prefs')
+    // The jwt stays in the query string for PrefsPage to read, nginx
+    // already SPA-falls through to index.html for unknown paths.
+    if (window.location.pathname === '/prefs' && params.get('t')) {
+      setScreen('prefs')
+      return
     }
 
     // 1. Hostname subdomain takes highest priority
@@ -201,6 +212,7 @@ export default function App() {
       case 'seva': return <SevaPage />
       case 'sqft': return <SqFtPageV2 />
       case 'sqft-classic': return <SqFtPage />
+      case 'prefs': return <PrefsPage />
       case 'donor-wall': return <DonorWallPage />
       case 'darshan': return <DarshanPage />
       case 'reference': return <ReferenceResponsePage />

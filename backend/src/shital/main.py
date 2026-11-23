@@ -2276,6 +2276,36 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_contacts_email   ON contacts(email)",
         "CREATE INDEX IF NOT EXISTS idx_contacts_surname ON contacts(surname)",
         "CREATE INDEX IF NOT EXISTS idx_contacts_created ON contacts(created_at DESC)",
+        # ── Marketing: per-channel subscription preferences ──────────────────
+        # Phase 1a compliance foundation. Every outbound marketing message
+        # MUST check is_opted_in(contact_id, channel) and every delivery
+        # path MUST carry a signed preference-centre link in the footer.
+        # Rows keyed by (contact_id, channel). Absent row = default (email
+        # opted-in because donors gave an email on checkout; SMS/WhatsApp/
+        # phone/post default off). An explicit row overrides the default.
+        """CREATE TABLE IF NOT EXISTS contact_channel_prefs (
+            contact_id    UUID         NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            channel       VARCHAR(20)  NOT NULL,
+            opted_in      BOOLEAN      NOT NULL,
+            reason        VARCHAR(100) NOT NULL DEFAULT '',
+            source_ip     VARCHAR(45)  NOT NULL DEFAULT '',
+            updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (contact_id, channel)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_prefs_updated ON contact_channel_prefs(updated_at DESC)",
+        # Append-only audit log of unsubscribe events, keyed by email so
+        # a donor can be matched even when no contact row exists yet
+        # (e.g. an email ingested from a Stripe charge that never finished
+        # contact-upsert). Used for compliance + anti-spam reports.
+        """CREATE TABLE IF NOT EXISTS marketing_unsubscribes (
+            id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+            email         VARCHAR(254) NOT NULL,
+            channel       VARCHAR(20)  NOT NULL,
+            reason        VARCHAR(500) NOT NULL DEFAULT '',
+            source        VARCHAR(50)  NOT NULL DEFAULT '',
+            created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_unsub_email ON marketing_unsubscribes(email)",
         # ── CRM: Addresses table (linked to contacts, stores UPRN) ────────────
         """CREATE TABLE IF NOT EXISTS addresses (
             id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -4609,6 +4639,7 @@ _mount("shital.api.routers.payroll",          "router")
 _mount("shital.api.routers.hr_alerts",        "router")
 _mount("shital.api.routers.admin_kiosk",      "router")
 _mount("shital.api.routers.email_templates",  "router")
+_mount("shital.api.routers.marketing_prefs",  "router")
 _mount("shital.api.routers.functions",        "router")
 _mount("shital.api.routers.assets",           "router")
 _mount("shital.api.routers.key_register",     "router")
