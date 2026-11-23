@@ -3344,6 +3344,33 @@ async def _patch_schema() -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_mkt_tpl_name ON marketing_templates(LOWER(name))",
         "CREATE INDEX IF NOT EXISTS idx_mkt_tpl_status ON marketing_templates(status)",
 
+        # ── Marketing: campaigns (compose + schedule + send) ────────────────
+        # A campaign ties a saved segment + saved template + optional
+        # scheduled_at + merge variables. Status lifecycle:
+        #   DRAFT        → still being edited
+        #   SCHEDULED    → scheduled_at in the future; worker picks up
+        #   SENDING      → worker currently iterating recipients
+        #   SENT         → run complete
+        #   CANCELLED    → aborted before send
+        """CREATE TABLE IF NOT EXISTS marketing_campaigns (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name          VARCHAR(200) NOT NULL,
+            segment_id    UUID REFERENCES audience_segments(id) ON DELETE SET NULL,
+            template_id   UUID REFERENCES marketing_templates(id) ON DELETE SET NULL,
+            variables     JSONB NOT NULL DEFAULT '{}'::jsonb,
+            scheduled_at  TIMESTAMPTZ,
+            sent_at       TIMESTAMPTZ,
+            status        VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+            stats         JSONB NOT NULL DEFAULT '{}'::jsonb,
+                -- {"attempted": N, "sent": N, "skipped_opted_out": N,
+                --  "failed": N, "failed_detail": [{email, reason}]}
+            created_by    UUID,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_mkt_cmp_status ON marketing_campaigns(status)",
+        "CREATE INDEX IF NOT EXISTS idx_mkt_cmp_scheduled ON marketing_campaigns(scheduled_at) WHERE scheduled_at IS NOT NULL",
+
         # ── Mail Agent: agentic email triage of shared mailboxes ─────────────
         # mail_agent_messages = one row per email the agent has seen. Idempotency
         # is via UNIQUE (graph_message_id) so the poller can safely re-fetch.
@@ -4894,6 +4921,7 @@ _mount("shital.api.routers.marketing_send",   "router")
 _mount("shital.api.routers.marketing_webhooks", "router")
 _mount("shital.api.routers.marketing_segments", "router")
 _mount("shital.api.routers.marketing_templates", "router")
+_mount("shital.api.routers.marketing_campaigns", "router")
 _mount("shital.api.routers.functions",        "router")
 _mount("shital.api.routers.assets",           "router")
 _mount("shital.api.routers.key_register",     "router")
