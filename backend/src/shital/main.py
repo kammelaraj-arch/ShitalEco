@@ -3222,6 +3222,49 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_res_ann_aud_ann ON resolution_announcement_audiences(announcement_id)",
 
+        # ── Phase C: trustee review-flow upgrades ─────────────────────────────
+        # Widen `choice` from VARCHAR(10) to VARCHAR(30) — new values
+        # FOR_WITH_CONDITIONS (counts as a provisional For until the chair
+        # resolves each condition) and DEFERRED (trustee opened the magic
+        # link, chose "review and complete later" — not counted toward any
+        # tally and doesn't block quorum, but surfaces in the Vote & Close
+        # panel as "not yet voted"). Shortest safe migration — idempotent.
+        "ALTER TABLE resolution_votes ALTER COLUMN choice TYPE VARCHAR(30)",
+
+        # Conditions attached to a FOR_WITH_CONDITIONS vote. One row per
+        # condition the trustee attaches; chair must resolve each one
+        # before the resolution can go to chair sign-off (Phase D's job).
+        """CREATE TABLE IF NOT EXISTS resolution_vote_conditions (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            vote_id         UUID NOT NULL REFERENCES resolution_votes(id) ON DELETE CASCADE,
+            resolution_id   UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            text            TEXT NOT NULL,
+            attachment_id   UUID,
+            status          VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                -- PENDING | ACCEPTED | REJECTED | DEFERRED
+            resolution_reason TEXT NOT NULL DEFAULT '',
+            resolved_by     UUID,
+            resolved_at     TIMESTAMPTZ,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_vote_cond_res ON resolution_vote_conditions(resolution_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_res_vote_cond_vote ON resolution_vote_conditions(vote_id)",
+
+        # Trustee review comments — posted via the public vote page *before*
+        # casting a final vote. Distinct from the admin-side draft comments
+        # (`resolution_comments`) because they fire after publish and must
+        # be visible to other trustees on their own vote page.
+        """CREATE TABLE IF NOT EXISTS resolution_review_comments (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id   UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            trustee_id      UUID REFERENCES trustees(id) ON DELETE SET NULL,
+            trustee_name    VARCHAR(255) NOT NULL DEFAULT '',
+            body_html       TEXT NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_rev_cmt_res ON resolution_review_comments(resolution_id, created_at)",
+
         # ── Mail Agent: agentic email triage of shared mailboxes ─────────────
         # mail_agent_messages = one row per email the agent has seen. Idempotency
         # is via UNIQUE (graph_message_id) so the poller can safely re-fetch.
@@ -4819,6 +4862,7 @@ _mount("shital.api.routers.finance_accounts",      "router")
 _mount("shital.api.routers.board_resolution_extras", "router")
 _mount("shital.api.routers.board_collab",            "router")
 _mount("shital.api.routers.board_announcement",      "router")
+_mount("shital.api.routers.board_voting_phase_c",    "router")
 _mount("shital.api.routers.public_campaigns",      "router")
 _mount("shital.api.routers.public_darshan",        "router")
 _mount("shital.api.routers.tier_profiles",         "router")

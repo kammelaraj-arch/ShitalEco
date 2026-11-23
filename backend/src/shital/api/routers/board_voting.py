@@ -50,7 +50,11 @@ router = APIRouter(tags=["board-voting"])
 
 PIN_LOCKOUT_MINUTES = 15
 PIN_MAX_FAILS = 5
-VALID_VOTE_CHOICES = {"FOR", "AGAINST", "ABSTAIN"}
+# Phase C: accept FOR_WITH_CONDITIONS (provisional For + conditions the
+# chair must resolve) and DEFERRED ("review and complete later" — opened
+# the magic link, isn't voting today). FOR_WITH_CONDITIONS counts as
+# a For for tally; DEFERRED is counted as neither.
+VALID_VOTE_CHOICES = {"FOR", "AGAINST", "ABSTAIN", "FOR_WITH_CONDITIONS", "DEFERRED"}
 
 
 def _require_admin(ctx: CurrentSpace) -> None:
@@ -336,10 +340,20 @@ def _mask_email(email: str) -> str:
     return f"{local[0]}{'*' * max(2, len(local) - 2)}{local[-1]}@{domain}"
 
 
+class VoteCondition(BaseModel):
+    text: str
+    attachment_id: str | None = None
+
+
 class CastVoteBody(BaseModel):
     choice: str
     pin: str
     comment: str = ""
+    # Phase C: conditions are required when choice == FOR_WITH_CONDITIONS,
+    # ignored otherwise. Each condition is a short text + optional
+    # attachment id from an earlier /public/board/vote/{token}/upload
+    # call (max 10 per vote).
+    conditions: list[VoteCondition] = []
 
 
 @router.post("/public/board/vote/{token}")
@@ -350,7 +364,15 @@ async def public_cast_vote(
     if not token or len(token) < 20:
         raise HTTPException(404, detail="Invalid token")
     if body.choice not in VALID_VOTE_CHOICES:
-        raise HTTPException(400, detail="choice must be FOR | AGAINST | ABSTAIN")
+        raise HTTPException(400, detail=f"choice must be one of {sorted(VALID_VOTE_CHOICES)}")
+    if body.choice == "FOR_WITH_CONDITIONS":
+        clean_conditions = [c for c in (body.conditions or []) if (c.text or "").strip()]
+        if not clean_conditions:
+            raise HTTPException(400, detail="At least one condition is required for FOR_WITH_CONDITIONS")
+        if len(clean_conditions) > 10:
+            raise HTTPException(400, detail="Max 10 conditions per vote")
+    else:
+        clean_conditions = []
     if not body.pin or not body.pin.isdigit() or not (4 <= len(body.pin) <= 6):
         raise HTTPException(400, detail="PIN must be 4-6 digits")
 
@@ -436,8 +458,10 @@ async def public_cast_vote(
             WHERE id = :id
         """), {"now": now, "id": trustee["id"]})
 
-        # Upsert the vote
-        await db.execute(text("""
+        # Upsert the vote and capture the final vote id so we can attach
+        # conditions. RETURNING on an ON CONFLICT ... UPDATE path is safe
+        # because Postgres always emits a row for UPSERT's RETURNING.
+        vote_row = (await db.execute(text("""
             INSERT INTO resolution_votes
                 (id, resolution_id, trustee_id, choice, anonymous, comment,
                  voted_at, updated_at)
@@ -447,11 +471,43 @@ async def public_cast_vote(
                 choice = EXCLUDED.choice,
                 comment = EXCLUDED.comment,
                 updated_at = :now
+            RETURNING id
         """), {
             "id": str(uuid.uuid4()), "rid": str(tok["resolution_id"]),
             "tid": str(trustee["id"]), "choice": body.choice,
             "comment": body.comment, "now": now,
-        })
+        })).mappings().one()
+        vote_id = str(vote_row["id"])
+
+        # Phase C: conditions. Re-casting a vote REPLACES prior conditions —
+        # treat the vote as fresh intent each time. Chair-resolved
+        # conditions carry through only when the choice stays
+        # FOR_WITH_CONDITIONS (we don't delete ACCEPTED/REJECTED rows; on a
+        # re-cast we just append the new PENDING ones).
+        if body.choice == "FOR_WITH_CONDITIONS":
+            await db.execute(text("""
+                DELETE FROM resolution_vote_conditions
+                 WHERE vote_id = CAST(:vid AS uuid) AND status = 'PENDING'
+            """), {"vid": vote_id})
+            for cond in clean_conditions:
+                await db.execute(text("""
+                    INSERT INTO resolution_vote_conditions
+                        (vote_id, resolution_id, text, attachment_id)
+                    VALUES
+                        (CAST(:vid AS uuid), CAST(:rid AS uuid), :t,
+                         CAST(:att AS uuid))
+                """), {
+                    "vid": vote_id, "rid": str(tok["resolution_id"]),
+                    "t": cond.text.strip()[:2000],
+                    "att": cond.attachment_id if cond.attachment_id else None,
+                })
+        elif body.choice != "FOR_WITH_CONDITIONS":
+            # Changing away from FOR_WITH_CONDITIONS cancels PENDING
+            # conditions — they no longer bind the record.
+            await db.execute(text("""
+                DELETE FROM resolution_vote_conditions
+                 WHERE vote_id = CAST(:vid AS uuid) AND status = 'PENDING'
+            """), {"vid": vote_id})
 
         # Bump token usage
         await db.execute(text("""
@@ -472,11 +528,15 @@ async def public_cast_vote(
         await db.commit()
 
         # Return updated tally so the page can render confirmation.
+        # FOR_WITH_CONDITIONS counts as a provisional For; DEFERRED
+        # contributes to neither side — matches the admin tally.
         tally_row = (await db.execute(text("""
             SELECT
-              SUM(CASE choice WHEN 'FOR' THEN 1 ELSE 0 END) AS f,
-              SUM(CASE choice WHEN 'AGAINST' THEN 1 ELSE 0 END) AS a,
-              SUM(CASE choice WHEN 'ABSTAIN' THEN 1 ELSE 0 END) AS b
+              SUM(CASE WHEN choice IN ('FOR','FOR_WITH_CONDITIONS') THEN 1 ELSE 0 END) AS f,
+              SUM(CASE WHEN choice = 'AGAINST'  THEN 1 ELSE 0 END) AS a,
+              SUM(CASE WHEN choice = 'ABSTAIN'  THEN 1 ELSE 0 END) AS b,
+              SUM(CASE WHEN choice = 'DEFERRED' THEN 1 ELSE 0 END) AS d,
+              SUM(CASE WHEN choice = 'FOR_WITH_CONDITIONS' THEN 1 ELSE 0 END) AS fc
             FROM resolution_votes WHERE resolution_id = :rid
         """), {"rid": str(tok["resolution_id"])})).mappings().one()
     return {
@@ -484,6 +544,8 @@ async def public_cast_vote(
         "tally_for": int(tally_row["f"] or 0),
         "tally_against": int(tally_row["a"] or 0),
         "tally_abstain": int(tally_row["b"] or 0),
+        "tally_deferred": int(tally_row["d"] or 0),
+        "tally_for_conditional": int(tally_row["fc"] or 0),
     }
 
 

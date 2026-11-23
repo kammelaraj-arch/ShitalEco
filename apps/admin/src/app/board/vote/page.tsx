@@ -4,7 +4,9 @@ import { motion } from 'framer-motion'
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
 
-type Choice = 'FOR' | 'AGAINST' | 'ABSTAIN'
+type Choice = 'FOR' | 'AGAINST' | 'ABSTAIN' | 'FOR_WITH_CONDITIONS' | 'DEFERRED'
+
+interface VoteCondition { text: string; attachment_id?: string | null }
 
 interface Resolution {
   id: string
@@ -77,6 +79,13 @@ export default function MagicLinkVotePage() {
 
   const [choice, setChoice] = useState<Choice | ''>('')
   const [comment, setComment] = useState('')
+  // Phase C — conditions attached to FOR_WITH_CONDITIONS vote. UI collects
+  // them as free-form text rows; each can carry one uploaded file id.
+  const [conditions, setConditions] = useState<VoteCondition[]>([{ text: '' }])
+  // Review comments (posted before the final vote)
+  const [reviewComments, setReviewComments] = useState<Array<{ id: string; trustee_name: string; body_html: string; created_at: string }>>([])
+  const [reviewDraft, setReviewDraft] = useState('')
+  const [reviewPosting, setReviewPosting] = useState(false)
 
   const [showPinModal, setShowPinModal] = useState(false)
   const [showSetupModal, setShowSetupModal] = useState(false)
@@ -103,6 +112,18 @@ export default function MagicLinkVotePage() {
 
   useEffect(() => { load() }, [load])
 
+  // Load review comments whenever we have a token
+  useEffect(() => {
+    if (!token) return
+    ;(async () => {
+      try {
+        const r = await fetch(`${API}/public/board/vote/${encodeURIComponent(token)}/review`)
+        const d = await r.json().catch(() => ({}))
+        if (r.ok && Array.isArray(d.comments)) setReviewComments(d.comments)
+      } catch { /* non-fatal */ }
+    })()
+  }, [token])
+
   async function submitVote() {
     if (!choice || pin.length < 4) return
     setSubmitting(true); setError('')
@@ -110,7 +131,12 @@ export default function MagicLinkVotePage() {
       const r = await fetch(`${API}/public/board/vote/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ choice, pin, comment }),
+        body: JSON.stringify({
+          choice, pin, comment,
+          conditions: choice === 'FOR_WITH_CONDITIONS'
+            ? conditions.filter(c => (c.text || '').trim())
+            : [],
+        }),
       })
       const d = await r.json().catch(() => ({}))
       if (!r.ok) {
@@ -246,7 +272,7 @@ export default function MagicLinkVotePage() {
               </p>
             )}
 
-            <div className="grid grid-cols-3 gap-2 mb-4">
+            <div className="grid grid-cols-3 gap-2 mb-3">
               {(['FOR', 'AGAINST', 'ABSTAIN'] as Choice[]).map(c => (
                 <button key={c} onClick={() => setChoice(c)}
                   className="py-3 rounded-xl text-sm font-black transition-all"
@@ -273,6 +299,60 @@ export default function MagicLinkVotePage() {
                   }}>{c}</button>
               ))}
             </div>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <button onClick={() => setChoice('FOR_WITH_CONDITIONS')}
+                className="py-2.5 rounded-xl text-xs font-bold transition-all"
+                style={{
+                  background: choice === 'FOR_WITH_CONDITIONS' ? 'rgba(234,179,8,0.25)' : 'rgba(255,255,255,0.04)',
+                  border: `1.5px solid ${choice === 'FOR_WITH_CONDITIONS' ? '#eab308' : 'rgba(255,255,255,0.1)'}`,
+                  color: choice === 'FOR_WITH_CONDITIONS' ? '#facc15' : 'rgba(255,255,255,0.6)',
+                }}>For — with conditions</button>
+              <button onClick={() => setChoice('DEFERRED')}
+                className="py-2.5 rounded-xl text-xs font-bold transition-all"
+                style={{
+                  background: choice === 'DEFERRED' ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)',
+                  border: `1.5px solid ${choice === 'DEFERRED' ? '#6366f1' : 'rgba(255,255,255,0.1)'}`,
+                  color: choice === 'DEFERRED' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+                }}>Review & complete later</button>
+            </div>
+
+            {choice === 'FOR_WITH_CONDITIONS' && (
+              <div className="mb-4 rounded-xl p-3" style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)' }}>
+                <p className="text-xs text-saffron-300 font-bold mb-2">
+                  Your conditions — the chair must resolve each before the resolution can be signed off.
+                </p>
+                {conditions.map((c, i) => (
+                  <div key={i} className="flex gap-2 mb-2">
+                    <input value={c.text} onChange={e => {
+                      const next = [...conditions]; next[i] = { ...next[i], text: e.target.value }; setConditions(next)
+                    }} placeholder={`Condition ${i + 1}`}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-xs outline-none focus:border-saffron-400/50" />
+                    <input type="file" onChange={async e => {
+                      const f = e.target.files?.[0]; if (!f) return
+                      const fd = new FormData(); fd.append('file', f)
+                      const r = await fetch(`${API}/public/board/vote/${encodeURIComponent(token)}/upload`, { method: 'POST', body: fd })
+                      const d = await r.json().catch(() => ({}))
+                      if (r.ok && d.attachment_id) {
+                        const next = [...conditions]; next[i] = { ...next[i], attachment_id: d.attachment_id }; setConditions(next)
+                      }
+                    }} className="text-xs text-white/40 w-28" />
+                    <button onClick={() => setConditions(conditions.filter((_, j) => j !== i))}
+                      disabled={conditions.length === 1}
+                      className="text-xs text-red-400 disabled:opacity-30">✕</button>
+                  </div>
+                ))}
+                {conditions.length < 10 && (
+                  <button onClick={() => setConditions([...conditions, { text: '' }])}
+                    className="text-xs text-saffron-300 hover:underline">+ Add another condition</button>
+                )}
+              </div>
+            )}
+
+            {choice === 'DEFERRED' && (
+              <p className="mb-4 text-xs text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-3 py-2">
+                You're parking this for later. Open the link again to cast a final vote before voting closes.
+              </p>
+            )}
 
             <textarea value={comment} onChange={e => setComment(e.target.value)}
               placeholder="Optional comment (visible to other trustees in the audit log)"
@@ -298,6 +378,16 @@ export default function MagicLinkVotePage() {
             {resolution.outcome_summary && <p className="text-white/70 text-xs mt-2">{resolution.outcome_summary}</p>}
           </div>
         )}
+
+        {/* Phase C: review comments shared between trustees */}
+        <div className="rounded-2xl p-5 mt-4" style={{ background: CARD_BG, border: `1px solid ${CARD_BORDER}` }}>
+          <h2 className="font-black text-white mb-3 text-sm">Discussion</h2>
+          <ReviewCommentsPanel token={token}
+            comments={reviewComments} setComments={setReviewComments}
+            draft={reviewDraft} setDraft={setReviewDraft}
+            posting={reviewPosting} setPosting={setReviewPosting}
+            closed={closed} />
+        </div>
 
         <p className="text-center text-white/30 text-xs mt-6">
           SHITAL · UK Charity 1138530 · Audit-logged action.
@@ -372,5 +462,69 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
       <p className="text-white/40 text-xs font-bold uppercase tracking-widest mb-1.5">{title}</p>
       <div className="text-white/90 text-sm">{children}</div>
     </div>
+  )
+}
+
+// Phase C — review comments trustees post BEFORE casting a final vote.
+// Shared across the whole board so a question from one trustee can be
+// seen (and answered) by the others on their own magic-link page.
+function ReviewCommentsPanel({
+  token, comments, setComments, draft, setDraft, posting, setPosting, closed,
+}: {
+  token: string
+  comments: Array<{ id: string; trustee_name: string; body_html: string; created_at: string }>
+  setComments: (c: Array<{ id: string; trustee_name: string; body_html: string; created_at: string }>) => void
+  draft: string; setDraft: (s: string) => void
+  posting: boolean; setPosting: (b: boolean) => void
+  closed: boolean
+}) {
+  async function post() {
+    const body = draft.trim()
+    if (!body) return
+    setPosting(true)
+    try {
+      const r = await fetch(`${API}/public/board/vote/${encodeURIComponent(token)}/comment`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body_html: body }),
+      })
+      if (!r.ok) throw new Error(await r.text())
+      setDraft('')
+      // Reload comments
+      const q = await fetch(`${API}/public/board/vote/${encodeURIComponent(token)}/review`)
+      const d = await q.json().catch(() => ({}))
+      if (q.ok && Array.isArray(d.comments)) setComments(d.comments)
+    } catch { /* surface via error state in parent isn't wired — intentionally minimal */ }
+    finally   { setPosting(false) }
+  }
+
+  return (
+    <>
+      {comments.length === 0 && (
+        <p className="text-white/40 text-xs italic">No discussion yet. Start one if you have a question before you vote.</p>
+      )}
+      {comments.map(c => (
+        <div key={c.id} className="rounded-lg bg-white/5 border border-white/10 p-3 mb-2">
+          <div className="flex items-center justify-between text-[11px] text-white/50 mb-1">
+            <span>{c.trustee_name}</span>
+            <span>{new Date(c.created_at).toLocaleString('en-GB')}</span>
+          </div>
+          <div className="text-white/90 text-sm prose prose-sm prose-invert max-w-none"
+               dangerouslySetInnerHTML={{ __html: c.body_html }} />
+        </div>
+      ))}
+      {!closed && (
+        <div className="mt-3">
+          <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={3}
+            placeholder="Ask a question or share a concern before voting…"
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-saffron-400/50 resize-none" />
+          <div className="flex justify-end mt-2">
+            <button onClick={post} disabled={posting || !draft.trim()}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-saffron-400/20 border border-saffron-400/40 text-saffron-300 disabled:opacity-40">
+              {posting ? 'Posting…' : 'Post'}
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
