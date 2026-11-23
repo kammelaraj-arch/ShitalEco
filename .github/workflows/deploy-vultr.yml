@@ -514,6 +514,7 @@ jobs:
               -d donate.shital.org.uk -d screen.shital.org.uk \
               -d api.shital.org.uk -d dev.shital.org.uk \
               -d service.shital.org.uk \
+              -d campaigns.shital.org.uk \
               -d service.shirdisai.org.uk \
               --expand --non-interactive --agree-tos \
               -m admin@shirdisai.org.uk \
