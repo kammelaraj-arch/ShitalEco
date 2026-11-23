@@ -96,4 +96,31 @@ export const api = {
     req<{ subject: string; html_body: string; text_body: string; declared_variables: string[] }>(
       `/marketing/templates/${id}/preview`, { method: 'POST', body: JSON.stringify({ variables }) },
     ),
+
+  // Marketing campaigns
+  listCampaigns: () => req<{ items: Array<{
+    id: string; name: string; status: 'DRAFT' | 'SCHEDULED' | 'SENDING' | 'SENT' | 'CANCELLED';
+    scheduled_at: string | null; sent_at: string | null;
+    stats: Record<string, unknown>; updated_at: string;
+    segment_name: string | null; template_name: string | null;
+  }> }>('/marketing/campaigns'),
+  createCampaign: (body: { name: string; segment_id?: string | null; template_id?: string | null; scheduled_at?: string | null }) =>
+    req<{ ok: true; id: string }>('/marketing/campaigns', { method: 'POST', body: JSON.stringify(body) }),
+  getCampaign: (id: string) =>
+    req<{ campaign: {
+      id: string; name: string; segment_id: string | null; template_id: string | null;
+      variables: Record<string, string>; scheduled_at: string | null;
+      status: 'DRAFT' | 'SCHEDULED' | 'SENDING' | 'SENT' | 'CANCELLED';
+      stats: { attempted?: number; sent?: number; skipped_opted_out?: number; failed?: number; failed_detail?: Array<{ email: string; reason: string }> };
+      segment_name: string | null; template_name: string | null;
+      subject: string | null; html_body: string | null;
+    } }>(`/marketing/campaigns/${id}`),
+  updateCampaign: (id: string, body: Record<string, unknown>) =>
+    req<{ ok: true }>(`/marketing/campaigns/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  cancelCampaign: (id: string) =>
+    req<{ ok: true }>(`/marketing/campaigns/${id}`, { method: 'DELETE' }),
+  previewCampaignCount: (id: string) =>
+    req<{ total_unique: number }>(`/marketing/campaigns/${id}/preview-count`, { method: 'POST' }),
+  sendCampaignNow: (id: string) =>
+    req<{ ok: true; stats: Record<string, unknown> }>(`/marketing/campaigns/${id}/send-now`, { method: 'POST' }),
 }
