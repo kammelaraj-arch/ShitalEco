@@ -3292,6 +3292,32 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_res_sig_res ON resolution_signatures(resolution_id)",
 
+        # ── Marketing: saved audience segments (reusable across campaigns) ──
+        # Same shape as resolution_announcement_audiences but with a stable
+        # name so multiple campaigns can target the same segment. The
+        # resolver (services/marketing/audience.py) understands both this
+        # table's rows and the ad-hoc audiences used by board announcements
+        # — one code path, two input sources.
+        """CREATE TABLE IF NOT EXISTS audience_segments (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name        VARCHAR(200) NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            created_by  UUID,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_audience_segments_name ON audience_segments(LOWER(name))",
+
+        """CREATE TABLE IF NOT EXISTS audience_segment_entries (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            segment_id  UUID NOT NULL REFERENCES audience_segments(id) ON DELETE CASCADE,
+            kind        VARCHAR(30) NOT NULL,
+                -- all_contacts | volunteers | recent_donors | trustees | individuals | external_list
+            params      JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_aud_seg_ent_seg ON audience_segment_entries(segment_id)",
+
         # ── Mail Agent: agentic email triage of shared mailboxes ─────────────
         # mail_agent_messages = one row per email the agent has seen. Idempotency
         # is via UNIQUE (graph_message_id) so the poller can safely re-fetch.
@@ -4840,6 +4866,7 @@ _mount("shital.api.routers.email_templates",  "router")
 _mount("shital.api.routers.marketing_prefs",  "router")
 _mount("shital.api.routers.marketing_send",   "router")
 _mount("shital.api.routers.marketing_webhooks", "router")
+_mount("shital.api.routers.marketing_segments", "router")
 _mount("shital.api.routers.functions",        "router")
 _mount("shital.api.routers.assets",           "router")
 _mount("shital.api.routers.key_register",     "router")

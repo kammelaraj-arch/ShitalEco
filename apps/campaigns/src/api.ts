@@ -51,4 +51,27 @@ export const api = {
   }) => req<{ sent: boolean; skipped?: boolean; reason?: string; prefs_url?: string; sent_email_id?: string }>(
     '/marketing/send-test', { method: 'POST', body: JSON.stringify(body) },
   ),
+
+  // Saved audience segments
+  listSegments: () => req<{ items: Array<{ id: string; name: string; description: string; entry_count: number; updated_at: string }> }>(
+    '/marketing/segments',
+  ),
+  createSegment: (body: { name: string; description?: string }) =>
+    req<{ ok: true; id: string }>('/marketing/segments', { method: 'POST', body: JSON.stringify(body) }),
+  getSegment: (id: string) =>
+    req<{ segment: { id: string; name: string; description: string }; entries: Array<{ id: string; kind: string; params: Record<string, unknown>; created_at: string }> }>(
+      `/marketing/segments/${id}`,
+    ),
+  deleteSegment: (id: string) =>
+    req<{ ok: true }>(`/marketing/segments/${id}`, { method: 'DELETE' }),
+  addSegmentEntry: (segId: string, body: { kind: string; params: Record<string, unknown> }) =>
+    req<{ ok: true; id: string }>(`/marketing/segments/${segId}/entries`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  deleteSegmentEntry: (segId: string, entryId: string) =>
+    req<{ ok: true }>(`/marketing/segments/${segId}/entries/${entryId}`, { method: 'DELETE' }),
+  previewSegment: (segId: string) =>
+    req<{ total: number; per_entry: Array<{ entry_id: string; kind: string; count: number }> }>(
+      `/marketing/segments/${segId}/preview-count`, { method: 'POST' },
+    ),
 }
