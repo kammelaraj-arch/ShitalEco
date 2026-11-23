@@ -1242,6 +1242,11 @@ async def publish_resolution(
             raise HTTPException(404, detail="Resolution not found")
         if existing["status"] != "DRAFT":
             raise HTTPException(400, detail=f"Cannot publish from status {existing['status']}")
+        # Phase A: block publish while any REQUIRED info request is still
+        # OPEN. The admin UI shows the same signal via /info-requests
+        # so the button is disabled before the user tries.
+        from shital.api.routers.board_collab import assert_info_requests_fulfilled
+        await assert_info_requests_fulfilled(resolution_id)
         await db.execute(text("""
             UPDATE resolutions SET status = 'OPEN', published_at = :now,
                                    updated_at = :now

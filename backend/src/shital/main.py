@@ -3094,6 +3094,90 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_board_audit_entity ON board_audit_log(entity_type, entity_id)",
         "CREATE INDEX IF NOT EXISTS idx_board_audit_when   ON board_audit_log(created_at DESC)",
 
+        # ── Phase A: richer draft collaboration ──────────────────────────────
+        # External links attached to a resolution (SharePoint docs, Drive links,
+        # Confluence pages, surveyor reports hosted elsewhere). File uploads
+        # continue to live in the existing attachments stack; this table is for
+        # content that LIVES on an external system.
+        """CREATE TABLE IF NOT EXISTS resolution_external_links (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            label         VARCHAR(255) NOT NULL,
+            url           VARCHAR(2048) NOT NULL,
+            added_by      UUID,
+            added_by_name VARCHAR(255) NOT NULL DEFAULT '',
+            added_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_links_res ON resolution_external_links(resolution_id)",
+
+        # Comments thread on a draft — internal board discussion before the
+        # resolution is published for voting. Rich text (sanitized HTML).
+        """CREATE TABLE IF NOT EXISTS resolution_comments (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id   UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            author_user_id  UUID,
+            author_name     VARCHAR(255) NOT NULL DEFAULT '',
+            body_html       TEXT NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_comments_res ON resolution_comments(resolution_id, created_at)",
+
+        # Information requests — chair asks a manager / expert / external
+        # contact to supply info / document / media before the resolution goes
+        # to vote. If any required request is still OPEN, publish is blocked.
+        """CREATE TABLE IF NOT EXISTS resolution_info_requests (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id   UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            target_user_id  UUID,
+            target_email    VARCHAR(254) NOT NULL,
+            target_name     VARCHAR(255) NOT NULL DEFAULT '',
+            prompt          TEXT NOT NULL,
+            expected_type   VARCHAR(20) NOT NULL DEFAULT 'text',
+                -- text | document | image | video | audio
+            is_required     BOOLEAN NOT NULL DEFAULT false,
+            due_at          TIMESTAMPTZ,
+            status          VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+                -- OPEN | SUBMITTED | CANCELLED
+            requested_by    UUID,
+            requested_by_name VARCHAR(255) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_info_req_res   ON resolution_info_requests(resolution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_res_info_req_email ON resolution_info_requests(target_email)",
+        "CREATE INDEX IF NOT EXISTS idx_res_info_req_stat  ON resolution_info_requests(status)",
+
+        # Contributor's submitted response. Append-only once locked; content
+        # hash printed in the final PDF appendix so integrity is provable
+        # offline. attachment_id references the existing resolution_attachments
+        # row if the contributor uploaded a file.
+        """CREATE TABLE IF NOT EXISTS resolution_info_responses (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            request_id    UUID NOT NULL REFERENCES resolution_info_requests(id) ON DELETE CASCADE,
+            body_html     TEXT NOT NULL DEFAULT '',
+            attachment_id UUID,
+            submitted_by_email VARCHAR(254) NOT NULL,
+            submitted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            locked_at     TIMESTAMPTZ,
+            content_hash  VARCHAR(64) NOT NULL DEFAULT '',
+            source_ip     VARCHAR(45) NOT NULL DEFAULT '',
+            user_agent    VARCHAR(500) NOT NULL DEFAULT ''
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_info_resp_req ON resolution_info_responses(request_id)",
+
+        # PIN store for external contributors (not already trustees/users).
+        # Argon2id hash. Rate-limiting counters on the row itself so a brute-
+        # force attempt from one IP can't dodge limits by varying IP.
+        """CREATE TABLE IF NOT EXISTS info_contributors (
+            email             VARCHAR(254) PRIMARY KEY,
+            name              VARCHAR(255) NOT NULL DEFAULT '',
+            pin_hash          VARCHAR(255) NOT NULL DEFAULT '',
+            failed_attempts   INT NOT NULL DEFAULT 0,
+            lockout_until     TIMESTAMPTZ,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+
         # ── Mail Agent: agentic email triage of shared mailboxes ─────────────
         # mail_agent_messages = one row per email the agent has seen. Idempotency
         # is via UNIQUE (graph_message_id) so the poller can safely re-fetch.
@@ -4689,6 +4773,7 @@ _mount("shital.api.routers.payment_sync",          "router")
 _mount("shital.api.routers.email_ingest",          "router")
 _mount("shital.api.routers.finance_accounts",      "router")
 _mount("shital.api.routers.board_resolution_extras", "router")
+_mount("shital.api.routers.board_collab",            "router")
 _mount("shital.api.routers.public_campaigns",      "router")
 _mount("shital.api.routers.public_darshan",        "router")
 _mount("shital.api.routers.tier_profiles",         "router")
