@@ -3318,6 +3318,32 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_aud_seg_ent_seg ON audience_segment_entries(segment_id)",
 
+        # ── Marketing: reusable email templates ──────────────────────────────
+        # Distinct from email_templates (transactional — receipts, Gift Aid,
+        # etc.): these are MARKETING templates, written in the campaigns
+        # app, used by the composer, carry the preference-centre footer at
+        # send time. Different lifecycle (draft→published→archived) and
+        # different role gate (MARKETING / CHAIR / ADMIN).
+        """CREATE TABLE IF NOT EXISTS marketing_templates (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name        VARCHAR(200) NOT NULL,
+            subject     VARCHAR(500) NOT NULL DEFAULT '',
+            html_body   TEXT NOT NULL DEFAULT '',
+            text_body   TEXT NOT NULL DEFAULT '',
+            variables   JSONB NOT NULL DEFAULT '[]'::jsonb,
+                -- list of merge-variable names the template expects; the
+                -- composer uses this to build the preview form.
+            status      VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | PUBLISHED | ARCHIVED
+            category    VARCHAR(60) NOT NULL DEFAULT 'general',
+                -- newsletter | appeal | event | welcome | thank-you | general
+            created_by  UUID,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_mkt_tpl_name ON marketing_templates(LOWER(name))",
+        "CREATE INDEX IF NOT EXISTS idx_mkt_tpl_status ON marketing_templates(status)",
+
         # ── Mail Agent: agentic email triage of shared mailboxes ─────────────
         # mail_agent_messages = one row per email the agent has seen. Idempotency
         # is via UNIQUE (graph_message_id) so the poller can safely re-fetch.
@@ -4867,6 +4893,7 @@ _mount("shital.api.routers.marketing_prefs",  "router")
 _mount("shital.api.routers.marketing_send",   "router")
 _mount("shital.api.routers.marketing_webhooks", "router")
 _mount("shital.api.routers.marketing_segments", "router")
+_mount("shital.api.routers.marketing_templates", "router")
 _mount("shital.api.routers.functions",        "router")
 _mount("shital.api.routers.assets",           "router")
 _mount("shital.api.routers.key_register",     "router")

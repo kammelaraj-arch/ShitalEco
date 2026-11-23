@@ -74,4 +74,26 @@ export const api = {
     req<{ total: number; per_entry: Array<{ entry_id: string; kind: string; count: number }> }>(
       `/marketing/segments/${segId}/preview-count`, { method: 'POST' },
     ),
+
+  // Marketing templates
+  listTemplates: () => req<{ items: Array<{ id: string; name: string; subject: string; category: 'newsletter' | 'appeal' | 'event' | 'welcome' | 'thank-you' | 'general'; status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'; variables: string[]; updated_at: string }> }>(
+    '/marketing/templates',
+  ),
+  createTemplate: (body: { name: string; subject?: string; html_body?: string; text_body?: string; category?: string }) =>
+    req<{ ok: true; id: string; variables: string[] }>('/marketing/templates', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  getTemplate: (id: string) =>
+    req<{ template: { id: string; name: string; subject: string; html_body: string; text_body: string; variables: string[]; status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'; category: 'newsletter' | 'appeal' | 'event' | 'welcome' | 'thank-you' | 'general'; updated_at: string } }>(
+      `/marketing/templates/${id}`,
+    ),
+  updateTemplate: (id: string, body: {
+    name?: string; subject?: string; html_body?: string; text_body?: string; category?: string; status?: string
+  }) => req<{ ok: true }>(`/marketing/templates/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  archiveTemplate: (id: string) =>
+    req<{ ok: true }>(`/marketing/templates/${id}`, { method: 'DELETE' }),
+  previewTemplate: (id: string, variables: Record<string, unknown>) =>
+    req<{ subject: string; html_body: string; text_body: string; declared_variables: string[] }>(
+      `/marketing/templates/${id}/preview`, { method: 'POST', body: JSON.stringify({ variables }) },
+    ),
 }
