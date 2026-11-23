@@ -3265,6 +3265,33 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_res_rev_cmt_res ON resolution_review_comments(resolution_id, created_at)",
 
+        # ── Phase D: chair sign-off, resolution PDF, announcement fan-out ────
+        # New state columns on the resolution itself. Idempotent ALTERs.
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS awaiting_chair_approval BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS chair_signoff_at TIMESTAMPTZ",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS chair_signoff_by UUID",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS pdf_attachment_id UUID",
+
+        # Drawn signatures — PNG bytes + optional SVG — one per (resolution,
+        # trustee). Legal weight comes from the PIN-authenticated action +
+        # audit log; the PNG is for visual presence on the PDF (what people
+        # expect to see). Stored BYTEA to keep the record self-contained
+        # without an object-store dependency.
+        """CREATE TABLE IF NOT EXISTS resolution_signatures (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id   UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            trustee_id      UUID REFERENCES trustees(id) ON DELETE SET NULL,
+            signer_name     VARCHAR(255) NOT NULL DEFAULT '',
+            signer_role     VARCHAR(80)  NOT NULL DEFAULT '',
+            signature_png   BYTEA        NOT NULL,
+            signature_svg   TEXT         NOT NULL DEFAULT '',
+            ip_address      VARCHAR(45)  NOT NULL DEFAULT '',
+            user_agent      VARCHAR(500) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            UNIQUE (resolution_id, trustee_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_sig_res ON resolution_signatures(resolution_id)",
+
         # ── Mail Agent: agentic email triage of shared mailboxes ─────────────
         # mail_agent_messages = one row per email the agent has seen. Idempotency
         # is via UNIQUE (graph_message_id) so the poller can safely re-fetch.
@@ -4863,6 +4890,7 @@ _mount("shital.api.routers.board_resolution_extras", "router")
 _mount("shital.api.routers.board_collab",            "router")
 _mount("shital.api.routers.board_announcement",      "router")
 _mount("shital.api.routers.board_voting_phase_c",    "router")
+_mount("shital.api.routers.board_signoff",           "router")
 _mount("shital.api.routers.public_campaigns",      "router")
 _mount("shital.api.routers.public_darshan",        "router")
 _mount("shital.api.routers.tier_profiles",         "router")

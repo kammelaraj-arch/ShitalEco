@@ -8,6 +8,7 @@ import { CommentsPanel } from '@/components/board/CommentsPanel'
 import { InfoRequestsPanel } from '@/components/board/InfoRequestsPanel'
 import { AnnouncementPanel } from '@/components/board/AnnouncementPanel'
 import { ConditionsPanel } from '@/components/board/ConditionsPanel'
+import { SignoffPanel } from '@/components/board/SignoffPanel'
 
 type ResStatus = 'DRAFT' | 'OPEN' | 'CLOSED' | 'ARCHIVED'
 type Category = 'OPERATIONAL' | 'OFFICER_ELECTION' | 'POLICY' | 'CONTRACT' | 'CONSTITUTIONAL'
@@ -896,6 +897,15 @@ export default function ResolutionsPage() {
                           </p>
                           <ConditionsPanel resolutionId={editing.id} locked={editing.status === 'CLOSED'} />
                         </div>
+
+                        {editing.status === 'CLOSED' && (
+                          <div className="rounded-2xl border border-saffron-400/30 bg-saffron-400/5 p-4">
+                            <p className="text-saffron-300 text-xs uppercase tracking-widest font-bold mb-2">
+                              ✍ Chair sign-off
+                            </p>
+                            <SignoffPanel resolutionId={editing.id} />
+                          </div>
+                        )}
 
                       <div className="rounded-2xl border border-white/10 bg-white/3 p-5">
                         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
