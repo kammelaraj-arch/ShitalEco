@@ -3178,6 +3178,50 @@ async def _patch_schema() -> None:
             updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
 
+        # ── Phase B: announcement plan attached to a resolution ──────────────
+        # One plan per resolution. Author / chair fills this in while the
+        # resolution is still a draft; the actual send happens AFTER chair
+        # sign-off in Phase D. An external audience (free-form email list)
+        # is always flagged `requires_chair_approval = true` so a draft
+        # author can't fan out to non-supporters without the chair's blessing.
+        """CREATE TABLE IF NOT EXISTS resolution_announcements (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id   UUID NOT NULL UNIQUE REFERENCES resolutions(id) ON DELETE CASCADE,
+            subject         VARCHAR(500) NOT NULL DEFAULT '',
+            body_html       TEXT NOT NULL DEFAULT '',
+            channels        JSONB NOT NULL DEFAULT '["email"]'::jsonb,
+                -- subset of ["email","sms","whatsapp"]
+            requires_chair_approval BOOLEAN NOT NULL DEFAULT false,
+            status          VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | AWAITING_APPROVAL | APPROVED | SENT | CANCELLED
+            created_by      UUID,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            approved_by     UUID,
+            approved_at     TIMESTAMPTZ,
+            sent_at         TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_ann_res ON resolution_announcements(resolution_id)",
+
+        # Audience entries — many per announcement. `kind` discriminates the
+        # resolver; `params` is a JSONB payload whose shape depends on kind:
+        #   all_contacts       → {}
+        #   volunteers         → {"active_only": true}  (default true)
+        #   recent_donors      → {"months": 12}         (default 12)
+        #   trustees           → {}
+        #   individuals        → {"contact_ids": ["uuid", ...]}
+        #   external_list      → {"people": [{"email":"x@y","name":"Dr X"}, ...]}
+        """CREATE TABLE IF NOT EXISTS resolution_announcement_audiences (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            announcement_id UUID NOT NULL REFERENCES resolution_announcements(id) ON DELETE CASCADE,
+            kind            VARCHAR(30) NOT NULL,
+            params          JSONB NOT NULL DEFAULT '{}'::jsonb,
+            added_by        UUID,
+            added_by_name   VARCHAR(255) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_ann_aud_ann ON resolution_announcement_audiences(announcement_id)",
+
         # ── Mail Agent: agentic email triage of shared mailboxes ─────────────
         # mail_agent_messages = one row per email the agent has seen. Idempotency
         # is via UNIQUE (graph_message_id) so the poller can safely re-fetch.
@@ -4774,6 +4818,7 @@ _mount("shital.api.routers.email_ingest",          "router")
 _mount("shital.api.routers.finance_accounts",      "router")
 _mount("shital.api.routers.board_resolution_extras", "router")
 _mount("shital.api.routers.board_collab",            "router")
+_mount("shital.api.routers.board_announcement",      "router")
 _mount("shital.api.routers.public_campaigns",      "router")
 _mount("shital.api.routers.public_darshan",        "router")
 _mount("shital.api.routers.tier_profiles",         "router")

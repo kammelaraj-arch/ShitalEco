@@ -6,6 +6,7 @@ import { RichTextEditor } from '@/components/board/RichTextEditor'
 import { ExternalLinksPanel } from '@/components/board/ExternalLinksPanel'
 import { CommentsPanel } from '@/components/board/CommentsPanel'
 import { InfoRequestsPanel } from '@/components/board/InfoRequestsPanel'
+import { AnnouncementPanel } from '@/components/board/AnnouncementPanel'
 
 type ResStatus = 'DRAFT' | 'OPEN' | 'CLOSED' | 'ARCHIVED'
 type Category = 'OPERATIONAL' | 'OFFICER_ELECTION' | 'POLICY' | 'CONTRACT' | 'CONSTITUTIONAL'
@@ -824,6 +825,17 @@ export default function ResolutionsPage() {
                         </div>
                       )}
                     </div>
+
+                    {editing?.id && (
+                      <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-2">
+                        <p className="text-white/70 text-xs uppercase tracking-widest font-bold">📣 Announcement when passed</p>
+                        <p className="text-white/40 text-xs">
+                          Set the message + audiences now. The send itself happens after chair sign-off (Phase D).
+                          External audiences trigger a chair-approval step automatically.
+                        </p>
+                        <AnnouncementPanel resolutionId={editing.id} locked={editing.status !== 'DRAFT'} />
+                      </div>
+                    )}
 
                     {!editing || editing.status === 'DRAFT' ? (
                       <div className="rounded-2xl border border-saffron-400/30 bg-saffron-400/5 p-5">
