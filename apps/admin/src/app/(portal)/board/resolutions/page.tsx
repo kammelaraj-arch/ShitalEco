@@ -7,6 +7,7 @@ import { ExternalLinksPanel } from '@/components/board/ExternalLinksPanel'
 import { CommentsPanel } from '@/components/board/CommentsPanel'
 import { InfoRequestsPanel } from '@/components/board/InfoRequestsPanel'
 import { AnnouncementPanel } from '@/components/board/AnnouncementPanel'
+import { ConditionsPanel } from '@/components/board/ConditionsPanel'
 
 type ResStatus = 'DRAFT' | 'OPEN' | 'CLOSED' | 'ARCHIVED'
 type Category = 'OPERATIONAL' | 'OFFICER_ELECTION' | 'POLICY' | 'CONTRACT' | 'CONSTITUTIONAL'
@@ -888,6 +889,14 @@ export default function ResolutionsPage() {
                     )}
 
                     {editing && (editing.status === 'OPEN' || editing.status === 'CLOSED') && (
+                      <>
+                        <div className="rounded-2xl border border-white/10 bg-white/3 p-4">
+                          <p className="text-white/70 text-xs uppercase tracking-widest font-bold mb-2">
+                            ⚖ Trustee conditions (FOR — with conditions)
+                          </p>
+                          <ConditionsPanel resolutionId={editing.id} locked={editing.status === 'CLOSED'} />
+                        </div>
+
                       <div className="rounded-2xl border border-white/10 bg-white/3 p-5">
                         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
                           <h3 className="font-black text-white">Live tally</h3>
@@ -984,6 +993,7 @@ export default function ResolutionsPage() {
                           </>
                         )}
                       </div>
+                      </>
                     )}
                   </div>
                 )}

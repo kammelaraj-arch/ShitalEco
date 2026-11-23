@@ -856,7 +856,14 @@ VALID_RESOLUTION_CATEGORIES = {
     "OPERATIONAL", "OFFICER_ELECTION", "POLICY", "CONTRACT", "CONSTITUTIONAL",
 }
 VALID_DECISION_TYPES = {"BOARD_MEETING", "WRITTEN_RESOLUTION", "RETROSPECTIVE"}
-VALID_VOTE_CHOICES = {"FOR", "AGAINST", "ABSTAIN"}
+VALID_VOTE_CHOICES = {"FOR", "AGAINST", "ABSTAIN", "FOR_WITH_CONDITIONS", "DEFERRED"}
+# FOR_WITH_CONDITIONS counts as a provisional FOR for tally purposes but
+# the resolution can't reach chair-sign-off until every condition on
+# every FOR_WITH_CONDITIONS vote is resolved (Phase D guard).
+# DEFERRED is explicit "review and come back" — doesn't contribute to
+# any count but also doesn't leave the trustee marked as not-yet-engaged.
+_TALLY_FOR_CHOICES    = {"FOR", "FOR_WITH_CONDITIONS"}
+_TALLY_IGNORE_CHOICES = {"DEFERRED"}
 
 
 class ResolutionCreate(BaseModel):
@@ -966,7 +973,10 @@ async def _compute_outcome(
         GROUP  BY choice
     """), {"id": resolution_id})
     counts = {row._mapping["choice"]: int(row._mapping["n"]) for row in tallies}
-    tally_for = counts.get("FOR", 0)
+    # FOR_WITH_CONDITIONS rolls into FOR for tally maths; conditions must
+    # be resolved before chair sign-off (gated separately in Phase D).
+    # DEFERRED votes are ignored — the trustee hasn't given a final answer.
+    tally_for = counts.get("FOR", 0) + counts.get("FOR_WITH_CONDITIONS", 0)
     tally_against = counts.get("AGAINST", 0)
     tally_abstain = counts.get("ABSTAIN", 0)
     total = tally_for + tally_against + tally_abstain
@@ -1284,7 +1294,7 @@ async def cast_vote(
         raise HTTPException(400, detail={"errors": ["trustee_id must be UUID"]})
     if body.choice not in VALID_VOTE_CHOICES:
         raise HTTPException(400, detail={"errors": [
-            f"choice must be FOR | AGAINST | ABSTAIN, got '{body.choice}'",
+            f"choice must be one of {sorted(VALID_VOTE_CHOICES)}, got '{body.choice}'",
         ]})
 
     from sqlalchemy import text
