@@ -127,7 +127,7 @@ take_snapshot() {
   fi
   # Image-tag snapshot of current :latest, before any retag — runs even
   # when pg_dump failed so the operator can still do an image-only rollback.
-  for svc in backend admin quick-donation kiosk screen service; do
+  for svc in backend admin quick-donation kiosk screen service campaigns; do
     local img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
     if docker tag "${img}:latest" "${img}:${reason}-${ts}" 2>/dev/null; then
       echo "  ✓ tagged ${svc}:${reason}-${ts}"
@@ -143,7 +143,7 @@ gc_snapshots() {
     | tail -n +"$((SNAP_GC_KEEP + 1))" \
     | while read -r f ; do echo "  rm $f"; rm -f "$f"; done
   # Image tags (parse promote-<ts> tags, keep last N)
-  for svc in backend admin quick-donation kiosk screen service; do
+  for svc in backend admin quick-donation kiosk screen service campaigns; do
     local img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
     docker images "${img}" --format '{{.Tag}}' 2>/dev/null \
       | grep '^promote-' | sort -r | tail -n +"$((SNAP_GC_KEEP + 1))" \
@@ -217,7 +217,7 @@ if [ -n "$RESTORE_ID" ]; then
   take_snapshot "$PRE_RESTORE_TS" "pre-restore"
 
   echo "=== Restoring images from :promote-${RESTORE_ID} → :latest ==="
-  for svc in backend admin quick-donation kiosk screen service; do
+  for svc in backend admin quick-donation kiosk screen service campaigns; do
     img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
     if docker tag "${img}:promote-${RESTORE_ID}" "${img}:latest" 2>/dev/null; then
       echo "  ✓ restored ${svc} → :latest"
@@ -246,7 +246,7 @@ if [ "$PROMOTE" -eq 1 ]; then
 
   echo "=== Promoting :dev → :latest ==="
   PROMOTE_FAILED=""
-  for svc in backend admin quick-donation kiosk screen service; do
+  for svc in backend admin quick-donation kiosk screen service campaigns; do
     img="ghcr.io/kammelaraj-arch/shitaleco-${svc}"
     # Snapshot current :latest as :previous (rollback target).
     docker tag "${img}:latest" "${img}:previous" 2>/dev/null || true
@@ -400,6 +400,8 @@ else
   $COMPOSE_CMD pull backend admin quick-donation kiosk screen 2>&1 | tail -10 || true
   $COMPOSE_CMD pull service 2>/dev/null || \
     echo "service image not yet in GHCR — skipping pull"
+  $COMPOSE_CMD pull campaigns 2>/dev/null || \
+    echo "campaigns image not yet in GHCR — skipping pull"
 fi
 
 docker image prune -f
@@ -463,7 +465,7 @@ else
   # recreated out-of-band (install workflow / manual), never by the
   # script it hosts. Same reasoning excludes nothing else — only the
   # self-host container is unsafe to recreate from within.
-  REQUIRED_SERVICES="db backend admin quick-donation kiosk screen service nginx certbot backup-scheduler"
+  REQUIRED_SERVICES="db backend admin quick-donation kiosk screen service campaigns nginx certbot backup-scheduler"
 fi
 $COMPOSE_CMD up -d --no-deps $REQUIRED_SERVICES 2>&1 | tail -30 || true
 
@@ -706,7 +708,7 @@ else
   # `docker compose pull` here re-resolves :latest from the local daemon's
   # most recent tag — which is the one we just retagged in the promote step.
   $COMPOSE_CMD pull admin quick-donation kiosk screen service 2>&1 | tail -15
-  $COMPOSE_CMD up -d --no-deps --force-recreate admin quick-donation kiosk screen service
+  $COMPOSE_CMD up -d --no-deps --force-recreate admin quick-donation kiosk screen service campaigns
 
   # Verify each prod frontend container is now serving the expected GIT_SHA
   # by reading the baked-in /usr/share/nginx/html/version.txt from each
@@ -715,7 +717,7 @@ else
   # days — a manual image with that tag had taken over :latest and the
   # silent promote skip masked the issue).
   echo "=== Verify frontend image versions ==="
-  for svc in admin quick-donation kiosk screen service; do
+  for svc in admin quick-donation kiosk screen service campaigns; do
     cid=$($COMPOSE_CMD ps -q "$svc" 2>/dev/null || true)
     if [ -n "$cid" ]; then
       v=$(docker exec "$cid" cat /usr/share/nginx/html/version.txt 2>/dev/null || echo "<not-served>")
