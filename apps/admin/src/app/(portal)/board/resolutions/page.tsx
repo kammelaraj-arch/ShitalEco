@@ -2,6 +2,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
+import { RichTextEditor } from '@/components/board/RichTextEditor'
+import { ExternalLinksPanel } from '@/components/board/ExternalLinksPanel'
+import { CommentsPanel } from '@/components/board/CommentsPanel'
+import { InfoRequestsPanel } from '@/components/board/InfoRequestsPanel'
 
 type ResStatus = 'DRAFT' | 'OPEN' | 'CLOSED' | 'ARCHIVED'
 type Category = 'OPERATIONAL' | 'OFFICER_ELECTION' | 'POLICY' | 'CONTRACT' | 'CONSTITUTIONAL'
@@ -125,6 +129,7 @@ export default function ResolutionsPage() {
   const [publishing, setPublishing] = useState(false)
   const [votes, setVotes] = useState<Vote[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [hasOpenRequired, setHasOpenRequired] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiNote, setAiNote] = useState('')
@@ -695,13 +700,23 @@ export default function ResolutionsPage() {
 
                     <div>
                       <label className={lbl}>Background</label>
-                      <textarea disabled={locked} value={form.background} onChange={e => setForm(p => ({ ...p, background: e.target.value }))} rows={6} className={inp + ' resize-none'}
-                        placeholder="Why is this resolution being put to the board?" />
+                      <RichTextEditor
+                        value={form.background}
+                        onChange={(html) => setForm(p => ({ ...p, background: html }))}
+                        disabled={locked}
+                        placeholder="Why is this resolution being put to the board?"
+                        minHeight={160}
+                      />
                     </div>
                     <div>
                       <label className={lbl}>Recommendation</label>
-                      <textarea disabled={locked} value={form.recommendation} onChange={e => setForm(p => ({ ...p, recommendation: e.target.value }))} rows={5} className={inp + ' resize-none'}
-                        placeholder="State the motion the board will vote on." />
+                      <RichTextEditor
+                        value={form.recommendation}
+                        onChange={(html) => setForm(p => ({ ...p, recommendation: html }))}
+                        disabled={locked}
+                        placeholder="State the motion the board will vote on."
+                        minHeight={140}
+                      />
                     </div>
 
                     {/* Attachments */}
@@ -742,6 +757,14 @@ export default function ResolutionsPage() {
                         </ul>
                       )}
                     </div>
+
+                    {editing?.id && (
+                      <CollabSection
+                        resolutionId={editing.id}
+                        locked={locked}
+                        onOpenRequiredChange={setHasOpenRequired}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -781,8 +804,8 @@ export default function ResolutionsPage() {
                         </div>
                       )}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <PreviewField title="Background" value={form.background} />
-                        <PreviewField title="Recommendation" value={form.recommendation} />
+                        <PreviewField title="Background" value={form.background} isHtml />
+                        <PreviewField title="Recommendation" value={form.recommendation} isHtml />
                         <PreviewField title="Risk / Impact" value={form.risk_impact} />
                         <PreviewField title="Budget Impact" value={form.budget_impact} />
                       </div>
@@ -811,15 +834,24 @@ export default function ResolutionsPage() {
                             className="px-4 py-2.5 rounded-xl border border-white/10 text-white/80 text-sm font-bold hover:bg-white/5 disabled:opacity-40">
                             {saving ? 'Saving…' : editing ? 'Save Changes' : 'Save as Draft'}
                           </button>
-                          <button onClick={() => publishNow({ sendInvites: false })} disabled={publishing || !form.title.trim()}
+                          <button onClick={() => publishNow({ sendInvites: false })}
+                            disabled={publishing || !form.title.trim() || hasOpenRequired}
+                            title={hasOpenRequired ? 'Required information requests still open' : ''}
                             className="px-4 py-2.5 rounded-xl border border-saffron-400/40 text-saffron-300 text-sm font-bold hover:bg-saffron-400/10 disabled:opacity-40">
                             {publishing ? 'Publishing…' : 'Publish for voting'}
                           </button>
-                          <button onClick={() => publishNow({ sendInvites: true })} disabled={publishing || !form.title.trim()}
+                          <button onClick={() => publishNow({ sendInvites: true })}
+                            disabled={publishing || !form.title.trim() || hasOpenRequired}
+                            title={hasOpenRequired ? 'Required information requests still open' : ''}
                             className="px-4 py-2.5 rounded-xl bg-saffron-gradient text-white text-sm font-black shadow-saffron disabled:opacity-40">
                             {publishing ? 'Working…' : '🚀 Publish & email invites →'}
                           </button>
                         </div>
+                        {hasOpenRequired && (
+                          <p className="mt-3 text-xs text-red-300">
+                            ⚠ One or more <b>required</b> information requests are still open. Fulfil or cancel them in the Context step before publishing.
+                          </p>
+                        )}
                       </div>
                     ) : (
                       <div className="rounded-2xl border border-white/10 bg-white/3 p-4 text-white/60 text-sm">
@@ -1079,11 +1111,54 @@ export default function ResolutionsPage() {
   )
 }
 
-function PreviewField({ title, value }: { title: string; value: string }) {
+function PreviewField({ title, value, isHtml }: { title: string; value: string; isHtml?: boolean }) {
   return (
     <div className="rounded-xl border border-white/5 p-4 bg-white/2.5">
       <p className="text-white/50 text-xs font-bold uppercase tracking-widest mb-1.5">{title}</p>
-      <div className="text-white/80 text-sm whitespace-pre-wrap">{value || <em className="text-white/30">(empty)</em>}</div>
+      {isHtml && value ? (
+        // Backend sanitizes on save (bleach), so the stored HTML is safe to render.
+        <div className="text-white/80 text-sm prose prose-sm prose-invert max-w-none"
+             dangerouslySetInnerHTML={{ __html: value }} />
+      ) : (
+        <div className="text-white/80 text-sm whitespace-pre-wrap">
+          {value || <em className="text-white/30">(empty)</em>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Phase A collaboration section: external links + comments + information
+// requests. Tabbed so the Context step doesn't scroll forever. Rendered
+// only once the resolution has an id (drafts need to be saved before
+// anything can be attached to them).
+function CollabSection({
+  resolutionId, locked, onOpenRequiredChange,
+}: {
+  resolutionId: string
+  locked: boolean
+  onOpenRequiredChange: (b: boolean) => void
+}) {
+  const [tab, setTab] = useState<'links' | 'comments' | 'info'>('info')
+  const tabBtn = (active: boolean) =>
+    `px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+      active ? 'bg-saffron-400/15 text-saffron-300' : 'text-white/60 hover:text-white/80'
+    }`
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-white/70 text-xs uppercase tracking-widest font-bold">🤝 Collaboration</p>
+        <div className="flex gap-1">
+          <button onClick={() => setTab('info')}     className={tabBtn(tab === 'info')}>Information requests</button>
+          <button onClick={() => setTab('links')}    className={tabBtn(tab === 'links')}>External links</button>
+          <button onClick={() => setTab('comments')} className={tabBtn(tab === 'comments')}>Comments</button>
+        </div>
+      </div>
+      <div className="rounded-xl bg-white/90 p-3">
+        {tab === 'info'     && <InfoRequestsPanel resolutionId={resolutionId} locked={locked} onChange={onOpenRequiredChange} />}
+        {tab === 'links'    && <ExternalLinksPanel resolutionId={resolutionId} locked={locked} />}
+        {tab === 'comments' && <CommentsPanel     resolutionId={resolutionId} locked={locked} />}
+      </div>
     </div>
   )
 }

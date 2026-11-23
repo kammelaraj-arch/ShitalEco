@@ -10,6 +10,9 @@
   },
   "dependencies": {
 "@tanstack/react-query": "^5.51.0",
+    "@tiptap/extension-link": "^2.11.0",
+    "@tiptap/react": "^2.11.0",
+    "@tiptap/starter-kit": "^2.11.0",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "framer-motion": "^11.3.0",
