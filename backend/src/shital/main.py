@@ -3536,22 +3536,81 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_minutes_status  ON meeting_minutes_versions(status)",
 
         # ─────────────────────────────────────────────────────────────────
+        # Governance Tranche 2B — delegations, attendance, skills matrix
+        # ─────────────────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS delegations (
+            id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title                  VARCHAR(255) NOT NULL,
+            area                   VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+            delegate_user_id       UUID,
+            delegate_name          VARCHAR(255) NOT NULL DEFAULT '',
+            delegate_role          VARCHAR(40)  NOT NULL DEFAULT '',
+            scope_description      TEXT         NOT NULL DEFAULT '',
+            limit_amount_gbp       NUMERIC(14,2),
+            limit_period           VARCHAR(20)  NOT NULL DEFAULT 'YEAR',
+            conditions             TEXT         NOT NULL DEFAULT '',
+            start_date             DATE,
+            end_date               DATE,
+            review_date            DATE,
+            status                 VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+            source_resolution_id   UUID REFERENCES resolutions(id) ON DELETE SET NULL,
+            revoked_by_resolution_id UUID REFERENCES resolutions(id) ON DELETE SET NULL,
+            revoked_at             TIMESTAMPTZ,
+            revoked_reason         TEXT         NOT NULL DEFAULT '',
+            created_by             UUID,
+            created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_delegations_status ON delegations(status)",
+        "CREATE INDEX IF NOT EXISTS idx_delegations_area   ON delegations(area)",
+        "CREATE INDEX IF NOT EXISTS idx_delegations_review ON delegations(review_date)",
+        "CREATE INDEX IF NOT EXISTS idx_delegations_end    ON delegations(end_date)",
+
+        """CREATE TABLE IF NOT EXISTS meeting_attendance (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            meeting_id      UUID NOT NULL REFERENCES board_meetings(id) ON DELETE CASCADE,
+            trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'PRESENT',
+            note            TEXT         NOT NULL DEFAULT '',
+            recorded_by     UUID,
+            recorded_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            UNIQUE (meeting_id, trustee_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_attendance_meeting ON meeting_attendance(meeting_id)",
+        "CREATE INDEX IF NOT EXISTS idx_attendance_trustee ON meeting_attendance(trustee_id)",
+
+        """CREATE TABLE IF NOT EXISTS required_skills (
+            code        VARCHAR(40) PRIMARY KEY,
+            label       VARCHAR(80) NOT NULL,
+            category    VARCHAR(40) NOT NULL DEFAULT 'OTHER',
+            description TEXT        NOT NULL DEFAULT '',
+            sort_order  SMALLINT    NOT NULL DEFAULT 100,
+            is_active   BOOLEAN     NOT NULL DEFAULT true
+        )""",
+
+        """CREATE TABLE IF NOT EXISTS trustee_skills (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
+            skill_code      VARCHAR(40) NOT NULL REFERENCES required_skills(code) ON DELETE CASCADE,
+            self_rating     SMALLINT    NOT NULL DEFAULT 0,
+            evidence        TEXT        NOT NULL DEFAULT '',
+            last_reviewed_at DATE,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (trustee_id, skill_code)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_trustee_skills_t ON trustee_skills(trustee_id)",
+        "CREATE INDEX IF NOT EXISTS idx_trustee_skills_s ON trustee_skills(skill_code)",
+
+        # ─────────────────────────────────────────────────────────────────
         # Governance Tranche 3A — Trustees' Annual Report (TAR, SORP §1.21)
         # ─────────────────────────────────────────────────────────────────
-        # One row per reporting period. `narrative_sections` holds editable
-        # HTML keyed by SORP section (public_benefit, objectives, activities,
-        # achievements, financial_review, risk_management, reserves_policy,
-        # structure_governance, trustees, related_parties, plans,
-        # fundraising_practices). `snapshot` freezes the aggregated source
-        # data at finalise-time so later edits to resolutions, risks, etc
-        # don't rewrite history.
         """CREATE TABLE IF NOT EXISTS annual_reports (
             id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             title                  VARCHAR(255) NOT NULL,
             period_start           DATE NOT NULL,
             period_end             DATE NOT NULL,
             status                 VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
-                -- DRAFT | REVIEWING | FINALISED | FILED
             narrative_sections     JSONB        NOT NULL DEFAULT '{}'::jsonb,
             snapshot               JSONB        NOT NULL DEFAULT '{}'::jsonb,
             pdf_attachment_id      UUID,
@@ -4341,6 +4400,7 @@ async def _patch_schema() -> None:
     await _seed_document_categories()
     await _seed_governance_core()
     await _seed_governance_tranche_2a()
+    await _seed_governance_tranche_2b()
 
 
 async def _seed_governance_tranche_2a() -> None:
@@ -4352,10 +4412,6 @@ async def _seed_governance_tranche_2a() -> None:
 
     from shital.core.fabrics.database import SessionLocal
 
-    # Standard policy register — the 10 policies the Charity Commission
-    # expects a registered charity to maintain. Each seeded row is a
-    # placeholder with status=DRAFT so the Admin UI shows it as "needs
-    # setting up" until a trustee attaches a document version.
     seed_policies = [
         # (title, category, review_period_months)
         ("Safeguarding Policy",            "SAFEGUARDING",      12),
@@ -4383,7 +4439,6 @@ async def _seed_governance_tranche_2a() -> None:
                     WHERE  category = :c AND lower(title) = lower(:t)
                 )
             """), {"t": title, "c": cat, "m": months})
-        # Reserves policy — only one row; seed if empty.
         await db.execute(text("""
             INSERT INTO reserves_policy
             (is_current, target_months, trigger_action_below_months,
@@ -4394,6 +4449,46 @@ async def _seed_governance_tranche_2a() -> None:
         """))
         await db.commit()
     logger.info("governance_tranche_2a_seeded")
+
+
+async def _seed_governance_tranche_2b() -> None:
+    """Seed the required-skills taxonomy (Charity Governance Code 3.4).
+    15 skill rows grouped by category. Idempotent."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    skills = [
+        # (code, label, category, description, sort)
+        ("FINANCE_ACCOUNTING",   "Finance & accounting",      "FINANCE",          "Reading charity accounts, budgeting, audit sign-off.", 10),
+        ("FINANCE_STRATEGIC",    "Financial strategy",        "FINANCE",          "Reserves policy, investment strategy, financial modelling.", 20),
+        ("GOVERNANCE_LAW",       "Governance & company law",  "GOVERNANCE",       "Board effectiveness, articles, trustee duties.", 30),
+        ("CHARITY_LAW",          "Charity law & regulation",  "LEGAL",            "Charity Commission framework, SORP, CC guidance.", 40),
+        ("FUNDRAISING",          "Fundraising",               "FUNDRAISING",      "Major donors, trusts & foundations, community fundraising.", 50),
+        ("SAFEGUARDING",         "Safeguarding",              "PEOPLE",           "Safeguarding of children & adults at risk; DBS; reporting.", 60),
+        ("HR_PEOPLE",            "HR & people management",    "PEOPLE",           "Employment law, recruitment, performance, EDI.", 70),
+        ("DIGITAL_IT",           "Digital & IT",              "DIGITAL",          "Systems, websites, digital service design.", 80),
+        ("CYBERSECURITY",        "Cyber & information security", "DIGITAL",       "Information governance, breach handling, GDPR.", 90),
+        ("PROGRAMME_DELIVERY",   "Programme / service delivery", "PROGRAMME",     "Running charitable programmes and measuring impact.", 100),
+        ("COMMS_MARKETING",      "Communications & marketing","COMMS",            "Brand, media, press, social, campaigns.", 110),
+        ("LIVED_EXPERIENCE",     "Lived experience",          "LIVED_EXPERIENCE", "Direct experience of the issues the charity exists to tackle.", 120),
+        ("LOCAL_COMMUNITY",      "Local community",           "LIVED_EXPERIENCE", "Deep knowledge of the geographic community served.", 130),
+        ("STRATEGY",             "Strategy & planning",       "GOVERNANCE",       "Strategic planning, prioritisation, horizon scanning.", 140),
+        ("INTERNATIONAL",        "International / overseas",  "PROGRAMME",        "International development, DFID / FCDO, country expertise.", 150),
+    ]
+    async with SessionLocal() as db:
+        for code, label, cat, desc, sort in skills:
+            await db.execute(text("""
+                INSERT INTO required_skills
+                (code, label, category, description, sort_order, is_active)
+                VALUES (:c, :l, :cat, :d, :s, true)
+                ON CONFLICT (code) DO UPDATE SET
+                  label       = EXCLUDED.label,
+                  category    = EXCLUDED.category,
+                  description = EXCLUDED.description,
+                  sort_order  = EXCLUDED.sort_order
+            """), {"c": code, "l": label, "cat": cat, "d": desc, "s": sort})
+        await db.commit()
+    logger.info("governance_tranche_2b_seeded")
 
 
 async def _seed_governance_core() -> None:
@@ -5584,6 +5679,9 @@ _mount("shital.api.routers.meeting_actions",         "router")
 _mount("shital.api.routers.policies",                "router")
 _mount("shital.api.routers.reserves",                "router")
 _mount("shital.api.routers.annual_reports",          "router")
+_mount("shital.api.routers.delegations",             "router")
+_mount("shital.api.routers.meeting_attendance",      "router")
+_mount("shital.api.routers.trustee_skills",          "router")
 _mount("shital.api.routers.board_voting_phase_c",    "router")
 _mount("shital.api.routers.board_signoff",           "router")
 _mount("shital.api.routers.public_campaigns",      "router")
