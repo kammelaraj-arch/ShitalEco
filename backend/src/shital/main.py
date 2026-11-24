@@ -3535,6 +3535,38 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_minutes_meeting ON meeting_minutes_versions(meeting_id, version_number DESC)",
         "CREATE INDEX IF NOT EXISTS idx_minutes_status  ON meeting_minutes_versions(status)",
 
+        # ─────────────────────────────────────────────────────────────────
+        # Governance Tranche 3A — Trustees' Annual Report (TAR, SORP §1.21)
+        # ─────────────────────────────────────────────────────────────────
+        # One row per reporting period. `narrative_sections` holds editable
+        # HTML keyed by SORP section (public_benefit, objectives, activities,
+        # achievements, financial_review, risk_management, reserves_policy,
+        # structure_governance, trustees, related_parties, plans,
+        # fundraising_practices). `snapshot` freezes the aggregated source
+        # data at finalise-time so later edits to resolutions, risks, etc
+        # don't rewrite history.
+        """CREATE TABLE IF NOT EXISTS annual_reports (
+            id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title                  VARCHAR(255) NOT NULL,
+            period_start           DATE NOT NULL,
+            period_end             DATE NOT NULL,
+            status                 VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | REVIEWING | FINALISED | FILED
+            narrative_sections     JSONB        NOT NULL DEFAULT '{}'::jsonb,
+            snapshot               JSONB        NOT NULL DEFAULT '{}'::jsonb,
+            pdf_attachment_id      UUID,
+            signed_by_user_id      UUID,
+            signed_by_name         VARCHAR(255) NOT NULL DEFAULT '',
+            signed_at              TIMESTAMPTZ,
+            filed_with_commission_at TIMESTAMPTZ,
+            commission_reference   VARCHAR(80)  NOT NULL DEFAULT '',
+            created_by             UUID,
+            created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_annual_reports_period ON annual_reports(period_end DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_annual_reports_status ON annual_reports(status)",
+
         # Vote rules per resolution category — quorum + passing threshold.
         # Seeded (see _seed_governance_core below) with the Charities Act
         # 2011 defaults: 50% simple majority for OPERATIONAL/POLICY/etc,
@@ -5551,6 +5583,7 @@ _mount("shital.api.routers.meeting_minutes",         "router")
 _mount("shital.api.routers.meeting_actions",         "router")
 _mount("shital.api.routers.policies",                "router")
 _mount("shital.api.routers.reserves",                "router")
+_mount("shital.api.routers.annual_reports",          "router")
 _mount("shital.api.routers.board_voting_phase_c",    "router")
 _mount("shital.api.routers.board_signoff",           "router")
 _mount("shital.api.routers.public_campaigns",      "router")
