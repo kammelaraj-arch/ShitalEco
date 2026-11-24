@@ -5,7 +5,11 @@ a given send goes through Office365 SMTP or AWS SES.
 Provider choice
 ---------------
 Env / SecretsManager keys read at call time:
-  MAIL_PROVIDER           — 'office365' (default) | 'ses'
+  MAIL_PROVIDER           — 'office365' (default) | 'ses' | 'notify' (GOV.UK, free for charities)
+  NOTIFY_API_KEY          — live-xxxxxxxx-...
+  NOTIFY_EMAIL_TEMPLATE_ID — uuid of a Notify template with ((subject))
+                            and ((body)) personalisations; one generic
+                            passthrough template is enough
   OFFICE365_EMAIL / _PASSWORD
   AWS_SES_SMTP_HOST       — e.g. email-smtp.eu-west-1.amazonaws.com
   AWS_SES_SMTP_PORT       — 587 (STARTTLS) default
@@ -59,20 +63,63 @@ def _smtp_send_sync(host: str, port: int, user: str, password: str,
         srv.sendmail(from_email, to_email, msg.as_string())
 
 
+async def _send_via_notify(to_email: str, subject: str, body: str) -> dict[str, object]:
+    """Send one email through GOV.UK Notify. Needs a template with
+    ((subject)) and ((body)) personalisations configured in the Notify
+    dashboard."""
+    import httpx
+
+    key = await _env("NOTIFY_API_KEY")
+    tpl = await _env("NOTIFY_EMAIL_TEMPLATE_ID")
+    if not key or not tpl:
+        return {"ok": False, "provider": "notify",
+                "error": "Notify not configured (NOTIFY_API_KEY + NOTIFY_EMAIL_TEMPLATE_ID)"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as cli:
+            r = await cli.post(
+                "https://api.notifications.service.gov.uk/v2/notifications/email",
+                headers={"Authorization": f"ApiKey-v1 {key}",
+                         "Content-Type": "application/json"},
+                json={
+                    "email_address":   to_email,
+                    "template_id":     tpl,
+                    "personalisation": {"subject": subject, "body": body},
+                },
+            )
+            if r.status_code >= 400:
+                return {"ok": False, "provider": "notify",
+                        "error": f"notify_{r.status_code}: {r.text[:300]}"}
+            return {"ok": True, "provider": "notify",
+                    "id": r.json().get("id", "")}
+    except Exception as exc:
+        return {"ok": False, "provider": "notify", "error": str(exc)[:300]}
+
+
 async def dispatch_email(
     *, to_email: str, subject: str,
     html_body: str, text_body: str = "",
     provider: str | None = None,
 ) -> dict[str, object]:
-    """Send one email through whichever SMTP provider is configured.
+    """Send one email through whichever provider is configured.
 
-    Returns {'ok': bool, 'provider': 'office365'|'ses', 'error'?: str}.
+    Returns {'ok': bool, 'provider': 'office365'|'ses'|'notify', 'error'?: str}.
     Never raises — callers (send_template, fanout) rely on a dict
     result to log success / failure uniformly.
     """
     chosen = (provider or await _env("MAIL_PROVIDER", "office365")).strip().lower()
 
-    # Resolve creds for the chosen provider.
+    # Notify is HTTP, not SMTP — handle before the SMTP branch.
+    if chosen == "notify":
+        # Notify accepts plain text or Markdown as the body; HTML inside
+        # the template is Notify's own branded wrapper. We pass html_body
+        # verbatim — if it is pure HTML, Notify renders it as text in
+        # the body cell, which is what a charity newsletter looks like
+        # when the operator wrote it in Markdown anyway. Operators who
+        # need full-HTML campaigns should use SES; Notify is the
+        # transactional + notifications path.
+        return await _send_via_notify(to_email, subject, text_body or html_body)
+
+    # Resolve SMTP creds for the chosen provider.
     if chosen == "ses":
         host   = await _env("AWS_SES_SMTP_HOST", "email-smtp.eu-west-1.amazonaws.com")
         port   = int(await _env("AWS_SES_SMTP_PORT", "587") or "587")

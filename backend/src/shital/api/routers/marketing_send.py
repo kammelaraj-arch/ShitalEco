@@ -35,7 +35,7 @@ from shital.api.deps import CurrentSpace
 from shital.core.fabrics.database import SessionLocal
 from shital.services.marketing.compliance import wrap_marketing_email
 
-router = APIRouter(prefix="/api/v1/marketing", tags=["marketing"])
+router = APIRouter(prefix="/marketing", tags=["marketing"])
 
 
 def _require_marketing(ctx: CurrentSpace) -> None:

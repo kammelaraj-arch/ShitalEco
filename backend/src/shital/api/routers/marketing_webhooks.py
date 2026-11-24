@@ -42,7 +42,7 @@ from shital.services.marketing.tracking import (
     decode_url_param,
 )
 
-router = APIRouter(prefix="/api/v1/webhooks/marketing", tags=["marketing-webhooks"])
+router = APIRouter(prefix="/webhooks/marketing", tags=["marketing-webhooks"])
 
 
 async def _mark_unsubscribed(email: str, reason: str, source: str) -> None:

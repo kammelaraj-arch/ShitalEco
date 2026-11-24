@@ -18,7 +18,7 @@ from sqlalchemy import text
 from shital.api.deps import CurrentSpace
 from shital.core.fabrics.database import SessionLocal
 
-router = APIRouter(prefix="/api/v1/marketing/segments", tags=["marketing-segments"])
+router = APIRouter(prefix="/marketing/segments", tags=["marketing-segments"])
 
 _ALLOWED_KINDS = {
     "all_contacts", "volunteers", "recent_donors",
