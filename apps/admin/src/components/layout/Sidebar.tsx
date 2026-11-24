@@ -87,6 +87,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/risk-register',     icon: '🛡️', label: 'Risk Register' },
       { href: '/policies',          icon: '📑', label: 'Policies' },
       { href: '/reserves',          icon: '💷', label: 'Reserves (CC19)' },
+      { href: '/annual-report',     icon: '📅', label: 'Annual Report (TAR)' },
     ],
   },
   {
