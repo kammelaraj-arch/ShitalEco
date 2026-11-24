@@ -3345,6 +3345,217 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_res_sig_res ON resolution_signatures(resolution_id)",
 
+        # ─────────────────────────────────────────────────────────────────────
+        # Governance Core (CC26 / CC27 / CC48 / Charity Governance Code)
+        # ─────────────────────────────────────────────────────────────────────
+        # Standing conflicts-of-interest register per trustee (CC27). Each
+        # trustee discloses every employment, directorship, family connection,
+        # material shareholding or other interest that could compete with their
+        # fiduciary duty to the charity. The register is matched against every
+        # resolution subject at vote time to raise a conflict warning.
+        """CREATE TABLE IF NOT EXISTS trustee_interests (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
+            category        VARCHAR(40) NOT NULL,
+                -- EMPLOYMENT | DIRECTORSHIP | OWNERSHIP | FAMILY | SUPPLIER
+                -- | CUSTOMER | TRUSTEE_OTHER | VOLUNTEER_OTHER | OTHER
+            counterparty    VARCHAR(255) NOT NULL DEFAULT '',
+                -- name of the employer / company / beneficiary / other entity
+            description     TEXT         NOT NULL DEFAULT '',
+            keywords        TEXT         NOT NULL DEFAULT '',
+                -- space-separated search terms used for auto-match against
+                -- resolution title + background. Admin can edit; defaulted
+                -- to counterparty on insert.
+            declared_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            expires_at      TIMESTAMPTZ,
+                -- OPTIONAL — some interests are open-ended (ownership);
+                -- others (short-term contract) carry an end date.
+            status          VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+                -- ACTIVE | EXPIRED | WITHDRAWN
+            created_by      UUID,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_trustee_interests_trustee ON trustee_interests(trustee_id)",
+        "CREATE INDEX IF NOT EXISTS idx_trustee_interests_status  ON trustee_interests(status)",
+
+        # Related-party register (SORP FRS 102 §9.14-9.24). Every related
+        # party transaction above the SORP threshold must be disclosed in
+        # the annual report; this register is the source list.
+        """CREATE TABLE IF NOT EXISTS trustee_related_parties (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
+            related_name    VARCHAR(255) NOT NULL,
+            relationship    VARCHAR(40)  NOT NULL,
+                -- SPOUSE | CHILD | PARENT | SIBLING | OTHER_FAMILY
+                -- | BUSINESS_PARTNER | COMMON_DIRECTORSHIP | TRUSTEE_OF
+                -- | EMPLOYER | OTHER
+            notes           TEXT         NOT NULL DEFAULT '',
+            declared_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            created_by      UUID,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_trustee_rp_trustee ON trustee_related_parties(trustee_id)",
+
+        # Per-resolution conflict record: either a system-detected match
+        # against a trustee_interest, or a manually recorded declaration.
+        # Resolves to one of two decisions: trustee RECUSES themselves
+        # (no vote, not counted in quorum) or PARTICIPATES_WITH_DECLARATION
+        # (vote counts, conflict is disclosed in the signed PDF).
+        """CREATE TABLE IF NOT EXISTS resolution_conflicts (
+            id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id      UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            trustee_id         UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
+            matched_interest_id UUID REFERENCES trustee_interests(id) ON DELETE SET NULL,
+                -- null when the conflict was declared manually at the
+                -- meeting (not from the standing register).
+            reason             TEXT NOT NULL DEFAULT '',
+            decision           VARCHAR(40) NOT NULL DEFAULT 'RECUSED',
+                -- RECUSED | PARTICIPATED_WITH_DECLARATION | NOT_A_CONFLICT
+            recorded_by        UUID,
+            recorded_by_name   VARCHAR(255) NOT NULL DEFAULT '',
+            recorded_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (resolution_id, trustee_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_conflict_res ON resolution_conflicts(resolution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_res_conflict_tru ON resolution_conflicts(trustee_id)",
+
+        # Organisation Risk Register (CC26). Scope distinguishes which
+        # risk register the row belongs to:
+        #   STRATEGIC   — board owned, charity-wide
+        #   OPERATIONAL — CEO / manager owned
+        #   COMPLIANCE  — safeguarding / data / regulatory, trustees own
+        #   PROJECT     — project-specific log, closes with the project
+        # Likelihood / impact use the standard 5x5 charity matrix.
+        """CREATE TABLE IF NOT EXISTS risk_register (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            risk_ref        VARCHAR(20)  NOT NULL UNIQUE,
+                -- RR-0001 style, server-assigned
+            title           VARCHAR(255) NOT NULL,
+            description     TEXT         NOT NULL DEFAULT '',
+            category        VARCHAR(40)  NOT NULL,
+                -- GOVERNANCE | OPERATIONAL | FINANCIAL | EXTERNAL
+                -- | COMPLIANCE_LEGAL | SAFEGUARDING | PEOPLE_HR
+                -- | REPUTATIONAL | INFORMATION_CYBER | FRAUD_FINCRIME
+                -- | ENVIRONMENTAL
+            scope           VARCHAR(20)  NOT NULL DEFAULT 'OPERATIONAL',
+                -- STRATEGIC | OPERATIONAL | COMPLIANCE | PROJECT
+            branch_id       UUID,
+                -- NULL for charity-wide; FK-like to branches.id by UUID
+            owner_user_id   UUID,
+            likelihood      SMALLINT     NOT NULL DEFAULT 1,
+                -- 1 Rare | 2 Unlikely | 3 Possible | 4 Likely | 5 Almost certain
+            impact          SMALLINT     NOT NULL DEFAULT 1,
+                -- 1 Insignificant | 2 Minor | 3 Moderate | 4 Major | 5 Severe
+            score           SMALLINT     NOT NULL DEFAULT 1,
+                -- likelihood * impact; app sets; UI shows level from score.
+            treatment       VARCHAR(20)  NOT NULL DEFAULT 'TREAT',
+                -- TOLERATE | TREAT | TRANSFER | TERMINATE  (HM Treasury 4Ts)
+            mitigation_plan TEXT         NOT NULL DEFAULT '',
+            status          VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
+                -- OPEN | MITIGATING | CLOSED | REALISED
+            review_date     DATE,
+            source_type     VARCHAR(20)  NOT NULL DEFAULT 'MANUAL',
+                -- RESOLUTION | MANUAL | AUDIT | INCIDENT
+            source_id       UUID,
+            created_by      UUID,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_risk_scope  ON risk_register(scope)",
+        "CREATE INDEX IF NOT EXISTS idx_risk_status ON risk_register(status)",
+        "CREATE INDEX IF NOT EXISTS idx_risk_level  ON risk_register(score DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_risk_src    ON risk_register(source_type, source_id)",
+
+        # Per-resolution risk entries. When a resolution is published and
+        # auto_promote=true, these rows are copied into risk_register with
+        # source_type='RESOLUTION', source_id=<resolution_id>. The copy's
+        # id is stored back in promoted_register_id so the UI can jump
+        # from the resolution to the register row.
+        """CREATE TABLE IF NOT EXISTS resolution_risks (
+            id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id        UUID NOT NULL REFERENCES resolutions(id) ON DELETE CASCADE,
+            title                VARCHAR(255) NOT NULL,
+            description          TEXT         NOT NULL DEFAULT '',
+            category             VARCHAR(40)  NOT NULL,
+            scope                VARCHAR(20)  NOT NULL DEFAULT 'OPERATIONAL',
+            likelihood           SMALLINT     NOT NULL DEFAULT 1,
+            impact               SMALLINT     NOT NULL DEFAULT 1,
+            treatment            VARCHAR(20)  NOT NULL DEFAULT 'TREAT',
+            mitigation_plan      TEXT         NOT NULL DEFAULT '',
+            auto_promote         BOOLEAN      NOT NULL DEFAULT true,
+            promoted_register_id UUID REFERENCES risk_register(id) ON DELETE SET NULL,
+            created_by           UUID,
+            created_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_res_risks_res ON resolution_risks(resolution_id)",
+
+        # Meeting notice sent to trustees (CC48 — reasonable notice of
+        # meeting). days_notice is server-computed from (sent_at - meeting
+        # scheduled_at). bundle_attachment_id optionally links the notice
+        # to the papers-bundle PDF.
+        """CREATE TABLE IF NOT EXISTS meeting_notices (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            meeting_id      UUID NOT NULL REFERENCES board_meetings(id) ON DELETE CASCADE,
+            sent_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            sent_by         UUID,
+            recipient_count INT          NOT NULL DEFAULT 0,
+            days_notice     INT          NOT NULL DEFAULT 0,
+            bundle_attachment_id UUID,
+            note            TEXT         NOT NULL DEFAULT ''
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_meeting_notices_meeting ON meeting_notices(meeting_id)",
+
+        # Vote rules per resolution category — quorum + passing threshold.
+        # Seeded (see _seed_governance_core below) with the Charities Act
+        # 2011 defaults: 50% simple majority for OPERATIONAL/POLICY/etc,
+        # and 75% super-majority for CONSTITUTIONAL (a "special resolution"
+        # under s.280). Admins can edit via /admin/board/vote-rules.
+        """CREATE TABLE IF NOT EXISTS resolution_vote_rules (
+            category          VARCHAR(60) PRIMARY KEY,
+            min_quorum_count  INT         NOT NULL DEFAULT 3,
+            min_quorum_pct    SMALLINT    NOT NULL DEFAULT 50,
+                -- percentage of active main-board trustees that must vote
+            pass_threshold_pct SMALLINT   NOT NULL DEFAULT 50,
+                -- "pass" when FOR / (FOR + AGAINST) * 100 >= this
+            is_special        BOOLEAN     NOT NULL DEFAULT false,
+                -- Companies Act / Charities Act "special resolution" flag
+            updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+
+        # Controlled list tables for Risk — so the UI can render the full
+        # charity-standard taxonomy without hardcoding and admins can
+        # add or rename labels through Admin → Settings.
+        """CREATE TABLE IF NOT EXISTS risk_categories (
+            code        VARCHAR(40) PRIMARY KEY,
+            label       VARCHAR(80) NOT NULL,
+            description TEXT        NOT NULL DEFAULT '',
+            sort_order  SMALLINT    NOT NULL DEFAULT 100,
+            is_active   BOOLEAN     NOT NULL DEFAULT true
+        )""",
+        """CREATE TABLE IF NOT EXISTS risk_levels (
+            code        VARCHAR(20) PRIMARY KEY,
+            label       VARCHAR(40) NOT NULL,
+            min_score   SMALLINT    NOT NULL,
+            max_score   SMALLINT    NOT NULL,
+            colour_hex  VARCHAR(7)  NOT NULL DEFAULT '#888',
+            sort_order  SMALLINT    NOT NULL DEFAULT 100
+        )""",
+        """CREATE TABLE IF NOT EXISTS risk_treatments (
+            code        VARCHAR(20) PRIMARY KEY,
+            label       VARCHAR(40) NOT NULL,
+            description TEXT        NOT NULL DEFAULT '',
+            sort_order  SMALLINT    NOT NULL DEFAULT 100
+        )""",
+
+        # Idempotent ALTERs on resolutions for the governance-core features
+        # — per-resolution overrides of the default category rules.
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS required_quorum_count INT",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS required_quorum_pct   SMALLINT",
+        "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS pass_threshold_pct    SMALLINT",
+
         # ── Marketing: saved audience segments (reusable across campaigns) ──
         # Same shape as resolution_announcement_audiences but with a stable
         # name so multiple campaigns can target the same segment. The
@@ -3950,6 +4161,92 @@ async def _patch_schema() -> None:
     await _seed_email_templates()
     await _seed_release_notes()
     await _seed_document_categories()
+    await _seed_governance_core()
+
+
+async def _seed_governance_core() -> None:
+    """Seed the risk taxonomy (CC26 + HM Treasury Orange Book) + default
+    quorum/threshold rules per resolution category. Idempotent — safe to
+    re-run on every boot (uses ON CONFLICT DO NOTHING / UPDATE)."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    categories = [
+        # (code, label, description, sort)
+        ("GOVERNANCE",        "Governance",          "Board composition, trustee decisions, succession, delegation.", 10),
+        ("OPERATIONAL",       "Operational",         "Programme delivery, service continuity, staff and volunteers, suppliers.", 20),
+        ("FINANCIAL",         "Financial",           "Reserves, cashflow, donations, investment, budgeting.", 30),
+        ("EXTERNAL",          "External",            "Regulation, political, economic, demographic, sector changes.", 40),
+        ("COMPLIANCE_LEGAL",  "Compliance & legal",  "Charity Commission, HMRC, Companies House, GDPR, licences.", 50),
+        ("SAFEGUARDING",      "Safeguarding",        "Children, adults at risk, disclosure (DBS), reporting obligations.", 60),
+        ("PEOPLE_HR",         "People / HR",         "Recruitment, retention, employment law, wellbeing, equality.", 70),
+        ("REPUTATIONAL",      "Reputational",        "Media, social media, donor confidence, beneficiary trust.", 80),
+        ("INFORMATION_CYBER", "Information & cyber", "Data breach, ransomware, systems outage, information integrity.", 90),
+        ("FRAUD_FINCRIME",    "Fraud & financial crime", "Internal / external fraud, bribery, money-laundering, sanctions.", 100),
+        ("ENVIRONMENTAL",     "Environmental",       "Buildings, utilities, climate, flooding, energy, waste.", 110),
+    ]
+    # Level bands from the standard UK charity 5x5 matrix.
+    levels = [
+        # (code, label, min, max, colour, sort)
+        ("LOW",       "Low",         1,  4, "#16a34a", 10),  # green
+        ("MEDIUM",    "Medium",      5,  9, "#eab308", 20),  # yellow
+        ("HIGH",      "High",       10, 14, "#f97316", 30),  # orange
+        ("VERY_HIGH", "Very high",  15, 19, "#dc2626", 40),  # red
+        ("CRITICAL",  "Critical",   20, 25, "#7f1d1d", 50),  # dark red
+    ]
+    treatments = [
+        # 4Ts — HM Treasury Orange Book + CC26
+        ("TOLERATE",  "Tolerate",  "Accept the risk; no action beyond monitoring.", 10),
+        ("TREAT",     "Treat",     "Reduce likelihood or impact by applying controls.", 20),
+        ("TRANSFER",  "Transfer",  "Share the risk (insurance, outsource, partnership).", 30),
+        ("TERMINATE", "Terminate", "Avoid the risk by ending the activity.", 40),
+    ]
+    # Charities Act 2011 defaults — simple majority for most, 75% special
+    # resolution for Constitutional. Officer election is a simple majority
+    # under Model Articles. Admin can edit the row to change the rule
+    # for their charity without a redeploy.
+    vote_rules = [
+        # (category, min_quorum_count, min_quorum_pct, pass_threshold_pct, is_special)
+        ("OPERATIONAL",       3, 50, 50, False),
+        ("POLICY",            3, 50, 50, False),
+        ("CONTRACT",          3, 50, 50, False),
+        ("OFFICER_ELECTION",  3, 50, 50, False),
+        ("CONSTITUTIONAL",    3, 66, 75, True),  # Charities Act 2011 §280
+    ]
+    async with SessionLocal() as db:
+        for code, label, desc, sort in categories:
+            await db.execute(text(
+                "INSERT INTO risk_categories (code, label, description, sort_order) "
+                "VALUES (:c, :l, :d, :s) "
+                "ON CONFLICT (code) DO UPDATE SET label = EXCLUDED.label, "
+                "description = EXCLUDED.description, sort_order = EXCLUDED.sort_order"
+            ), {"c": code, "l": label, "d": desc, "s": sort})
+        for code, label, mn, mx, col, sort in levels:
+            await db.execute(text(
+                "INSERT INTO risk_levels (code, label, min_score, max_score, colour_hex, sort_order) "
+                "VALUES (:c, :l, :mn, :mx, :col, :s) "
+                "ON CONFLICT (code) DO UPDATE SET label = EXCLUDED.label, "
+                "min_score = EXCLUDED.min_score, max_score = EXCLUDED.max_score, "
+                "colour_hex = EXCLUDED.colour_hex, sort_order = EXCLUDED.sort_order"
+            ), {"c": code, "l": label, "mn": mn, "mx": mx, "col": col, "s": sort})
+        for code, label, desc, sort in treatments:
+            await db.execute(text(
+                "INSERT INTO risk_treatments (code, label, description, sort_order) "
+                "VALUES (:c, :l, :d, :s) "
+                "ON CONFLICT (code) DO UPDATE SET label = EXCLUDED.label, "
+                "description = EXCLUDED.description, sort_order = EXCLUDED.sort_order"
+            ), {"c": code, "l": label, "d": desc, "s": sort})
+        for cat, mq, mqp, pt, sp in vote_rules:
+            # Only insert if admin hasn't already customised for the charity.
+            await db.execute(text(
+                "INSERT INTO resolution_vote_rules "
+                "(category, min_quorum_count, min_quorum_pct, pass_threshold_pct, is_special) "
+                "VALUES (:cat, :mq, :mqp, :pt, :sp) "
+                "ON CONFLICT (category) DO NOTHING"
+            ), {"cat": cat, "mq": mq, "mqp": mqp, "pt": pt, "sp": sp})
+        await db.commit()
+    logger.info("governance_core_seeded")
 
 
 async def _seed_api_key_metadata() -> None:
@@ -5047,6 +5344,9 @@ _mount("shital.api.routers.finance_accounts",      "router")
 _mount("shital.api.routers.board_resolution_extras", "router")
 _mount("shital.api.routers.board_collab",            "router")
 _mount("shital.api.routers.board_announcement",      "router")
+_mount("shital.api.routers.risk_register",           "router")
+_mount("shital.api.routers.trustee_interests",       "router")
+_mount("shital.api.routers.meeting_notices",         "router")
 _mount("shital.api.routers.board_voting_phase_c",    "router")
 _mount("shital.api.routers.board_signoff",           "router")
 _mount("shital.api.routers.public_campaigns",      "router")
