@@ -83,6 +83,47 @@ const OUTCOME_BADGE: Record<string, string> = {
 const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50'
 const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5'
 
+// Inline help tooltip — sits next to a label to explain fields without
+// crowding the form. Keep copy short; use StepIntro for longer context.
+function HelpTip({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-white/20 bg-white/5 text-white/60 text-[10px] font-bold cursor-help ml-1 align-middle"
+      aria-label={text}
+    >?</span>
+  )
+}
+
+// Card that opens each wizard step with purpose + what good looks like
+// + a concrete charity example. Teaches without forcing people to read
+// a manual.
+function StepIntro({
+  title, why, goodLooks, example,
+}: {
+  title: string
+  why: string
+  goodLooks: string
+  example: string
+}) {
+  return (
+    <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/10 to-sky-500/5 p-4">
+      <p className="text-sky-300 text-[11px] font-black uppercase tracking-widest mb-1.5">💡 {title}</p>
+      <p className="text-white/80 text-sm mb-2">{why}</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+        <div className="rounded-lg bg-black/30 border border-white/5 p-3">
+          <p className="text-emerald-300 text-[10px] font-black uppercase tracking-widest mb-1">✓ What good looks like</p>
+          <p className="text-white/70 text-xs leading-relaxed">{goodLooks}</p>
+        </div>
+        <div className="rounded-lg bg-black/30 border border-white/5 p-3">
+          <p className="text-saffron-300 text-[10px] font-black uppercase tracking-widest mb-1">📝 Example</p>
+          <p className="text-white/70 text-xs leading-relaxed italic">{example}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface Form {
   title: string; background: string; recommendation: string
   risk_impact: string; budget_impact: string
@@ -344,11 +385,26 @@ export default function ResolutionsPage() {
       ? 'Publish this resolution and email vote-invites to every active trustee? Text becomes locked once published.'
       : 'Publish this resolution? Voting opens immediately. Text becomes locked once published.'
     if (!confirm(confirmMsg)) return
-    setPublishing(true)
+    setPublishing(true); setError('')
     try {
       const saved = await saveDraft(true)
-      if (!saved) { setPublishing(false); return }
-      await apiFetch(`/admin/board/resolutions/${saved.id}/publish`, { method: 'POST' })
+      if (!saved) {
+        // saveDraft already set `error`; surface it loudly so the user
+        // doesn't think the click did nothing.
+        const err = (document.querySelector('[data-resolution-save-error]')?.textContent || '').trim()
+        const msg = err || 'Could not save before publishing — fix the errors shown above and try again.'
+        setError(msg)
+        alert('Publish aborted:\n\n' + msg)
+        setPublishing(false)
+        return
+      }
+      try {
+        await apiFetch(`/admin/board/resolutions/${saved.id}/publish`, { method: 'POST' })
+      } catch (pubErr) {
+        let msg = pubErr instanceof Error ? pubErr.message : 'Failed to publish'
+        try { const p = JSON.parse(msg); if (p?.detail) msg = typeof p.detail === 'string' ? p.detail : (p.detail.errors?.join(' · ') || JSON.stringify(p.detail)) } catch { /* not JSON */ }
+        setError(msg); alert('Publish failed:\n\n' + msg); setPublishing(false); return
+      }
       if (opts.sendInvites) {
         try {
           const res = await apiFetch<{ trustees_total: number; tokens_created: number; tokens_reused: number; email_failed: string[] }>(
@@ -595,7 +651,13 @@ export default function ResolutionsPage() {
                 ))}
               </div>
 
-              {error && <div className="mx-6 mt-4 bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
+              {error && (
+                <div className="sticky top-0 z-30 mx-6 mt-4 bg-red-500/15 border border-red-500/40 text-red-200 px-4 py-3 rounded-xl text-sm shadow-lg shadow-red-900/30 flex items-start gap-3">
+                  <span className="flex-1 whitespace-pre-wrap">{error}</span>
+                  <button type="button" onClick={() => setError('')}
+                    className="shrink-0 text-red-200/80 hover:text-white">✕</button>
+                </div>
+              )}
 
               {/* Body: main form + right rail */}
               <div className="flex-1 overflow-y-auto">
@@ -618,15 +680,21 @@ export default function ResolutionsPage() {
 
                 {wizStep === 'basics' && (
                   <div className="w-full space-y-4">
+                    <StepIntro
+                      title="Basics — what is being decided?"
+                      why="Set the headline so trustees know at a glance what they are voting on. A good title reads like a motion on a meeting agenda."
+                      goodLooks="Specific, actionable, starts with a verb (Approve / Adopt / Appoint / Terminate). Names the figure or person. Avoids jargon."
+                      example="“Approve Diwali 2026 festival budget of £15,000 funded from the General Fund, with £3,000 contingency.”"
+                    />
                     <div>
-                      <label className={lbl}>Title *</label>
+                      <label className={lbl}>Title *<HelpTip text="Reads on the agenda, in the voting email, in the signed PDF — write it so a trustee skimming an email understands it." /></label>
                       <input disabled={locked} value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} className={inp}
-                        placeholder="e.g. Approve Diwali budget of £15,000" />
-                      <p className="text-white/40 text-xs mt-1">Write it like a motion — clear, specific, actionable.</p>
+                        placeholder="e.g. Approve Diwali 2026 festival budget of £15,000" />
+                      <p className="text-white/40 text-xs mt-1">Write it like a motion — verb first, specific, under 120 characters.</p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className={lbl}>Category</label>
+                        <label className={lbl}>Category<HelpTip text="Operational = day-to-day. Policy = new/updated written policy. Contract = any engagement over the delegated limit. Officer election = Chair/Treasurer/Secretary appointment. Constitutional = anything that amends the governing document (CC26 §11)." /></label>
                         <select disabled={locked} value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value as Category }))} className={inp}>
                           {(['OPERATIONAL', 'OFFICER_ELECTION', 'POLICY', 'CONTRACT', 'CONSTITUTIONAL'] as Category[]).map(c =>
                             <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
@@ -676,6 +744,13 @@ export default function ResolutionsPage() {
 
                 {wizStep === 'context' && (
                   <div className="w-full space-y-5">
+                    <StepIntro
+                      title="Context — the case for the decision"
+                      why="Trustees should be able to vote without asking you a single question. Capture the story (Background), the ask (Recommendation), and everything they'd want to read (Attachments + info-requests to staff)."
+                      goodLooks="Background is 3-6 bullet points of facts. Recommendation is one sentence beginning with 'That the board…'. Supporting files include quotes, prior decisions, and any compliance checks (Charity Commission CC26 §4, 'informed decisions')."
+                      example="Background: 2024 Diwali attendance 4,200; hall capacity 3,500 breached. Recommendation: That the board approve a second service on 2 Nov 2026 at 6pm and £15,000 contingent budget."
+                    />
+
                     {/* AI draft */}
                     <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4">
                       <div className="flex items-center gap-2 mb-2">
@@ -702,24 +777,26 @@ export default function ResolutionsPage() {
                     </div>
 
                     <div>
-                      <label className={lbl}>Background</label>
+                      <label className={lbl}>Background<HelpTip text="The facts and the 'why now' — not the ask itself. Bullet points, dates, figures. Link prior minutes or policies in the toolbar's 🔗 Link button." /></label>
                       <RichTextEditor
                         value={form.background}
                         onChange={(html) => setForm(p => ({ ...p, background: html }))}
                         disabled={locked}
-                        placeholder="Why is this resolution being put to the board?"
+                        placeholder="Why does the board need to decide this, and why now? List the facts, dates, prior decisions, and any regulatory driver."
                         minHeight={160}
                       />
+                      <p className="text-white/40 text-xs mt-1">Example: “The 2024 Diwali service hit 4,200 attendees against hall capacity 3,500. A fire-safety review flagged the overflow. The CEO proposes a second service for 2026.”</p>
                     </div>
                     <div>
-                      <label className={lbl}>Recommendation</label>
+                      <label className={lbl}>Recommendation<HelpTip text="One sentence starting with 'That the board…' — this is the motion that goes on the signed PDF and the vote-invite email." /></label>
                       <RichTextEditor
                         value={form.recommendation}
                         onChange={(html) => setForm(p => ({ ...p, recommendation: html }))}
                         disabled={locked}
-                        placeholder="State the motion the board will vote on."
+                        placeholder="That the board approve / adopt / appoint …"
                         minHeight={140}
                       />
+                      <p className="text-white/40 text-xs mt-1">Example: “That the board approve the Diwali 2026 festival plan including a second service on 2 Nov at 6pm, with a total budget of £15,000 from the General Fund and £3,000 contingency, subject to a safety plan sign-off by the Trust Health &amp; Safety lead.”</p>
                     </div>
 
                     {/* Attachments */}
@@ -773,22 +850,81 @@ export default function ResolutionsPage() {
 
                 {wizStep === 'impact' && (
                   <div className="w-full space-y-4">
+                    <StepIntro
+                      title="Impact — risk and money"
+                      why="Trustees are legally responsible for the charity's assets and beneficiaries (Charities Act 2011 §3). This section is the paper trail that proves they weighed risk and cost before voting."
+                      goodLooks="Risk lists what could go wrong, who is affected, and the mitigation. Budget names the fund line, one-off vs recurring, and any match-funding. Numbers in £, no ranges."
+                      example="Risk: Second service means 240 extra car journeys → neighbour complaints. Mitigation: 4 marshals + shuttle from Harrow car park (CC26 taxonomy: OPERATIONAL / REPUTATIONAL · likelihood 3 · impact 2). Budget: £15,000 one-off from General Fund + £3,000 contingency. No recurring cost."
+                    />
                     <div>
-                      <label className={lbl}>Risk / Impact</label>
-                      <textarea disabled={locked} value={form.risk_impact} onChange={e => setForm(p => ({ ...p, risk_impact: e.target.value }))} rows={4} className={inp + ' resize-none'}
-                        placeholder="What could go wrong? Who is affected? What does success look like?" />
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <label className={lbl + ' mb-0'}>Risk / Impact<HelpTip text="What could go wrong (safeguarding, financial, reputational, operational), who it affects, and how it will be mitigated. Risk Register entry will be auto-created on publish if scope is Strategic / Operational / Compliance." /></label>
+                        {editing?.id && (
+                          <button type="button" disabled={locked}
+                            onClick={() => {
+                              const target = window.prompt('Who should supply this detail? Enter email', '')
+                              if (!target || !target.includes('@')) return
+                              const prompt = window.prompt(
+                                'What are you asking them to send?',
+                                'Please share the risk assessment and mitigation plan for this resolution.',
+                              )
+                              if (!prompt) return
+                              void apiFetch(`/admin/board/resolutions/${editing.id}/info-requests`, {
+                                method: 'POST',
+                                body: JSON.stringify({ target_email: target, prompt, required: false, type: 'text' }),
+                              }).then(() => {
+                                alert(`Info-request sent to ${target}.\nTheir reply will attach to this resolution automatically.`)
+                              }).catch(err => alert('Failed to create info-request: ' + (err instanceof Error ? err.message : 'unknown')))
+                            }}
+                            className="px-3 py-1.5 rounded-lg border border-sky-400/40 text-sky-300 text-xs font-bold hover:bg-sky-400/10 disabled:opacity-40">
+                            ✉ Request info from someone
+                          </button>
+                        )}
+                      </div>
+                      <textarea disabled={locked} value={form.risk_impact} onChange={e => setForm(p => ({ ...p, risk_impact: e.target.value }))} rows={5} className={inp + ' resize-none'}
+                        placeholder={'Format:\n• Category (Operational / Financial / Reputational / Safeguarding / Compliance / Cyber / Governance / External)\n• What could go wrong + who is affected\n• Likelihood × Impact (1–5 each)\n• Mitigation plan + owner\n\nExample:\n• OPERATIONAL + REPUTATIONAL — overflow car parking on Northwick Avenue could annoy neighbours and trigger council warning.\n• Likelihood 3 × Impact 2 = 6 (MEDIUM).\n• Mitigation: 4 car-park marshals + shuttle from Harrow Leisure Centre; CEO owns.'} />
+                      <p className="text-white/40 text-xs mt-1">If the risk is strategic or ongoing, it will be auto-added to the Org Risk Register on publish (CC26 §3).</p>
                     </div>
                     <div>
-                      <label className={lbl}>Budget Impact</label>
-                      <textarea disabled={locked} value={form.budget_impact} onChange={e => setForm(p => ({ ...p, budget_impact: e.target.value }))} rows={4} className={inp + ' resize-none'}
-                        placeholder="One-off vs recurring. Which fund / budget line. Any match-funding." />
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <label className={lbl + ' mb-0'}>Budget Impact<HelpTip text="Name the fund (General / Restricted / Capital), one-off vs recurring, VAT treatment, any match-funding or external restriction. Charity SORP §4.33 requires separate disclosure of restricted-fund movements." /></label>
+                        {editing?.id && (
+                          <button type="button" disabled={locked}
+                            onClick={() => {
+                              const target = window.prompt('Who should supply the budget detail? (e.g. treasurer@…)', '')
+                              if (!target || !target.includes('@')) return
+                              const prompt = window.prompt(
+                                'What are you asking them to send?',
+                                'Please confirm the fund line, VAT treatment and any restricted-fund implications for this resolution.',
+                              )
+                              if (!prompt) return
+                              void apiFetch(`/admin/board/resolutions/${editing.id}/info-requests`, {
+                                method: 'POST',
+                                body: JSON.stringify({ target_email: target, prompt, required: false, type: 'text' }),
+                              }).then(() => {
+                                alert(`Info-request sent to ${target}.\nTheir reply will attach to this resolution automatically.`)
+                              }).catch(err => alert('Failed to create info-request: ' + (err instanceof Error ? err.message : 'unknown')))
+                            }}
+                            className="px-3 py-1.5 rounded-lg border border-sky-400/40 text-sky-300 text-xs font-bold hover:bg-sky-400/10 disabled:opacity-40">
+                            ✉ Ask the Treasurer
+                          </button>
+                        )}
+                      </div>
+                      <textarea disabled={locked} value={form.budget_impact} onChange={e => setForm(p => ({ ...p, budget_impact: e.target.value }))} rows={5} className={inp + ' resize-none'}
+                        placeholder={'Format:\n• Fund (General / Restricted / Capital / Designated)\n• One-off £ + recurring £ / year\n• VAT treatment\n• Match-funding or grant restriction\n\nExample:\n• Fund: General. One-off £15,000 + £3,000 contingency.\n• No recurring cost.\n• VAT: exempt (religious service).\n• No external restriction.'} />
+                      <p className="text-white/40 text-xs mt-1">If the amount is above the Treasurer's delegated authority, the decision type must be BOARD MEETING (step 1).</p>
                     </div>
-                    <p className="text-white/40 text-xs">Optional, but strongly recommended for any spending or policy change.</p>
                   </div>
                 )}
 
                 {wizStep === 'review' && (
                   <div className="w-full space-y-4">
+                    <StepIntro
+                      title="Review — publish when you're happy"
+                      why="Once you publish, the text locks. Any edit after publish needs a fresh resolution. Vote invites go out immediately."
+                      goodLooks="All sections filled, at least one supporting file, every REQUIRED info-request submitted. The Progress circle (footer) is ≥ 80%."
+                      example="Save → come back → make one last change → Publish & email invites. Trustees receive a magic link within ~10 seconds."
+                    />
                     <p className="text-white/50 text-xs uppercase tracking-widest font-bold">Preview — this is what trustees will see</p>
                     <div className="rounded-2xl border border-white/10 bg-white/3 p-5 space-y-4">
                       <div>
@@ -846,7 +982,7 @@ export default function ResolutionsPage() {
                         <div className="flex flex-wrap gap-2">
                           <button onClick={() => saveDraft()} disabled={saving || !form.title.trim()}
                             className="px-4 py-2.5 rounded-xl border border-white/10 text-white/80 text-sm font-bold hover:bg-white/5 disabled:opacity-40">
-                            {saving ? 'Saving…' : editing ? 'Save Changes' : 'Save as Draft'}
+                            {saving ? 'Saving…' : 'Save'}
                           </button>
                           <button onClick={() => publishNow({ sendInvites: false })}
                             disabled={publishing || !form.title.trim() || hasOpenRequired}
@@ -1119,7 +1255,7 @@ export default function ResolutionsPage() {
                   {!locked && (
                     <button onClick={() => saveDraft()} disabled={saving || !form.title.trim()}
                       className="px-5 py-2.5 rounded-xl border border-white/15 text-white text-sm font-bold hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed">
-                      {saving ? 'Saving…' : 'Save draft'}
+                      {saving ? 'Saving…' : 'Save'}
                     </button>
                   )}
                   {wizStep !== 'review' && wizStep !== 'vote' ? (
