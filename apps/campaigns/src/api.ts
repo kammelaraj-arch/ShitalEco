@@ -123,4 +123,10 @@ export const api = {
     req<{ total_unique: number }>(`/marketing/campaigns/${id}/preview-count`, { method: 'POST' }),
   sendCampaignNow: (id: string) =>
     req<{ ok: true; stats: Record<string, unknown> }>(`/marketing/campaigns/${id}/send-now`, { method: 'POST' }),
+  scheduleCampaign: (id: string, scheduled_at: string) =>
+    req<{ ok: true; scheduled_at: string }>(`/marketing/campaigns/${id}/schedule`, {
+      method: 'POST', body: JSON.stringify({ scheduled_at }),
+    }),
+  unscheduleCampaign: (id: string) =>
+    req<{ ok: true }>(`/marketing/campaigns/${id}/unschedule`, { method: 'POST' }),
 }

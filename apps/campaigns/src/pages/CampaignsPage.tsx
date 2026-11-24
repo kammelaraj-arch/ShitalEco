@@ -190,20 +190,23 @@ export function CampaignsPage() {
               </div>
             )}
 
-            {editing.status === 'DRAFT' && (
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <button onClick={save} className="rounded-lg bg-indigo-500/20 border border-indigo-500/40 text-indigo-200 px-3 py-2 text-sm">
-                  Save
-                </button>
-                <button onClick={sendNow}
-                  disabled={sending || !editing.segment_id || !editing.template_id}
-                  className="rounded-lg bg-yellow-500 text-black px-4 py-2 text-sm font-bold disabled:opacity-50">
-                  {sending ? 'Sending…' : `Send now${previewCount ? ` (~${previewCount})` : ''}`}
-                </button>
-                <div className="flex-1" />
-                <button onClick={cancel} className="rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 px-3 py-2 text-sm">
-                  Cancel
-                </button>
+            {(editing.status === 'DRAFT' || editing.status === 'SCHEDULED') && (
+              <div className="pt-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={save} className="rounded-lg bg-indigo-500/20 border border-indigo-500/40 text-indigo-200 px-3 py-2 text-sm">
+                    Save
+                  </button>
+                  <button onClick={sendNow}
+                    disabled={sending || !editing.segment_id || !editing.template_id || editing.status === 'SCHEDULED'}
+                    className="rounded-lg bg-yellow-500 text-black px-4 py-2 text-sm font-bold disabled:opacity-50">
+                    {sending ? 'Sending…' : `Send now${previewCount ? ` (~${previewCount})` : ''}`}
+                  </button>
+                  <div className="flex-1" />
+                  <button onClick={cancel} className="rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 px-3 py-2 text-sm">
+                    Cancel
+                  </button>
+                </div>
+                <SchedulingRow editing={editing} onSaved={() => openCampaign(editing.id)} setError={setError} />
               </div>
             )}
 
@@ -231,6 +234,71 @@ export function CampaignsPage() {
         )}
       </section>
       {error && <p className="col-span-full text-xs text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+function SchedulingRow({
+  editing, onSaved, setError,
+}: {
+  editing: CampaignFull
+  onSaved: () => void
+  setError: (s: string) => void
+}) {
+  // Default to one hour from now in the input, rounded to the minute.
+  const defaultLocal = (() => {
+    const d = new Date(Date.now() + 60 * 60 * 1000)
+    d.setSeconds(0, 0)
+    // datetime-local input wants YYYY-MM-DDTHH:MM in LOCAL time (no tz).
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  })()
+  const [when, setWhen] = useState<string>(
+    editing.scheduled_at ? new Date(editing.scheduled_at).toISOString().slice(0, 16) : defaultLocal,
+  )
+  const [busy, setBusy] = useState(false)
+
+  async function schedule() {
+    setBusy(true); setError('')
+    try {
+      // Parse as local time, then convert to ISO (toISOString → UTC).
+      const iso = new Date(when).toISOString()
+      await api.scheduleCampaign(editing.id, iso)
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Schedule failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function unschedule() {
+    setBusy(true); setError('')
+    try { await api.unscheduleCampaign(editing.id); onSaved() }
+    catch (e) { setError(e instanceof Error ? e.message : 'Unschedule failed') }
+    finally   { setBusy(false) }
+  }
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 p-3 flex flex-wrap items-center gap-2 text-sm">
+      <span className="text-xs opacity-70 uppercase tracking-widest">Or schedule</span>
+      <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)}
+        className="rounded px-2 py-1 bg-black/40 border border-white/10 text-sm" />
+      {editing.status === 'SCHEDULED' ? (
+        <>
+          <button onClick={unschedule} disabled={busy}
+            className="rounded-lg bg-white/5 border border-white/15 text-white/70 px-3 py-1.5 text-xs">
+            {busy ? '…' : 'Unschedule'}
+          </button>
+          <span className="text-[11px] text-indigo-300">
+            Fires at {new Date(editing.scheduled_at || '').toLocaleString('en-GB')}
+          </span>
+        </>
+      ) : (
+        <button onClick={schedule} disabled={busy || !editing.segment_id || !editing.template_id}
+          className="rounded-lg bg-indigo-500/20 border border-indigo-500/40 text-indigo-200 px-3 py-1.5 text-xs font-bold disabled:opacity-50">
+          {busy ? 'Scheduling…' : 'Schedule send'}
+        </button>
+      )}
     </div>
   )
 }

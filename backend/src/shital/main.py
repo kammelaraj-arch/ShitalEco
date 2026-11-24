@@ -138,6 +138,21 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
         logger.info("recovery_loop_started")
         logger.info("stripe_giving_fast_loop_started")
         logger.info("stripe_import_daily_loop_started")
+
+        # Marketing scheduled-campaign worker — polls marketing_campaigns
+        # every MKT_SCHED_POLL_SECONDS (60s default), flips any row whose
+        # scheduled_at has passed from SCHEDULED to SENDING, and fires the
+        # send using the same `_run_campaign_send` the UI's send-now
+        # endpoint uses. One supervisor loop, same shape as the recovery
+        # loops above. Disable with MKT_SCHED_WORKER_ENABLED=0.
+        if os.environ.get("MKT_SCHED_WORKER_ENABLED", "1") == "1":
+            from shital.services.marketing.scheduled_worker import (
+                scheduled_loop_supervised as _mkt_sched_loop,
+            )
+            _mkt_sched_task = _asyncio.create_task(_mkt_sched_loop())
+            logger.info("marketing_scheduled_worker_started")
+        else:
+            _mkt_sched_task = None
     else:
         logger.info("recovery_loop_disabled_via_env")
 
