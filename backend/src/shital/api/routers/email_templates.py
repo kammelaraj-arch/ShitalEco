@@ -392,6 +392,29 @@ async def send_test_email(body: TemplateSendTest):
     return result
 
 
+@router.get("/mail-diag")
+async def mail_diag() -> dict[str, Any]:
+    """Quick visibility into mail config without SSH. Does NOT reveal
+    secret values — only whether each key is set + the chosen provider.
+    """
+    from shital.core.fabrics.secrets import SecretsManager
+    keys_to_check = [
+        "MAIL_PROVIDER",
+        "OFFICE365_EMAIL", "OFFICE365_PASSWORD",
+        "AWS_SES_SMTP_HOST", "AWS_SES_SMTP_USER", "AWS_SES_SMTP_PASSWORD",
+        "AWS_SES_FROM",
+        "NOTIFY_API_KEY", "NOTIFY_EMAIL_TEMPLATE_ID",
+    ]
+    out: dict[str, Any] = {}
+    for k in keys_to_check:
+        try:
+            val = await SecretsManager.get(k, fallback="")
+            out[k] = {"set": bool(val), "length": len(val or "")}
+        except Exception as exc:
+            out[k] = {"set": False, "error": str(exc)[:200]}
+    return {"provider_default": "office365", "keys": out}
+
+
 @router.post("/send-raw-test")
 async def send_raw_test(body: RawSendTest):
     """Freeform admin test send — pure diagnostic.
@@ -447,19 +470,31 @@ def _default_vars() -> dict[str, Any]:
 
 
 async def _smtp_send(from_email: str, password: str, to_email: str, subject: str, html_body: str, text_body: str) -> None:
-    """Legacy SMTP send — kept as a thin wrapper over the new
-    `dispatch_email` service so existing call sites work unchanged.
-    Raises on any error (callers already wrap in try/except)."""
-    # The legacy signature passes creds explicitly, but the dispatcher
-    # reads from env / SecretsManager — which admin UI rotates. Prefer
-    # the dispatcher so a key rotation takes effect here too.
-    from shital.services.mail import dispatch_email
-    result = await dispatch_email(
-        to_email=to_email, subject=subject,
-        html_body=html_body, text_body=text_body,
-    )
-    if not result.get("ok"):
-        raise RuntimeError(str(result.get("error") or "mail dispatch failed"))
+    """Direct Office365 SMTP send — the path that worked before PR #431.
+    When the caller passes creds explicitly (every current call site
+    does), skip the dispatcher entirely and open an SMTP connection
+    straight to Office365. The dispatcher stays available for callers
+    that want to pick a non-default provider — see dispatch_email."""
+    import asyncio
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    def _send() -> None:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = from_email
+        msg["To"]      = to_email
+        if text_body:
+            msg.attach(MIMEText(text_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+        with smtplib.SMTP("smtp.office365.com", 587, timeout=30) as srv:
+            srv.ehlo()
+            srv.starttls()
+            srv.login(from_email, password)
+            srv.sendmail(from_email, to_email, msg.as_string())
+
+    await asyncio.get_event_loop().run_in_executor(None, _send)
 
 
 async def _record_pending(
