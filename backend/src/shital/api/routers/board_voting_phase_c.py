@@ -22,7 +22,6 @@ Three surfaces:
 """
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -244,22 +243,20 @@ async def resolve_condition(
 # message endpoint accepts a basic-auth POST so we can get by with httpx
 # which is already in deps.
 async def _send_sms(to_phone: str, body: str) -> dict[str, Any]:
-    sid   = os.environ.get("TWILIO_ACCOUNT_SID") or ""
-    tok   = os.environ.get("TWILIO_AUTH_TOKEN") or ""
-    frm   = os.environ.get("TWILIO_FROM_NUMBER") or ""
-    if not (sid and tok and frm):
-        return {"sent": False, "reason": "twilio_not_configured"}
-    import httpx
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
-    try:
-        async with httpx.AsyncClient(timeout=15) as cli:
-            r = await cli.post(url, auth=(sid, tok),
-                               data={"To": to_phone, "From": frm, "Body": body})
-            if r.status_code >= 400:
-                return {"sent": False, "reason": f"twilio_{r.status_code}", "detail": r.text[:200]}
-            return {"sent": True, "sid": r.json().get("sid", "")}
-    except Exception as e:
-        return {"sent": False, "reason": "twilio_error", "detail": str(e)[:200]}
+    """Thin wrapper over the shared services.sms.dispatcher. Uses whatever
+    SMS_PROVIDER env selects — GOV.UK Notify by default (free for UK
+    charities up to 250k msgs/year), Twilio as the fallback. Returns the
+    legacy `{sent, sid?, reason?}` shape so the caller's result loop
+    stays unchanged."""
+    from shital.services.sms import dispatch_sms
+    r = await dispatch_sms(to_phone=to_phone, body=body)
+    return {
+        "sent":  bool(r.get("ok")),
+        "sid":   r.get("id", ""),
+        "reason": r.get("reason", ""),
+        "detail": r.get("detail", ""),
+        "provider": r.get("provider", ""),
+    }
 
 
 class SmsInviteBody(BaseModel):
