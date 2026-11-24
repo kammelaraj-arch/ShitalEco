@@ -3764,6 +3764,82 @@ async def _patch_schema() -> None:
         "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS term_max_years  SMALLINT NOT NULL DEFAULT 9",
         "CREATE INDEX IF NOT EXISTS idx_trustees_dbs_valid_until ON trustees(dbs_valid_until)",
 
+        # ─────────────────────────────────────────────────────────────────
+        # Governance Tranche 4A — Members register + AGM voting
+        # ─────────────────────────────────────────────────────────────────
+        # Members of the charity. Charities Act 2011 + Companies Act
+        # 2006 §303-305 (member resolutions / AGM) apply when the
+        # charity is a CIO or CLG with a membership body.
+        """CREATE TABLE IF NOT EXISTS members (
+            id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            full_name                VARCHAR(255) NOT NULL,
+            email                    VARCHAR(254) NOT NULL DEFAULT '',
+            phone                    VARCHAR(40)  NOT NULL DEFAULT '',
+            address                  TEXT         NOT NULL DEFAULT '',
+            postcode                 VARCHAR(20)  NOT NULL DEFAULT '',
+            membership_type          VARCHAR(20)  NOT NULL DEFAULT 'ORDINARY',
+                -- ORDINARY | LIFE | HONORARY | CORPORATE | CONCESSIONARY
+            joined_at                DATE,
+            resigned_at              DATE,
+            resignation_reason       TEXT         NOT NULL DEFAULT '',
+            status                   VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+                -- ACTIVE | LAPSED | RESIGNED | REMOVED
+            subscription_paid_until  DATE,
+            voting_rights            BOOLEAN      NOT NULL DEFAULT true,
+            gift_aid_declared        BOOLEAN      NOT NULL DEFAULT false,
+            notes                    TEXT         NOT NULL DEFAULT '',
+            magic_token_hash         VARCHAR(255) NOT NULL DEFAULT '',
+            created_by               UUID,
+            created_at               TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at               TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_members_status ON members(status)",
+        "CREATE INDEX IF NOT EXISTS idx_members_type   ON members(membership_type)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_members_email ON members(LOWER(email)) WHERE email <> ''",
+
+        # Flags a resolution as needing member vote (as opposed to the
+        # trustee vote path). members_quorum / notice days etc live here
+        # so one resolution can be either trustee-voted OR member-voted.
+        """CREATE TABLE IF NOT EXISTS member_resolutions (
+            id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            resolution_id           UUID NOT NULL UNIQUE REFERENCES resolutions(id) ON DELETE CASCADE,
+            is_special              BOOLEAN      NOT NULL DEFAULT false,
+                -- 75% threshold applies (Companies Act 2006 §283)
+            required_notice_days    INT          NOT NULL DEFAULT 14,
+            members_notice_sent_at  TIMESTAMPTZ,
+            members_quorum          INT          NOT NULL DEFAULT 0,
+                -- 0 = use default rule from governing document
+            closes_at               TIMESTAMPTZ,
+            tally_for               INT          NOT NULL DEFAULT 0,
+            tally_against           INT          NOT NULL DEFAULT 0,
+            tally_abstain           INT          NOT NULL DEFAULT 0,
+            voters_total            INT          NOT NULL DEFAULT 0,
+            outcome                 VARCHAR(20)  NOT NULL DEFAULT '',
+                -- CARRIED | NOT_CARRIED | INQUORATE
+            created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_member_resolutions_res ON member_resolutions(resolution_id)",
+
+        # Individual member vote. Proxies carry proxy_holder_id set to
+        # another member — holder casts the choice as if they were the
+        # principal.
+        """CREATE TABLE IF NOT EXISTS member_votes (
+            id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            member_resolution_id     UUID NOT NULL REFERENCES member_resolutions(id) ON DELETE CASCADE,
+            member_id                UUID NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+            choice                   VARCHAR(10)  NOT NULL,
+                -- FOR | AGAINST | ABSTAIN
+            is_proxy                 BOOLEAN      NOT NULL DEFAULT false,
+            proxy_holder_id          UUID REFERENCES members(id) ON DELETE SET NULL,
+            comment                  TEXT         NOT NULL DEFAULT '',
+            cast_at                  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            cast_ip                  VARCHAR(45)  NOT NULL DEFAULT '',
+            UNIQUE (member_resolution_id, member_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_member_votes_mr   ON member_votes(member_resolution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_member_votes_mem  ON member_votes(member_id)",
+
         # Vote rules per resolution category — quorum + passing threshold.
         # Seeded (see _seed_governance_core below) with the Charities Act
         # 2011 defaults: 50% simple majority for OPERATIONAL/POLICY/etc,
@@ -5910,6 +5986,7 @@ _mount("shital.api.routers.annual_reports",          "router")
 _mount("shital.api.routers.sir",                     "router")
 _mount("shital.api.routers.compliance_calendar",     "router")
 _mount("shital.api.routers.induction_succession",    "router")
+_mount("shital.api.routers.members",                 "router")
 _mount("shital.api.routers.delegations",             "router")
 _mount("shital.api.routers.meeting_attendance",      "router")
 _mount("shital.api.routers.trustee_skills",          "router")
