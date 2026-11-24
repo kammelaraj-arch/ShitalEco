@@ -1271,7 +1271,32 @@ async def publish_resolution(
             ua=request.headers.get("user-agent", ""),
         )
         await db.commit()
-    return {"id": resolution_id, "status": "OPEN", "success": True}
+    # Governance Core hooks — run OUTSIDE the publish transaction so a
+    # failure to detect conflicts or promote risks never undoes the
+    # publish itself. Both are idempotent.
+    try:
+        from shital.services.board.governance import (
+            detect_conflicts,
+            promote_resolution_risks,
+        )
+        conflicts = await detect_conflicts(
+            resolution_id=resolution_id, ctx=ctx,
+            ip=(request.client.host if request.client else ""),
+            ua=request.headers.get("user-agent", ""),
+        )
+        promoted = await promote_resolution_risks(
+            resolution_id=resolution_id, ctx=ctx,
+            ip=(request.client.host if request.client else ""),
+            ua=request.headers.get("user-agent", ""),
+        )
+    except Exception:
+        # Best-effort — publish is already committed, log and move on.
+        conflicts, promoted = [], []
+    return {
+        "id": resolution_id, "status": "OPEN", "success": True,
+        "conflicts_detected": len(conflicts),
+        "risks_promoted":     len(promoted),
+    }
 
 
 @router.post("/admin/board/resolutions/{resolution_id}/votes")
@@ -1485,12 +1510,53 @@ async def close_resolution(
             ua=request.headers.get("user-agent", ""),
         )
         await db.commit()
+    # Governance Core — layer per-category threshold (CONSTITUTIONAL = 75%
+    # special resolution per Charities Act 2011 §280) and recusal count on
+    # the response so the UI can show them. Also rerun the outcome against
+    # the category threshold; flip CARRIED → NOT_CARRIED if a super-majority
+    # was required but not met.
+    governance: dict[str, Any] = {}
+    try:
+        from shital.services.board.governance import compute_vote_outcome
+        gov = await compute_vote_outcome(resolution_id=resolution_id)
+        if gov.get("found"):
+            governance = {
+                "category": gov["category"],
+                "pass_threshold_pct": gov["pass_threshold_pct"],
+                "is_special": gov["is_special"],
+                "recused": gov["recused"],
+                "eligible_to_vote": gov["eligible_to_vote"],
+                "outcome": gov["outcome"],
+            }
+            # When super-majority was required but simple majority was taken,
+            # re-close to the stricter outcome.
+            if (
+                gov["is_special"]
+                and outcome_label == "CARRIED"
+                and gov["outcome"] == "NOT_CARRIED"
+            ):
+                from sqlalchemy import text
+
+                from shital.core.fabrics.database import SessionLocal
+                async with SessionLocal() as super_db:
+                    await super_db.execute(text(
+                        "UPDATE resolutions SET outcome = 'NOT_CARRIED', "
+                        "outcome_summary = outcome_summary || "
+                        "' · Super-majority ' || :pct || '%% required (special resolution) — not met.' "
+                        "WHERE id::text = :id"
+                    ), {"pct": gov["pass_threshold_pct"], "id": resolution_id})
+                    await super_db.commit()
+                outcome_label = "NOT_CARRIED"
+                governance["flipped_from_simple_majority"] = True
+    except Exception:
+        governance = {}
     return {
         "resolution_id": resolution_id,
         "outcome": outcome_label,
         "tally_for": tally_for, "tally_against": tally_against,
         "tally_abstain": tally_abstain,
         "quorum_total": total, "effective_quorum": eq,
+        "governance": governance,
         "success": True,
     }
 
