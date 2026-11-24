@@ -3626,6 +3626,47 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_annual_reports_period ON annual_reports(period_end DESC)",
         "CREATE INDEX IF NOT EXISTS idx_annual_reports_status ON annual_reports(status)",
 
+        # ─────────────────────────────────────────────────────────────────
+        # Governance Tranche 3C — Induction, DBS, Succession
+        # ─────────────────────────────────────────────────────────────────
+        # Induction taxonomy (CC3, Charity Governance Code principle 3.3).
+        # Seeded from _seed_governance_tranche_3c below.
+        """CREATE TABLE IF NOT EXISTS induction_items (
+            code        VARCHAR(40) PRIMARY KEY,
+            title       VARCHAR(255) NOT NULL,
+            category    VARCHAR(40) NOT NULL DEFAULT 'GOVERNANCE',
+                -- GOVERNANCE | SAFEGUARDING | FINANCE | OPERATIONS | LEGAL
+            description TEXT        NOT NULL DEFAULT '',
+            sort_order  SMALLINT    NOT NULL DEFAULT 100,
+            is_required BOOLEAN     NOT NULL DEFAULT true,
+            is_active   BOOLEAN     NOT NULL DEFAULT true
+        )""",
+
+        # Per-trustee completion log.
+        """CREATE TABLE IF NOT EXISTS trustee_induction_progress (
+            id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            trustee_id             UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
+            item_code              VARCHAR(40) NOT NULL REFERENCES induction_items(code) ON DELETE CASCADE,
+            completed_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_by           UUID,
+            completed_by_name      VARCHAR(255) NOT NULL DEFAULT '',
+            evidence_note          TEXT         NOT NULL DEFAULT '',
+            evidence_attachment_id UUID,
+            UNIQUE (trustee_id, item_code)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_induction_prog_trustee ON trustee_induction_progress(trustee_id)",
+
+        # DBS + statutory trustee fields. All idempotent; safe where
+        # columns already exist.
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS dbs_type        VARCHAR(20) NOT NULL DEFAULT 'NONE'",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS dbs_reference   VARCHAR(80) NOT NULL DEFAULT ''",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS dbs_issued_at   DATE",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS dbs_valid_until DATE",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS dbs_status      VARCHAR(20) NOT NULL DEFAULT 'NOT_REQUIRED'",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS term_number     SMALLINT NOT NULL DEFAULT 1",
+        "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS term_max_years  SMALLINT NOT NULL DEFAULT 9",
+        "CREATE INDEX IF NOT EXISTS idx_trustees_dbs_valid_until ON trustees(dbs_valid_until)",
+
         # Vote rules per resolution category — quorum + passing threshold.
         # Seeded (see _seed_governance_core below) with the Charities Act
         # 2011 defaults: 50% simple majority for OPERATIONAL/POLICY/etc,
@@ -4401,6 +4442,45 @@ async def _patch_schema() -> None:
     await _seed_governance_core()
     await _seed_governance_tranche_2a()
     await _seed_governance_tranche_2b()
+    await _seed_governance_tranche_3c()
+
+
+async def _seed_governance_tranche_3c() -> None:
+    """Seed the 12 standard trustee induction items (CC3 + Charity
+    Governance Code principle 3.3). Idempotent."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    items = [
+        # (code, title, category, description, sort, required)
+        ("GOV_DOC",        "Read and sign the governing document",            "GOVERNANCE",   "Constitution / articles / trust deed — the legal backbone of your trusteeship.", 10,  True),
+        ("STRATEGIC_PLAN", "Read the current strategic plan",                 "GOVERNANCE",   "Current three-to-five-year plan setting the direction the board is accountable for.", 20, True),
+        ("ANNUAL_ACCOUNTS","Read the latest annual accounts",                 "FINANCE",      "Most recent signed accounts + trustees' annual report.", 30,  True),
+        ("SAFEGUARDING",   "Safeguarding briefing (with the Safeguarding Lead)","SAFEGUARDING","CC9. Current policy + reporting routes + designated leads.", 40,  True),
+        ("RISK_BRIEFING",  "Risk register walkthrough (with the Chair)",      "GOVERNANCE",   "CC26. Current OPEN risks + treatment + owners.", 50,  True),
+        ("CONFLICTS",      "Conflicts-of-interest declaration + policy training","LEGAL",     "CC27. Declare standing interests and related parties.", 60,  True),
+        ("DELEGATIONS",    "Delegations register briefing",                   "GOVERNANCE",   "Who may authorise what, up to what limit, for how long.", 70,  True),
+        ("CODE_OF_CONDUCT","Trustee Code of Conduct signed",                  "LEGAL",        "Behavioural expectations + reporting breaches.", 80,  True),
+        ("SKILLS_SELF",    "Skills self-assessment completed",                "GOVERNANCE",   "Rate yourself against the required-skills matrix.", 90,  True),
+        ("CC3_READ",       "Charity Commission CC3 (The Essential Trustee) read","LEGAL",     "The Commission's own primer on trustee duties.", 100, True),
+        ("DBS_CHECK",      "DBS check completed (if role applies)",           "SAFEGUARDING", "Enhanced DBS for trustees working with children or vulnerable adults.", 110, False),
+        ("ATTENDANCE",     "Attendance expectations briefing",                "OPERATIONS",   "Meeting cadence, quorum rules, apologies procedure.", 120, True),
+    ]
+    async with SessionLocal() as db:
+        for code, title, cat, desc, sort, req in items:
+            await db.execute(text("""
+                INSERT INTO induction_items
+                (code, title, category, description, sort_order, is_required, is_active)
+                VALUES (:c, :t, :cat, :d, :s, :r, true)
+                ON CONFLICT (code) DO UPDATE SET
+                  title       = EXCLUDED.title,
+                  category    = EXCLUDED.category,
+                  description = EXCLUDED.description,
+                  sort_order  = EXCLUDED.sort_order,
+                  is_required = EXCLUDED.is_required
+            """), {"c": code, "t": title, "cat": cat, "d": desc, "s": sort, "r": req})
+        await db.commit()
+    logger.info("governance_tranche_3c_seeded")
 
 
 async def _seed_governance_tranche_2a() -> None:
@@ -5679,6 +5759,7 @@ _mount("shital.api.routers.meeting_actions",         "router")
 _mount("shital.api.routers.policies",                "router")
 _mount("shital.api.routers.reserves",                "router")
 _mount("shital.api.routers.annual_reports",          "router")
+_mount("shital.api.routers.induction_succession",    "router")
 _mount("shital.api.routers.delegations",             "router")
 _mount("shital.api.routers.meeting_attendance",      "router")
 _mount("shital.api.routers.trustee_skills",          "router")
