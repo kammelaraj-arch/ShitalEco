@@ -3583,6 +3583,125 @@ async def _patch_schema() -> None:
         "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS required_quorum_pct   SMALLINT",
         "ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS pass_threshold_pct    SMALLINT",
 
+        # ─────────────────────────────────────────────────────────────────────
+        # Governance Tranche 2A — action tracker, policy register, reserves
+        # ─────────────────────────────────────────────────────────────────────
+        # Meeting action items (Charity Governance Code principle 6.5 —
+        # "Decisions are followed through.") One row per action out of a
+        # meeting; status carried forward meeting to meeting.
+        """CREATE TABLE IF NOT EXISTS meeting_actions (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            meeting_id      UUID NOT NULL REFERENCES board_meetings(id) ON DELETE CASCADE,
+            resolution_id   UUID REFERENCES resolutions(id) ON DELETE SET NULL,
+                -- NULL when the action came from a general discussion, not a motion
+            title           VARCHAR(500) NOT NULL,
+            description     TEXT         NOT NULL DEFAULT '',
+            owner_user_id   UUID,
+            owner_name      VARCHAR(255) NOT NULL DEFAULT '',
+            due_date        DATE,
+            priority        VARCHAR(10)  NOT NULL DEFAULT 'MEDIUM',
+                -- LOW | MEDIUM | HIGH
+            status          VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
+                -- OPEN | IN_PROGRESS | DONE | CANCELLED | CARRIED_FORWARD
+            carried_from_action_id UUID REFERENCES meeting_actions(id) ON DELETE SET NULL,
+            done_at         TIMESTAMPTZ,
+            done_by         UUID,
+            done_note       TEXT         NOT NULL DEFAULT '',
+            created_by      UUID,
+            created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_meeting_actions_meeting ON meeting_actions(meeting_id)",
+        "CREATE INDEX IF NOT EXISTS idx_meeting_actions_owner   ON meeting_actions(owner_user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_meeting_actions_status  ON meeting_actions(status)",
+        "CREATE INDEX IF NOT EXISTS idx_meeting_actions_due     ON meeting_actions(due_date)",
+
+        # Policy register (Charity Governance Code principle 7 — openness
+        # and accountability; CC9, CC12, CC26). Each policy has a review
+        # cadence, an owner trustee, and version history.
+        """CREATE TABLE IF NOT EXISTS policies (
+            id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title                  VARCHAR(255) NOT NULL,
+            category               VARCHAR(40)  NOT NULL,
+                -- SAFEGUARDING | FINANCE | HR | GOVERNANCE | DATA_PROTECTION
+                -- | EQUALITY | RESERVES | WHISTLEBLOWING | HEALTH_SAFETY
+                -- | ENVIRONMENT | COMPLAINTS | FUNDRAISING | INVESTMENT | OTHER
+            summary                TEXT         NOT NULL DEFAULT '',
+            current_version        INT          NOT NULL DEFAULT 1,
+            owner_user_id          UUID,
+            owner_name             VARCHAR(255) NOT NULL DEFAULT '',
+            review_period_months   SMALLINT     NOT NULL DEFAULT 12,
+            adopted_at             DATE,
+            adopted_at_resolution_id UUID REFERENCES resolutions(id) ON DELETE SET NULL,
+            next_review_date       DATE,
+            status                 VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+                -- DRAFT | ACTIVE | UNDER_REVIEW | ARCHIVED
+            current_attachment_id  UUID,
+            created_by             UUID,
+            created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_policies_category ON policies(category)",
+        "CREATE INDEX IF NOT EXISTS idx_policies_status   ON policies(status)",
+        "CREATE INDEX IF NOT EXISTS idx_policies_review   ON policies(next_review_date)",
+
+        """CREATE TABLE IF NOT EXISTS policy_versions (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            policy_id       UUID NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+            version_number  INT  NOT NULL,
+            summary_of_changes TEXT NOT NULL DEFAULT '',
+            attachment_id   UUID,
+            adopted_at      DATE,
+            adopted_at_resolution_id UUID REFERENCES resolutions(id) ON DELETE SET NULL,
+            created_by      UUID,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_policy_versions_policy ON policy_versions(policy_id, version_number DESC)",
+
+        # Reserves policy — one row only, the charity's current reserves
+        # policy (CC19). target_months is the policy target expressed as
+        # months of running cost; target_amount_gbp mirrors it for
+        # charities that fix a cash amount instead.
+        """CREATE TABLE IF NOT EXISTS reserves_policy (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            is_current          BOOLEAN NOT NULL DEFAULT true,
+            target_months       NUMERIC(5,2) NOT NULL DEFAULT 3,
+            target_amount_gbp   NUMERIC(14,2),
+            free_reserves_definition TEXT NOT NULL DEFAULT 'Unrestricted funds less any amounts designated or tied up in fixed assets.',
+            trigger_action_below_months NUMERIC(5,2) NOT NULL DEFAULT 1.5,
+            notes               TEXT NOT NULL DEFAULT '',
+            last_reviewed_at    DATE,
+            review_period_months SMALLINT NOT NULL DEFAULT 12,
+            next_review_date    DATE,
+            policy_attachment_id UUID,
+            updated_by          UUID,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_reserves_policy_current ON reserves_policy(is_current) WHERE is_current = true",
+
+        # Monthly (or ad-hoc) reserves snapshot. months_of_cover is
+        # computed from the policy's `free_reserves_definition` applied to
+        # the balances — kept on the row so historical runs don't shift
+        # if the policy changes later.
+        """CREATE TABLE IF NOT EXISTS reserves_snapshots (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            as_of_date          DATE NOT NULL,
+            unrestricted_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
+            restricted_balance  NUMERIC(14,2) NOT NULL DEFAULT 0,
+            endowment_balance   NUMERIC(14,2) NOT NULL DEFAULT 0,
+            free_reserves       NUMERIC(14,2) NOT NULL DEFAULT 0,
+            monthly_run_cost    NUMERIC(14,2) NOT NULL DEFAULT 0,
+            months_of_cover     NUMERIC(6,2)  NOT NULL DEFAULT 0,
+            triggers_fired      JSONB         NOT NULL DEFAULT '[]'::jsonb,
+            source              VARCHAR(30)   NOT NULL DEFAULT 'MANUAL',
+                -- MANUAL | ACCOUNTS_IMPORT | CRON
+            note                TEXT          NOT NULL DEFAULT '',
+            created_by          UUID,
+            created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_reserves_snaps_date ON reserves_snapshots(as_of_date DESC)",
+
         # ── Marketing: saved audience segments (reusable across campaigns) ──
         # Same shape as resolution_announcement_audiences but with a stable
         # name so multiple campaigns can target the same segment. The
@@ -4189,6 +4308,60 @@ async def _patch_schema() -> None:
     await _seed_release_notes()
     await _seed_document_categories()
     await _seed_governance_core()
+    await _seed_governance_tranche_2a()
+
+
+async def _seed_governance_tranche_2a() -> None:
+    """Seed the 10 standard UK-charity policy categories (one empty
+    policy row per category so the Admin → Policies page always
+    renders a full grid) + default reserves policy (CC19: 3 months
+    cover, trigger at 1.5 months). Idempotent."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    # Standard policy register — the 10 policies the Charity Commission
+    # expects a registered charity to maintain. Each seeded row is a
+    # placeholder with status=DRAFT so the Admin UI shows it as "needs
+    # setting up" until a trustee attaches a document version.
+    seed_policies = [
+        # (title, category, review_period_months)
+        ("Safeguarding Policy",            "SAFEGUARDING",      12),
+        ("Financial Procedures & Controls","FINANCE",           12),
+        ("Reserves Policy",                "RESERVES",          12),
+        ("Risk Management Policy",         "GOVERNANCE",        12),
+        ("Conflicts of Interest Policy",   "GOVERNANCE",        12),
+        ("Data Protection (GDPR) Policy",  "DATA_PROTECTION",   12),
+        ("Equality, Diversity & Inclusion Policy", "EQUALITY",  24),
+        ("Whistleblowing Policy",          "WHISTLEBLOWING",    24),
+        ("Health & Safety Policy",         "HEALTH_SAFETY",     12),
+        ("Complaints Policy",              "COMPLAINTS",        24),
+        ("Fundraising Policy (Code of Fundraising Practice)", "FUNDRAISING", 12),
+        ("Investment Policy",              "INVESTMENT",        24),
+    ]
+    async with SessionLocal() as db:
+        for title, cat, months in seed_policies:
+            await db.execute(text("""
+                INSERT INTO policies
+                (title, category, review_period_months, status, summary)
+                SELECT :t, :c, :m, 'DRAFT',
+                       'Seeded placeholder — attach an adopted document and set the review date to make it ACTIVE.'
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM policies
+                    WHERE  category = :c AND lower(title) = lower(:t)
+                )
+            """), {"t": title, "c": cat, "m": months})
+        # Reserves policy — only one row; seed if empty.
+        await db.execute(text("""
+            INSERT INTO reserves_policy
+            (is_current, target_months, trigger_action_below_months,
+             review_period_months, notes)
+            SELECT true, 3.00, 1.50, 12,
+                   'CC19 default seed — 3 months cover, trigger below 1.5 months. Review the policy annually with the trustees.'
+            WHERE NOT EXISTS (SELECT 1 FROM reserves_policy WHERE is_current = true)
+        """))
+        await db.commit()
+    logger.info("governance_tranche_2a_seeded")
 
 
 async def _seed_governance_core() -> None:
@@ -5375,6 +5548,9 @@ _mount("shital.api.routers.risk_register",           "router")
 _mount("shital.api.routers.trustee_interests",       "router")
 _mount("shital.api.routers.meeting_notices",         "router")
 _mount("shital.api.routers.meeting_minutes",         "router")
+_mount("shital.api.routers.meeting_actions",         "router")
+_mount("shital.api.routers.policies",                "router")
+_mount("shital.api.routers.reserves",                "router")
 _mount("shital.api.routers.board_voting_phase_c",    "router")
 _mount("shital.api.routers.board_signoff",           "router")
 _mount("shital.api.routers.public_campaigns",      "router")

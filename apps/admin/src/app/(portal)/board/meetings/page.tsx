@@ -296,6 +296,7 @@ export default function MeetingsPage() {
                   <>
                     <NoticePanel meetingId={editing.id} />
                     <MinutesPanel meetingId={editing.id} />
+                    <ActionsPanel meetingId={editing.id} meetings={items} />
                   </>
                 )}
               </div>
@@ -310,6 +311,196 @@ export default function MeetingsPage() {
           </>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+// ─── Charity Governance Code 6.5 — action-item tracker ─────────────────
+
+interface ActionRow {
+  id: string
+  title: string
+  description: string
+  owner_name: string
+  due_date: string | null
+  priority: 'LOW' | 'MEDIUM' | 'HIGH'
+  status: 'OPEN' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED' | 'CARRIED_FORWARD'
+  done_at: string | null
+  done_note: string
+}
+
+function ActionsPanel({ meetingId, meetings }: { meetingId: string; meetings: Meeting[] }) {
+  const [rows, setRows] = useState<ActionRow[]>([])
+  const [busy, setBusy] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState({
+    title: '', description: '', owner_name: '', due_date: '',
+    priority: 'MEDIUM' as 'LOW' | 'MEDIUM' | 'HIGH',
+  })
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch<{ actions: ActionRow[] }>(`/admin/board/meetings/${meetingId}/actions`)
+      setRows(r.actions || [])
+    } catch { /* quiet */ }
+  }, [meetingId])
+  useEffect(() => { void load() }, [load])
+
+  async function add() {
+    if (!draft.title.trim()) { alert('Title is required'); return }
+    setBusy(true)
+    try {
+      await apiFetch(`/admin/board/meetings/${meetingId}/actions`, {
+        method: 'POST', body: JSON.stringify({
+          ...draft,
+          due_date: draft.due_date || null,
+        }),
+      })
+      setDraft({ title: '', description: '', owner_name: '', due_date: '', priority: 'MEDIUM' })
+      setAdding(false)
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  async function updateStatus(a: ActionRow, next: ActionRow['status']) {
+    setBusy(true)
+    try {
+      const body: Record<string, string> = { status: next }
+      if (next === 'DONE') {
+        const note = window.prompt('Completion note (optional)', '') || ''
+        body.done_note = note
+      }
+      await apiFetch(`/admin/board/meetings/${meetingId}/actions/${a.id}`, {
+        method: 'PUT', body: JSON.stringify(body),
+      })
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  async function remove(id: string) {
+    if (!confirm('Delete this action?')) return
+    try {
+      await apiFetch(`/admin/board/meetings/${meetingId}/actions/${id}`, { method: 'DELETE' })
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed')
+    }
+  }
+
+  async function carryFrom(fromId: string) {
+    if (!confirm('Copy every OPEN action from that meeting into this one?')) return
+    setBusy(true)
+    try {
+      const r = await apiFetch<{ copied: number }>(
+        `/admin/board/meetings/${meetingId}/actions/carry-forward`,
+        { method: 'POST', body: JSON.stringify({ from_meeting_id: fromId }) },
+      )
+      alert(`Copied ${r.copied} action(s).`)
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  const prevMeetings = meetings.filter(m => m.id !== meetingId).slice(0, 10)
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-white/70 text-xs uppercase tracking-widest font-bold">✅ Actions</p>
+          <p className="text-white/40 text-[10px]">Governance Code 6.5 — decisions are followed through.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {prevMeetings.length > 0 && (
+            <select onChange={e => { if (e.target.value) void carryFrom(e.target.value); e.currentTarget.value = '' }}
+              defaultValue=""
+              className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white/70">
+              <option value="">Carry forward from…</option>
+              {prevMeetings.map(m => <option key={m.id} value={m.id}>{new Date(m.scheduled_at).toLocaleDateString()} — {m.title || m.meeting_type.replace(/_/g, ' ')}</option>)}
+            </select>
+          )}
+          <button type="button" onClick={() => setAdding(s => !s)}
+            className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/80 text-xs font-bold hover:bg-white/10">
+            {adding ? 'Cancel' : '+ Add action'}
+          </button>
+        </div>
+      </div>
+
+      {adding && (
+        <div className="rounded-xl border border-saffron-400/30 bg-saffron-400/5 p-3 space-y-2">
+          <input value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
+            placeholder="Action — verb first"
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs" />
+          <textarea rows={2} value={draft.description}
+            onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
+            placeholder="Context (optional)"
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs resize-none" />
+          <div className="grid grid-cols-3 gap-2">
+            <input value={draft.owner_name} onChange={e => setDraft(d => ({ ...d, owner_name: e.target.value }))}
+              placeholder="Owner"
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs" />
+            <input type="date" value={draft.due_date} onChange={e => setDraft(d => ({ ...d, due_date: e.target.value }))}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs" />
+            <select value={draft.priority} onChange={e => setDraft(d => ({ ...d, priority: e.target.value as 'LOW' | 'MEDIUM' | 'HIGH' }))}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs">
+              <option value="LOW">Low</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HIGH">High</option>
+            </select>
+          </div>
+          <button type="button" onClick={add} disabled={busy}
+            className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-xs font-black shadow-saffron disabled:opacity-40">
+            {busy ? 'Saving…' : 'Create action'}
+          </button>
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <p className="text-white/30 text-xs italic">No actions yet.</p>
+      ) : (
+        <ul className="space-y-2">
+          {rows.map(a => {
+            const dueSoon = a.due_date && new Date(a.due_date) <= new Date(Date.now() + 7 * 864e5)
+            const overdue = a.due_date && new Date(a.due_date) < new Date() && a.status !== 'DONE' && a.status !== 'CANCELLED'
+            return (
+              <li key={a.id} className={
+                'rounded-xl border p-2.5 ' +
+                (a.status === 'DONE' ? 'border-emerald-500/20 bg-emerald-500/5'
+                  : overdue ? 'border-red-500/30 bg-red-500/5'
+                  : 'border-white/10 bg-white/3')
+              }>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className={'text-sm font-bold ' + (a.status === 'DONE' ? 'text-emerald-200 line-through' : 'text-white')}>{a.title}</p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[10px] uppercase tracking-widest">
+                      <span className={
+                        a.priority === 'HIGH' ? 'text-red-300' : a.priority === 'MEDIUM' ? 'text-amber-300' : 'text-white/50'
+                      }>{a.priority}</span>
+                      {a.owner_name && <span className="text-white/60">· {a.owner_name}</span>}
+                      {a.due_date && <span className={overdue ? 'text-red-300' : dueSoon ? 'text-amber-300' : 'text-white/50'}>· due {new Date(a.due_date).toLocaleDateString()}</span>}
+                      <span className="text-white/40">· {a.status.replace(/_/g, ' ')}</span>
+                    </div>
+                    {a.description && <p className="text-white/60 text-xs mt-1">{a.description}</p>}
+                    {a.done_note && <p className="text-emerald-200/70 text-[10px] italic mt-1">Done: {a.done_note}</p>}
+                  </div>
+                  <div className="flex gap-1">
+                    {a.status !== 'DONE' && a.status !== 'CANCELLED' && (
+                      <>
+                        {a.status === 'OPEN' && (
+                          <button type="button" onClick={() => updateStatus(a, 'IN_PROGRESS')}
+                            className="text-sky-300 hover:text-sky-200 text-[10px] font-bold px-1">▶ Start</button>
+                        )}
+                        <button type="button" onClick={() => updateStatus(a, 'DONE')}
+                          className="text-emerald-300 hover:text-emerald-200 text-[10px] font-bold px-1">✓ Done</button>
+                      </>
+                    )}
+                    <button type="button" onClick={() => remove(a.id)}
+                      className="text-red-400/60 hover:text-red-400 text-xs">✕</button>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }
@@ -437,7 +628,6 @@ function MinutesPanel({ meetingId }: { meetingId: string }) {
     } finally { setBusy(false) }
   }
 
-  // Hydrate draft textarea if there's a current draft and the box is empty
   useEffect(() => {
     if (currentDraft && !draftContent) setDraftContent(currentDraft.content_html)
   }, [currentDraft, draftContent])
