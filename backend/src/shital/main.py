@@ -1547,6 +1547,25 @@ async def _patch_schema() -> None:
         "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS related_id      VARCHAR(100) NOT NULL DEFAULT ''",
         "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS triggered_by    VARCHAR(255) NOT NULL DEFAULT ''",
         "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()",
+        # If related_id was created as UUID on an older install, convert it
+        # to VARCHAR so the sender (which passes ''/short strings for admin
+        # tests, campaign ids, resolution ids, etc.) works. No-op where the
+        # column is already VARCHAR.
+        """DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE  table_name = 'sent_emails'
+                  AND  column_name = 'related_id'
+                  AND  data_type   = 'uuid'
+            ) THEN
+                ALTER TABLE sent_emails
+                    ALTER COLUMN related_id DROP DEFAULT,
+                    ALTER COLUMN related_id TYPE VARCHAR(100) USING COALESCE(related_id::text, ''),
+                    ALTER COLUMN related_id SET DEFAULT '',
+                    ALTER COLUMN related_id SET NOT NULL;
+            END IF;
+        END$$""",
         # ── Temple Services ───────────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS temple_services (
             id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
