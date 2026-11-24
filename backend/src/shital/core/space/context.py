@@ -33,9 +33,20 @@ class DigitalSpace:
             from shital.core.fabrics.errors import ForbiddenError
             raise ForbiddenError(f"Permission '{permission}' required")
 
+    # Roles pinned to a single branch. BRANCH_MANAGER / STAFF run the
+    # branch day-to-day; VOLUNTEER contributes at their branch; LMC is the
+    # branch-level governance committee (LMC_CHAIR / LMC_TREASURER /
+    # LMC_MEMBER) so they see their own branch only, never org-wide.
+    # Main-board roles (SUPER_ADMIN, TRUSTEE, CHAIR, ACCOUNTANT,
+    # HR_MANAGER, AUDITOR) stay unscoped — they govern across branches.
+    _BRANCH_SCOPED_ROLES = (
+        "BRANCH_MANAGER", "STAFF", "VOLUNTEER",
+        "LMC_CHAIR", "LMC_TREASURER", "LMC_MEMBER",
+    )
+
     def require_branch_scope(self, branch_id: str) -> None:
-        """Branch managers and staff can only access their own branch."""
-        if self.role in ("BRANCH_MANAGER", "STAFF") and self.branch_id != branch_id:
+        """Branch-scoped roles can only access their own branch."""
+        if self.role in self._BRANCH_SCOPED_ROLES and self.branch_id != branch_id:
             from shital.core.fabrics.errors import ForbiddenError
             raise ForbiddenError("Access restricted to your branch")
 
