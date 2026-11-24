@@ -292,7 +292,13 @@ export default function MeetingsPage() {
                   <label className={lbl}>Internal notes</label>
                   <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} rows={3} className={inp + ' resize-none'} />
                 </div>
-                {editing && <ActionsPanel meetingId={editing.id} meetings={items} />}
+                {editing && (
+                  <>
+                    <NoticePanel meetingId={editing.id} />
+                    <MinutesPanel meetingId={editing.id} />
+                    <ActionsPanel meetingId={editing.id} meetings={items} />
+                  </>
+                )}
               </div>
               <div className="px-6 py-4 border-t border-white/5 flex gap-3">
                 <button onClick={() => setShowForm(false)} className="flex-1 py-3 rounded-xl border border-white/10 text-white/60 font-semibold text-sm">Cancel</button>
@@ -493,6 +499,184 @@ function ActionsPanel({ meetingId, meetings }: { meetingId: string; meetings: Me
               </li>
             )
           })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ─── CC48 meeting notice + minutes versioning ───────────────────────────
+
+interface NoticeRow {
+  id: string; sent_at: string; recipient_count: number; days_notice: number
+  note: string
+}
+
+function NoticePanel({ meetingId }: { meetingId: string }) {
+  const [rows, setRows] = useState<NoticeRow[]>([])
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch<{ notices: NoticeRow[] }>(`/admin/board/meetings/${meetingId}/notices`)
+      setRows(r.notices || [])
+    } catch { /* quiet */ }
+  }, [meetingId])
+  useEffect(() => { void load() }, [load])
+
+  async function send() {
+    if (!confirm('Send a notice-of-meeting email to every active trustee now?')) return
+    setBusy(true)
+    try {
+      const r = await apiFetch<{ sent: number; failed: string[]; days_notice: number }>(
+        `/admin/board/meetings/${meetingId}/notices/send`,
+        { method: 'POST', body: JSON.stringify({ note }) },
+      )
+      setNote('')
+      alert(`Notice sent to ${r.sent} trustees (${r.days_notice} day(s) notice). ${r.failed.length} failed.`)
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-white/70 text-xs uppercase tracking-widest font-bold">📣 Notice of meeting</p>
+          <p className="text-white/40 text-[10px]">CC48 — days-notice is computed from current time.</p>
+        </div>
+      </div>
+      <textarea rows={2} value={note} onChange={e => setNote(e.target.value)}
+        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs resize-none"
+        placeholder="Optional covering note (e.g. 'please note change of venue')." />
+      <button type="button" onClick={send} disabled={busy}
+        className="px-3 py-2 rounded-lg bg-saffron-gradient text-white text-xs font-black shadow-saffron disabled:opacity-40">
+        {busy ? 'Sending…' : '✉ Send notice to every active trustee'}
+      </button>
+      {rows.length > 0 && (
+        <ul className="space-y-1.5 text-xs text-white/60">
+          {rows.map(r => (
+            <li key={r.id}>
+              Sent {new Date(r.sent_at).toLocaleString()} · {r.recipient_count} trustees · {r.days_notice} day(s) notice
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+interface MinutesRow {
+  id: string; version_number: number; content_html: string
+  status: 'DRAFT' | 'CIRCULATED' | 'APPROVED' | 'SUPERSEDED'
+  circulated_at: string | null; approved_at: string | null
+}
+
+function MinutesPanel({ meetingId }: { meetingId: string }) {
+  const [rows, setRows] = useState<MinutesRow[]>([])
+  const [busy, setBusy] = useState(false)
+  const [draftContent, setDraftContent] = useState('')
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch<{ versions: MinutesRow[] }>(`/admin/board/meetings/${meetingId}/minutes`)
+      setRows(r.versions || [])
+    } catch { /* quiet */ }
+  }, [meetingId])
+  useEffect(() => { void load() }, [load])
+
+  const currentDraft = rows.find(r => r.status === 'DRAFT')
+
+  async function createOrSave() {
+    setBusy(true)
+    try {
+      if (currentDraft) {
+        await apiFetch(`/admin/board/meetings/${meetingId}/minutes/${currentDraft.id}`, {
+          method: 'PUT', body: JSON.stringify({ content_html: draftContent }),
+        })
+      } else {
+        await apiFetch(`/admin/board/meetings/${meetingId}/minutes`, {
+          method: 'POST', body: JSON.stringify({ content_html: draftContent }),
+        })
+      }
+      setDraftContent('')
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed')
+    } finally { setBusy(false) }
+  }
+
+  async function circulate(id: string) {
+    if (!confirm('Circulate this draft to all trustees for review?')) return
+    setBusy(true)
+    try {
+      await apiFetch(`/admin/board/meetings/${meetingId}/minutes/${id}/circulate`, { method: 'POST' })
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  async function approve(id: string) {
+    const aid = window.prompt('Meeting id where these minutes were approved (defaults to this meeting)', meetingId)
+    if (!aid) return
+    setBusy(true)
+    try {
+      await apiFetch(`/admin/board/meetings/${meetingId}/minutes/${id}/approve`, {
+        method: 'POST', body: JSON.stringify({ approved_at_meeting_id: aid }),
+      })
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  useEffect(() => {
+    if (currentDraft && !draftContent) setDraftContent(currentDraft.content_html)
+  }, [currentDraft, draftContent])
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-white/70 text-xs uppercase tracking-widest font-bold">📝 Minutes</p>
+          <p className="text-white/40 text-[10px]">Draft → circulate → approve. The approved version is the legal record.</p>
+        </div>
+      </div>
+      <textarea rows={6} value={draftContent} onChange={e => setDraftContent(e.target.value)}
+        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono resize-none"
+        placeholder="&lt;p&gt;Resolved: the board unanimously approved…&lt;/p&gt;" />
+      <div className="flex gap-2 flex-wrap">
+        <button type="button" onClick={createOrSave} disabled={busy || !draftContent.trim()}
+          className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-xs font-black shadow-saffron disabled:opacity-40">
+          {busy ? 'Saving…' : currentDraft ? 'Save draft' : 'Create draft'}
+        </button>
+        {currentDraft && (
+          <>
+            <button type="button" onClick={() => circulate(currentDraft.id)} disabled={busy}
+              className="px-3 py-1.5 rounded-lg border border-sky-400/40 text-sky-300 text-xs font-bold hover:bg-sky-400/10 disabled:opacity-40">
+              ✉ Circulate to trustees
+            </button>
+            <button type="button" onClick={() => approve(currentDraft.id)} disabled={busy}
+              className="px-3 py-1.5 rounded-lg border border-emerald-400/40 text-emerald-300 text-xs font-bold hover:bg-emerald-400/10 disabled:opacity-40">
+              ✓ Approve
+            </button>
+          </>
+        )}
+      </div>
+      {rows.length > 0 && (
+        <ul className="space-y-1.5 text-xs text-white/60">
+          {rows.map(r => (
+            <li key={r.id} className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-white">v{r.version_number}</span>
+              <span className={
+                'px-1.5 py-0.5 rounded-full text-[10px] font-bold border ' +
+                (r.status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30'
+                  : r.status === 'CIRCULATED' ? 'bg-sky-500/20 text-sky-200 border-sky-400/30'
+                  : r.status === 'DRAFT' ? 'bg-amber-500/20 text-amber-200 border-amber-400/30'
+                  : 'bg-white/10 text-white/50 border-white/10')
+              }>{r.status}</span>
+              {r.circulated_at && <span className="text-white/40 text-[10px]">circulated {new Date(r.circulated_at).toLocaleDateString()}</span>}
+              {r.approved_at && <span className="text-white/40 text-[10px]">approved {new Date(r.approved_at).toLocaleDateString()}</span>}
+            </li>
+          ))}
         </ul>
       )}
     </div>
