@@ -3627,22 +3627,122 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_annual_reports_status ON annual_reports(status)",
 
         # ─────────────────────────────────────────────────────────────────
+        # Governance Tranche 3B — Serious Incident Report + Filing calendar
+        # ─────────────────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS serious_incidents (
+            id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            ref                       VARCHAR(20)  NOT NULL UNIQUE,
+            category                  VARCHAR(40)  NOT NULL,
+                -- SAFEGUARDING | FRAUD | FINANCIAL_LOSS | CRIMINAL |
+                -- REPUTATIONAL | DATA_BREACH | OTHER
+            severity                  VARCHAR(20)  NOT NULL DEFAULT 'MEDIUM',
+                -- LOW | MEDIUM | HIGH | CRITICAL
+            title                     VARCHAR(255) NOT NULL,
+            summary                   TEXT         NOT NULL DEFAULT '',
+            date_occurred             TIMESTAMPTZ,
+            date_discovered           TIMESTAMPTZ,
+            affected_parties          TEXT         NOT NULL DEFAULT '',
+            impact_assessment         TEXT         NOT NULL DEFAULT '',
+            actions_taken             TEXT         NOT NULL DEFAULT '',
+            further_actions_planned   TEXT         NOT NULL DEFAULT '',
+            commission_reportable     BOOLEAN      NOT NULL DEFAULT false,
+            reported_to_commission    BOOLEAN      NOT NULL DEFAULT false,
+            commission_reported_at    TIMESTAMPTZ,
+            commission_reference      VARCHAR(80)  NOT NULL DEFAULT '',
+            reported_to_police        BOOLEAN      NOT NULL DEFAULT false,
+            police_reference          VARCHAR(80)  NOT NULL DEFAULT '',
+            reported_to_ico           BOOLEAN      NOT NULL DEFAULT false,
+            reported_to_insurer       BOOLEAN      NOT NULL DEFAULT false,
+            reporter_user_id          UUID,
+            reporter_name             VARCHAR(255) NOT NULL DEFAULT '',
+            status                    VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
+                -- OPEN | INVESTIGATING | RESOLVED | REFERRED
+            resolved_at               TIMESTAMPTZ,
+            resolution_summary        TEXT         NOT NULL DEFAULT '',
+            related_risk_id           UUID REFERENCES risk_register(id) ON DELETE SET NULL,
+            attachment_ids            JSONB        NOT NULL DEFAULT '[]'::jsonb,
+            created_by                UUID,
+            created_at                TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at                TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_sir_status   ON serious_incidents(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sir_category ON serious_incidents(category)",
+        "CREATE INDEX IF NOT EXISTS idx_sir_severity ON serious_incidents(severity)",
+
+        # Append-only update log on each SIR row — CC28 expects
+        # contemporaneous records of how the incident was handled.
+        """CREATE TABLE IF NOT EXISTS sir_updates (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            sir_id          UUID NOT NULL REFERENCES serious_incidents(id) ON DELETE CASCADE,
+            body            TEXT NOT NULL DEFAULT '',
+            author_user_id  UUID,
+            author_name     VARCHAR(255) NOT NULL DEFAULT '',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_sir_updates_sir ON sir_updates(sir_id, created_at)",
+
+        # Compliance deadlines — recurring statutory filings (Charity
+        # Commission AR, Accounts, ICO renewal, HMRC Gift Aid, etc.).
+        # The row defines the cadence; `compliance_filings` tracks the
+        # actual per-cycle filing.
+        """CREATE TABLE IF NOT EXISTS compliance_deadlines (
+            id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title                VARCHAR(255) NOT NULL,
+            authority            VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
+                -- COMMISSION | COMPANIES_HOUSE | HMRC | ICO
+                -- | LOCAL_AUTHORITY | DBS | OTHER
+            frequency            VARCHAR(20)  NOT NULL DEFAULT 'ANNUAL',
+                -- ANNUAL | QUARTERLY | MONTHLY | ONE_OFF
+            base_month           SMALLINT,          -- 1-12 (annual cadence)
+            base_day             SMALLINT,          -- 1-31
+            days_offset_from_fye INT,               -- e.g. 304 = 10 months
+            owner_user_id        UUID,
+            owner_name           VARCHAR(255) NOT NULL DEFAULT '',
+            remind_days          INTEGER[]    NOT NULL DEFAULT ARRAY[60, 30, 7],
+            status               VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+                -- ACTIVE | ARCHIVED
+            notes                TEXT         NOT NULL DEFAULT '',
+            created_by           UUID,
+            created_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_deadlines_authority ON compliance_deadlines(authority)",
+        "CREATE INDEX IF NOT EXISTS idx_deadlines_status    ON compliance_deadlines(status)",
+
+        # Actual per-cycle filing record.
+        """CREATE TABLE IF NOT EXISTS compliance_filings (
+            id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            deadline_id           UUID NOT NULL REFERENCES compliance_deadlines(id) ON DELETE CASCADE,
+            period_start          DATE,
+            period_end            DATE,
+            due_date              DATE NOT NULL,
+            filed_at              TIMESTAMPTZ,
+            filed_by_user_id      UUID,
+            filed_by_name         VARCHAR(255) NOT NULL DEFAULT '',
+            reference_number      VARCHAR(80)  NOT NULL DEFAULT '',
+            evidence_attachment_id UUID,
+            status                VARCHAR(20)  NOT NULL DEFAULT 'UPCOMING',
+                -- UPCOMING | DUE_SOON | OVERDUE | FILED | SKIPPED
+            note                  TEXT         NOT NULL DEFAULT '',
+            created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_filings_deadline ON compliance_filings(deadline_id, due_date DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_filings_due      ON compliance_filings(due_date)",
+        "CREATE INDEX IF NOT EXISTS idx_filings_status   ON compliance_filings(status)",
+
+        # ─────────────────────────────────────────────────────────────────
         # Governance Tranche 3C — Induction, DBS, Succession
         # ─────────────────────────────────────────────────────────────────
-        # Induction taxonomy (CC3, Charity Governance Code principle 3.3).
-        # Seeded from _seed_governance_tranche_3c below.
         """CREATE TABLE IF NOT EXISTS induction_items (
             code        VARCHAR(40) PRIMARY KEY,
             title       VARCHAR(255) NOT NULL,
             category    VARCHAR(40) NOT NULL DEFAULT 'GOVERNANCE',
-                -- GOVERNANCE | SAFEGUARDING | FINANCE | OPERATIONS | LEGAL
             description TEXT        NOT NULL DEFAULT '',
             sort_order  SMALLINT    NOT NULL DEFAULT 100,
             is_required BOOLEAN     NOT NULL DEFAULT true,
             is_active   BOOLEAN     NOT NULL DEFAULT true
         )""",
-
-        # Per-trustee completion log.
         """CREATE TABLE IF NOT EXISTS trustee_induction_progress (
             id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             trustee_id             UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
@@ -3655,9 +3755,6 @@ async def _patch_schema() -> None:
             UNIQUE (trustee_id, item_code)
         )""",
         "CREATE INDEX IF NOT EXISTS idx_induction_prog_trustee ON trustee_induction_progress(trustee_id)",
-
-        # DBS + statutory trustee fields. All idempotent; safe where
-        # columns already exist.
         "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS dbs_type        VARCHAR(20) NOT NULL DEFAULT 'NONE'",
         "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS dbs_reference   VARCHAR(80) NOT NULL DEFAULT ''",
         "ALTER TABLE trustees ADD COLUMN IF NOT EXISTS dbs_issued_at   DATE",
@@ -4518,7 +4615,58 @@ async def _patch_schema() -> None:
     await _seed_governance_core()
     await _seed_governance_tranche_2a()
     await _seed_governance_tranche_2b()
+    await _seed_governance_tranche_3b()
     await _seed_governance_tranche_3c()
+
+
+async def _seed_governance_tranche_3b() -> None:
+    """Seed the six standard UK-charity compliance deadlines (Charity
+    Commission annual return, annual accounts, ICO renewal, HMRC Gift
+    Aid quarterly, Companies House confirmation, DBS trustee renewal).
+    Idempotent — INSERT WHERE NOT EXISTS matched on title."""
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+    deadlines = [
+        # (title, authority, frequency, base_month, base_day,
+        #  days_offset_from_fye, remind_days, notes)
+        ("Charity Commission Annual Return",   "COMMISSION",     "ANNUAL",    None, None, 304,
+         "{60,30,7}",
+         "Charities Act 2011 §162 — 10 months after financial year end."),
+        ("Annual Accounts (SORP)",              "COMMISSION",     "ANNUAL",    None, None, 304,
+         "{90,60,30,7}",
+         "Full SORP accounts for gross income above £250k; receipts & payments otherwise. 10 months after FYE."),
+        ("ICO Data Protection Fee renewal",     "ICO",            "ANNUAL",    None, None, None,
+         "{30,7}",
+         "Data Protection Act 2018 — annual anniversary of registration."),
+        ("HMRC Gift Aid return",                "HMRC",           "QUARTERLY", None, None, None,
+         "{14}",
+         "Quarterly claim via HMRC Charities Online."),
+        ("Companies House confirmation statement","COMPANIES_HOUSE","ANNUAL",  None, None, None,
+         "{30,7}",
+         "CIOs are exempt; only applies if the charity is a company limited by guarantee."),
+        ("Trustee DBS renewal review",          "DBS",            "ANNUAL",    None, None, None,
+         "{90,30}",
+         "DBS enhanced checks for trustees working with children or vulnerable adults — review 3-yearly."),
+    ]
+    async with SessionLocal() as db:
+        for title, auth, freq, bm, bd, off, remind, notes in deadlines:
+            await db.execute(text("""
+                INSERT INTO compliance_deadlines
+                (title, authority, frequency, base_month, base_day,
+                 days_offset_from_fye, remind_days, notes)
+                SELECT :t, :a, :f, :bm, :bd, :off, :rd::int[], :n
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM compliance_deadlines
+                    WHERE lower(title) = lower(:t)
+                )
+            """), {
+                "t": title, "a": auth, "f": freq,
+                "bm": bm, "bd": bd, "off": off,
+                "rd": remind, "n": notes,
+            })
+        await db.commit()
+    logger.info("governance_tranche_3b_seeded")
 
 
 async def _seed_governance_tranche_3c() -> None:
@@ -5835,6 +5983,8 @@ _mount("shital.api.routers.meeting_actions",         "router")
 _mount("shital.api.routers.policies",                "router")
 _mount("shital.api.routers.reserves",                "router")
 _mount("shital.api.routers.annual_reports",          "router")
+_mount("shital.api.routers.sir",                     "router")
+_mount("shital.api.routers.compliance_calendar",     "router")
 _mount("shital.api.routers.induction_succession",    "router")
 _mount("shital.api.routers.members",                 "router")
 _mount("shital.api.routers.delegations",             "router")
