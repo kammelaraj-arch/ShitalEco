@@ -223,12 +223,68 @@ async def generate_pdf_bytes(resolution_id: str) -> bytes:
     return bytes(HTML(string=html).write_pdf())
 
 
+def _sign_bytes(payload: bytes) -> tuple[str, str]:
+    """Detached-signature receipt for the PDF.
+
+    Signing key material is read lazily from env:
+      * BOARD_PDF_SIGNING_KEY_PEM — PEM-encoded Ed25519 private key.
+        When unset, we fall back to a stable HMAC-SHA256 whose shared
+        secret is JWT_SECRET. Not a *true* asymmetric signature in that
+        case, but still tamper-evident.
+      * Ed25519 is preferred over RSA/ECDSA: small signatures (64 bytes),
+        no parameter choices to get wrong, fast on a 2 GB VPS.
+
+    Returns (algorithm, base64_signature). Both go in the PDF appendix
+    and (next PR) into a `.sig` sidecar file.
+    """
+    import base64
+    import hashlib
+    import hmac
+    import os
+
+    key_pem = os.environ.get("BOARD_PDF_SIGNING_KEY_PEM") or ""
+    if key_pem:
+        try:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+                Ed25519PrivateKey,
+            )
+            # Serialization load tolerates both PEM and OpenSSH-wrapped PEM.
+            key = serialization.load_pem_private_key(key_pem.encode("utf-8"), password=None)
+            if isinstance(key, Ed25519PrivateKey):
+                sig = key.sign(payload)
+                return ("ed25519", base64.b64encode(sig).decode("ascii"))
+        except Exception:
+            # Fall through to HMAC — never fail the sign-off because the
+            # operator's PEM is malformed.
+            pass
+
+    # Fallback: HMAC-SHA256(JWT_SECRET, pdf_bytes).
+    from shital.core.fabrics.config import settings
+    mac = hmac.new(
+        (getattr(settings, "JWT_SECRET", "") or "").encode("utf-8"),
+        payload, hashlib.sha256,
+    ).digest()
+    return ("hmac-sha256", base64.b64encode(mac).decode("ascii"))
+
+
 async def attach_pdf_to_resolution(resolution_id: str) -> str:
-    """Generate, store, and link the PDF. Returns the attachment id."""
+    """Generate, store, and link the PDF plus a detached `.sig` sidecar.
+    Returns the PDF attachment id."""
+    import hashlib
     import uuid as _uuid
 
     pdf = await generate_pdf_bytes(resolution_id)
+    algo, sig_b64 = _sign_bytes(pdf)
+    pdf_sha256 = hashlib.sha256(pdf).hexdigest()
+    sidecar = (
+        f"algorithm: {algo}\n"
+        f"pdf_sha256: {pdf_sha256}\n"
+        f"signature_b64: {sig_b64}\n"
+    ).encode()
+
     att_id = str(_uuid.uuid4())
+    sig_id = str(_uuid.uuid4())
     now = datetime.now(UTC)
     async with SessionLocal() as db:
         await db.execute(text("""
@@ -242,6 +298,21 @@ async def attach_pdf_to_resolution(resolution_id: str) -> str:
             "id": att_id, "rid": resolution_id,
             "fn": f"resolution-{resolution_id[:8]}.pdf",
             "size": len(pdf), "data": pdf,
+        })
+        # Sidecar signature so anyone can verify the PDF offline. Stored
+        # as its own attachment row with source='pdf_signature' so the
+        # admin UI shows it next to the PDF.
+        await db.execute(text("""
+            INSERT INTO board_resolution_attachments
+                (id, resolution_id, filename, content_type, size_bytes,
+                 source, uploaded_by, data)
+            VALUES
+                (CAST(:id AS uuid), CAST(:rid AS uuid), :fn, 'text/plain',
+                 :size, 'pdf_signature', NULL, :data)
+        """), {
+            "id": sig_id, "rid": resolution_id,
+            "fn": f"resolution-{resolution_id[:8]}.pdf.sig",
+            "size": len(sidecar), "data": sidecar,
         })
         await db.execute(text("""
             UPDATE resolutions

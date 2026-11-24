@@ -16,84 +16,29 @@ from sqlalchemy import text
 
 from shital.api.routers.marketing_prefs import is_opted_in, prefs_url
 from shital.core.fabrics.database import SessionLocal
+from shital.services.marketing.audience import resolve_entries
 
 
 async def _resolve_audiences(resolution_id: str) -> list[dict[str, Any]]:
-    """Return a de-duplicated list of {email, name, contact_id, kind}
-    across every audience row on the plan."""
-    seen: dict[str, dict[str, Any]] = {}
+    """Return a de-duplicated list of {email, name, contact_id} across
+    every audience row on the plan.
+
+    Thin wrapper over services/marketing/audience.resolve_entries so
+    board announcements and marketing campaigns resolve through the
+    same six-kind resolver. Keeps this file's signature stable so the
+    chair-signoff caller doesn't need to change."""
     async with SessionLocal() as db:
         plan = (await db.execute(text(
             "SELECT id FROM resolution_announcements WHERE resolution_id = CAST(:r AS uuid)"
         ), {"r": resolution_id})).first()
-        if not plan:
-            return []
-        plan_id = str(plan[0])
+    if not plan:
+        return []
+    async with SessionLocal() as db:
         auds = (await db.execute(text("""
             SELECT kind, params FROM resolution_announcement_audiences
              WHERE announcement_id = CAST(:a AS uuid)
-        """), {"a": plan_id})).mappings().all()
-
-        for a in auds:
-            kind = a["kind"]
-            params = dict(a["params"] or {})
-            rows: list[dict[str, Any]] = []
-
-            if kind == "all_contacts":
-                rows = [dict(r) for r in (await db.execute(text("""
-                    SELECT id AS contact_id, email,
-                           COALESCE(NULLIF(full_name,''), first_name || ' ' || surname) AS name
-                    FROM   contacts WHERE email IS NOT NULL AND email <> ''
-                """))).mappings().all()]
-            elif kind == "volunteers":
-                rows = [dict(r) for r in (await db.execute(text("""
-                    SELECT c.id AS contact_id, c.email,
-                           COALESCE(NULLIF(c.full_name,''), c.first_name || ' ' || c.surname) AS name
-                    FROM   contacts c
-                    JOIN   volunteers v ON LOWER(v.email) = LOWER(c.email)
-                    WHERE  v.status IN ('ACTIVE','APPROVED')
-                """))).mappings().all()]
-            elif kind == "recent_donors":
-                months = int(params.get("months", 12) or 12)
-                rows = [dict(r) for r in (await db.execute(text(f"""
-                    SELECT c.id AS contact_id, c.email,
-                           COALESCE(NULLIF(c.full_name,''), c.first_name || ' ' || c.surname) AS name
-                    FROM   contacts c
-                    JOIN   donations d ON d.contact_id = c.id
-                    WHERE  d.deleted_at IS NULL
-                      AND  d.created_at >= NOW() - INTERVAL '{months} months'
-                """))).mappings().all()]
-            elif kind == "trustees":
-                rows = [dict(r) for r in (await db.execute(text("""
-                    SELECT t.id AS contact_id, t.email, t.full_name AS name
-                    FROM   trustees t WHERE t.is_active = true AND t.email <> ''
-                """))).mappings().all()]
-            elif kind == "individuals":
-                ids = [str(x) for x in (params.get("contact_ids") or []) if x]
-                if ids:
-                    rows = [dict(r) for r in (await db.execute(text("""
-                        SELECT id AS contact_id, email,
-                               COALESCE(NULLIF(full_name,''), first_name || ' ' || surname) AS name
-                        FROM   contacts
-                        WHERE  id = ANY(CAST(:ids AS uuid[])) AND email IS NOT NULL AND email <> ''
-                    """), {"ids": ids})).mappings().all()]
-            elif kind == "external_list":
-                people = params.get("people") or []
-                rows = [
-                    {"contact_id": None, "email": str(p.get("email", "")).lower(), "name": p.get("name") or ""}
-                    for p in people if "@" in str(p.get("email", ""))
-                ]
-
-            for row in rows:
-                email = str(row.get("email") or "").strip().lower()
-                if not email:
-                    continue
-                if email not in seen:
-                    seen[email] = {"email": email, "name": row.get("name") or "",
-                                   "contact_id": str(row.get("contact_id") or "") or None,
-                                   "kind": kind}
-
-    return list(seen.values())
+        """), {"a": str(plan[0])})).mappings().all()
+    return await resolve_entries([dict(e) for e in auds])
 
 
 async def fanout_announcement(resolution_id: str, triggered_by: str = "") -> dict[str, Any]:
