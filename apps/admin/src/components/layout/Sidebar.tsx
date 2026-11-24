@@ -91,6 +91,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/skills-matrix',     icon: '🧩', label: 'Skills Matrix' },
       { href: '/annual-report',     icon: '📅', label: 'Annual Report (TAR)' },
       { href: '/succession',        icon: '🧭', label: 'Succession' },
+      { href: '/members',           icon: '🧑‍🤝‍🧑', label: 'Members' },
     ],
   },
   {
