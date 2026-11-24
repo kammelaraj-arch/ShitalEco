@@ -261,6 +261,7 @@ export default function TrusteesPage() {
       </div>
 
       <AnimatePresence>
+        {/* mounted below */}
         {showForm && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -339,6 +340,7 @@ export default function TrusteesPage() {
                   <label className={lbl}>Notes</label>
                   <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} rows={3} className={inp + ' resize-none'} placeholder="Standing interests, areas of expertise, etc." />
                 </div>
+                {editing && <InterestsAndRelatedParties trusteeId={editing.id} />}
               </div>
               <div className="px-6 py-4 border-t border-white/5 flex gap-3">
                 <button onClick={() => setShowForm(false)} className="flex-1 py-3 rounded-xl border border-white/10 text-white/60 font-semibold text-sm">Cancel</button>
@@ -351,6 +353,280 @@ export default function TrusteesPage() {
           </>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// CC27 — Interests + SORP §9.14 Related Parties tabs on the Trustee form
+// ──────────────────────────────────────────────────────────────────────
+
+interface TrusteeInterest {
+  id: string; category: string; counterparty: string; description: string
+  keywords: string; expires_at: string | null; status: string
+  declared_at: string
+}
+interface TrusteeRelatedParty {
+  id: string; related_name: string; relationship: string; notes: string
+  declared_at: string
+}
+
+const INTEREST_CATEGORIES = [
+  'EMPLOYMENT', 'DIRECTORSHIP', 'OWNERSHIP', 'FAMILY',
+  'SUPPLIER', 'CUSTOMER', 'TRUSTEE_OTHER', 'VOLUNTEER_OTHER', 'OTHER',
+]
+const RELATIONSHIPS = [
+  'SPOUSE', 'CHILD', 'PARENT', 'SIBLING', 'OTHER_FAMILY',
+  'BUSINESS_PARTNER', 'COMMON_DIRECTORSHIP', 'TRUSTEE_OF',
+  'EMPLOYER', 'OTHER',
+]
+
+function InterestsAndRelatedParties({ trusteeId }: { trusteeId: string }) {
+  const [tab, setTab] = useState<'interests' | 'related'>('interests')
+  const tabBtn = (active: boolean) =>
+    'px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ' +
+    (active ? 'bg-saffron-400/15 text-saffron-300' : 'text-white/60 hover:text-white/80')
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-white/70 text-xs uppercase tracking-widest font-bold">⚖ Governance register</p>
+          <p className="text-white/40 text-[10px]">CC27 interests · SORP §9.14 related parties.</p>
+        </div>
+        <div className="flex gap-1">
+          <button type="button" onClick={() => setTab('interests')} className={tabBtn(tab === 'interests')}>Interests</button>
+          <button type="button" onClick={() => setTab('related')}   className={tabBtn(tab === 'related')}>Related parties</button>
+        </div>
+      </div>
+      {tab === 'interests' ? (
+        <InterestsPanel trusteeId={trusteeId} />
+      ) : (
+        <RelatedPartiesPanel trusteeId={trusteeId} />
+      )}
+    </div>
+  )
+}
+
+function InterestsPanel({ trusteeId }: { trusteeId: string }) {
+  const [rows, setRows] = useState<TrusteeInterest[]>([])
+  const [adding, setAdding] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState({
+    category: 'EMPLOYMENT', counterparty: '', description: '', keywords: '',
+    expires_at: '',
+  })
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch<{ interests: TrusteeInterest[] }>(`/admin/board/trustees/${trusteeId}/interests`)
+      setRows(r.interests || [])
+    } catch { /* quiet */ }
+  }, [trusteeId])
+  useEffect(() => { void load() }, [load])
+
+  async function add() {
+    if (!draft.counterparty.trim()) { alert('Counterparty is required'); return }
+    setBusy(true)
+    try {
+      await apiFetch(`/admin/board/trustees/${trusteeId}/interests`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...draft,
+          keywords: draft.keywords.trim() || draft.counterparty.trim(),
+          expires_at: draft.expires_at || null,
+        }),
+      })
+      setDraft({ category: 'EMPLOYMENT', counterparty: '', description: '', keywords: '', expires_at: '' })
+      setAdding(false)
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  async function withdraw(id: string) {
+    if (!confirm('Mark this interest as withdrawn? It stays on the audit log.')) return
+    try {
+      await apiFetch(`/admin/board/trustees/${trusteeId}/interests/${id}`, { method: 'DELETE' })
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed')
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {!adding ? (
+        <button type="button" onClick={() => setAdding(true)}
+          className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/80 text-xs font-bold hover:bg-white/10">
+          + Declare interest
+        </button>
+      ) : (
+        <div className="rounded-xl border border-saffron-400/30 bg-saffron-400/5 p-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-white/50 text-[10px] uppercase tracking-widest">Category</label>
+              <select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1">
+                {INTEREST_CATEGORIES.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-white/50 text-[10px] uppercase tracking-widest">Counterparty</label>
+              <input value={draft.counterparty} onChange={e => setDraft(d => ({ ...d, counterparty: e.target.value }))}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1"
+                placeholder="Employer / company / family member" />
+            </div>
+          </div>
+          <div>
+            <label className="text-white/50 text-[10px] uppercase tracking-widest">Description</label>
+            <textarea rows={2} value={draft.description}
+              onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1 resize-none"
+              placeholder="Role / nature of the relationship." />
+          </div>
+          <div>
+            <label className="text-white/50 text-[10px] uppercase tracking-widest">Keywords (space-separated, used for auto-match)</label>
+            <input value={draft.keywords} onChange={e => setDraft(d => ({ ...d, keywords: e.target.value }))}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1"
+              placeholder="Diwali Harrow Thaker-Co" />
+          </div>
+          <div>
+            <label className="text-white/50 text-[10px] uppercase tracking-widest">Expires</label>
+            <input type="date" value={draft.expires_at}
+              onChange={e => setDraft(d => ({ ...d, expires_at: e.target.value }))}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1" />
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={add} disabled={busy}
+              className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-xs font-black shadow-saffron disabled:opacity-40">
+              {busy ? 'Saving…' : 'Save interest'}
+            </button>
+            <button type="button" onClick={() => setAdding(false)}
+              className="px-3 py-1.5 rounded-lg border border-white/15 text-white/60 text-xs font-bold hover:bg-white/5">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <p className="text-white/30 text-xs italic">No interests declared.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map(r => (
+            <li key={r.id} className="flex items-start justify-between gap-2 p-2 rounded-lg bg-white/3 border border-white/5">
+              <div className="min-w-0 flex-1">
+                <p className="text-white text-xs font-bold">{r.counterparty || '(no counterparty)'}</p>
+                <p className="text-white/50 text-[10px] uppercase tracking-widest">
+                  {r.category.replace(/_/g, ' ')} · {r.status}
+                </p>
+                {r.description && <p className="text-white/60 text-xs mt-0.5 line-clamp-2">{r.description}</p>}
+              </div>
+              {r.status === 'ACTIVE' && (
+                <button type="button" onClick={() => withdraw(r.id)}
+                  className="text-red-400/60 hover:text-red-400 text-xs">Withdraw</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function RelatedPartiesPanel({ trusteeId }: { trusteeId: string }) {
+  const [rows, setRows] = useState<TrusteeRelatedParty[]>([])
+  const [adding, setAdding] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState({
+    related_name: '', relationship: 'SPOUSE', notes: '',
+  })
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch<{ related_parties: TrusteeRelatedParty[] }>(`/admin/board/trustees/${trusteeId}/related-parties`)
+      setRows(r.related_parties || [])
+    } catch { /* quiet */ }
+  }, [trusteeId])
+  useEffect(() => { void load() }, [load])
+
+  async function add() {
+    if (!draft.related_name.trim()) { alert('Name is required'); return }
+    setBusy(true)
+    try {
+      await apiFetch(`/admin/board/trustees/${trusteeId}/related-parties`, {
+        method: 'POST', body: JSON.stringify(draft),
+      })
+      setDraft({ related_name: '', relationship: 'SPOUSE', notes: '' })
+      setAdding(false)
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  async function remove(id: string) {
+    if (!confirm('Remove this related party?')) return
+    try {
+      await apiFetch(`/admin/board/trustees/${trusteeId}/related-parties/${id}`, { method: 'DELETE' })
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed')
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {!adding ? (
+        <button type="button" onClick={() => setAdding(true)}
+          className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/80 text-xs font-bold hover:bg-white/10">
+          + Add related party
+        </button>
+      ) : (
+        <div className="rounded-xl border border-saffron-400/30 bg-saffron-400/5 p-3 space-y-2">
+          <div>
+            <label className="text-white/50 text-[10px] uppercase tracking-widest">Name</label>
+            <input value={draft.related_name} onChange={e => setDraft(d => ({ ...d, related_name: e.target.value }))}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1"
+              placeholder="Mrs Ami Thaker" />
+          </div>
+          <div>
+            <label className="text-white/50 text-[10px] uppercase tracking-widest">Relationship</label>
+            <select value={draft.relationship} onChange={e => setDraft(d => ({ ...d, relationship: e.target.value }))}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1">
+              {RELATIONSHIPS.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-white/50 text-[10px] uppercase tracking-widest">Notes</label>
+            <textarea rows={2} value={draft.notes} onChange={e => setDraft(d => ({ ...d, notes: e.target.value }))}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1 resize-none" />
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={add} disabled={busy}
+              className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-xs font-black shadow-saffron disabled:opacity-40">
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+            <button type="button" onClick={() => setAdding(false)}
+              className="px-3 py-1.5 rounded-lg border border-white/15 text-white/60 text-xs font-bold hover:bg-white/5">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <p className="text-white/30 text-xs italic">No related parties declared.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map(r => (
+            <li key={r.id} className="flex items-start justify-between gap-2 p-2 rounded-lg bg-white/3 border border-white/5">
+              <div className="min-w-0 flex-1">
+                <p className="text-white text-xs font-bold">{r.related_name}</p>
+                <p className="text-white/50 text-[10px] uppercase tracking-widest">{r.relationship.replace(/_/g, ' ')}</p>
+                {r.notes && <p className="text-white/60 text-xs mt-0.5 line-clamp-2">{r.notes}</p>}
+              </div>
+              <button type="button" onClick={() => remove(r.id)}
+                className="text-red-400/60 hover:text-red-400 text-xs">✕</button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
