@@ -37,6 +37,30 @@ class RawSendTest(BaseModel):
     is_html: bool = False               # default text/plain; UI can tick HTML
 
 
+@router.get("/mail-diag")
+async def mail_diag() -> dict[str, Any]:
+    """Visibility into mail config without SSH. Never reveals secret
+    values — only whether each key is set + its length. Lives at the
+    top of the file so FastAPI matches it BEFORE `/{template_key}`.
+    """
+    from shital.core.fabrics.secrets import SecretsManager
+    keys_to_check = [
+        "MAIL_PROVIDER",
+        "OFFICE365_EMAIL", "OFFICE365_PASSWORD",
+        "AWS_SES_SMTP_HOST", "AWS_SES_SMTP_USER", "AWS_SES_SMTP_PASSWORD",
+        "AWS_SES_FROM",
+        "NOTIFY_API_KEY", "NOTIFY_EMAIL_TEMPLATE_ID",
+    ]
+    out: dict[str, Any] = {}
+    for k in keys_to_check:
+        try:
+            val = await SecretsManager.get(k, fallback="")
+            out[k] = {"set": bool(val), "length": len(val or "")}
+        except Exception as exc:
+            out[k] = {"set": False, "error": str(exc)[:200]}
+    return {"provider_default": "office365", "keys": out}
+
+
 @router.get("")
 async def list_templates():
     from sqlalchemy import text
@@ -392,29 +416,6 @@ async def send_test_email(body: TemplateSendTest):
     return result
 
 
-@router.get("/mail-diag")
-async def mail_diag() -> dict[str, Any]:
-    """Quick visibility into mail config without SSH. Does NOT reveal
-    secret values — only whether each key is set + the chosen provider.
-    """
-    from shital.core.fabrics.secrets import SecretsManager
-    keys_to_check = [
-        "MAIL_PROVIDER",
-        "OFFICE365_EMAIL", "OFFICE365_PASSWORD",
-        "AWS_SES_SMTP_HOST", "AWS_SES_SMTP_USER", "AWS_SES_SMTP_PASSWORD",
-        "AWS_SES_FROM",
-        "NOTIFY_API_KEY", "NOTIFY_EMAIL_TEMPLATE_ID",
-    ]
-    out: dict[str, Any] = {}
-    for k in keys_to_check:
-        try:
-            val = await SecretsManager.get(k, fallback="")
-            out[k] = {"set": bool(val), "length": len(val or "")}
-        except Exception as exc:
-            out[k] = {"set": False, "error": str(exc)[:200]}
-    return {"provider_default": "office365", "keys": out}
-
-
 @router.post("/send-raw-test")
 async def send_raw_test(body: RawSendTest):
     """Freeform admin test send — pure diagnostic.
@@ -436,14 +437,27 @@ async def send_raw_test(body: RawSendTest):
         safe  = body.body.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>\n")
         html  = f"<html><body style=\"font-family:system-ui,sans-serif\"><pre style=\"white-space:pre-wrap\">{safe}</pre></body></html>"
 
-    return await send_raw_email(
-        to_email=body.to,
-        subject=body.subject,
-        html_body=html,
-        text_body=text_,
-        related_type="admin_raw_test",
-        triggered_by="admin_raw_test_send",
-    )
+    # Belt-and-braces: send_raw_email should return a {sent, ...} dict
+    # even on failure, but if ANYTHING in the chain throws uncaught
+    # (bad schema, SecretsManager hiccup, uncaught SMTP state), we want
+    # the exception detail in the response, not nginx's blank 500.
+    import traceback
+    try:
+        return await send_raw_email(
+            to_email=body.to,
+            subject=body.subject,
+            html_body=html,
+            text_body=text_,
+            related_type="admin_raw_test",
+            triggered_by="admin_raw_test_send",
+        )
+    except Exception as exc:
+        return {
+            "sent": False,
+            "exception": type(exc).__name__,
+            "error":     str(exc)[:500],
+            "traceback": traceback.format_exc().splitlines()[-8:],
+        }
 
 
 def render_template(template: dict[str, Any], variables: dict[str, Any]) -> tuple[str, str, str]:
