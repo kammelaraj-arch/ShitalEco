@@ -1535,17 +1535,17 @@ async def close_resolution(
                 and outcome_label == "CARRIED"
                 and gov["outcome"] == "NOT_CARRIED"
             ):
-                from sqlalchemy import text as _t
+                from sqlalchemy import text
 
-                from shital.core.fabrics.database import SessionLocal as _S
-                async with _S() as db2:
-                    await db2.execute(_t(
+                from shital.core.fabrics.database import SessionLocal
+                async with SessionLocal() as super_db:
+                    await super_db.execute(text(
                         "UPDATE resolutions SET outcome = 'NOT_CARRIED', "
                         "outcome_summary = outcome_summary || "
                         "' · Super-majority ' || :pct || '%% required (special resolution) — not met.' "
                         "WHERE id::text = :id"
                     ), {"pct": gov["pass_threshold_pct"], "id": resolution_id})
-                    await db2.commit()
+                    await super_db.commit()
                 outcome_label = "NOT_CARRIED"
                 governance["flipped_from_simple_majority"] = True
     except Exception:
