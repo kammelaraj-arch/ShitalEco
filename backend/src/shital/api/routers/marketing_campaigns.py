@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -199,42 +199,28 @@ async def preview_count(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
     return {"total_unique": len(recipients)}
 
 
-# ─── Fire: send-now ──────────────────────────────────────────────────────────
-@router.post("/{cid}/send-now")
-async def send_now(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
-    _require_marketing(ctx)
-    # Resolve prerequisites.
+# ─── Shared send implementation ─────────────────────────────────────────────
+# Called by both the send-now endpoint (from the UI) and the scheduled
+# worker (services/marketing/scheduled_worker.py). Assumes the caller
+# has already flipped the row to SENDING (the endpoint does; the worker
+# claims via an atomic UPDATE in `_claim_due_campaigns`).
+async def _run_campaign_send(cid: str, *, triggered_by: str) -> dict[str, Any]:
     async with SessionLocal() as db:
         row = (await db.execute(text("""
-            SELECT c.segment_id, c.template_id, c.variables, c.status,
+            SELECT c.segment_id, c.template_id, c.variables,
                    t.subject, t.html_body, t.text_body, t.status AS tpl_status
             FROM   marketing_campaigns c
             LEFT JOIN marketing_templates t ON t.id = c.template_id
             WHERE  c.id = CAST(:id AS uuid)
         """), {"id": cid})).mappings().first()
     if not row:
-        raise HTTPException(404, detail="Campaign not found")
-    if row["status"] in {"SENDING", "SENT"}:
-        raise HTTPException(409, detail=f"Campaign is {row['status']}")
-    if not row["segment_id"]:
-        raise HTTPException(400, detail="Campaign has no segment — pick one first")
-    if not row["template_id"]:
-        raise HTTPException(400, detail="Campaign has no template — pick one first")
-    if row["tpl_status"] == "ARCHIVED":
-        raise HTTPException(400, detail="Template is archived — publish or pick another")
+        raise RuntimeError("Campaign not found")
+    if not row["segment_id"] or not row["template_id"]:
+        raise RuntimeError("Campaign missing segment or template")
 
-    # Flip to SENDING so a second click doesn't race us.
-    async with SessionLocal() as db:
-        await db.execute(text(
-            "UPDATE marketing_campaigns SET status='SENDING', updated_at=NOW() WHERE id = CAST(:id AS uuid)"
-        ), {"id": cid})
-        await db.commit()
-
-    # Resolve recipients + fire.
     recipients = await resolve_segment(str(row["segment_id"]))
     variables_campaign = dict(row["variables"] or {})
 
-    # Import inside — send_raw_email pulls in the full SMTP stack.
     from shital.api.routers.email_templates import send_raw_email
 
     attempted = 0
@@ -250,7 +236,6 @@ async def send_now(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
             skipped += 1
             continue
 
-        # Merge variables: campaign-level + per-contact.
         merged = {
             "first_name": (r.get("name") or "").split(" ")[0] if r.get("name") else "",
             "name":        r.get("name") or "",
@@ -262,7 +247,6 @@ async def send_now(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
         html    = _render(row["html_body"] or "", merged)
         plain   = _render(row["text_body"] or "", merged)
 
-        # Footer with the preference-centre URL for known contacts.
         if contact_id:
             footer_url = prefs_url(contact_id)
             html += (
@@ -277,8 +261,7 @@ async def send_now(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
             to_email=email, subject=subject,
             html_body=html, text_body=plain,
             related_type="marketing_campaign",
-            related_id=cid,
-            triggered_by=getattr(ctx, "user_email", "") or "",
+            related_id=cid, triggered_by=triggered_by,
             template_key=str(row["template_id"] or ""),
         )
         if result.get("sent"):
@@ -293,16 +276,111 @@ async def send_now(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
         "attempted": attempted, "sent": sent,
         "skipped_opted_out": skipped,
         "failed": len(failed),
-        "failed_detail": failed[:100],  # cap the JSON size
+        "failed_detail": failed[:100],
     }
     async with SessionLocal() as db:
         await db.execute(text("""
             UPDATE marketing_campaigns
-               SET status='SENT', sent_at = NOW(), stats = CAST(:stats AS jsonb), updated_at=NOW()
+               SET status='SENT', sent_at=NOW(), stats=CAST(:stats AS jsonb), updated_at=NOW()
              WHERE id = CAST(:id AS uuid)
         """), {"id": cid, "stats": json.dumps(stats)})
         await db.commit()
+    return stats
+
+
+# ─── Fire: send-now ──────────────────────────────────────────────────────────
+@router.post("/{cid}/send-now")
+async def send_now(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_marketing(ctx)
+    # Preconditions — read before flipping state so we 4xx cleanly.
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT c.status, c.segment_id, c.template_id, t.status AS tpl_status
+            FROM   marketing_campaigns c
+            LEFT JOIN marketing_templates t ON t.id = c.template_id
+            WHERE  c.id = CAST(:id AS uuid)
+        """), {"id": cid})).mappings().first()
+    if not row:
+        raise HTTPException(404, detail="Campaign not found")
+    if row["status"] in {"SENDING", "SENT"}:
+        raise HTTPException(409, detail=f"Campaign is {row['status']}")
+    if not row["segment_id"]:
+        raise HTTPException(400, detail="Campaign has no segment — pick one first")
+    if not row["template_id"]:
+        raise HTTPException(400, detail="Campaign has no template — pick one first")
+    if row["tpl_status"] == "ARCHIVED":
+        raise HTTPException(400, detail="Template is archived — publish or pick another")
+
+    # Flip to SENDING so a second click can't race us.
+    async with SessionLocal() as db:
+        await db.execute(text(
+            "UPDATE marketing_campaigns SET status='SENDING', updated_at=NOW() WHERE id = CAST(:id AS uuid)"
+        ), {"id": cid})
+        await db.commit()
+
+    stats = await _run_campaign_send(cid, triggered_by=getattr(ctx, "user_email", "") or "")
     return {"ok": True, "stats": stats}
 
 
-__all__ = ["router"]
+# ─── Schedule: flip to SCHEDULED so the worker picks it up ───────────────────
+class ScheduleBody(BaseModel):
+    scheduled_at: str  # ISO-8601
+
+
+@router.post("/{cid}/schedule")
+async def schedule_campaign(cid: str, body: ScheduleBody, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_marketing(ctx)
+    try:
+        when = datetime.fromisoformat(body.scheduled_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(400, detail="scheduled_at must be ISO-8601") from None
+    # Must be in the future (allow a 60s grace for clock skew).
+    now = datetime.now(UTC)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    if (when - now).total_seconds() < -60:
+        raise HTTPException(400, detail="scheduled_at is in the past")
+
+    async with SessionLocal() as db:
+        # Pre-check: template + segment must be set so the worker doesn't
+        # fail on dispatch at the chosen time.
+        row = (await db.execute(text("""
+            SELECT c.status, c.segment_id, c.template_id, t.status AS tpl_status
+            FROM   marketing_campaigns c
+            LEFT JOIN marketing_templates t ON t.id = c.template_id
+            WHERE  c.id = CAST(:id AS uuid)
+        """), {"id": cid})).mappings().first()
+        if not row:
+            raise HTTPException(404, detail="Campaign not found")
+        if row["status"] not in {"DRAFT", "SCHEDULED"}:
+            raise HTTPException(409, detail=f"Campaign is {row['status']}")
+        if not row["segment_id"] or not row["template_id"]:
+            raise HTTPException(400, detail="Pick a segment and a template first")
+        if row["tpl_status"] == "ARCHIVED":
+            raise HTTPException(400, detail="Template is archived")
+
+        await db.execute(text("""
+            UPDATE marketing_campaigns
+               SET status = 'SCHEDULED', scheduled_at = :when, updated_at = NOW()
+             WHERE id = CAST(:id AS uuid)
+        """), {"id": cid, "when": when})
+        await db.commit()
+    return {"ok": True, "scheduled_at": when.isoformat()}
+
+
+@router.post("/{cid}/unschedule")
+async def unschedule_campaign(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
+    _require_marketing(ctx)
+    async with SessionLocal() as db:
+        r = await db.execute(text("""
+            UPDATE marketing_campaigns
+               SET status = 'DRAFT', scheduled_at = NULL, updated_at = NOW()
+             WHERE id = CAST(:id AS uuid) AND status = 'SCHEDULED'
+        """), {"id": cid})
+        await db.commit()
+    if not r.rowcount:
+        raise HTTPException(409, detail="Not currently scheduled")
+    return {"ok": True}
+
+
+__all__ = ["router", "_run_campaign_send"]
