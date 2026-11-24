@@ -344,11 +344,26 @@ export default function ResolutionsPage() {
       ? 'Publish this resolution and email vote-invites to every active trustee? Text becomes locked once published.'
       : 'Publish this resolution? Voting opens immediately. Text becomes locked once published.'
     if (!confirm(confirmMsg)) return
-    setPublishing(true)
+    setPublishing(true); setError('')
     try {
       const saved = await saveDraft(true)
-      if (!saved) { setPublishing(false); return }
-      await apiFetch(`/admin/board/resolutions/${saved.id}/publish`, { method: 'POST' })
+      if (!saved) {
+        // saveDraft already set `error`; surface it loudly so the user
+        // doesn't think the click did nothing.
+        const err = (document.querySelector('[data-resolution-save-error]')?.textContent || '').trim()
+        const msg = err || 'Could not save before publishing — fix the errors shown above and try again.'
+        setError(msg)
+        alert('Publish aborted:\n\n' + msg)
+        setPublishing(false)
+        return
+      }
+      try {
+        await apiFetch(`/admin/board/resolutions/${saved.id}/publish`, { method: 'POST' })
+      } catch (pubErr) {
+        let msg = pubErr instanceof Error ? pubErr.message : 'Failed to publish'
+        try { const p = JSON.parse(msg); if (p?.detail) msg = typeof p.detail === 'string' ? p.detail : (p.detail.errors?.join(' · ') || JSON.stringify(p.detail)) } catch { /* not JSON */ }
+        setError(msg); alert('Publish failed:\n\n' + msg); setPublishing(false); return
+      }
       if (opts.sendInvites) {
         try {
           const res = await apiFetch<{ trustees_total: number; tokens_created: number; tokens_reused: number; email_failed: string[] }>(
@@ -595,7 +610,13 @@ export default function ResolutionsPage() {
                 ))}
               </div>
 
-              {error && <div className="mx-6 mt-4 bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">{error}</div>}
+              {error && (
+                <div className="sticky top-0 z-30 mx-6 mt-4 bg-red-500/15 border border-red-500/40 text-red-200 px-4 py-3 rounded-xl text-sm shadow-lg shadow-red-900/30 flex items-start gap-3">
+                  <span className="flex-1 whitespace-pre-wrap">{error}</span>
+                  <button type="button" onClick={() => setError('')}
+                    className="shrink-0 text-red-200/80 hover:text-white">✕</button>
+                </div>
+              )}
 
               {/* Body: main form + right rail */}
               <div className="flex-1 overflow-y-auto">
@@ -846,7 +867,7 @@ export default function ResolutionsPage() {
                         <div className="flex flex-wrap gap-2">
                           <button onClick={() => saveDraft()} disabled={saving || !form.title.trim()}
                             className="px-4 py-2.5 rounded-xl border border-white/10 text-white/80 text-sm font-bold hover:bg-white/5 disabled:opacity-40">
-                            {saving ? 'Saving…' : editing ? 'Save Changes' : 'Save as Draft'}
+                            {saving ? 'Saving…' : 'Save'}
                           </button>
                           <button onClick={() => publishNow({ sendInvites: false })}
                             disabled={publishing || !form.title.trim() || hasOpenRequired}
@@ -1119,7 +1140,7 @@ export default function ResolutionsPage() {
                   {!locked && (
                     <button onClick={() => saveDraft()} disabled={saving || !form.title.trim()}
                       className="px-5 py-2.5 rounded-xl border border-white/15 text-white text-sm font-bold hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed">
-                      {saving ? 'Saving…' : 'Save draft'}
+                      {saving ? 'Saving…' : 'Save'}
                     </button>
                   )}
                   {wizStep !== 'review' && wizStep !== 'vote' ? (
