@@ -85,6 +85,8 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/board/resolutions', icon: '📜', label: 'Resolutions & Voting' },
       { href: '/board/rules',       icon: '📐', label: 'Governing Rules' },
       { href: '/risk-register',     icon: '🛡️', label: 'Risk Register' },
+      { href: '/delegations',       icon: '🗝️', label: 'Delegations' },
+      { href: '/skills-matrix',     icon: '🧩', label: 'Skills Matrix' },
     ],
   },
   {

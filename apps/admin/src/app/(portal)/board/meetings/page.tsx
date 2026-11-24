@@ -296,6 +296,7 @@ export default function MeetingsPage() {
                   <>
                     <NoticePanel meetingId={editing.id} />
                     <MinutesPanel meetingId={editing.id} />
+                    <AttendancePanel meetingId={editing.id} />
                   </>
                 )}
               </div>
@@ -485,6 +486,86 @@ function MinutesPanel({ meetingId }: { meetingId: string }) {
               }>{r.status}</span>
               {r.circulated_at && <span className="text-white/40 text-[10px]">circulated {new Date(r.circulated_at).toLocaleDateString()}</span>}
               {r.approved_at && <span className="text-white/40 text-[10px]">approved {new Date(r.approved_at).toLocaleDateString()}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ─── SORP §9.4 trustee attendance ───────────────────────────────────────
+
+type AttStatus = 'PRESENT' | 'VIRTUAL' | 'LATE' | 'APOLOGIES' | 'ABSENT' | 'UNSET'
+
+interface AttendanceRow {
+  trustee_id: string
+  full_name: string
+  role: string
+  status: AttStatus
+  note: string
+  recorded_at: string | null
+}
+
+const ATT_STATUSES: AttStatus[] = ['PRESENT', 'VIRTUAL', 'LATE', 'APOLOGIES', 'ABSENT']
+
+function AttendancePanel({ meetingId }: { meetingId: string }) {
+  const [rows, setRows] = useState<AttendanceRow[]>([])
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch<{ attendance: AttendanceRow[] }>(`/admin/board/meetings/${meetingId}/attendance`)
+      setRows(r.attendance || [])
+    } catch { /* quiet */ }
+  }, [meetingId])
+  useEffect(() => { void load() }, [load])
+
+  async function saveAll() {
+    setBusy(true)
+    try {
+      const records = rows
+        .filter(r => r.status !== 'UNSET')
+        .map(r => ({ trustee_id: r.trustee_id, status: r.status, note: r.note }))
+      await apiFetch(`/admin/board/meetings/${meetingId}/attendance`, {
+        method: 'PUT', body: JSON.stringify({ records }),
+      })
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-white/70 text-xs uppercase tracking-widest font-bold">👥 Attendance</p>
+          <p className="text-white/40 text-[10px]">SORP §9.4 — recorded for the Trustees’ Annual Report.</p>
+        </div>
+        <button type="button" onClick={saveAll} disabled={busy}
+          className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-xs font-black shadow-saffron disabled:opacity-40">
+          {busy ? 'Saving…' : 'Save attendance'}
+        </button>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-white/30 text-xs italic">No active trustees.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map(r => (
+            <li key={r.trustee_id} className="flex items-center gap-2 flex-wrap p-2 rounded-lg bg-white/3 border border-white/5">
+              <span className="flex-1 text-white text-sm font-bold">{r.full_name}
+                <span className="text-white/40 text-[10px] uppercase tracking-widest ml-2">{r.role}</span>
+              </span>
+              <select value={r.status === 'UNSET' ? '' : r.status}
+                onChange={e => setRows(rs => rs.map(x => x.trustee_id === r.trustee_id ? { ...x, status: (e.target.value || 'UNSET') as AttStatus } : x))}
+                className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs">
+                <option value="">— set —</option>
+                {ATT_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <input value={r.note}
+                onChange={e => setRows(rs => rs.map(x => x.trustee_id === r.trustee_id ? { ...x, note: e.target.value } : x))}
+                className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs flex-[2]"
+                placeholder="Note (optional)" />
             </li>
           ))}
         </ul>
