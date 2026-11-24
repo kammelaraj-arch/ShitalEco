@@ -928,6 +928,7 @@ export default function ResolutionsPage() {
                       goodLooks="All sections filled, at least one supporting file, every REQUIRED info-request submitted. The Progress circle (footer) is ≥ 80%."
                       example="Save → come back → make one last change → Publish & email invites. Trustees receive a magic link within ~10 seconds."
                     />
+                    {editing?.id && <ConflictsBanner resolutionId={editing.id} locked={locked} />}
                     <p className="text-white/50 text-xs uppercase tracking-widest font-bold">Preview — this is what trustees will see</p>
                     <div className="rounded-2xl border border-white/10 bg-white/3 p-5 space-y-4">
                       <div>
@@ -1295,6 +1296,128 @@ function PreviewField({ title, value, isHtml }: { title: string; value: string; 
           {value || <em className="text-white/30">(empty)</em>}
         </div>
       )}
+    </div>
+  )
+}
+
+// Conflicts banner on the Review step — loads existing resolution_conflicts
+// rows (auto-detected at publish time via keyword match against each
+// trustee_interests.keywords; also seeded by manual declarations) and
+// lets the chair change the decision per trustee before the vote
+// closes. CC27 — conflicts of interest management.
+interface ResolutionConflict {
+  id: string; trustee_id: string
+  trustee_name: string; trustee_role: string
+  interest_category: string | null
+  interest_counterparty: string | null
+  reason: string
+  decision: 'RECUSED' | 'PARTICIPATED_WITH_DECLARATION' | 'NOT_A_CONFLICT'
+  matched_interest_id: string | null
+}
+function ConflictsBanner({ resolutionId, locked }: { resolutionId: string; locked: boolean }) {
+  const [rows, setRows] = useState<ResolutionConflict[]>([])
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch<{ conflicts: ResolutionConflict[] }>(`/admin/board/resolutions/${resolutionId}/conflicts`)
+      setRows(r.conflicts || [])
+    } catch { /* quietly */ }
+  }, [resolutionId])
+  useEffect(() => { void load() }, [load])
+
+  async function rerunAutoDetect() {
+    setBusy(true)
+    try {
+      await apiFetch(`/admin/board/resolutions/${resolutionId}/conflicts/auto-detect`, { method: 'POST' })
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  async function changeDecision(c: ResolutionConflict, next: ResolutionConflict['decision']) {
+    const reason = next === c.decision ? c.reason : (window.prompt('Reason / basis for this decision', c.reason || '') || c.reason)
+    setBusy(true)
+    try {
+      await apiFetch(`/admin/board/resolutions/${resolutionId}/conflicts`, {
+        method: 'POST',
+        body: JSON.stringify({
+          trustee_id: c.trustee_id,
+          matched_interest_id: c.matched_interest_id,
+          reason, decision: next,
+        }),
+      })
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5 text-emerald-200 text-xs flex items-center justify-between gap-3">
+        <span>No trustee conflicts detected on this resolution’s subject.</span>
+        {!locked && (
+          <button onClick={rerunAutoDetect} disabled={busy}
+            className="text-emerald-200/80 hover:text-white text-[10px] font-bold">
+            {busy ? 'Scanning…' : 'Re-scan interests'}
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-amber-300 text-xs font-black uppercase tracking-widest">⚠ Conflicts of interest</p>
+          <p className="text-amber-100/90 text-sm mt-0.5">
+            {rows.length} trustee{rows.length === 1 ? '' : 's'} flagged against this resolution. Chair must set a decision before vote closes (CC27).
+          </p>
+        </div>
+        {!locked && (
+          <button onClick={rerunAutoDetect} disabled={busy}
+            className="px-3 py-1.5 rounded-lg border border-amber-400/40 text-amber-100 text-xs font-bold hover:bg-amber-400/10">
+            {busy ? 'Scanning…' : 'Re-scan interests'}
+          </button>
+        )}
+      </div>
+      <ul className="space-y-2">
+        {rows.map(c => (
+          <li key={c.id} className="rounded-xl bg-black/30 border border-amber-500/20 p-3 space-y-2">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-white font-bold text-sm">{c.trustee_name} <span className="text-white/40 text-[10px] uppercase tracking-widest">{c.trustee_role}</span></p>
+                {c.interest_category && (
+                  <p className="text-white/50 text-xs">Interest: {c.interest_category}{c.interest_counterparty ? ` · ${c.interest_counterparty}` : ''}</p>
+                )}
+                {c.reason && <p className="text-white/70 text-xs mt-1">{c.reason}</p>}
+              </div>
+              <span className={
+                'px-2 py-0.5 rounded-full text-[10px] font-black border ' +
+                (c.decision === 'RECUSED' ? 'bg-red-500/20 text-red-200 border-red-400/30'
+                  : c.decision === 'PARTICIPATED_WITH_DECLARATION' ? 'bg-amber-500/20 text-amber-200 border-amber-400/30'
+                  : 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30')
+              }>
+                {c.decision.replace(/_/g, ' ')}
+              </span>
+            </div>
+            {!locked && (
+              <div className="flex gap-2 flex-wrap">
+                {(['RECUSED', 'PARTICIPATED_WITH_DECLARATION', 'NOT_A_CONFLICT'] as const).map(opt => (
+                  <button key={opt} disabled={busy || opt === c.decision}
+                    onClick={() => changeDecision(c, opt)}
+                    className={
+                      'px-2 py-1 rounded-lg text-[10px] font-bold ' +
+                      (opt === c.decision ? 'bg-white/10 text-white/60 cursor-default'
+                        : 'border border-white/15 text-white/70 hover:bg-white/5')
+                    }>
+                    {opt.replace(/_/g, ' ')}
+                  </button>
+                ))}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

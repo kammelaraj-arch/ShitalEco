@@ -3508,6 +3508,33 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_meeting_notices_meeting ON meeting_notices(meeting_id)",
 
+        # Minutes versions per meeting (CC48 — minutes are a legal record).
+        # Status lifecycle:
+        #   DRAFT       → author is editing; not visible to other trustees
+        #   CIRCULATED  → sent to trustees for review
+        #   APPROVED    → adopted at a later meeting; locked, carries
+        #                 approved_at_meeting_id back-link
+        # A meeting can hold multiple DRAFT versions — the latest is
+        # editable — but only one APPROVED row.
+        """CREATE TABLE IF NOT EXISTS meeting_minutes_versions (
+            id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            meeting_id             UUID NOT NULL REFERENCES board_meetings(id) ON DELETE CASCADE,
+            version_number         INT  NOT NULL DEFAULT 1,
+            content_html           TEXT NOT NULL DEFAULT '',
+            status                 VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+                -- DRAFT | CIRCULATED | APPROVED | SUPERSEDED
+            circulated_at          TIMESTAMPTZ,
+            circulated_by          UUID,
+            approved_at            TIMESTAMPTZ,
+            approved_by            UUID,
+            approved_at_meeting_id UUID REFERENCES board_meetings(id) ON DELETE SET NULL,
+            created_by             UUID,
+            created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_minutes_meeting ON meeting_minutes_versions(meeting_id, version_number DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_minutes_status  ON meeting_minutes_versions(status)",
+
         # Vote rules per resolution category — quorum + passing threshold.
         # Seeded (see _seed_governance_core below) with the Charities Act
         # 2011 defaults: 50% simple majority for OPERATIONAL/POLICY/etc,
@@ -5347,6 +5374,7 @@ _mount("shital.api.routers.board_announcement",      "router")
 _mount("shital.api.routers.risk_register",           "router")
 _mount("shital.api.routers.trustee_interests",       "router")
 _mount("shital.api.routers.meeting_notices",         "router")
+_mount("shital.api.routers.meeting_minutes",         "router")
 _mount("shital.api.routers.board_voting_phase_c",    "router")
 _mount("shital.api.routers.board_signoff",           "router")
 _mount("shital.api.routers.public_campaigns",      "router")
