@@ -341,6 +341,8 @@ export default function TrusteesPage() {
                   <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} rows={3} className={inp + ' resize-none'} placeholder="Standing interests, areas of expertise, etc." />
                 </div>
                 {editing && <InterestsAndRelatedParties trusteeId={editing.id} />}
+                {editing && <InductionPanel trusteeId={editing.id} />}
+                {editing && <DBSPanel trusteeId={editing.id} />}
               </div>
               <div className="px-6 py-4 border-t border-white/5 flex gap-3">
                 <button onClick={() => setShowForm(false)} className="flex-1 py-3 rounded-xl border border-white/10 text-white/60 font-semibold text-sm">Cancel</button>
@@ -627,6 +629,197 @@ function RelatedPartiesPanel({ trusteeId }: { trusteeId: string }) {
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+// ─── CC3 / Governance Code 3.3 — Trustee induction checklist ───────────
+
+interface InductionItem {
+  code: string
+  title: string
+  category: string
+  description: string
+  sort_order: number
+  is_required: boolean
+  completed_at: string | null
+  completed_by_name: string
+  evidence_note: string
+}
+
+function InductionPanel({ trusteeId }: { trusteeId: string }) {
+  const [items, setItems] = useState<InductionItem[]>([])
+  const [pct, setPct] = useState(0)
+  const [reqPct, setReqPct] = useState(0)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch<{ items: InductionItem[]; completion_pct: number; required_completion_pct: number }>(
+        `/admin/board/trustees/${trusteeId}/induction`,
+      )
+      setItems(r.items || [])
+      setPct(r.completion_pct)
+      setReqPct(r.required_completion_pct)
+    } catch { /* quiet */ }
+  }, [trusteeId])
+  useEffect(() => { void load() }, [load])
+
+  async function toggle(item: InductionItem) {
+    setBusy(true)
+    try {
+      if (item.completed_at) {
+        await apiFetch(`/admin/board/trustees/${trusteeId}/induction/${item.code}`, { method: 'DELETE' })
+      } else {
+        const note = window.prompt(`Evidence for "${item.title}" (optional)`, '') || ''
+        await apiFetch(`/admin/board/trustees/${trusteeId}/induction/${item.code}`, {
+          method: 'PUT', body: JSON.stringify({ evidence_note: note }),
+        })
+      }
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-white/70 text-xs uppercase tracking-widest font-bold">📋 Induction (CC3)</p>
+          <p className="text-white/40 text-[10px]">Governance Code 3.3 — brief every trustee on these.</p>
+        </div>
+        <div className="text-right">
+          <p className="text-white font-black text-lg">{pct.toFixed(0)}%</p>
+          <p className="text-white/50 text-[10px]">Required: {reqPct.toFixed(0)}%</p>
+        </div>
+      </div>
+      <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+        <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+      </div>
+      <ul className="space-y-1.5">
+        {items.map(it => (
+          <li key={it.code} className="flex items-start gap-2 p-2 rounded-lg bg-white/3 border border-white/5">
+            <button type="button" onClick={() => toggle(it)} disabled={busy}
+              className={'mt-0.5 w-5 h-5 rounded border flex items-center justify-center text-xs font-black transition ' +
+                (it.completed_at ? 'bg-emerald-500 border-emerald-400 text-white' : 'border-white/30 text-transparent hover:border-white/50')}>
+              {it.completed_at ? '✓' : ''}
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="text-white text-xs font-bold">
+                {it.title}
+                {it.is_required && <span className="ml-1 text-red-300 text-[10px]">*</span>}
+              </p>
+              <p className="text-white/40 text-[10px]">{it.category.replace(/_/g, ' ')}{it.description && ` · ${it.description}`}</p>
+              {it.completed_at && (
+                <p className="text-emerald-200/80 text-[10px] italic mt-0.5">
+                  ✓ {new Date(it.completed_at).toLocaleDateString()}{it.completed_by_name && ` by ${it.completed_by_name}`}
+                  {it.evidence_note && ` — ${it.evidence_note}`}
+                </p>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// ─── CC9 — DBS tracking ─────────────────────────────────────────────────
+
+const DBS_TYPES = ['NONE', 'BASIC', 'STANDARD', 'ENHANCED', 'ENHANCED_BARRED']
+
+function DBSPanel({ trusteeId }: { trusteeId: string }) {
+  const [form, setForm] = useState({
+    dbs_type: 'NONE',
+    dbs_reference: '',
+    dbs_issued_at: '',
+    dbs_valid_until: '',
+    dbs_status: 'NOT_REQUIRED',
+  })
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      // Pull the trustee row via the existing endpoint, if available.
+      // Otherwise leave defaults; a save will populate.
+      const r = await apiFetch<{ trustee?: Record<string, string | null> }>(`/admin/board/trustees/${trusteeId}`)
+      const t = r.trustee || {}
+      setForm({
+        dbs_type: (t.dbs_type as string) || 'NONE',
+        dbs_reference: (t.dbs_reference as string) || '',
+        dbs_issued_at: (t.dbs_issued_at as string)?.slice(0, 10) || '',
+        dbs_valid_until: (t.dbs_valid_until as string)?.slice(0, 10) || '',
+        dbs_status: (t.dbs_status as string) || 'NOT_REQUIRED',
+      })
+    } catch { /* quiet — endpoint may not exist yet */ }
+  }, [trusteeId])
+  useEffect(() => { void load() }, [load])
+
+  async function save() {
+    setBusy(true)
+    try {
+      await apiFetch(`/admin/board/trustees/${trusteeId}/dbs`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          ...form,
+          dbs_issued_at: form.dbs_issued_at || null,
+          dbs_valid_until: form.dbs_valid_until || null,
+        }),
+      })
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed — this area is restricted to Safeguarding roles.')
+    } finally { setBusy(false) }
+  }
+
+  const expiring = form.dbs_valid_until
+    ? Math.round((new Date(form.dbs_valid_until).getTime() - Date.now()) / 864e5)
+    : null
+  const chip =
+    form.dbs_type === 'NONE' ? { label: 'Not required', c: 'bg-white/10 text-white/50 border-white/20' }
+    : expiring === null ? { label: 'Unknown', c: 'bg-white/10 text-white/50 border-white/20' }
+    : expiring < 0 ? { label: 'Expired', c: 'bg-red-500/25 text-red-200 border-red-400/30' }
+    : expiring <= 90 ? { label: `Expires in ${expiring}d`, c: 'bg-amber-500/25 text-amber-200 border-amber-400/30' }
+    : { label: 'Valid', c: 'bg-emerald-500/25 text-emerald-200 border-emerald-400/30' }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-white/70 text-xs uppercase tracking-widest font-bold">🔎 DBS (CC9)</p>
+          <p className="text-white/40 text-[10px]">Safeguarding — only Chair / Secretary / Safeguarding Lead may edit.</p>
+        </div>
+        <span className={'px-2 py-0.5 rounded-full text-[10px] font-black border ' + chip.c}>{chip.label}</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div>
+          <label className="block text-white/50 text-[10px] uppercase tracking-widest font-bold">Type</label>
+          <select value={form.dbs_type} onChange={e => setForm(f => ({ ...f, dbs_type: e.target.value }))}
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1">
+            {DBS_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-white/50 text-[10px] uppercase tracking-widest font-bold">Reference</label>
+          <input value={form.dbs_reference} onChange={e => setForm(f => ({ ...f, dbs_reference: e.target.value }))}
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1" />
+        </div>
+        <div>
+          <label className="block text-white/50 text-[10px] uppercase tracking-widest font-bold">Issued</label>
+          <input type="date" value={form.dbs_issued_at}
+            onChange={e => setForm(f => ({ ...f, dbs_issued_at: e.target.value }))}
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1" />
+        </div>
+        <div>
+          <label className="block text-white/50 text-[10px] uppercase tracking-widest font-bold">Valid until</label>
+          <input type="date" value={form.dbs_valid_until}
+            onChange={e => setForm(f => ({ ...f, dbs_valid_until: e.target.value }))}
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs mt-1" />
+        </div>
+      </div>
+      <button type="button" onClick={save} disabled={busy}
+        className="px-3 py-1.5 rounded-lg bg-saffron-gradient text-white text-xs font-black shadow-saffron disabled:opacity-40">
+        {busy ? 'Saving…' : 'Save DBS'}
+      </button>
     </div>
   )
 }
