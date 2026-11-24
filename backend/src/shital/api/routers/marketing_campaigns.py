@@ -24,7 +24,7 @@ from shital.core.fabrics.database import SessionLocal
 from shital.services.marketing.audience import resolve_segment
 from shital.services.marketing.tracking import rewrite_for_tracking
 
-router = APIRouter(prefix="/api/v1/marketing/campaigns", tags=["marketing-campaigns"])
+router = APIRouter(prefix="/marketing/campaigns", tags=["marketing-campaigns"])
 
 # {{ variable }} render — same pattern as marketing_templates.
 _VAR_RE = re.compile(r"\{\{\s*([a-z][a-z0-9_]*)\s*\}\}")

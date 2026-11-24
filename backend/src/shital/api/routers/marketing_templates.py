@@ -20,7 +20,7 @@ from shital.api.deps import CurrentSpace
 from shital.core.fabrics.database import SessionLocal
 from shital.services.board.collab import sanitize_html
 
-router = APIRouter(prefix="/api/v1/marketing/templates", tags=["marketing-templates"])
+router = APIRouter(prefix="/marketing/templates", tags=["marketing-templates"])
 
 _ALLOWED_STATUSES  = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 _ALLOWED_CATEGORIES = {"newsletter", "appeal", "event", "welcome", "thank-you", "general"}
