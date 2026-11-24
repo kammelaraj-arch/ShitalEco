@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -1983,6 +1983,105 @@ async def reconcile_pending_stripe(ctx: CurrentSpace, days: int = 14) -> dict[st
     days = max(1, min(int(days), 90))
     from shital.services.background_recovery import _stripe_reconcile_once
     return await _stripe_reconcile_once(days=days)
+
+
+@router.post("/sumup/reconcile-pending/cron")
+async def reconcile_pending_sumup_cron(
+    x_sync_token: str | None = Header(default=None, alias="X-Sync-Token"),
+    days: int = 14,
+) -> dict[str, Any]:
+    """Service-token variant of /sumup/reconcile-pending. Takes the
+    same PAYMENT_SYNC_TOKEN as the daily finance sync and runs the
+    two-pass reconcile. Useful for a one-shot curl from an admin
+    terminal when the background loop hasn't resolved a backlog.
+    """
+    from shital.core.fabrics.secrets import SecretsManager
+    expected = await SecretsManager.get("PAYMENT_SYNC_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=503, detail="PAYMENT_SYNC_TOKEN not configured")
+    if not x_sync_token or x_sync_token != expected:
+        raise HTTPException(status_code=403, detail="Invalid sync token")
+    days = max(1, min(int(days), 90))
+    from shital.services.background_recovery import _sumup_reconcile_once
+    return await _sumup_reconcile_once(days=days)
+
+
+@router.get("/sumup/diag")
+async def sumup_diag() -> dict[str, Any]:
+    """Unauthenticated diagnostic for SumUp donation reconciliation.
+    Never exposes secret values — only whether each key is set + its
+    length. Pairs a config snapshot with counts of PENDING donations in
+    the last 24h / 7d / 14d so you can see from one HTTP call whether
+    the reconcile pipeline has the credentials it needs and how big
+    the backlog is.
+
+    Also pings SumUp's /me endpoint to prove the token authenticates.
+    """
+    from sqlalchemy import text as _t
+
+    from shital.core.fabrics.secrets import SecretsManager
+
+    keys: dict[str, Any] = {}
+    for k in ("SUMUP_ACCESS_TOKEN", "SUMUP_MERCHANT_CODE",
+              "SUMUP_API_KEY", "SUMUP_WEBHOOK_SECRET"):
+        try:
+            val = (await SecretsManager.get(k, fallback="")) or ""
+        except Exception as exc:
+            keys[k] = {"set": False, "error": str(exc)[:200]}
+            continue
+        keys[k] = {"set": bool(val), "length": len(val)}
+
+    # Counts of PENDING donations by age window.
+    counts: dict[str, int] = {}
+    async with SessionLocal() as db:
+        for label, days in (("24h", 1), ("7d", 7), ("14d", 14), ("30d", 30)):
+            n = (await db.execute(_t("""
+                SELECT COUNT(*) FROM donations
+                WHERE  UPPER(COALESCE(status, '')) IN ('PENDING', '')
+                  AND  UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+                  AND  deleted_at IS NULL
+                  AND  created_at >= NOW() - (:d || ' days')::interval
+            """), {"d": str(days)})).scalar() or 0
+            counts[f"pending_{label}"] = int(n)
+        n_no_ref = (await db.execute(_t("""
+            SELECT COUNT(*) FROM donations
+            WHERE  UPPER(COALESCE(status, '')) IN ('PENDING', '')
+              AND  UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+              AND  deleted_at IS NULL
+              AND  COALESCE(payment_ref, '') = ''
+              AND  created_at >= NOW() - INTERVAL '14 days'
+        """))).scalar() or 0
+        counts["pending_14d_without_payment_ref"] = int(n_no_ref)
+
+    # Live auth check: cheapest SumUp endpoint that proves credentials work.
+    auth_check: dict[str, Any] = {"attempted": False}
+    try:
+        access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+        if access_token:
+            auth_check["attempted"] = True
+            import httpx as _httpx
+            async with _httpx.AsyncClient(timeout=8) as cx:
+                r = await cx.get("https://api.sumup.com/v0.1/me",
+                                 headers={"Authorization": f"Bearer {access_token}"})
+            auth_check["status_code"] = r.status_code
+            if r.status_code == 200:
+                body = r.json() or {}
+                auth_check["merchant_code"] = (
+                    (body.get("merchant_profile") or {}).get("merchant_code") or ""
+                )
+                auth_check["ok"] = True
+            else:
+                auth_check["ok"] = False
+                auth_check["body_snippet"] = r.text[:400]
+    except Exception as exc:
+        auth_check["ok"] = False
+        auth_check["error"] = str(exc)[:300]
+
+    return {
+        "keys": keys,
+        "pending_counts": counts,
+        "live_auth_check": auth_check,
+    }
 
 
 @router.post("/sumup/reconcile-pending")
