@@ -89,6 +89,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/reserves',          icon: '💷', label: 'Reserves (CC19)' },
       { href: '/delegations',       icon: '🗝️', label: 'Delegations' },
       { href: '/skills-matrix',     icon: '🧩', label: 'Skills Matrix' },
+      { href: '/annual-report',     icon: '📅', label: 'Annual Report (TAR)' },
     ],
   },
   {

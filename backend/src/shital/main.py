@@ -3538,32 +3538,21 @@ async def _patch_schema() -> None:
         # ─────────────────────────────────────────────────────────────────
         # Governance Tranche 2B — delegations, attendance, skills matrix
         # ─────────────────────────────────────────────────────────────────
-        # Formal delegation of authority from the board to an officer /
-        # trustee / employee. Charities Act 2011 §280 + SORP §9.17 require
-        # a documented, limited, revocable record. Each row names a
-        # delegate (person OR role), a scope, a cash and/or period limit,
-        # start/end dates, and a review date.
         """CREATE TABLE IF NOT EXISTS delegations (
             id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             title                  VARCHAR(255) NOT NULL,
             area                   VARCHAR(40)  NOT NULL DEFAULT 'OTHER',
-                -- FINANCE | HR | PROPERTY | MARKETING | OPERATIONS
-                -- | SAFEGUARDING | GOVERNANCE | OTHER
             delegate_user_id       UUID,
             delegate_name          VARCHAR(255) NOT NULL DEFAULT '',
             delegate_role          VARCHAR(40)  NOT NULL DEFAULT '',
-                -- a role name when the delegation goes to whoever holds
-                -- the role, e.g. 'TREASURER'; otherwise ''
             scope_description      TEXT         NOT NULL DEFAULT '',
             limit_amount_gbp       NUMERIC(14,2),
             limit_period           VARCHAR(20)  NOT NULL DEFAULT 'YEAR',
-                -- PER_TRANSACTION | MONTH | QUARTER | YEAR | PROJECT | NONE
             conditions             TEXT         NOT NULL DEFAULT '',
             start_date             DATE,
             end_date               DATE,
             review_date            DATE,
             status                 VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
-                -- DRAFT | ACTIVE | EXPIRED | REVOKED
             source_resolution_id   UUID REFERENCES resolutions(id) ON DELETE SET NULL,
             revoked_by_resolution_id UUID REFERENCES resolutions(id) ON DELETE SET NULL,
             revoked_at             TIMESTAMPTZ,
@@ -3577,13 +3566,11 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_delegations_review ON delegations(review_date)",
         "CREATE INDEX IF NOT EXISTS idx_delegations_end    ON delegations(end_date)",
 
-        # Per-trustee attendance at each meeting (SORP §9.4 TAR disclosure).
         """CREATE TABLE IF NOT EXISTS meeting_attendance (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             meeting_id      UUID NOT NULL REFERENCES board_meetings(id) ON DELETE CASCADE,
             trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
             status          VARCHAR(20)  NOT NULL DEFAULT 'PRESENT',
-                -- PRESENT | VIRTUAL | LATE | APOLOGIES | ABSENT
             note            TEXT         NOT NULL DEFAULT '',
             recorded_by     UUID,
             recorded_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
@@ -3592,28 +3579,20 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_attendance_meeting ON meeting_attendance(meeting_id)",
         "CREATE INDEX IF NOT EXISTS idx_attendance_trustee ON meeting_attendance(trustee_id)",
 
-        # Required skill taxonomy (Charity Governance Code 3.4). Seeded
-        # from _seed_governance_tranche_2b below; admins can add/disable
-        # rows via /admin/board/skills/taxonomy.
         """CREATE TABLE IF NOT EXISTS required_skills (
             code        VARCHAR(40) PRIMARY KEY,
             label       VARCHAR(80) NOT NULL,
             category    VARCHAR(40) NOT NULL DEFAULT 'OTHER',
-                -- FINANCE | GOVERNANCE | PROGRAMME | DIGITAL | LEGAL
-                -- | PEOPLE | FUNDRAISING | COMMS | LIVED_EXPERIENCE | OTHER
             description TEXT        NOT NULL DEFAULT '',
             sort_order  SMALLINT    NOT NULL DEFAULT 100,
             is_active   BOOLEAN     NOT NULL DEFAULT true
         )""",
 
-        # Per-trustee self-reported rating against each required skill.
         """CREATE TABLE IF NOT EXISTS trustee_skills (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             trustee_id      UUID NOT NULL REFERENCES trustees(id) ON DELETE CASCADE,
             skill_code      VARCHAR(40) NOT NULL REFERENCES required_skills(code) ON DELETE CASCADE,
             self_rating     SMALLINT    NOT NULL DEFAULT 0,
-                -- 0 None | 1 Awareness | 2 Working | 3 Proficient
-                -- 4 Advanced | 5 Expert
             evidence        TEXT        NOT NULL DEFAULT '',
             last_reviewed_at DATE,
             created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -3622,6 +3601,30 @@ async def _patch_schema() -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS idx_trustee_skills_t ON trustee_skills(trustee_id)",
         "CREATE INDEX IF NOT EXISTS idx_trustee_skills_s ON trustee_skills(skill_code)",
+
+        # ─────────────────────────────────────────────────────────────────
+        # Governance Tranche 3A — Trustees' Annual Report (TAR, SORP §1.21)
+        # ─────────────────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS annual_reports (
+            id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title                  VARCHAR(255) NOT NULL,
+            period_start           DATE NOT NULL,
+            period_end             DATE NOT NULL,
+            status                 VARCHAR(20)  NOT NULL DEFAULT 'DRAFT',
+            narrative_sections     JSONB        NOT NULL DEFAULT '{}'::jsonb,
+            snapshot               JSONB        NOT NULL DEFAULT '{}'::jsonb,
+            pdf_attachment_id      UUID,
+            signed_by_user_id      UUID,
+            signed_by_name         VARCHAR(255) NOT NULL DEFAULT '',
+            signed_at              TIMESTAMPTZ,
+            filed_with_commission_at TIMESTAMPTZ,
+            commission_reference   VARCHAR(80)  NOT NULL DEFAULT '',
+            created_by             UUID,
+            created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+            updated_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_annual_reports_period ON annual_reports(period_end DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_annual_reports_status ON annual_reports(status)",
 
         # Vote rules per resolution category — quorum + passing threshold.
         # Seeded (see _seed_governance_core below) with the Charities Act
@@ -5675,6 +5678,7 @@ _mount("shital.api.routers.meeting_minutes",         "router")
 _mount("shital.api.routers.meeting_actions",         "router")
 _mount("shital.api.routers.policies",                "router")
 _mount("shital.api.routers.reserves",                "router")
+_mount("shital.api.routers.annual_reports",          "router")
 _mount("shital.api.routers.delegations",             "router")
 _mount("shital.api.routers.meeting_attendance",      "router")
 _mount("shital.api.routers.trustee_skills",          "router")
