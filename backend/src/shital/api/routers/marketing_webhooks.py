@@ -31,10 +31,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import text
 
 from shital.core.fabrics.database import SessionLocal
+from shital.services.marketing.tracking import (
+    TRACKING_PIXEL_GIF,
+    decode_token,
+    decode_url_param,
+)
 
 router = APIRouter(prefix="/api/v1/webhooks/marketing", tags=["marketing-webhooks"])
 
@@ -133,6 +139,82 @@ async def ses_webhook(request: Request) -> dict[str, Any]:
         return {"ignored": True, "type": kind}
 
     return {"applied": True, "count": len(affected), "affected": affected}
+
+
+# ─── Open tracking pixel ─────────────────────────────────────────────────────
+@router.get("/open", include_in_schema=False)
+async def track_open(request: Request, t: str = Query(..., description="Signed open-token")) -> Response:
+    try:
+        campaign_id, contact_id = decode_token(t, "track_open")
+    except HTTPException:
+        # Never 4xx on a pixel — serve the GIF so mail clients don't
+        # show a broken image.
+        return Response(content=TRACKING_PIXEL_GIF, media_type="image/gif")
+
+    ip = (request.client.host if request.client else "")[:45]
+    ua = (request.headers.get("user-agent") or "")[:500]
+    try:
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                INSERT INTO marketing_campaign_events
+                    (campaign_id, contact_id, email, kind, url, ip_address, user_agent)
+                VALUES
+                    (CAST(:cid AS uuid), CAST(:ct AS uuid), '', 'open', '', :ip, :ua)
+            """), {
+                "cid": campaign_id,
+                "ct": contact_id if contact_id else None,
+                "ip": ip, "ua": ua,
+            })
+            await db.commit()
+    except Exception:
+        # Tracker DB write must never block pixel delivery.
+        pass
+    return Response(content=TRACKING_PIXEL_GIF, media_type="image/gif",
+                    headers={"Cache-Control": "no-store, no-cache, must-revalidate",
+                             "Pragma": "no-cache"})
+
+
+# ─── Click tracking redirect ─────────────────────────────────────────────────
+@router.get("/click", include_in_schema=False)
+async def track_click(
+    request: Request,
+    t: str = Query(..., description="Signed click-token"),
+    u: str = Query(..., description="url-safe base64 of the target URL"),
+) -> RedirectResponse:
+    # Safe fallback on any auth failure — still redirect the user to
+    # the decoded URL (we'd rather miss a tracking event than a user
+    # journey).
+    campaign_id: str | None = None
+    contact_id: str | None = None
+    try:
+        campaign_id, contact_id = decode_token(t, "track_click")
+    except HTTPException:
+        pass
+
+    target = decode_url_param(u)
+    # Defence-in-depth: only http/https schemes.
+    if not (target.startswith("http://") or target.startswith("https://")):
+        raise HTTPException(400, detail="Bad target URL")
+
+    if campaign_id:
+        ip = (request.client.host if request.client else "")[:45]
+        ua = (request.headers.get("user-agent") or "")[:500]
+        try:
+            async with SessionLocal() as db:
+                await db.execute(text("""
+                    INSERT INTO marketing_campaign_events
+                        (campaign_id, contact_id, email, kind, url, ip_address, user_agent)
+                    VALUES
+                        (CAST(:cid AS uuid), CAST(:ct AS uuid), '', 'click', :u, :ip, :ua)
+                """), {
+                    "cid": campaign_id,
+                    "ct": contact_id if contact_id else None,
+                    "u": target[:2048], "ip": ip, "ua": ua,
+                })
+                await db.commit()
+        except Exception:
+            pass
+    return RedirectResponse(url=target, status_code=302)
 
 
 __all__ = ["router"]

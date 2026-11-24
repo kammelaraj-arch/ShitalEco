@@ -19,8 +19,10 @@ from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace
 from shital.api.routers.marketing_prefs import is_opted_in, prefs_url
+from shital.core.fabrics.config import settings
 from shital.core.fabrics.database import SessionLocal
 from shital.services.marketing.audience import resolve_segment
+from shital.services.marketing.tracking import rewrite_for_tracking
 
 router = APIRouter(prefix="/api/v1/marketing/campaigns", tags=["marketing-campaigns"])
 
@@ -257,6 +259,16 @@ async def _run_campaign_send(cid: str, *, triggered_by: str) -> dict[str, Any]:
                 '</div>'
             )
 
+        # Open + click tracking — rewrite <a href> to the click endpoint
+        # and append a pixel. Unsubscribe / prefs links are preserved by
+        # the rewriter's skip-fragments. Both rely on SITE_URL resolving
+        # to a public host (prod: https://api.shital.org.uk via nginx).
+        tracker_base = getattr(settings, "SITE_URL", "") or "https://api.shital.org.uk"
+        html = rewrite_for_tracking(
+            html, campaign_id=cid, contact_id=contact_id,
+            tracker_base=tracker_base,
+        )
+
         result = await send_raw_email(
             to_email=email, subject=subject,
             html_body=html, text_body=plain,
@@ -381,6 +393,43 @@ async def unschedule_campaign(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
     if not r.rowcount:
         raise HTTPException(409, detail="Not currently scheduled")
     return {"ok": True}
+
+
+# ─── Open + click tracking stats ─────────────────────────────────────────────
+@router.get("/{cid}/tracking")
+async def campaign_tracking(cid: str, ctx: CurrentSpace) -> dict[str, Any]:
+    """Aggregate opens + clicks. Unique = distinct contact_ids (plus a
+    bucket keyed on IP for external-list sends where contact_id is
+    NULL, so proxy prefetches don't inflate the number too much)."""
+    _require_marketing(ctx)
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT
+              COUNT(*) FILTER (WHERE kind='open')  AS opens,
+              COUNT(*) FILTER (WHERE kind='click') AS clicks,
+              COUNT(DISTINCT COALESCE(contact_id::text, ip_address))
+                 FILTER (WHERE kind='open')  AS unique_opens,
+              COUNT(DISTINCT COALESCE(contact_id::text, ip_address))
+                 FILTER (WHERE kind='click') AS unique_clicks
+            FROM marketing_campaign_events
+            WHERE campaign_id = CAST(:id AS uuid)
+        """), {"id": cid})).mappings().first()
+        top_links = (await db.execute(text("""
+            SELECT url, COUNT(*) AS clicks,
+                   COUNT(DISTINCT COALESCE(contact_id::text, ip_address)) AS unique_clicks
+            FROM   marketing_campaign_events
+            WHERE  campaign_id = CAST(:id AS uuid) AND kind = 'click' AND url <> ''
+            GROUP  BY url
+            ORDER  BY clicks DESC
+            LIMIT  20
+        """), {"id": cid})).mappings().all()
+    return {
+        "opens":         int((row or {}).get("opens") or 0),
+        "clicks":        int((row or {}).get("clicks") or 0),
+        "unique_opens":  int((row or {}).get("unique_opens") or 0),
+        "unique_clicks": int((row or {}).get("unique_clicks") or 0),
+        "top_links":     [dict(r) for r in top_links],
+    }
 
 
 __all__ = ["router", "_run_campaign_send"]

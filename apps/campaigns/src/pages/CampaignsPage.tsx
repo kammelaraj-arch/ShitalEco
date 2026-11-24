@@ -230,10 +230,68 @@ export function CampaignsPage() {
                 )}
               </div>
             )}
+            {editing.status === 'SENT' && <TrackingPanel campaignId={editing.id} sentCount={editing.stats?.sent ?? 0} />}
           </div>
         )}
       </section>
       {error && <p className="col-span-full text-xs text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+function TrackingPanel({ campaignId, sentCount }: { campaignId: string; sentCount: number }) {
+  const [t, setT] = useState<{ opens: number; clicks: number; unique_opens: number; unique_clicks: number; top_links: Array<{ url: string; clicks: number; unique_clicks: number }> } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    async function pull() {
+      try {
+        const r = await api.campaignTracking(campaignId)
+        if (!cancelled) setT(r)
+      } catch { /* non-fatal */ }
+    }
+    pull()
+    const h = setInterval(pull, 30_000)
+    return () => { cancelled = true; clearInterval(h) }
+  }, [campaignId])
+
+  if (!t) return null
+  const pct = (n: number) => sentCount > 0 ? `${((n / sentCount) * 100).toFixed(1)}%` : '—'
+
+  return (
+    <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-3 space-y-2">
+      <p className="font-bold text-sm">Engagement</p>
+      <div className="grid grid-cols-4 gap-3 text-xs">
+        <Stat label="Opens"         value={t.opens}         rate={pct(t.unique_opens)} />
+        <Stat label="Unique opens"  value={t.unique_opens}  rate="of sent" />
+        <Stat label="Clicks"        value={t.clicks}        rate={pct(t.unique_clicks)} />
+        <Stat label="Unique clicks" value={t.unique_clicks} rate="of sent" />
+      </div>
+      {t.top_links.length > 0 && (
+        <details className="text-[11px]">
+          <summary className="cursor-pointer opacity-70">Top links</summary>
+          <ul className="mt-1 space-y-0.5">
+            {t.top_links.map((l, i) => (
+              <li key={i} className="truncate">
+                <b>{l.clicks}</b> clicks (<b>{l.unique_clicks}</b> unique) —{' '}
+                <a href={l.url} target="_blank" rel="noreferrer" className="underline">{l.url}</a>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <p className="text-[10px] opacity-50">
+        Opens auto-refresh every 30s. Email clients vary — some (notably Apple Mail Privacy) pre-fetch the pixel.
+      </p>
+    </div>
+  )
+}
+
+function Stat({ label, value, rate }: { label: string; value: number; rate: string }) {
+  return (
+    <div className="rounded-lg bg-black/30 p-2">
+      <div className="text-[11px] opacity-60 uppercase tracking-widest">{label}</div>
+      <div className="font-bold text-lg mt-0.5">{value}</div>
+      <div className="text-[10px] opacity-50">{rate}</div>
     </div>
   )
 }
