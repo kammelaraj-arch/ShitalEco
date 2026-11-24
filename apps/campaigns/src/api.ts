@@ -129,4 +129,9 @@ export const api = {
     }),
   unscheduleCampaign: (id: string) =>
     req<{ ok: true }>(`/marketing/campaigns/${id}/unschedule`, { method: 'POST' }),
+  campaignTracking: (id: string) =>
+    req<{
+      opens: number; clicks: number; unique_opens: number; unique_clicks: number;
+      top_links: Array<{ url: string; clicks: number; unique_clicks: number }>
+    }>(`/marketing/campaigns/${id}/tracking`),
 }

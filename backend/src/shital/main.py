@@ -3386,6 +3386,28 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_mkt_cmp_status ON marketing_campaigns(status)",
         "CREATE INDEX IF NOT EXISTS idx_mkt_cmp_scheduled ON marketing_campaigns(scheduled_at) WHERE scheduled_at IS NOT NULL",
 
+        # ── Marketing: open + click tracking events ─────────────────────────
+        # One row per open / click. Email opens are famously unreliable
+        # (many clients proxy or block pixels), so we also count unique
+        # opens by (campaign_id, contact_id) to avoid double-counting
+        # proxy prefetches. Click tracking is more reliable — ISPs
+        # rarely follow outbound links.
+        """CREATE TABLE IF NOT EXISTS marketing_campaign_events (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            campaign_id   UUID NOT NULL REFERENCES marketing_campaigns(id) ON DELETE CASCADE,
+            contact_id    UUID,
+            email         VARCHAR(254) NOT NULL DEFAULT '',
+            kind          VARCHAR(10) NOT NULL,
+                -- open | click
+            url           VARCHAR(2048) NOT NULL DEFAULT '',
+            ip_address    VARCHAR(45) NOT NULL DEFAULT '',
+            user_agent    VARCHAR(500) NOT NULL DEFAULT '',
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_mkt_evt_campaign ON marketing_campaign_events(campaign_id, kind)",
+        "CREATE INDEX IF NOT EXISTS idx_mkt_evt_contact  ON marketing_campaign_events(campaign_id, contact_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mkt_evt_when     ON marketing_campaign_events(created_at DESC)",
+
         # ── Mail Agent: agentic email triage of shared mailboxes ─────────────
         # mail_agent_messages = one row per email the agent has seen. Idempotency
         # is via UNIQUE (graph_message_id) so the poller can safely re-fetch.
