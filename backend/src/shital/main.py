@@ -1528,6 +1528,25 @@ async def _patch_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_sent_emails_template ON sent_emails(template_key)",
         "CREATE INDEX IF NOT EXISTS idx_sent_emails_related  ON sent_emails(related_type, related_id)",
         "CREATE INDEX IF NOT EXISTS idx_sent_emails_failed   ON sent_emails(created_at DESC) WHERE status = 'FAILED'",
+        # ── Idempotent column patches for sent_emails ────────────────────
+        # CREATE TABLE IF NOT EXISTS above skips creation if an older
+        # version of the table already exists. Any column we added to
+        # the CREATE TABLE after first deploy has to be re-asserted via
+        # ALTER TABLE ADD COLUMN IF NOT EXISTS so prod picks it up on
+        # the next schema-patch pass.
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS from_email      VARCHAR(255) NOT NULL DEFAULT ''",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS subject         TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS html_body       TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS text_body       TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS variables       JSONB        NOT NULL DEFAULT '{}'::jsonb",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS error           TEXT         NOT NULL DEFAULT ''",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS attempts        INTEGER      NOT NULL DEFAULT 0",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS sent_at         TIMESTAMPTZ",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS related_type    VARCHAR(50)  NOT NULL DEFAULT ''",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS related_id      VARCHAR(100) NOT NULL DEFAULT ''",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS triggered_by    VARCHAR(255) NOT NULL DEFAULT ''",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()",
         # ── Temple Services ───────────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS temple_services (
             id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
