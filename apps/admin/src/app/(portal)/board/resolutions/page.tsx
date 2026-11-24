@@ -914,6 +914,9 @@ export default function ResolutionsPage() {
                         placeholder={'Format:\n• Fund (General / Restricted / Capital / Designated)\n• One-off £ + recurring £ / year\n• VAT treatment\n• Match-funding or grant restriction\n\nExample:\n• Fund: General. One-off £15,000 + £3,000 contingency.\n• No recurring cost.\n• VAT: exempt (religious service).\n• No external restriction.'} />
                       <p className="text-white/40 text-xs mt-1">If the amount is above the Treasurer's delegated authority, the decision type must be BOARD MEETING (step 1).</p>
                     </div>
+                    {editing?.id && (
+                      <RisksPanel resolutionId={editing.id} locked={locked} />
+                    )}
                   </div>
                 )}
 
@@ -1291,6 +1294,192 @@ function PreviewField({ title, value, isHtml }: { title: string; value: string; 
         <div className="text-white/80 text-sm whitespace-pre-wrap">
           {value || <em className="text-white/30">(empty)</em>}
         </div>
+      )}
+    </div>
+  )
+}
+
+// Risks panel on the Impact step — per-resolution risk entries that
+// auto-promote into the Organisation Risk Register (CC26) at publish
+// when auto_promote=true.
+interface ResolutionRisk {
+  id: string; title: string; description: string
+  category: string; scope: string
+  likelihood: number; impact: number
+  treatment: string; mitigation_plan: string
+  auto_promote: boolean
+  promoted_register_id: string | null
+  register_ref?: string | null
+}
+interface RiskTaxonomy {
+  categories: { code: string; label: string }[]
+  levels:     { code: string; label: string; min_score: number; max_score: number; colour_hex: string }[]
+  treatments: { code: string; label: string }[]
+  scopes:     { code: string; label: string }[]
+}
+function RisksPanel({ resolutionId, locked }: { resolutionId: string; locked: boolean }) {
+  const [risks, setRisks] = useState<ResolutionRisk[]>([])
+  const [tax, setTax] = useState<RiskTaxonomy | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState({
+    title: '', description: '', category: 'OPERATIONAL', scope: 'OPERATIONAL',
+    likelihood: 2, impact: 2, treatment: 'TREAT', mitigation_plan: '',
+    auto_promote: true,
+  })
+
+  const load = useCallback(async () => {
+    try {
+      const [r, t] = await Promise.all([
+        apiFetch<{ risks: ResolutionRisk[] }>(`/admin/board/resolutions/${resolutionId}/risks`),
+        tax ? Promise.resolve(tax) : apiFetch<RiskTaxonomy>('/admin/risk-register/taxonomy'),
+      ])
+      setRisks(r.risks || [])
+      if (!tax) setTax(t)
+    } catch { /* keep panel quiet; errors show on parent banner */ }
+  }, [resolutionId, tax])
+  useEffect(() => { void load() }, [load])
+
+  async function add() {
+    if (!draft.title.trim()) return
+    setBusy(true)
+    try {
+      await apiFetch(`/admin/board/resolutions/${resolutionId}/risks`, {
+        method: 'POST', body: JSON.stringify(draft),
+      })
+      setDraft({ title: '', description: '', category: 'OPERATIONAL', scope: 'OPERATIONAL',
+        likelihood: 2, impact: 2, treatment: 'TREAT', mitigation_plan: '', auto_promote: true })
+      setAdding(false)
+      await load()
+    } finally { setBusy(false) }
+  }
+
+  async function remove(id: string) {
+    if (!confirm('Remove this risk entry?')) return
+    try {
+      await apiFetch(`/admin/board/resolutions/${resolutionId}/risks/${id}`, { method: 'DELETE' })
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed')
+    }
+  }
+
+  const levelFor = (score: number) => tax?.levels.find(b => score >= b.min_score && score <= b.max_score)
+  const draftScore = draft.likelihood * draft.impact
+  const draftLevel = levelFor(draftScore)
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-white/70 text-xs uppercase tracking-widest font-bold">🛡 Risks — structured register (CC26)</p>
+          <p className="text-white/40 text-xs">Entries ticked “Add to register” are copied into the Org Risk Register at publish.</p>
+        </div>
+        {!locked && (
+          <button onClick={() => setAdding(s => !s)}
+            className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/80 text-xs font-bold hover:bg-white/10">
+            {adding ? 'Cancel' : '+ Add risk'}
+          </button>
+        )}
+      </div>
+
+      {adding && tax && (
+        <div className="rounded-xl border border-saffron-400/30 bg-saffron-400/5 p-3 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Title</label>
+              <input value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm mt-1"
+                placeholder="e.g. Overflow car parking triggers council warning" />
+            </div>
+            <div>
+              <label className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Category</label>
+              <select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm mt-1">
+                {tax.categories.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Scope</label>
+              <select value={draft.scope} onChange={e => setDraft(d => ({ ...d, scope: e.target.value }))}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm mt-1">
+                {tax.scopes.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Treatment</label>
+              <select value={draft.treatment} onChange={e => setDraft(d => ({ ...d, treatment: e.target.value }))}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm mt-1">
+                {tax.treatments.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Likelihood ({draft.likelihood})</label>
+              <input type="range" min={1} max={5} value={draft.likelihood} className="w-full accent-saffron-400 mt-2"
+                onChange={e => setDraft(d => ({ ...d, likelihood: parseInt(e.target.value) }))} />
+            </div>
+            <div>
+              <label className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Impact ({draft.impact})</label>
+              <input type="range" min={1} max={5} value={draft.impact} className="w-full accent-saffron-400 mt-2"
+                onChange={e => setDraft(d => ({ ...d, impact: parseInt(e.target.value) }))} />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-white/60 text-xs">Score:</span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-black"
+              style={{ backgroundColor: draftLevel?.colour_hex || '#888', color: '#fff' }}>
+              {draftScore} · {draftLevel?.label || '—'}
+            </span>
+          </div>
+          <div>
+            <label className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Mitigation</label>
+            <textarea rows={2} value={draft.mitigation_plan}
+              onChange={e => setDraft(d => ({ ...d, mitigation_plan: e.target.value }))}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm mt-1 resize-none"
+              placeholder="Controls + owner." />
+          </div>
+          <label className="flex items-center gap-2 text-white/80 text-xs">
+            <input type="checkbox" checked={draft.auto_promote}
+              onChange={e => setDraft(d => ({ ...d, auto_promote: e.target.checked }))}
+              className="accent-saffron-400" />
+            Copy into the Organisation Risk Register at publish
+          </label>
+          <button onClick={add} disabled={busy || !draft.title.trim()}
+            className="px-3 py-2 rounded-lg bg-saffron-gradient text-white text-xs font-black shadow-saffron disabled:opacity-40">
+            {busy ? 'Adding…' : 'Add risk'}
+          </button>
+        </div>
+      )}
+
+      {risks.length === 0 ? (
+        <p className="text-white/30 text-xs italic">No structured risks yet.</p>
+      ) : (
+        <ul className="space-y-2">
+          {risks.map(r => {
+            const level = levelFor(r.likelihood * r.impact)
+            return (
+              <li key={r.id} className="flex items-start justify-between gap-3 p-2 rounded-lg bg-white/3 border border-white/5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-white text-sm">{r.title}</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black"
+                      style={{ backgroundColor: level?.colour_hex || '#888', color: '#fff' }}>
+                      {r.likelihood * r.impact} · {level?.label || '—'}
+                    </span>
+                    <span className="text-white/40 text-[10px] uppercase tracking-widest">{r.scope} · {r.category.replace(/_/g, ' ')}</span>
+                    {r.promoted_register_id && (
+                      <span className="text-saffron-300 text-[10px] font-bold">→ {r.register_ref || 'in register'}</span>
+                    )}
+                  </div>
+                  {r.mitigation_plan && <p className="text-white/50 text-xs mt-1 line-clamp-2">{r.mitigation_plan}</p>}
+                </div>
+                {!locked && (
+                  <button onClick={() => remove(r.id)} className="text-red-400/60 hover:text-red-400 text-xs">✕</button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
       )}
     </div>
   )
