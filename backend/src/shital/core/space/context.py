@@ -33,20 +33,27 @@ class DigitalSpace:
             from shital.core.fabrics.errors import ForbiddenError
             raise ForbiddenError(f"Permission '{permission}' required")
 
-    # Roles pinned to a single branch. BRANCH_MANAGER / STAFF run the
-    # branch day-to-day; VOLUNTEER contributes at their branch; LMC is the
-    # branch-level governance committee (LMC_CHAIR / LMC_TREASURER /
-    # LMC_MEMBER) so they see their own branch only, never org-wide.
-    # Main-board roles (SUPER_ADMIN, TRUSTEE, CHAIR, ACCOUNTANT,
-    # HR_MANAGER, AUDITOR) stay unscoped — they govern across branches.
-    _BRANCH_SCOPED_ROLES = (
-        "BRANCH_MANAGER", "STAFF", "VOLUNTEER",
-        "LMC_CHAIR", "LMC_TREASURER", "LMC_MEMBER",
-    )
+    # Default-deny branch scoping: every role belongs to a single branch
+    # and sees only their branch, UNLESS it is one of the national roles
+    # listed here. This matches the charity's governance model — a Main
+    # Board trustee / Accountant / HR Manager / Auditor serves the whole
+    # charity, everyone else (LMC, Branch Manager, Staff, Volunteer, …)
+    # belongs to one branch.
+    #
+    # SUPER_ADMIN is the platform/tech admin and is always cross-branch.
+    # Main-board roles: CHAIR, TREASURER, SECRETARY, CEO, TRUSTEE.
+    _CROSS_BRANCH_ROLES = frozenset({
+        "SUPER_ADMIN",
+        "TRUSTEE", "CHAIR", "TREASURER", "SECRETARY", "CEO",
+        "ACCOUNTANT", "HR_MANAGER", "AUDITOR",
+    })
 
     def require_branch_scope(self, branch_id: str) -> None:
-        """Branch-scoped roles can only access their own branch."""
-        if self.role in self._BRANCH_SCOPED_ROLES and self.branch_id != branch_id:
+        """Everyone is pinned to their own branch unless their role is a
+        national/main-board role listed in `_CROSS_BRANCH_ROLES`."""
+        if self.role in self._CROSS_BRANCH_ROLES:
+            return
+        if self.branch_id != branch_id:
             from shital.core.fabrics.errors import ForbiddenError
             raise ForbiddenError("Access restricted to your branch")
 
