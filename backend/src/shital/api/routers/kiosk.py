@@ -2237,6 +2237,40 @@ async def sumup_diag() -> dict[str, Any]:
         """))).scalar() or 0
         counts["pending_14d_without_payment_ref"] = int(n_no_ref)
 
+    # Per-device PENDING breakdown (last 14d) — "which kiosk is leaving
+    # abandoned rows behind?". Groups by kiosk_devices.name /
+    # device_username so an operator can tell WQKK1 vs WQKK2 apart at
+    # a glance.
+    pending_by_device: list[dict[str, Any]] = []
+    async with SessionLocal() as db:
+        dev_rows = (await db.execute(_t("""
+            SELECT
+                COALESCE(kd.name, '(unknown)')             AS device_name,
+                COALESCE(kd.device_username, '')           AS device_username,
+                COALESCE(kd.branch_id, '')                 AS branch_id,
+                COUNT(*)                                   AS pending_count,
+                COUNT(*) FILTER (WHERE COALESCE(d.payment_ref, '') = '') AS pending_without_payment_ref,
+                COALESCE(SUM(d.amount), 0)::numeric        AS pending_amount_gbp,
+                MIN(d.created_at)                          AS first_pending_at,
+                MAX(d.created_at)                          AS last_pending_at
+            FROM   donations d
+            LEFT   JOIN kiosk_devices kd ON kd.id = d.kiosk_device_id
+            WHERE  UPPER(COALESCE(d.status, '')) IN ('PENDING', '')
+              AND  UPPER(COALESCE(d.payment_provider, '')) IN ('SUMUP', 'KIOSK')
+              AND  d.deleted_at IS NULL
+              AND  d.created_at >= NOW() - INTERVAL '14 days'
+            GROUP  BY kd.name, kd.device_username, kd.branch_id
+            ORDER  BY COUNT(*) DESC
+            LIMIT  25
+        """))).mappings().all()
+        for r in dev_rows:
+            d = dict(r)
+            d["pending_amount_gbp"] = float(d["pending_amount_gbp"] or 0)
+            for ts in ("first_pending_at", "last_pending_at"):
+                if d.get(ts) and hasattr(d[ts], "isoformat"):
+                    d[ts] = d[ts].isoformat()
+            pending_by_device.append(d)
+
     # Live auth check: cheapest SumUp endpoint that proves credentials work.
     auth_check: dict[str, Any] = {"attempted": False}
     try:
@@ -2264,6 +2298,7 @@ async def sumup_diag() -> dict[str, Any]:
     return {
         "keys": keys,
         "pending_counts": counts,
+        "pending_by_device": pending_by_device,
         "live_auth_check": auth_check,
     }
 
