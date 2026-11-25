@@ -1,0 +1,41 @@
+name: SumUp — reconcile pending donations
+
+# Manually-triggered sweep of PENDING SumUp donations. Hits the
+# header-token-gated /sumup/reconcile-pending/cron endpoint, which
+# runs the same two-pass reconcile (checkouts API then transactions
+# history API) that /admin/finance/sync does nightly.
+#
+# Prerequisites (already set for payment-sync-nightly):
+#   API_BASE_URL       — e.g. https://api.shital.org.uk
+#   PAYMENT_SYNC_TOKEN — matches the backend's configured token
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Look-back window in days (1-90, default 14)'
+        required: false
+        default: '14'
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Call /kiosk/sumup/reconcile-pending/cron
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          PAYMENT_SYNC_TOKEN: ${{ secrets.PAYMENT_SYNC_TOKEN }}
+          DAYS: ${{ github.event.inputs.days || '14' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_BASE_URL:-}" ] || [ -z "${PAYMENT_SYNC_TOKEN:-}" ]; then
+            echo "::error::API_BASE_URL and PAYMENT_SYNC_TOKEN must be set as repo secrets"
+            exit 1
+          fi
+          echo "Reconciling SumUp PENDING donations for last ${DAYS} day(s)…"
+          RESPONSE=$(curl --fail-with-body -sS -X POST \
+            "${API_BASE_URL%/}/api/v1/kiosk/sumup/reconcile-pending/cron?days=${DAYS}" \
+            -H "X-Sync-Token: ${PAYMENT_SYNC_TOKEN}")
+          echo "$RESPONSE" | tee /tmp/reconcile.json
+          echo "SumUp reconcile complete."
