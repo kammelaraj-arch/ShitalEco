@@ -1019,6 +1019,37 @@ async def sumup_checkout(body: SumUpCheckoutInput):
             checkout = create_resp.json()
             checkout_id = checkout.get("id")
 
+            # Server-side backfill: stamp donations.payment_ref with the
+            # fresh SumUp checkout_id as soon as we know it. The Quick
+            # Donation flow (ProcessingScreen.tsx) inserts a PENDING
+            # donation BEFORE this checkout call with payment_ref='' so
+            # the row always surfaces in admin; without this UPDATE the
+            # row relies on TapScreen's /order/confirm callback, and when
+            # the customer walks away or the reader times out that call
+            # never fires. With the UPDATE here the reconcile loop's
+            # Pass 1 (GET /checkouts/{id}) can resolve the PENDING row
+            # from SumUp's own records 15 min later.
+            # Reference = 'DON-' || UPPER(SUBSTRING(basketId, 1, 8))
+            # — set by apps/quick-donation/ProcessingScreen.tsx.
+            if checkout_id and body.order_id:
+                donation_ref = "DON-" + (body.order_id[:8]).upper()
+                try:
+                    async with SessionLocal() as _db:
+                        await _db.execute(text("""
+                            UPDATE donations
+                               SET payment_ref = :cid, updated_at = NOW()
+                             WHERE reference = :ref
+                               AND UPPER(COALESCE(payment_provider, '')) = 'SUMUP'
+                               AND COALESCE(payment_ref, '') = ''
+                               AND deleted_at IS NULL
+                        """), {"cid": checkout_id, "ref": donation_ref})
+                        await _db.commit()
+                except Exception:  # noqa: BLE001
+                    # Best-effort — never fail the checkout push on a
+                    # stamping hiccup. Pass 2 of the reconcile loop will
+                    # still match the row by amount + timestamp.
+                    pass
+
             # 2. Push to physical reader
             # body.reader_id = SumUp API reader ID (rdr_XXX) if known
             # body.reader_serial = physical serial number (e.g. 200101578509)
