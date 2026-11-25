@@ -119,9 +119,19 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     if os.environ.get("RECOVERY_LOOP_ENABLED", "1") == "1":
         from shital.services.background_recovery import (
             recovery_loop_supervised,
+            run_boot_reap_once,
             stripe_giving_fast_loop_supervised,
             stripe_import_daily_loop_supervised,
         )
+        # One-shot reaper at boot — clears any stale PENDING backlog that
+        # built up while the backend was down. Separate from the main loop
+        # so a crash in the sumup sweep setup doesn't stop it firing.
+        # Idempotent and fast (single UPDATE), so cost is negligible.
+        try:
+            await run_boot_reap_once()
+        except Exception as _reap_exc:
+            logger.warning("boot_reap_sumup_skipped",
+                           error=str(_reap_exc))
         _recovery_task = _asyncio.create_task(recovery_loop_supervised())
         # Dedicated 60 s cadence for Stripe monthly-giving reconcile so a
         # just-paid subscription self-heals to ACTIVE within a minute of
