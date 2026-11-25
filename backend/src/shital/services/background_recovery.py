@@ -74,8 +74,34 @@ async def _sumup_reconcile_once(days: int = 14) -> dict[str, Any]:
         "scanned": 0, "completed": 0, "failed": 0,
         "still_pending": 0, "not_found": 0, "errors": 0,
         "matched_via_transactions_api": 0, "days_window": days,
+        "stale_reaped": 0,
     }
+    # Pass 0 — reap stale PENDING rows that never got a SumUp checkout_id
+    # (abandoned carts: user tapped Pay, PENDING row written, flow died
+    # before /sumup/checkout returned). Mirrors PR #288 for monthly-giving.
+    # Time-only, no API call. Rows marked CANCELLED stay in the ledger for
+    # audit but drop out of ACTIVE views.
+    #
+    # Window: 15 minutes. Anything shorter than that may still be in flight
+    # (SumUp checkout returns within seconds; 15 min is 60× that safety
+    # margin). Matches the main recovery_loop tick so a row that misses
+    # one tick is reaped on the next.
+    stale_ttl_minutes = int(os.environ.get("SUMUP_STALE_PENDING_TTL_MIN", "15"))
+    stale_ttl_minutes = max(5, min(stale_ttl_minutes, 180))
+
     async with SessionLocal() as db:
+        reaped = (await db.execute(text("""
+            UPDATE donations
+               SET status = 'CANCELLED', updated_at = NOW()
+             WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
+               AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+               AND COALESCE(payment_ref, '') = ''
+               AND deleted_at IS NULL
+               AND created_at < NOW() - (:ttl || ' minutes')::interval
+        """), {"ttl": str(stale_ttl_minutes)})).rowcount or 0
+        summary["stale_reaped"] = int(reaped)
+        summary["stale_ttl_minutes"] = stale_ttl_minutes
+
         pending_rows = (await db.execute(text("""
             SELECT id::text AS id, payment_ref, amount, reference, created_at
             FROM donations

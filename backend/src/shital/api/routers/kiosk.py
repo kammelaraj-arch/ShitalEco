@@ -2342,10 +2342,30 @@ async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 14) -> dict[str
         "still_pending": 0, "not_found": 0,
         "errors": 0, "days_window": days,
         "matched_via_transactions_api": 0,
+        "stale_reaped": 0,
         "rows": [],
     }
 
+    # Pass 0 — reap abandoned-cart PENDING rows (no SumUp checkout_id, no
+    # provider match possible). Mirrors the background recovery loop and
+    # PR #288 for monthly-giving. Time-only, no API call, idempotent.
+    import os as _os
+    stale_ttl_minutes = int(_os.environ.get("SUMUP_STALE_PENDING_TTL_MIN", "15"))
+    stale_ttl_minutes = max(5, min(stale_ttl_minutes, 180))
+
     async with SessionLocal() as db:
+        reaped = (await db.execute(_text("""
+            UPDATE donations
+               SET status = 'CANCELLED', updated_at = NOW()
+             WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
+               AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+               AND COALESCE(payment_ref, '') = ''
+               AND deleted_at IS NULL
+               AND created_at < NOW() - (:ttl || ' minutes')::interval
+        """), {"ttl": str(stale_ttl_minutes)})).rowcount or 0
+        summary["stale_reaped"] = int(reaped)
+        summary["stale_ttl_minutes"] = stale_ttl_minutes
+
         pending_rows = (await db.execute(_text("""
             SELECT id::text AS id, payment_ref, amount, currency, reference,
                    created_at, branch_id
