@@ -108,14 +108,17 @@ export function ProcessingScreen() {
 
       if (isSumUp) {
         // ── SumUp Solo flow ──────────────────────────────────────────────────
-        setStage('Creating donation...')
+        // CALL SUMUP FIRST, RECORD AFTER. Previously we wrote the donation
+        // row before the SumUp call so the row appeared in admin even on
+        // provider failure — but that strategy created a "ghost" PENDING row
+        // every time the flow died between Pay-tap and /sumup/checkout
+        // completing (walk-away, tablet freeze, network blip). WQKK1 at
+        // Wembley accumulated 31 such rows in 14d. PR #461 reaps them,
+        // this PR stops them being written in the first place.
+        setStage('Sending to SumUp reader...')
         const basketId = generateUUID()
         const orderRef = `DON-${basketId.slice(0, 8).toUpperCase()}`
 
-        // Save PENDING record before sending to reader so it always appears in admin
-        await recordDonation(basketId, orderRef, amountPence, '', sumupReaderId, 'SUMUP')
-
-        setStage('Sending to SumUp reader...')
         const res = await fetch(`${API_BASE}/kiosk/sumup/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -134,6 +137,11 @@ export function ProcessingScreen() {
         const data = await res.json()
         if (data.error) throw new Error(data.error)
 
+        // SumUp acknowledged the checkout — now safe to record the row,
+        // stamped with the checkout_id so the reconcile pass can resolve it.
+        setStage('Recording donation...')
+        await recordDonation(basketId, orderRef, amountPence, data.checkout_id, sumupReaderId, 'SUMUP')
+
         setOrderResult(basketId, orderRef, data.checkout_id, '')
         setScreen('tap')
         return
@@ -141,13 +149,11 @@ export function ProcessingScreen() {
 
       if (isClover) {
         // ── Clover Flex flow ─────────────────────────────────────────────────
-        setStage('Creating donation...')
+        // Same ordering rationale as the SumUp branch above.
+        setStage('Sending to Clover reader...')
         const basketId = generateUUID()
         const orderRef = `DON-${basketId.slice(0, 8).toUpperCase()}`
 
-        await recordDonation(basketId, orderRef, amountPence, '', cloverDeviceId, 'CLOVER')
-
-        setStage('Sending to Clover reader...')
         const res = await fetch(`${API_BASE}/kiosk/clover/payment`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -164,6 +170,9 @@ export function ProcessingScreen() {
         }
         const data = await res.json()
         if (data.error) throw new Error(data.error)
+
+        setStage('Recording donation...')
+        await recordDonation(basketId, orderRef, amountPence, data.clover_order_id, cloverDeviceId, 'CLOVER')
 
         setOrderResult(basketId, orderRef, data.clover_order_id, '')
         setScreen('tap')
