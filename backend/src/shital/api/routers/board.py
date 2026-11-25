@@ -1130,7 +1130,15 @@ async def create_resolution(
             ua=request.headers.get("user-agent", ""),
         )
         await db.commit()
-    return {"id": new_id, "success": True}
+        saved_row = (await db.execute(
+            text("SELECT * FROM resolutions WHERE id::text = :id"),
+            {"id": new_id},
+        )).mappings().one_or_none()
+    return {
+        "id": new_id,
+        "success": True,
+        "resolution": _resolution_row(saved_row) if saved_row else {"id": new_id},
+    }
 
 
 @router.get("/admin/board/resolutions/{resolution_id}")
@@ -1178,7 +1186,20 @@ async def update_resolution(
 
     updates = body.model_dump(exclude_unset=True, exclude_none=True)
     if not updates:
-        return {"id": resolution_id, "success": True, "no_op": True}
+        from sqlalchemy import text as _t
+
+        from shital.core.fabrics.database import SessionLocal
+        async with SessionLocal() as _db:
+            _row = (await _db.execute(
+                _t("SELECT * FROM resolutions WHERE id::text = :id"),
+                {"id": resolution_id},
+            )).mappings().one_or_none()
+        return {
+            "id": resolution_id,
+            "success": True,
+            "no_op": True,
+            "resolution": _resolution_row(_row) if _row else {"id": resolution_id},
+        }
 
     errs = _validate_resolution_payload(
         category=updates.get("category"),
@@ -1226,7 +1247,15 @@ async def update_resolution(
             ua=request.headers.get("user-agent", ""),
         )
         await db.commit()
-    return {"id": resolution_id, "success": True}
+        saved_row = (await db.execute(
+            text("SELECT * FROM resolutions WHERE id::text = :id"),
+            {"id": resolution_id},
+        )).mappings().one_or_none()
+    return {
+        "id": resolution_id,
+        "success": True,
+        "resolution": _resolution_row(saved_row) if saved_row else {"id": resolution_id},
+    }
 
 
 @router.post("/admin/board/resolutions/{resolution_id}/publish")
