@@ -2037,6 +2037,159 @@ async def reconcile_pending_sumup_cron(
     return await _sumup_reconcile_once(days=days)
 
 
+@router.get("/sumup/pending-audit")
+async def sumup_pending_audit(days: int = 30) -> dict[str, Any]:
+    """Money-at-risk audit for PENDING SumUp donations. Unauthenticated
+    — answers the one question that matters: did any money actually
+    come in that we missed on our side?
+
+    For each PENDING / blank-status row in the last `days` days:
+      1. Query SumUp's transactions history for all SUCCESSFUL
+         transactions (we hit `/v2.1/merchants/{code}/transactions
+         /history` once and keep an in-memory index).
+      2. Match our row to any SumUp transaction by amount + timestamp
+         ±15 min (slightly wider than the reconcile loop's 10 min so
+         borderline rows don't slip through this audit).
+      3. Classify every row:
+            matched_successful   — SumUp has a corresponding paid
+                                    transaction. **Money was received
+                                    but our row is still PENDING.**
+                                    ACTION: reconcile this row.
+            matched_failed       — SumUp has a declined / failed tap
+                                    at that time. No money.
+            not_found            — no matching SumUp transaction. The
+                                    customer walked away before any
+                                    tap. **No money was lost.**
+
+    Returns per-row verdicts + a bottom-line summary so the Treasurer
+    can see at a glance: £X at risk, £Y safe-to-cancel, £Z suspicious.
+    """
+    from sqlalchemy import text as _t
+
+    from shital.core.fabrics.secrets import SecretsManager
+    access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
+    merchant_code = await SecretsManager.get("SUMUP_MERCHANT_CODE") or settings.SUMUP_MERCHANT_CODE
+    if not access_token or not merchant_code:
+        return {"error": "SumUp not configured — add SUMUP_ACCESS_TOKEN and SUMUP_MERCHANT_CODE"}
+
+    days = max(1, min(int(days), 90))
+
+    # Load PENDING rows.
+    async with SessionLocal() as db:
+        pending_rows = (await db.execute(_t("""
+            SELECT id::text AS id, reference, amount, created_at,
+                   COALESCE(payment_ref, '') AS payment_ref
+            FROM   donations
+            WHERE  UPPER(COALESCE(status, '')) IN ('PENDING', '')
+              AND  UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+              AND  deleted_at IS NULL
+              AND  created_at >= NOW() - (:d || ' days')::interval
+            ORDER  BY created_at DESC
+        """), {"d": str(days)})).mappings().all()
+
+    # Build a SumUp transactions index (amount_pence → list of (ts, status, code)).
+    tx_index: dict[int, list[tuple[Any, str, str, str]]] = {}
+    pages_fetched = 0
+    oldest_ref = ""
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    try:
+        async with httpx.AsyncClient(timeout=15) as cx:
+            for _ in range(20):
+                url = (f"https://api.sumup.com/v2.1/merchants/{merchant_code}/"
+                       f"transactions/history?limit=100&order=descending")
+                if oldest_ref:
+                    url += f"&oldest_ref={oldest_ref}"
+                resp = await cx.get(url, headers={"Authorization": f"Bearer {access_token}"})
+                if resp.status_code >= 400:
+                    break
+                data = resp.json() or {}
+                items = data.get("items") or data.get("data") or []
+                if not items:
+                    break
+                pages_fetched += 1
+                page_oldest = None
+                for tx in items:
+                    ts_raw = tx.get("timestamp") or tx.get("created_at") or ""
+                    try:
+                        ts_dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw else None
+                    except (ValueError, AttributeError):
+                        ts_dt = None
+                    page_oldest = ts_dt or page_oldest
+                    if ts_dt and ts_dt < cutoff:
+                        continue
+                    amount_pence = int(round(float(tx.get("amount") or 0) * 100))
+                    status_tx = (tx.get("status") or "").upper()
+                    tx_code = tx.get("transaction_code") or tx.get("transaction_id") or ""
+                    foreign_ref = tx.get("foreign_transaction_id") or tx.get("checkout_reference") or ""
+                    tx_index.setdefault(amount_pence, []).append(
+                        (ts_dt, status_tx, tx_code, foreign_ref))
+                if page_oldest and page_oldest < cutoff:
+                    break
+                next_ref = data.get("next_ref") or data.get("oldest_ref")
+                if not next_ref or next_ref == oldest_ref:
+                    break
+                oldest_ref = next_ref
+    except Exception as exc:
+        return {"error": f"SumUp API error: {str(exc)[:200]}"}
+
+    # Match each pending row.
+    matched_successful: list[dict[str, Any]] = []
+    matched_failed:     list[dict[str, Any]] = []
+    not_found:          list[dict[str, Any]] = []
+    for r in pending_rows:
+        amount_pence = int(round(float(r["amount"]) * 100))
+        best: tuple[Any, str, str] | None = None
+        for ts_dt, status_tx, tx_code, _fref in tx_index.get(amount_pence, []):
+            if not ts_dt or not r["created_at"]:
+                continue
+            delta = abs((ts_dt - r["created_at"]).total_seconds())
+            if delta <= 900:  # ± 15 min window
+                best = (ts_dt, status_tx, tx_code)
+                break
+        row_out = {
+            "donation_id": r["id"][:8],
+            "reference":   r["reference"],
+            "amount_gbp":  float(r["amount"]),
+            "created_at":  r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        if best is None:
+            not_found.append(row_out)
+        elif best[1] in {"SUCCESSFUL", "PAID"}:
+            matched_successful.append({**row_out,
+                                       "sumup_transaction_code": best[2],
+                                       "sumup_timestamp": best[0].isoformat() if best[0] else None})
+        else:
+            matched_failed.append({**row_out,
+                                   "sumup_status": best[1],
+                                   "sumup_transaction_code": best[2]})
+
+    money_at_risk  = round(sum(r["amount_gbp"] for r in matched_successful), 2)
+    money_declined = round(sum(r["amount_gbp"] for r in matched_failed), 2)
+    money_abandoned = round(sum(r["amount_gbp"] for r in not_found), 2)
+
+    return {
+        "window_days": days,
+        "sumup_pages_fetched": pages_fetched,
+        "sumup_transactions_indexed": sum(len(v) for v in tx_index.values()),
+        "verdict": {
+            "money_received_but_pending_gbp": money_at_risk,
+            "money_declined_no_loss_gbp":     money_declined,
+            "money_abandoned_no_loss_gbp":    money_abandoned,
+        },
+        "counts": {
+            "matched_successful": len(matched_successful),
+            "matched_failed":     len(matched_failed),
+            "not_found":          len(not_found),
+            "total_pending":      len(pending_rows),
+        },
+        "rows": {
+            "matched_successful_needing_reconcile": matched_successful,
+            "matched_failed_safe_to_cancel":        matched_failed,
+            "abandoned_safe_to_cancel":             not_found,
+        },
+    }
+
+
 @router.get("/sumup/diag")
 async def sumup_diag() -> dict[str, Any]:
     """Unauthenticated diagnostic for SumUp donation reconciliation.
