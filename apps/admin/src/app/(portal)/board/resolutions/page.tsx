@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { RichTextEditor } from '@/components/board/RichTextEditor'
@@ -354,20 +354,38 @@ export default function ResolutionsPage() {
   }
 
   // ─── mutations ───
+  const saveErrorRef = useRef<string>('')
   async function saveDraft(silent = false): Promise<Resolution | null> {
-    if (!form.title.trim()) { setError('Title is required'); return null }
+    saveErrorRef.current = ''
+    if (!form.title.trim()) {
+      saveErrorRef.current = 'Title is required'
+      setError('Title is required'); return null
+    }
     setSaving(true)
     try {
       const body: Record<string, unknown> = { ...form }
       if (!body.meeting_id) delete body.meeting_id
       if (!body.decision_date) delete body.decision_date
-      let saved: Resolution
+      let saved: Resolution | undefined
       if (editing) {
-        const r = await apiFetch<{ resolution: Resolution }>(`/admin/board/resolutions/${editing.id}`, { method: 'PUT', body: JSON.stringify(body) })
+        const r = await apiFetch<{ resolution?: Resolution; id?: string }>(`/admin/board/resolutions/${editing.id}`, { method: 'PUT', body: JSON.stringify(body) })
         saved = r.resolution
+        if (!saved && r.id) {
+          const got = await apiFetch<{ resolution: Resolution }>(`/admin/board/resolutions/${r.id}`)
+          saved = got.resolution
+        }
       } else {
-        const r = await apiFetch<{ resolution: Resolution }>('/admin/board/resolutions', { method: 'POST', body: JSON.stringify(body) })
+        const r = await apiFetch<{ resolution?: Resolution; id?: string }>('/admin/board/resolutions', { method: 'POST', body: JSON.stringify(body) })
         saved = r.resolution
+        if (!saved && r.id) {
+          const got = await apiFetch<{ resolution: Resolution }>(`/admin/board/resolutions/${r.id}`)
+          saved = got.resolution
+        }
+      }
+      if (!saved) {
+        saveErrorRef.current = 'Server did not return the saved resolution'
+        setError(saveErrorRef.current)
+        return null
       }
       setEditing(saved)
       if (!silent) await load()
@@ -375,6 +393,7 @@ export default function ResolutionsPage() {
     } catch (e) {
       let msg = e instanceof Error ? e.message : 'Failed to save'
       try { const p = JSON.parse(msg); if (p?.detail?.errors) msg = p.detail.errors.join(' · ') } catch { /* not JSON */ }
+      saveErrorRef.current = msg
       setError(msg)
       return null
     } finally { setSaving(false) }
@@ -389,10 +408,7 @@ export default function ResolutionsPage() {
     try {
       const saved = await saveDraft(true)
       if (!saved) {
-        // saveDraft already set `error`; surface it loudly so the user
-        // doesn't think the click did nothing.
-        const err = (document.querySelector('[data-resolution-save-error]')?.textContent || '').trim()
-        const msg = err || 'Could not save before publishing — fix the errors shown above and try again.'
+        const msg = saveErrorRef.current || 'Could not save before publishing — fix the errors shown above and try again.'
         setError(msg)
         alert('Publish aborted:\n\n' + msg)
         setPublishing(false)
