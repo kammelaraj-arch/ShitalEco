@@ -127,6 +127,10 @@ export interface DonationState {
 
   _hasHydrated: boolean
   setHasHydrated: (v: boolean) => void
+  /** Timestamp (ms) of the most recent entry into the `processing`
+   *  screen, used by setScreen to debounce rapid "Pay" button mashing.
+   *  Never persisted — guard is per-session. */
+  _lastProcessingAt: number
 
   setScreen: (screen: Screen) => void
   setAmount: (amount: number) => void
@@ -201,8 +205,25 @@ export const useDonationStore = create<DonationState>()(
 
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
+      _lastProcessingAt: 0,
 
-      setScreen: (screen) => set({ screen }),
+      // Debounce transitions INTO 'processing' so tap-happy donors who
+      // mash the Pay button don't create multiple PENDING donation rows
+      // (the SumUp audit showed 45% of apparent "abandoned" PENDING rows
+       // on prod were from 2–3 duplicate clicks within ~15 seconds, same
+      // amount, same minute). Any attempt to re-enter 'processing' within
+      // 3 seconds of leaving (or arriving at) it is silently dropped.
+      // Every other screen transition is unaffected.
+      setScreen: (screen) => set((state) => {
+        if (screen === 'processing') {
+          const now = Date.now()
+          if (state.screen === 'processing') return {}
+          const last = (state as unknown as { _lastProcessingAt?: number })._lastProcessingAt || 0
+          if (now - last < 3000) return {}
+          return { screen, _lastProcessingAt: now } as Partial<DonationState>
+        }
+        return { screen }
+      }),
       setAmount: (amount) => set({ amount }),
       setBranchId: (branchId) => set({ branchId }),
       setReader: (stripeReaderId, stripeReaderLabel, readerProvider = '', sumupReaderId = '', sumupReaderApiId = '', cloverDeviceId = '') =>
