@@ -2295,11 +2295,18 @@ async def sumup_diag() -> dict[str, Any]:
         auth_check["ok"] = False
         auth_check["error"] = str(exc)[:300]
 
+    # Reaper observability — shows whether the in-process reaper has
+    # actually fired since the backend booted. Reads the singleton that
+    # the boot-time reap and the recovery loop keep up to date.
+    from shital.services.background_recovery import reap_state
+    reaper_state = reap_state()
+
     return {
         "keys": keys,
         "pending_counts": counts,
         "pending_by_device": pending_by_device,
         "live_auth_check": auth_check,
+        "reaper": reaper_state,
     }
 
 
@@ -2346,26 +2353,23 @@ async def reconcile_pending_sumup(ctx: CurrentSpace, days: int = 14) -> dict[str
         "rows": [],
     }
 
-    # Pass 0 — reap abandoned-cart PENDING rows (no SumUp checkout_id, no
-    # provider match possible). Mirrors the background recovery loop and
-    # PR #288 for monthly-giving. Time-only, no API call, idempotent.
+    # Pass 0 — reap abandoned-cart PENDING rows. Shared helper updates
+    # the diag-visible _REAP_STATE so an operator can confirm the
+    # reaper fired even when they can't read backend logs.
     import os as _os
+
+    from shital.services.background_recovery import reap_stale_pending_sumup
     stale_ttl_minutes = int(_os.environ.get("SUMUP_STALE_PENDING_TTL_MIN", "15"))
-    stale_ttl_minutes = max(5, min(stale_ttl_minutes, 180))
+    try:
+        reaped_n = await reap_stale_pending_sumup(ttl_minutes=stale_ttl_minutes)
+    except Exception as exc:  # noqa: BLE001
+        reaped_n = 0
+        summary["errors"] += 1
+        summary.setdefault("rows", []).append({"outcome": "reap_failed", "error": str(exc)[:200]})
+    summary["stale_reaped"] = reaped_n
+    summary["stale_ttl_minutes"] = max(5, min(stale_ttl_minutes, 180))
 
     async with SessionLocal() as db:
-        reaped = (await db.execute(_text("""
-            UPDATE donations
-               SET status = 'CANCELLED', updated_at = NOW()
-             WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
-               AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
-               AND COALESCE(payment_ref, '') = ''
-               AND deleted_at IS NULL
-               AND created_at < NOW() - (:ttl || ' minutes')::interval
-        """), {"ttl": str(stale_ttl_minutes)})).rowcount or 0
-        summary["stale_reaped"] = int(reaped)
-        summary["stale_ttl_minutes"] = stale_ttl_minutes
-
         pending_rows = (await db.execute(_text("""
             SELECT id::text AS id, payment_ref, amount, currency, reference,
                    created_at, branch_id

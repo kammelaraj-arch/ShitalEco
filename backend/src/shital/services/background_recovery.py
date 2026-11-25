@@ -46,6 +46,77 @@ ALERT_DIGEST_GRACE_SECONDS = 5 * 60
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Reap observability — a module-level singleton the loop updates and the
+# /sumup/diag endpoint reads so we can see from outside whether the reaper
+# is actually firing without needing backend logs or a server shell.
+# ─────────────────────────────────────────────────────────────────────────────
+_REAP_STATE: dict[str, Any] = {
+    "last_run_at": None,           # ISO timestamp of last reaper pass
+    "last_run_count": 0,           # Rows CANCELLED on the last pass
+    "total_runs": 0,               # Number of passes since process start
+    "total_reaped": 0,             # Cumulative rows CANCELLED since process start
+    "last_error": None,            # Most recent error (if any) from the reap SQL
+    "boot_reap_ran": False,        # Whether the one-shot boot reap has fired
+}
+
+
+def reap_state() -> dict[str, Any]:
+    """Snapshot of the reaper's observable state. Shallow copy so callers
+    can serialise safely."""
+    return dict(_REAP_STATE)
+
+
+async def reap_stale_pending_sumup(ttl_minutes: int = 15) -> int:
+    """Pure stale-PENDING sweep. SumUp PENDING + empty payment_ref +
+    older than ``ttl_minutes`` → CANCELLED. Idempotent. No provider
+    API call. Returns the number of rows updated.
+
+    Callable from:
+      - the main recovery_loop (Pass 0)
+      - the admin reconcile endpoint (Pass 0)
+      - app startup (once, via run_boot_reap_once)
+    """
+    ttl = max(5, min(int(ttl_minutes), 180))
+    async with SessionLocal() as db:
+        reaped = (await db.execute(text("""
+            UPDATE donations
+               SET status = 'CANCELLED', updated_at = NOW()
+             WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
+               AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
+               AND COALESCE(payment_ref, '') = ''
+               AND deleted_at IS NULL
+               AND created_at < NOW() - (:ttl || ' minutes')::interval
+        """), {"ttl": str(ttl)})).rowcount or 0
+        await db.commit()
+    n = int(reaped)
+    _REAP_STATE["last_run_at"] = datetime.now(UTC).isoformat()
+    _REAP_STATE["last_run_count"] = n
+    _REAP_STATE["total_runs"] += 1
+    _REAP_STATE["total_reaped"] += n
+    _REAP_STATE["last_error"] = None
+    return n
+
+
+async def run_boot_reap_once() -> None:
+    """Fire the reaper once on backend boot — before the 60 s init delay
+    of the main loop — so a deploy restart immediately clears any stale
+    PENDING backlog. Idempotent and safe to call every boot.
+
+    If the DB isn't ready yet (schema patch still running, pool not
+    initialised) the error is caught and logged so boot continues."""
+    if _REAP_STATE["boot_reap_ran"]:
+        return
+    try:
+        n = await reap_stale_pending_sumup(ttl_minutes=15)
+        logger.info("boot_reap_sumup", reaped=n)
+    except Exception as exc:  # noqa: BLE001
+        _REAP_STATE["last_error"] = str(exc)[:300]
+        logger.error("boot_reap_sumup_failed", error=str(exc))
+    finally:
+        _REAP_STATE["boot_reap_ran"] = True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SumUp reconcile
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -77,31 +148,19 @@ async def _sumup_reconcile_once(days: int = 14) -> dict[str, Any]:
         "stale_reaped": 0,
     }
     # Pass 0 — reap stale PENDING rows that never got a SumUp checkout_id
-    # (abandoned carts: user tapped Pay, PENDING row written, flow died
-    # before /sumup/checkout returned). Mirrors PR #288 for monthly-giving.
-    # Time-only, no API call. Rows marked CANCELLED stay in the ledger for
-    # audit but drop out of ACTIVE views.
-    #
-    # Window: 15 minutes. Anything shorter than that may still be in flight
-    # (SumUp checkout returns within seconds; 15 min is 60× that safety
-    # margin). Matches the main recovery_loop tick so a row that misses
-    # one tick is reaped on the next.
+    # (abandoned carts). Shared helper updates _REAP_STATE so the diag
+    # endpoint can confirm from outside that the reaper is firing.
     stale_ttl_minutes = int(os.environ.get("SUMUP_STALE_PENDING_TTL_MIN", "15"))
-    stale_ttl_minutes = max(5, min(stale_ttl_minutes, 180))
+    try:
+        reaped_n = await reap_stale_pending_sumup(ttl_minutes=stale_ttl_minutes)
+    except Exception as exc:  # noqa: BLE001
+        _REAP_STATE["last_error"] = str(exc)[:300]
+        reaped_n = 0
+        logger.error("recovery_sumup_reap_failed", error=str(exc))
+    summary["stale_reaped"] = reaped_n
+    summary["stale_ttl_minutes"] = max(5, min(stale_ttl_minutes, 180))
 
     async with SessionLocal() as db:
-        reaped = (await db.execute(text("""
-            UPDATE donations
-               SET status = 'CANCELLED', updated_at = NOW()
-             WHERE UPPER(COALESCE(status, '')) IN ('PENDING', '')
-               AND UPPER(COALESCE(payment_provider, '')) IN ('SUMUP', 'KIOSK')
-               AND COALESCE(payment_ref, '') = ''
-               AND deleted_at IS NULL
-               AND created_at < NOW() - (:ttl || ' minutes')::interval
-        """), {"ttl": str(stale_ttl_minutes)})).rowcount or 0
-        summary["stale_reaped"] = int(reaped)
-        summary["stale_ttl_minutes"] = stale_ttl_minutes
-
         pending_rows = (await db.execute(text("""
             SELECT id::text AS id, payment_ref, amount, reference, created_at
             FROM donations
