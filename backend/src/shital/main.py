@@ -4524,6 +4524,23 @@ async def _patch_schema() -> None:
         # operator sees *why* a Failed row failed without clicking in.
         "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_code    VARCHAR(80)  NOT NULL DEFAULT ''",
         "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_message VARCHAR(500) NOT NULL DEFAULT ''",
+
+        # Single-row counter table for the SumUp stale-pending reaper.
+        # Needed because the in-process _REAP_STATE dict is per-uvicorn-
+        # worker, so a /sumup/diag call hitting a different worker from
+        # the one that ran the boot reap would see all zeros. Writing
+        # through the DB lets every worker see the same state.
+        """CREATE TABLE IF NOT EXISTS sumup_reaper_state (
+            id              INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+            last_run_at     TIMESTAMPTZ,
+            last_run_count  INT NOT NULL DEFAULT 0,
+            total_runs      BIGINT NOT NULL DEFAULT 0,
+            total_reaped    BIGINT NOT NULL DEFAULT 0,
+            last_error      TEXT,
+            boot_reap_ran   BOOLEAN NOT NULL DEFAULT FALSE,
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "INSERT INTO sumup_reaper_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING",
     ]
 
     # Each statement runs in its own transaction so one failure doesn't

@@ -46,30 +46,55 @@ ALERT_DIGEST_GRACE_SECONDS = 5 * 60
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Reap observability — a module-level singleton the loop updates and the
-# /sumup/diag endpoint reads so we can see from outside whether the reaper
-# is actually firing without needing backend logs or a server shell.
+# Reap observability — the counter row lives in `sumup_reaper_state` so every
+# uvicorn worker sees the same values. A module-level dict would only reflect
+# what happened in the specific worker handling the diag request, which showed
+# as all-zeros right after PR #463 even though the boot reap had cleared 35
+# rows (the curl hit a different worker).
 # ─────────────────────────────────────────────────────────────────────────────
-_REAP_STATE: dict[str, Any] = {
-    "last_run_at": None,           # ISO timestamp of last reaper pass
-    "last_run_count": 0,           # Rows CANCELLED on the last pass
-    "total_runs": 0,               # Number of passes since process start
-    "total_reaped": 0,             # Cumulative rows CANCELLED since process start
-    "last_error": None,            # Most recent error (if any) from the reap SQL
-    "boot_reap_ran": False,        # Whether the one-shot boot reap has fired
+
+_EMPTY_REAP_STATE: dict[str, Any] = {
+    "last_run_at": None,
+    "last_run_count": 0,
+    "total_runs": 0,
+    "total_reaped": 0,
+    "last_error": None,
+    "boot_reap_ran": False,
 }
 
 
-def reap_state() -> dict[str, Any]:
-    """Snapshot of the reaper's observable state. Shallow copy so callers
-    can serialise safely."""
-    return dict(_REAP_STATE)
+async def reap_state() -> dict[str, Any]:
+    """Current reaper state, read from the shared DB row. Returns the
+    empty-state shape when the row isn't there yet (schema patch still
+    pending on first boot after this change)."""
+    try:
+        async with SessionLocal() as db:
+            row = (await db.execute(text(
+                "SELECT last_run_at, last_run_count, total_runs, "
+                "       total_reaped, last_error, boot_reap_ran "
+                "FROM sumup_reaper_state WHERE id = 1"
+            ))).mappings().one_or_none()
+    except Exception:  # noqa: BLE001
+        return dict(_EMPTY_REAP_STATE)
+    if not row:
+        return dict(_EMPTY_REAP_STATE)
+    return {
+        "last_run_at": row["last_run_at"].isoformat() if row["last_run_at"] else None,
+        "last_run_count": int(row["last_run_count"] or 0),
+        "total_runs": int(row["total_runs"] or 0),
+        "total_reaped": int(row["total_reaped"] or 0),
+        "last_error": row["last_error"],
+        "boot_reap_ran": bool(row["boot_reap_ran"]),
+    }
 
 
 async def reap_stale_pending_sumup(ttl_minutes: int = 15) -> int:
     """Pure stale-PENDING sweep. SumUp PENDING + empty payment_ref +
     older than ``ttl_minutes`` → CANCELLED. Idempotent. No provider
     API call. Returns the number of rows updated.
+
+    After the UPDATE, upserts the shared `sumup_reaper_state` row so
+    `reap_state()` on any worker reflects this call.
 
     Callable from:
       - the main recovery_loop (Pass 0)
@@ -87,33 +112,73 @@ async def reap_stale_pending_sumup(ttl_minutes: int = 15) -> int:
                AND deleted_at IS NULL
                AND created_at < NOW() - (:ttl || ' minutes')::interval
         """), {"ttl": str(ttl)})).rowcount or 0
+        n = int(reaped)
+        # Persist state so every uvicorn worker sees the latest numbers.
+        # The row is seeded by the schema patcher; the fall-back ON CONFLICT
+        # keeps this idempotent if the seed hasn't run yet for any reason.
+        await db.execute(text("""
+            INSERT INTO sumup_reaper_state
+                (id, last_run_at, last_run_count, total_runs, total_reaped,
+                 last_error, updated_at)
+            VALUES (1, NOW(), :n, 1, :n, NULL, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                last_run_at    = NOW(),
+                last_run_count = EXCLUDED.last_run_count,
+                total_runs     = sumup_reaper_state.total_runs + 1,
+                total_reaped   = sumup_reaper_state.total_reaped + EXCLUDED.last_run_count,
+                last_error     = NULL,
+                updated_at     = NOW()
+        """), {"n": n})
         await db.commit()
-    n = int(reaped)
-    _REAP_STATE["last_run_at"] = datetime.now(UTC).isoformat()
-    _REAP_STATE["last_run_count"] = n
-    _REAP_STATE["total_runs"] += 1
-    _REAP_STATE["total_reaped"] += n
-    _REAP_STATE["last_error"] = None
     return n
 
 
 async def run_boot_reap_once() -> None:
     """Fire the reaper once on backend boot — before the 60 s init delay
     of the main loop — so a deploy restart immediately clears any stale
-    PENDING backlog. Idempotent and safe to call every boot.
+    PENDING backlog. Guarded by the shared ``boot_reap_ran`` flag so a
+    worker that already ran it doesn't repeat; a fresh container with a
+    fresh row runs once.
 
     If the DB isn't ready yet (schema patch still running, pool not
     initialised) the error is caught and logged so boot continues."""
-    if _REAP_STATE["boot_reap_ran"]:
-        return
+    try:
+        async with SessionLocal() as db:
+            row = (await db.execute(text(
+                "SELECT boot_reap_ran FROM sumup_reaper_state WHERE id = 1"
+            ))).mappings().one_or_none()
+            if row and bool(row["boot_reap_ran"]):
+                return
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("boot_reap_sumup_flag_lookup_failed", error=str(exc))
+        # Fall through — try to run the reap anyway.
+
     try:
         n = await reap_stale_pending_sumup(ttl_minutes=15)
         logger.info("boot_reap_sumup", reaped=n)
     except Exception as exc:  # noqa: BLE001
-        _REAP_STATE["last_error"] = str(exc)[:300]
         logger.error("boot_reap_sumup_failed", error=str(exc))
+        try:
+            async with SessionLocal() as db:
+                await db.execute(text("""
+                    UPDATE sumup_reaper_state
+                       SET last_error = :e, updated_at = NOW()
+                     WHERE id = 1
+                """), {"e": str(exc)[:300]})
+                await db.commit()
+        except Exception:  # noqa: BLE001
+            pass
     finally:
-        _REAP_STATE["boot_reap_ran"] = True
+        try:
+            async with SessionLocal() as db:
+                await db.execute(text("""
+                    UPDATE sumup_reaper_state
+                       SET boot_reap_ran = TRUE, updated_at = NOW()
+                     WHERE id = 1
+                """))
+                await db.commit()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -148,15 +213,26 @@ async def _sumup_reconcile_once(days: int = 14) -> dict[str, Any]:
         "stale_reaped": 0,
     }
     # Pass 0 — reap stale PENDING rows that never got a SumUp checkout_id
-    # (abandoned carts). Shared helper updates _REAP_STATE so the diag
-    # endpoint can confirm from outside that the reaper is firing.
+    # (abandoned carts). Shared helper writes the sumup_reaper_state row
+    # so the diag endpoint can confirm from outside that the reaper fired.
     stale_ttl_minutes = int(os.environ.get("SUMUP_STALE_PENDING_TTL_MIN", "15"))
     try:
         reaped_n = await reap_stale_pending_sumup(ttl_minutes=stale_ttl_minutes)
     except Exception as exc:  # noqa: BLE001
-        _REAP_STATE["last_error"] = str(exc)[:300]
         reaped_n = 0
         logger.error("recovery_sumup_reap_failed", error=str(exc))
+        # Best-effort: stamp the failure into the shared state row so the
+        # diag endpoint shows what went wrong.
+        try:
+            async with SessionLocal() as _db_err:
+                await _db_err.execute(text("""
+                    UPDATE sumup_reaper_state
+                       SET last_error = :e, updated_at = NOW()
+                     WHERE id = 1
+                """), {"e": str(exc)[:300]})
+                await _db_err.commit()
+        except Exception:  # noqa: BLE001
+            pass
     summary["stale_reaped"] = reaped_n
     summary["stale_ttl_minutes"] = max(5, min(stale_ttl_minutes, 180))
 
