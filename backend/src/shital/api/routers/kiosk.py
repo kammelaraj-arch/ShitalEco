@@ -1738,6 +1738,62 @@ async def sumup_checkout_status(checkout_id: str):
             if t_status and (raw_status == "PENDING" or not raw_status):
                 raw_status = t_status
         normalized = _normalize_sumup_status(raw_status)
+
+        # Transactions-history fallback — observed in production: for some
+        # Solo reader checkouts the /v0.1/checkouts/{id} endpoint keeps
+        # reporting PENDING with transactions: [] for a minute or longer
+        # even after the card has been tapped and SumUp has settled the
+        # payment. The transactions-history endpoint (/v2.1) reflects the
+        # tap within seconds. When the primary path still shows PENDING,
+        # we look up the donation that owns this checkout_id, pull its
+        # order reference (which the kiosk sent as checkout_reference /
+        # foreign_transaction_id), and search a small window of recent
+        # transactions for a match. First real "SUCCESSFUL" / "FAILED"
+        # match wins.
+        if normalized == "PENDING":
+            merchant_code = (
+                await SecretsManager.get("SUMUP_MERCHANT_CODE")
+                or settings.SUMUP_MERCHANT_CODE
+            )
+            foreign_ref = ""
+            try:
+                async with SessionLocal() as _db:
+                    _row = (await _db.execute(text("""
+                        SELECT reference FROM donations
+                         WHERE COALESCE(payment_ref, '') = :cid
+                           AND deleted_at IS NULL
+                         ORDER BY created_at DESC
+                         LIMIT 1
+                    """), {"cid": checkout_id})).mappings().one_or_none()
+                    if _row:
+                        foreign_ref = (_row["reference"] or "").strip()
+            except Exception:  # noqa: BLE001
+                pass
+            if merchant_code and foreign_ref:
+                try:
+                    async with httpx.AsyncClient(timeout=8) as _c:
+                        _r = await _c.get(
+                            f"https://api.sumup.com/v2.1/merchants/{merchant_code}/transactions/history",
+                            headers={"Authorization": f"Bearer {access_token}"},
+                            params={"limit": 20, "order": "descending"},
+                        )
+                    if _r.is_success:
+                        _hits = ((_r.json() or {}).get("items")
+                                 or (_r.json() or {}).get("transactions") or [])
+                        for _t in _hits:
+                            _fref = (_t.get("foreign_transaction_id")
+                                     or _t.get("checkout_reference") or "")
+                            if _fref and _fref == foreign_ref:
+                                raw_status = _t.get("status") or raw_status
+                                normalized = _normalize_sumup_status(raw_status)
+                                data["_transactions_history_fallback"] = {
+                                    "foreign_ref":      foreign_ref,
+                                    "transaction_code": _t.get("transaction_code"),
+                                }
+                                break
+                except Exception:  # noqa: BLE001
+                    pass
+
         if normalized != "PENDING":
             try:
                 await cache_set(f"sumup:checkout:{checkout_id}",
