@@ -5,6 +5,7 @@ import { apiFetch } from '@/lib/api'
 import { RichTextEditor } from '@/components/board/RichTextEditor'
 import { CollabDrawer } from '@/components/board/CollabDrawer'
 import { ExternalLinksPanel } from '@/components/board/ExternalLinksPanel'
+import { StructuredRiskPanel, StructuredBudgetPanel } from '@/components/board/StructuredImpact'
 import { AnnouncementPanel } from '@/components/board/AnnouncementPanel'
 import { ConditionsPanel } from '@/components/board/ConditionsPanel'
 import { SignoffPanel } from '@/components/board/SignoffPanel'
@@ -833,10 +834,10 @@ export default function ResolutionsPage() {
                 )}
 
                 {wizStep === 'impact' && (
-                  <div className="w-full space-y-4">
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <label className={lbl + ' mb-0'}>Risk / Impact</label>
+                  <div className="w-full space-y-6">
+                    <div className="rounded-2xl border border-white/10 bg-white/3 p-4">
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <p className="text-white/70 text-xs uppercase tracking-widest font-bold">⚠️ Risk / Impact</p>
                         {editing?.id && (
                           <button type="button" disabled={locked}
                             onClick={() => {
@@ -859,13 +860,16 @@ export default function ResolutionsPage() {
                           </button>
                         )}
                       </div>
-                      <textarea disabled={locked} value={form.risk_impact} onChange={e => setForm(p => ({ ...p, risk_impact: e.target.value }))} rows={5} className={inp + ' resize-none'}
-                        placeholder={'Format:\n• Category (Operational / Financial / Reputational / Safeguarding / Compliance / Cyber / Governance / External)\n• What could go wrong + who is affected\n• Likelihood × Impact (1–5 each)\n• Mitigation plan + owner\n\nExample:\n• OPERATIONAL + REPUTATIONAL — overflow car parking on Northwick Avenue could annoy neighbours and trigger council warning.\n• Likelihood 3 × Impact 2 = 6 (MEDIUM).\n• Mitigation: 4 car-park marshals + shuttle from Harrow Leisure Centre; CEO owns.'} />
-                      <p className="text-white/40 text-xs mt-1">If the risk is strategic or ongoing, it will be auto-added to the Org Risk Register on publish (CC26 §3).</p>
+                      <StructuredRiskPanel
+                        value={form.risk_impact}
+                        disabled={locked}
+                        onChange={text => setForm(p => ({ ...p, risk_impact: text }))}
+                      />
                     </div>
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <label className={lbl + ' mb-0'}>Budget Impact</label>
+
+                    <div className="rounded-2xl border border-white/10 bg-white/3 p-4">
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <p className="text-white/70 text-xs uppercase tracking-widest font-bold">💷 Budget Impact</p>
                         {editing?.id && (
                           <button type="button" disabled={locked}
                             onClick={() => {
@@ -888,10 +892,13 @@ export default function ResolutionsPage() {
                           </button>
                         )}
                       </div>
-                      <textarea disabled={locked} value={form.budget_impact} onChange={e => setForm(p => ({ ...p, budget_impact: e.target.value }))} rows={5} className={inp + ' resize-none'}
-                        placeholder={'Format:\n• Fund (General / Restricted / Capital / Designated)\n• One-off £ + recurring £ / year\n• VAT treatment\n• Match-funding or grant restriction\n\nExample:\n• Fund: General. One-off £15,000 + £3,000 contingency.\n• No recurring cost.\n• VAT: exempt (religious service).\n• No external restriction.'} />
-                      <p className="text-white/40 text-xs mt-1">If the amount is above the Treasurer's delegated authority, the decision type must be BOARD MEETING (step 1).</p>
+                      <StructuredBudgetPanel
+                        value={form.budget_impact}
+                        disabled={locked}
+                        onChange={text => setForm(p => ({ ...p, budget_impact: text }))}
+                      />
                     </div>
+
                     {editing?.id && (
                       <RisksPanel resolutionId={editing.id} locked={locked} />
                     )}
