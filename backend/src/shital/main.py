@@ -3172,6 +3172,9 @@ async def _patch_schema() -> None:
             added_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
         "CREATE INDEX IF NOT EXISTS idx_res_links_res ON resolution_external_links(resolution_id)",
+        # Source tracks where the link came from so the UI can badge
+        # SharePoint picks distinctly from a manually-pasted URL.
+        "ALTER TABLE resolution_external_links ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'manual'",
 
         # Comments thread on a draft — internal board discussion before the
         # resolution is published for voting. Rich text (sanitized HTML).
