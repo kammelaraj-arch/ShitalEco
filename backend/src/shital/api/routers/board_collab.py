@@ -75,14 +75,31 @@ class ExternalLinkIn(BaseModel):
     source: str = "manual"  # "manual" | "sharepoint" (future: "drive", "s3", ...)
 
 
+async def _external_links_has_source_column() -> bool:
+    """One-shot, cached check: does resolution_external_links have the
+    `source` column? #465 added it via a schema patch, but if that patch
+    hasn't landed yet the list/insert queries would 500. We fall back to
+    the pre-#465 shape in that case so the wizard keeps working."""
+    async with SessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'resolution_external_links'
+               AND column_name = 'source'
+            LIMIT 1
+        """))).first()
+    return bool(row)
+
+
 @router.get("/admin/board/resolutions/{rid}/external-links")
 async def list_external_links(rid: str, ctx: CurrentSpace) -> dict[str, Any]:
     _require_admin(ctx)
     await _ensure_resolution_exists(rid)
+    has_source = await _external_links_has_source_column()
+    source_col = "COALESCE(source, 'manual') AS source" if has_source else "'manual' AS source"
     async with SessionLocal() as db:
-        rows = (await db.execute(text("""
+        rows = (await db.execute(text(f"""
             SELECT id, label, url,
-                   COALESCE(source, 'manual') AS source,
+                   {source_col},
                    added_by_name, added_at
             FROM   resolution_external_links
             WHERE  resolution_id = CAST(:id AS uuid)
@@ -107,20 +124,34 @@ async def add_external_link(rid: str, body: ExternalLinkIn, ctx: CurrentSpace) -
     if len(url) > 2048 or len(label) > 255:
         raise HTTPException(400, detail="label or url too long")
     new_id = str(uuid.uuid4())
+    has_source = await _external_links_has_source_column()
     async with SessionLocal() as db:
-        await db.execute(text("""
-            INSERT INTO resolution_external_links
-                (id, resolution_id, label, url, source, added_by, added_by_name)
-            VALUES
-                (CAST(:id AS uuid), CAST(:rid AS uuid), :label, :url, :src,
-                 CAST(:u AS uuid), :uname)
-        """), {
-            "id": new_id, "rid": rid, "label": label, "url": url, "src": source,
-            "u": getattr(ctx, "user_id", None),
-            "uname": getattr(ctx, "user_email", "") or "",
-        })
+        if has_source:
+            await db.execute(text("""
+                INSERT INTO resolution_external_links
+                    (id, resolution_id, label, url, source, added_by, added_by_name)
+                VALUES
+                    (CAST(:id AS uuid), CAST(:rid AS uuid), :label, :url, :src,
+                     CAST(:u AS uuid), :uname)
+            """), {
+                "id": new_id, "rid": rid, "label": label, "url": url, "src": source,
+                "u": getattr(ctx, "user_id", None),
+                "uname": getattr(ctx, "user_email", "") or "",
+            })
+        else:
+            await db.execute(text("""
+                INSERT INTO resolution_external_links
+                    (id, resolution_id, label, url, added_by, added_by_name)
+                VALUES
+                    (CAST(:id AS uuid), CAST(:rid AS uuid), :label, :url,
+                     CAST(:u AS uuid), :uname)
+            """), {
+                "id": new_id, "rid": rid, "label": label, "url": url,
+                "u": getattr(ctx, "user_id", None),
+                "uname": getattr(ctx, "user_email", "") or "",
+            })
         await db.commit()
-    return {"ok": True, "id": new_id, "source": source}
+    return {"ok": True, "id": new_id, "source": source if has_source else "manual"}
 
 
 # ─── SharePoint document picker ─────────────────────────────────────────────
