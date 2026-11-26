@@ -80,6 +80,14 @@ export async function apiFetch<T = unknown>(
       else if (res.status === 504) msg = 'Request timed out — please try again'
       else { const t = await res.text().catch(() => ''); msg = t.replace(/<[^>]+>/g, '').trim().slice(0, 200) || `HTTP ${res.status}` }
     }
+    // Append the HTTP code + path so the banner tells us *which* call blew up
+    // without the operator having to open devtools. Only for server-ish errors
+    // where the generic "Internal Server Error" tells us nothing.
+    if (res.status >= 500) {
+      // Trim the request path to the API-visible segment (strip querystring + leading base).
+      const shortPath = path.split('?')[0]
+      msg = `${msg} [${res.status} ${shortPath}]`
+    }
     throw new Error(msg)
   }
   throw new Error('Server is temporarily unavailable — please try again in a moment')
