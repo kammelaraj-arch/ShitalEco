@@ -2295,11 +2295,12 @@ async def sumup_diag() -> dict[str, Any]:
         auth_check["ok"] = False
         auth_check["error"] = str(exc)[:300]
 
-    # Reaper observability — shows whether the in-process reaper has
-    # actually fired since the backend booted. Reads the singleton that
-    # the boot-time reap and the recovery loop keep up to date.
+    # Reaper observability — shows whether the reaper has actually fired
+    # since the backend booted. Reads the shared `sumup_reaper_state`
+    # row (not a per-worker dict) so every uvicorn worker sees the same
+    # numbers regardless of which one handles this request.
     from shital.services.background_recovery import reap_state
-    reaper_state = reap_state()
+    reaper_state = await reap_state()
 
     return {
         "keys": keys,
