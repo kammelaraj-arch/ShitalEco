@@ -1783,6 +1783,19 @@ async def sumup_checkout_status(checkout_id: str):
         foreign_ref = ""
 
     # ── Step 3: primary — authoritative transaction lookup ──────────────────
+    #     Uses the single-transaction retrieve endpoint
+    #       GET /v2.1/merchants/{code}/transactions?checkout_reference={ref}
+    #     which returns the one matching transaction with full detail
+    #     (including status and checkout_reference). Previous implementation
+    #     walked /transactions/history, but SumUp's history list-item
+    #     payload does NOT include `checkout_reference` or
+    #     `foreign_transaction_id` fields — it returns only
+    #     transaction_code, status, amount, currency, timestamp. So the
+    #     match loop could never succeed, and we always fell through to
+    #     the laggy Checkouts API. Symptom the user hit: Solo reader tap
+    #     lands, SumUp dashboard shows SUCCESSFUL within 1-2s, but the
+    #     kiosk UI stayed on "Waiting for card on SumUp reader…" until
+    #     the donor walked away.
     source = "transactions"
     raw_status = "PENDING"
     tx_code = ""
@@ -1790,28 +1803,27 @@ async def sumup_checkout_status(checkout_id: str):
         try:
             async with httpx.AsyncClient(timeout=8) as _c:
                 _r = await _c.get(
-                    f"https://api.sumup.com/v2.1/merchants/{merchant_code}/transactions/history",
+                    f"https://api.sumup.com/v2.1/merchants/{merchant_code}/transactions",
                     headers={"Authorization": f"Bearer {access_token}"},
-                    params={"limit": 20, "order": "descending"},
+                    params={"checkout_reference": foreign_ref},
                 )
             if _r.is_success:
-                for _t in ((_r.json() or {}).get("items")
-                           or (_r.json() or {}).get("transactions") or []):
-                    # SumUp exposes the reference under both
-                    # `checkout_reference` (modern) and
-                    # `foreign_transaction_id` (older history payloads).
-                    # Accept either; the server-stamped value we wrote on
-                    # donation.sumup_checkout_reference (SHT-*-*) matches
-                    # SumUp's checkout_reference exactly.
-                    _candidates = {
-                        (_t.get("checkout_reference") or "").strip(),
-                        (_t.get("foreign_transaction_id") or "").strip(),
-                    }
-                    if foreign_ref and foreign_ref in _candidates:
-                        raw_status = _t.get("status") or raw_status
-                        tx_code = _t.get("transaction_code") or ""
-                        break
+                _body = _r.json() or {}
+                # Response is a single transaction object on this endpoint,
+                # but older API versions / proxies occasionally wrap it in
+                # a list. Accept both shapes.
+                if isinstance(_body, list):
+                    _t = _body[0] if _body else {}
+                elif isinstance(_body, dict) and "items" in _body:
+                    _items = _body.get("items") or []
+                    _t = _items[0] if _items else {}
+                else:
+                    _t = _body
+                if _t:
+                    raw_status = _t.get("status") or raw_status
+                    tx_code = _t.get("transaction_code") or ""
         except Exception:  # noqa: BLE001
+            # Any transport/parse error — fall through to Checkouts fallback.
             pass
 
     normalized = _normalize_sumup_status(raw_status)
