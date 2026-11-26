@@ -608,23 +608,27 @@ export default function ResolutionsPage() {
                 </div>
               </div>
 
-              {/* Info strip (always-visible context) */}
-              <div className="px-6 py-3 bg-[#0e1626] border-b border-white/5 flex flex-wrap gap-x-10 gap-y-3 text-[11px]">
-                {[
-                  { label: 'Status', value: editing ? editing.status : 'NEW', accent: 'text-emerald-300' },
-                  { label: 'Category', value: (form.category || '—').replace(/_/g, ' ') },
-                  { label: 'Decision Type', value: (form.decision_type || '—').replace(/_/g, ' ') },
-                  { label: 'Decision Date', value: fmtDate(editing?.decision_date ?? form.decision_date) },
-                  { label: 'Attachments', value: `${attachments.length} file${attachments.length === 1 ? '' : 's'}` },
-                  { label: 'Tally', value: editing ? `FOR ${editing.tally_for} · AGAINST ${editing.tally_against} · ABSTAIN ${editing.tally_abstain}` : '—' },
-                  { label: 'Outcome', value: editing?.outcome ? editing.outcome.replace(/_/g, ' ') : 'Pending vote', accent: editing?.outcome === 'CARRIED' ? 'text-emerald-300' : editing?.outcome === 'NOT_CARRIED' ? 'text-red-300' : 'text-amber-300' },
-                ].map(it => (
-                  <div key={it.label} className="min-w-0">
-                    <div className="text-white/40 font-bold uppercase tracking-wider">{it.label}</div>
-                    <div className={`font-black ${it.accent || 'text-white'} truncate`}>{it.value}</div>
-                  </div>
-                ))}
-              </div>
+              {/* Info strip — only once there's a vote (OPEN or CLOSED) to
+                  show. Pre-publish the stats are visual noise; the fields
+                  that matter (category, decision type) are right there in
+                  the Basics form, and the sticky sidebar carries Ref +
+                  Status. Hidden entirely on DRAFT. */}
+              {editing && (editing.status === 'OPEN' || editing.status === 'CLOSED') && (
+                <div className="px-6 py-3 bg-[#0e1626] border-b border-white/5 flex flex-wrap gap-x-10 gap-y-3 text-[11px]">
+                  {[
+                    { label: 'Status', value: editing.status, accent: 'text-emerald-300' },
+                    { label: 'Decision Date', value: fmtDate(editing.decision_date ?? form.decision_date) },
+                    { label: 'Tally', value: `FOR ${editing.tally_for} · AGAINST ${editing.tally_against} · ABSTAIN ${editing.tally_abstain}` },
+                    { label: 'Outcome', value: editing.outcome ? editing.outcome.replace(/_/g, ' ') : 'Pending vote',
+                      accent: editing.outcome === 'CARRIED' ? 'text-emerald-300' : editing.outcome === 'NOT_CARRIED' ? 'text-red-300' : 'text-amber-300' },
+                  ].map(it => (
+                    <div key={it.label} className="min-w-0">
+                      <div className="text-white/40 font-bold uppercase tracking-wider">{it.label}</div>
+                      <div className={`font-black ${it.accent || 'text-white'} truncate`}>{it.value}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {error && (
                 <div className="sticky top-0 z-30 mx-6 mt-4 bg-red-500/15 border border-red-500/40 text-red-200 px-4 py-3 rounded-xl text-sm shadow-lg shadow-red-900/30 flex items-start gap-3">
@@ -1068,18 +1072,19 @@ export default function ResolutionsPage() {
                   </div>
                 )}
                   </div>
-                  {/* Right rail */}
+                  {/* Right rail — now a single sticky at-a-glance card.
+                      Separate cards for Resolution Record / Linked meeting /
+                      Supporting files were pulled out in #468: the Context
+                      step's "📎 Supporting material" button owns the
+                      file count now, and the single card below shows
+                      everything a chair glances at (Ref, Status, Category,
+                      Meeting). */}
                   <aside className="min-w-0 space-y-4">
-                    <div className="rounded-2xl border border-white/10 bg-[#0e1626] p-4">
-                      <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mb-2">Resolution record</p>
+                    <div className="rounded-2xl border border-white/10 bg-[#0e1626] p-4 space-y-3 sticky top-4">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
+                          <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Ref</p>
                           <p className="text-white font-black text-sm truncate">{editing ? `RES-${editing.id.slice(0, 8).toUpperCase()}` : 'Not saved yet'}</p>
-                          <p className="text-white/50 text-xs mt-0.5">
-                            {editing
-                              ? `${(editing.category || '').replace(/_/g, ' ')} · ${(editing.decision_type || '').replace(/_/g, ' ')}`
-                              : 'Save a draft to assign a reference.'}
-                          </p>
                         </div>
                         {editing && (
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-black border ${STATUS_BADGE[editing.status]}`}>
@@ -1087,40 +1092,27 @@ export default function ResolutionsPage() {
                           </span>
                         )}
                       </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-[#0e1626] p-4">
-                      <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mb-2">Linked meeting</p>
-                      {(() => {
-                        const m = meetings.find(mm => mm.id === form.meeting_id)
-                        if (!m) return <p className="text-white/50 text-xs">No meeting linked. Pick one in the Basics step for AI draft context.</p>
-                        return (
-                          <div>
-                            <p className="text-white font-bold text-sm">{m.title || m.meeting_type.replace(/_/g, ' ')}</p>
-                            <p className="text-white/50 text-xs mt-0.5">{fmtDate(m.scheduled_at)}</p>
-                          </div>
-                        )
-                      })()}
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-[#0e1626] p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Supporting files</p>
-                        <span className="text-white/60 text-xs font-bold">{attachments.length}</span>
+                      <div>
+                        <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Category</p>
+                        <p className="text-white/80 text-xs mt-0.5">
+                          {editing
+                            ? `${(editing.category || form.category || '').replace(/_/g, ' ') || '—'} · ${(editing.decision_type || form.decision_type || '').replace(/_/g, ' ') || '—'}`
+                            : `${(form.category || '').replace(/_/g, ' ') || '—'} · ${(form.decision_type || '').replace(/_/g, ' ') || '—'}`}
+                        </p>
                       </div>
-                      {attachments.length === 0 ? (
-                        <p className="text-white/50 text-xs">No files attached yet.</p>
-                      ) : (
-                        <ul className="space-y-1">
-                          {attachments.slice(0, 4).map(a => (
-                            <li key={a.id} className="flex items-center gap-2 text-xs">
-                              <span className="text-white/40">{a.source === 'meeting' ? '📅' : a.source === 'ai' ? '✨' : '📎'}</span>
-                              <a href={a.url} target="_blank" rel="noreferrer" className="text-saffron-300 hover:underline truncate flex-1">{a.filename}</a>
-                            </li>
-                          ))}
-                          {attachments.length > 4 && <li className="text-white/40 text-xs">+ {attachments.length - 4} more…</li>}
-                        </ul>
-                      )}
+                      <div>
+                        <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Linked meeting</p>
+                        {(() => {
+                          const m = meetings.find(mm => mm.id === form.meeting_id)
+                          if (!m) return <p className="text-white/50 text-xs mt-0.5">None — pick one in Basics for AI draft context.</p>
+                          return (
+                            <div className="mt-0.5">
+                              <p className="text-white/80 text-xs truncate">{m.title || m.meeting_type.replace(/_/g, ' ')}</p>
+                              <p className="text-white/40 text-[11px]">{fmtDate(m.scheduled_at)}</p>
+                            </div>
+                          )
+                        })()}
+                      </div>
                     </div>
 
                     {editing && (editing.status === 'OPEN' || editing.status === 'CLOSED') && (
