@@ -3,9 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { apiFetch } from '@/lib/api'
 import { RichTextEditor } from '@/components/board/RichTextEditor'
-import { ExternalLinksPanel } from '@/components/board/ExternalLinksPanel'
-import { CommentsPanel } from '@/components/board/CommentsPanel'
-import { InfoRequestsPanel } from '@/components/board/InfoRequestsPanel'
+import { CollabDrawer } from '@/components/board/CollabDrawer'
 import { AnnouncementPanel } from '@/components/board/AnnouncementPanel'
 import { ConditionsPanel } from '@/components/board/ConditionsPanel'
 import { SignoffPanel } from '@/components/board/SignoffPanel'
@@ -138,6 +136,7 @@ export default function ResolutionsPage() {
   const [votes, setVotes] = useState<Vote[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [hasOpenRequired, setHasOpenRequired] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiNote, setAiNote] = useState('')
@@ -756,52 +755,28 @@ export default function ResolutionsPage() {
                       <p className="text-white/40 text-xs mt-1">Example: “That the board approve the Diwali 2026 festival plan including a second service on 2 Nov at 6pm, with a total budget of £15,000 from the General Fund and £3,000 contingency, subject to a safety plan sign-off by the Trust Health &amp; Safety lead.”</p>
                     </div>
 
-                    {/* Attachments */}
-                    <div className="rounded-2xl border border-white/10 bg-white/3 p-4">
-                      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-                        <p className="text-white/70 text-xs uppercase tracking-widest font-bold">📎 Supporting files</p>
-                        <div className="flex gap-2 flex-wrap">
-                          <label className="px-3 py-1.5 rounded-lg border border-white/10 text-white/80 text-xs font-bold hover:bg-white/5 cursor-pointer">
-                            {uploading ? 'Uploading…' : '+ Add files'}
-                            <input type="file" multiple hidden disabled={locked || uploading}
-                              onChange={e => { void uploadFiles(e.target.files); e.currentTarget.value = '' }} />
-                          </label>
-                          {form.meeting_id && (
-                            <button onClick={pullMeetingFiles} disabled={locked || uploading}
-                              className="px-3 py-1.5 rounded-lg border border-saffron-400/40 text-saffron-300 text-xs font-bold hover:bg-saffron-400/10 disabled:opacity-40">
-                              📥 Pull meeting files
-                            </button>
-                          )}
+                    {/* Single "Supporting material" row — opens the drawer with
+                        files, links, info-requests and comments as tabs. */}
+                    <button
+                      type="button"
+                      onClick={() => setDrawerOpen(true)}
+                      disabled={!editing?.id}
+                      className="w-full rounded-2xl border border-white/10 bg-white/3 p-4 text-left hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-white/70 text-xs uppercase tracking-widest font-bold">📎 Supporting material</p>
+                          <p className="text-white/50 text-xs mt-0.5">
+                            {attachments.length === 0
+                              ? (editing?.id ? 'Files, links, info-requests, comments — attach what the board needs to decide.' : 'Save as draft first — then attach files, links and info-requests.')
+                              : `${attachments.length} file${attachments.length === 1 ? '' : 's'} attached. Open to add links, info-requests or comments.`}
+                          </p>
                         </div>
+                        <span className="shrink-0 text-saffron-300 text-xs font-bold uppercase tracking-wide">
+                          {editing?.id ? 'Open ›' : ''}
+                        </span>
                       </div>
-                      <p className="text-white/40 text-xs mb-3">Minutes, quotes, prior correspondence. Trustees see these linked from the vote-invite.</p>
-                      {attachments.length === 0 ? (
-                        <p className="text-white/30 text-xs italic">No files attached yet.</p>
-                      ) : (
-                        <ul className="space-y-1.5">
-                          {attachments.map(a => (
-                            <li key={a.id} className="flex items-center justify-between gap-3 p-2 rounded-lg bg-white/3 text-xs">
-                              <div className="min-w-0 flex-1 flex items-center gap-2">
-                                <span className="text-white/40">{a.source === 'meeting' ? '📅' : a.source === 'ai' ? '✨' : '📎'}</span>
-                                <a href={a.url} target="_blank" rel="noreferrer" className="text-saffron-300 hover:underline truncate">{a.filename}</a>
-                                <span className="text-white/40">· {fmtBytes(a.size_bytes)}</span>
-                              </div>
-                              {!locked && (
-                                <button onClick={() => removeAttachment(a.id)} className="text-red-400/60 hover:text-red-400 px-1">✕</button>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-
-                    {editing?.id && (
-                      <CollabSection
-                        resolutionId={editing.id}
-                        locked={locked}
-                        onOpenRequiredChange={setHasOpenRequired}
-                      />
-                    )}
+                    </button>
                   </div>
                 )}
 
@@ -1224,6 +1199,24 @@ export default function ResolutionsPage() {
           </>
         )}
       </AnimatePresence>
+
+      {/* Collab drawer — mounts outside the wizard modal so it slides in
+          above the darkened body without fighting the modal's own layout. */}
+      {editing?.id && (
+        <CollabDrawer
+          isOpen={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          resolutionId={editing.id}
+          locked={locked}
+          attachments={attachments}
+          uploading={uploading}
+          onUploadFiles={uploadFiles}
+          onPullMeetingFiles={pullMeetingFiles}
+          showPullMeetingFiles={Boolean(form.meeting_id)}
+          onRemoveAttachment={removeAttachment}
+          onOpenRequiredChange={setHasOpenRequired}
+        />
+      )}
     </div>
   )
 }
@@ -1553,37 +1546,7 @@ function RisksPanel({ resolutionId, locked }: { resolutionId: string; locked: bo
   )
 }
 
-// Phase A collaboration section: external links + comments + information
-// requests. Tabbed so the Context step doesn't scroll forever. Rendered
-// only once the resolution has an id (drafts need to be saved before
-// anything can be attached to them).
-function CollabSection({
-  resolutionId, locked, onOpenRequiredChange,
-}: {
-  resolutionId: string
-  locked: boolean
-  onOpenRequiredChange: (b: boolean) => void
-}) {
-  const [tab, setTab] = useState<'links' | 'comments' | 'info'>('info')
-  const tabBtn = (active: boolean) =>
-    `px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
-      active ? 'bg-saffron-400/15 text-saffron-300' : 'text-white/60 hover:text-white/80'
-    }`
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <p className="text-white/70 text-xs uppercase tracking-widest font-bold">🤝 Collaboration</p>
-        <div className="flex gap-1">
-          <button onClick={() => setTab('info')}     className={tabBtn(tab === 'info')}>Information requests</button>
-          <button onClick={() => setTab('links')}    className={tabBtn(tab === 'links')}>External links</button>
-          <button onClick={() => setTab('comments')} className={tabBtn(tab === 'comments')}>Comments</button>
-        </div>
-      </div>
-      <div className="rounded-xl bg-white/90 p-3">
-        {tab === 'info'     && <InfoRequestsPanel resolutionId={resolutionId} locked={locked} onChange={onOpenRequiredChange} />}
-        {tab === 'links'    && <ExternalLinksPanel resolutionId={resolutionId} locked={locked} />}
-        {tab === 'comments' && <CommentsPanel     resolutionId={resolutionId} locked={locked} />}
-      </div>
-    </div>
-  )
-}
+// (CollabSection was inlined on the Context step before #467 — the four
+// surfaces it held (files, external links, info-requests, comments) now
+// live inside <CollabDrawer>. The wizard page only owns the trigger
+// button; the drawer owns its own tab state.)
