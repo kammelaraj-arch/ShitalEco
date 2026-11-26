@@ -182,11 +182,12 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
     """Return 'inserted' or 'updated'. Links new rows to the provider's primary
     finance_account; existing rows have their account_id backfilled only when
     it is still NULL (so operators can retag a specific row without the sync
-    stomping on it)."""
-    existed = (await db.execute(text("""
-        SELECT id FROM payment_transactions WHERE provider = :p AND external_id = :eid
-    """), {"p": provider, "eid": external_id})).first()
+    stomping on it).
 
+    Atomic via ON CONFLICT on the uq_payment_tx_provider_eid index — two
+    concurrent syncs racing on the same transaction_code converge to one
+    row instead of two. Replaced the pre-check SELECT that caused the
+    26-Nov duplicate-row incident."""
     account_id = await _primary_account_id_for_provider(db, provider)
 
     params = {
@@ -229,42 +230,14 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
         "failure_code":    (row.get("failure_code") or "")[:80],
         "failure_message": (row.get("failure_message") or "")[:500],
     }
-    if existed:
-        await db.execute(text("""
-            UPDATE payment_transactions SET
-              kind = :kind, status = :status,
-              amount_pence = :amount, currency = :currency,
-              fee_pence = :fee, net_pence = :net,
-              description = :desc, customer_hint = :cust,
-              payment_method_hint = :pmh, source_ref = :src,
-              payout_ref = :payout, provider_created_at = :pca,
-              raw = CAST(:raw AS JSONB), synced_at = NOW(),
-              account_id = COALESCE(account_id, :account),
-              customer_name     = CASE WHEN :cust_name <> ''     THEN :cust_name     ELSE customer_name     END,
-              customer_email    = CASE WHEN :cust_email <> ''    THEN :cust_email    ELSE customer_email    END,
-              customer_phone    = CASE WHEN :cust_phone <> ''    THEN :cust_phone    ELSE customer_phone    END,
-              billing_country   = CASE WHEN :bill_country <> ''  THEN :bill_country  ELSE billing_country   END,
-              billing_postcode  = CASE WHEN :bill_postcode <> '' THEN :bill_postcode ELSE billing_postcode  END,
-              payment_method_type = CASE WHEN :pm_type <> ''     THEN :pm_type       ELSE payment_method_type END,
-              card_brand        = CASE WHEN :card_brand <> ''    THEN :card_brand    ELSE card_brand        END,
-              card_last4        = CASE WHEN :card_last4 <> ''    THEN :card_last4    ELSE card_last4        END,
-              card_country      = CASE WHEN :card_country <> ''  THEN :card_country  ELSE card_country      END,
-              card_funding      = CASE WHEN :card_funding <> ''  THEN :card_funding  ELSE card_funding      END,
-              receipt_url       = CASE WHEN :receipt_url <> ''   THEN :receipt_url   ELSE receipt_url       END,
-              statement_descriptor = CASE WHEN :stmt_desc <> ''  THEN :stmt_desc     ELSE statement_descriptor END,
-              available_at      = COALESCE(:available_at, available_at),
-              refunded          = CASE WHEN :refunded THEN true ELSE refunded END,
-              refund_amount_pence = GREATEST(refund_amount_pence, :refund_amount),
-              disputed          = CASE WHEN :disputed THEN true ELSE disputed END,
-              -- Never clobber a populated reason with a blank re-sync:
-              -- Stripe can return the charge later without failure_message
-              -- once the merchant acked it. Upsert only widens.
-              failure_code      = CASE WHEN :failure_code    <> '' THEN :failure_code    ELSE failure_code    END,
-              failure_message   = CASE WHEN :failure_message <> '' THEN :failure_message ELSE failure_message END
-            WHERE provider = :provider AND external_id = :eid
-        """), params)
-        return "updated"
-    await db.execute(text("""
+    # Single atomic statement, guarded by the uq_payment_tx_provider_eid
+    # unique index (main.py schema patch). Two concurrent syncs that both
+    # see "no existing row" cannot both insert: whoever loses the race
+    # takes the UPDATE branch. Returns 'inserted' or 'updated' by inspecting
+    # xmax (Postgres's row-version column) — 0 on a fresh insert, non-zero
+    # on a merge into an existing row. Replaces the SELECT-then-INSERT race
+    # that produced 7 duplicate rows for one SumUp tap on 26-Nov.
+    result = await db.execute(text("""
         INSERT INTO payment_transactions
           (provider, external_id, kind, status, amount_pence, currency,
            fee_pence, net_pence, description, customer_hint,
@@ -287,8 +260,41 @@ async def _upsert_tx(db: Any, provider: str, external_id: str, row: dict[str, An
            :receipt_url, :stmt_desc, :available_at,
            :refunded, :refund_amount, :disputed,
            :failure_code, :failure_message)
+        ON CONFLICT (provider, external_id) WHERE external_id <> ''
+        DO UPDATE SET
+            kind = EXCLUDED.kind, status = EXCLUDED.status,
+            amount_pence = EXCLUDED.amount_pence, currency = EXCLUDED.currency,
+            fee_pence = EXCLUDED.fee_pence, net_pence = EXCLUDED.net_pence,
+            description = EXCLUDED.description, customer_hint = EXCLUDED.customer_hint,
+            payment_method_hint = EXCLUDED.payment_method_hint,
+            source_ref = EXCLUDED.source_ref,
+            payout_ref = EXCLUDED.payout_ref,
+            provider_created_at = EXCLUDED.provider_created_at,
+            raw = EXCLUDED.raw,
+            synced_at = NOW(),
+            account_id = COALESCE(payment_transactions.account_id, EXCLUDED.account_id),
+            customer_name     = CASE WHEN EXCLUDED.customer_name <> ''     THEN EXCLUDED.customer_name     ELSE payment_transactions.customer_name     END,
+            customer_email    = CASE WHEN EXCLUDED.customer_email <> ''    THEN EXCLUDED.customer_email    ELSE payment_transactions.customer_email    END,
+            customer_phone    = CASE WHEN EXCLUDED.customer_phone <> ''    THEN EXCLUDED.customer_phone    ELSE payment_transactions.customer_phone    END,
+            billing_country   = CASE WHEN EXCLUDED.billing_country <> ''   THEN EXCLUDED.billing_country   ELSE payment_transactions.billing_country   END,
+            billing_postcode  = CASE WHEN EXCLUDED.billing_postcode <> ''  THEN EXCLUDED.billing_postcode  ELSE payment_transactions.billing_postcode  END,
+            payment_method_type = CASE WHEN EXCLUDED.payment_method_type <> '' THEN EXCLUDED.payment_method_type ELSE payment_transactions.payment_method_type END,
+            card_brand        = CASE WHEN EXCLUDED.card_brand <> ''        THEN EXCLUDED.card_brand        ELSE payment_transactions.card_brand        END,
+            card_last4        = CASE WHEN EXCLUDED.card_last4 <> ''        THEN EXCLUDED.card_last4        ELSE payment_transactions.card_last4        END,
+            card_country      = CASE WHEN EXCLUDED.card_country <> ''      THEN EXCLUDED.card_country      ELSE payment_transactions.card_country      END,
+            card_funding      = CASE WHEN EXCLUDED.card_funding <> ''      THEN EXCLUDED.card_funding      ELSE payment_transactions.card_funding      END,
+            receipt_url       = CASE WHEN EXCLUDED.receipt_url <> ''       THEN EXCLUDED.receipt_url       ELSE payment_transactions.receipt_url       END,
+            statement_descriptor = CASE WHEN EXCLUDED.statement_descriptor <> '' THEN EXCLUDED.statement_descriptor ELSE payment_transactions.statement_descriptor END,
+            available_at      = COALESCE(EXCLUDED.available_at, payment_transactions.available_at),
+            refunded          = CASE WHEN EXCLUDED.refunded THEN true ELSE payment_transactions.refunded END,
+            refund_amount_pence = GREATEST(payment_transactions.refund_amount_pence, EXCLUDED.refund_amount_pence),
+            disputed          = CASE WHEN EXCLUDED.disputed THEN true ELSE payment_transactions.disputed END,
+            failure_code      = CASE WHEN EXCLUDED.failure_code    <> '' THEN EXCLUDED.failure_code    ELSE payment_transactions.failure_code    END,
+            failure_message   = CASE WHEN EXCLUDED.failure_message <> '' THEN EXCLUDED.failure_message ELSE payment_transactions.failure_message END
+        RETURNING (xmax = 0) AS inserted
     """), params)
-    return "inserted"
+    row = result.first()
+    return "inserted" if (row and row[0]) else "updated"
 
 
 # ────────────────────────────── Stripe sync ────────────────────────────────

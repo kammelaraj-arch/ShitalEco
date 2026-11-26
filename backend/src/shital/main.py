@@ -4534,6 +4534,28 @@ async def _patch_schema() -> None:
         "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_code    VARCHAR(80)  NOT NULL DEFAULT ''",
         "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_message VARCHAR(500) NOT NULL DEFAULT ''",
 
+        # Dedup + unique key on (provider, external_id). Root cause of the
+        # 26-Nov dupes: _upsert_tx used "SELECT then INSERT/UPDATE" without
+        # a unique constraint, so the boot-time reconcile + a user-triggered
+        # sync + the webhook ingest could all see "no row" for the same
+        # SumUp transaction_code at the same time and each insert their
+        # own copy. Operator saw a single £2 tap show up seven times on
+        # the Transactions page.
+        # Delete the extras keeping the oldest row per (provider, external_id)
+        # BEFORE creating the unique index — Postgres refuses an index that
+        # the current data violates.
+        """DELETE FROM payment_transactions
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                  FROM payment_transactions
+                 WHERE external_id <> ''
+                 GROUP BY provider, external_id
+            )
+            AND external_id <> ''""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_tx_provider_eid "
+        "ON payment_transactions(provider, external_id) "
+        "WHERE external_id <> ''",
+
         # Single-row counter table for the SumUp stale-pending reaper.
         # Needed because the in-process _REAP_STATE dict is per-uvicorn-
         # worker, so a /sumup/diag call hitting a different worker from
