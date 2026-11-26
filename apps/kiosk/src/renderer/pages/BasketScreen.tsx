@@ -439,13 +439,15 @@ function ContactCaptureScreen({
           </div>
         )}
 
-        {/* Details / Anonymous radio selector */}
-        <div className="flex gap-2">
+        {/* Details / Anonymous radio selector — stacked vertically so each
+            option has room to breathe and the description sits beneath the
+            title, as it used to before the layout went to two columns. */}
+        <div className="flex flex-col gap-3">
           {/* Details option */}
           <button
             type="button"
             onClick={() => { setAnonymous(false) }}
-            className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
+            className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
             style={{ borderColor: !anonymous ? '#FF9933' : '#e5e7eb', background: !anonymous ? '#FFF7ED' : '#fff' }}
           >
             {/* Radio circle */}
@@ -462,8 +464,8 @@ function ContactCaptureScreen({
           {/* Anonymous option */}
           <button
             type="button"
-            onClick={() => { setAnonymous(true); setName(''); setEmail(''); setPhone('') }}
-            className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
+            onClick={() => { setAnonymous(true); setFirstName(''); setSurname(''); setEmail(''); setPhone('') }}
+            className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
             style={{ borderColor: anonymous ? '#6B7280' : '#e5e7eb', background: anonymous ? '#F9FAFB' : '#fff' }}
           >
             {/* Radio circle */}

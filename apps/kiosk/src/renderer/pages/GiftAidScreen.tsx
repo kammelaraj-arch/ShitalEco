@@ -441,12 +441,13 @@ export function GiftAidScreen() {
                 )}
               </div>
 
-              {/* Details / Anonymous radio row */}
-              <div className="flex gap-2">
+              {/* Details / Anonymous — stacked vertically so each option
+                  reads cleanly with its description beneath. */}
+              <div className="flex flex-col gap-3">
                 <button
                   type="button"
                   onClick={() => setNoAnonymous(false)}
-                  className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
+                  className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
                   style={{ borderColor: !noAnonymous ? th.langActive : '#e5e7eb', background: !noAnonymous ? '#FFF7ED' : '#fff' }}
                 >
                   <div className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"
@@ -462,7 +463,7 @@ export function GiftAidScreen() {
                 <button
                   type="button"
                   onClick={() => { setNoAnonymous(true); setNoFormFirstName(''); setNoFormSurname(''); setNoFormEmail(''); setNoFormPhone('') }}
-                  className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
+                  className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-[0.97]"
                   style={{ borderColor: noAnonymous ? '#6B7280' : '#e5e7eb', background: noAnonymous ? '#F9FAFB' : '#fff' }}
                 >
                   <div className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"

@@ -268,28 +268,60 @@ export function CheckoutScreen() {
       className="w-full h-full flex flex-col items-center justify-center gap-6 px-8"
       style={{ background: th.mainBg, fontFamily: 'Inter, system-ui, sans-serif' }}
     >
-      {error ? (
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="text-center max-w-sm w-full">
-          <div className="text-6xl mb-4">⚠️</div>
-          <h2 className="font-black text-xl text-gray-900 mb-2">Something went wrong</h2>
-          <p className="text-gray-500 text-sm mb-6">{error}</p>
-          <div className="flex gap-3">
-            <button
-              onClick={() => setScreen('basket')}
-              className="flex-1 py-3.5 rounded-2xl border-2 border-gray-200 text-gray-600 font-bold text-sm"
-            >
-              ← Back to Basket
-            </button>
-            <button
-              onClick={processPayment}
-              className="flex-2 py-3.5 px-6 rounded-2xl text-white font-black text-sm shadow-lg"
-              style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', flex: 2 }}
-            >
-              Try Again →
-            </button>
-          </div>
-        </motion.div>
-      ) : (
+      {error ? (() => {
+        // Pretty-print the common machine errors so the donor and
+        // the volunteer at the till don't have to read JSON. Falls
+        // back to the raw string for anything we haven't mapped yet.
+        const prettyError = (raw: string): { headline: string; detail: string; tip?: string } => {
+          const s = raw || ''
+          if (/READER_OFFLINE|reader.*offline|device is offline/i.test(s)) return {
+            headline: 'Card reader is offline',
+            detail:   'The card reader at this kiosk isn\'t currently reachable.',
+            tip:      'Wake the reader with its button, check it has Wi-Fi/4G signal, and tap Try Again. If it stays offline, ask a volunteer to power-cycle the reader.',
+          }
+          if (/SumUp auth rejected|SUMUP_ACCESS_TOKEN|SumUp credentials/i.test(s)) return {
+            headline: 'Payment service not connected',
+            detail:   'The till can\'t sign in to SumUp right now.',
+            tip:      'Ask an admin to refresh the SumUp access token in Admin → API Keys.',
+          }
+          if (/network|timeout|ECONN|fetch failed/i.test(s)) return {
+            headline: 'Connection trouble',
+            detail:   'The till couldn\'t reach the server.',
+            tip:      'Check the kiosk Wi-Fi, then tap Try Again.',
+          }
+          // Pull "detail" out of a JSON error body if present (keeps the UI
+          // readable even for errors we haven't explicitly mapped yet).
+          const detailMatch = s.match(/"detail"\s*:\s*"([^"]+)"/)
+          return {
+            headline: 'Something went wrong',
+            detail:   detailMatch ? detailMatch[1] : s,
+          }
+        }
+        const pretty = prettyError(error)
+        return (
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="text-center max-w-sm w-full">
+            <div className="text-6xl mb-4">⚠️</div>
+            <h2 className="font-black text-xl text-gray-900 mb-2">{pretty.headline}</h2>
+            <p className="text-gray-600 text-sm mb-2">{pretty.detail}</p>
+            {pretty.tip && <p className="text-gray-500 text-xs mb-6 leading-relaxed">{pretty.tip}</p>}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setScreen('basket')}
+                className="flex-1 py-3.5 rounded-2xl border-2 border-gray-200 text-gray-600 font-bold text-sm"
+              >
+                ← Back to Basket
+              </button>
+              <button
+                onClick={processPayment}
+                className="flex-2 py-3.5 px-6 rounded-2xl text-white font-black text-sm shadow-lg"
+                style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', flex: 2 }}
+              >
+                Try Again →
+              </button>
+            </div>
+          </motion.div>
+        )
+      })() : (
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center">
           {/* Spinning logo */}
           <motion.div

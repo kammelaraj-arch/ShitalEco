@@ -157,8 +157,19 @@ export function KioskKeyboard({
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: '100%', opacity: 0 }}
           transition={{ type: 'spring', damping: 32, stiffness: 380 }}
-          className="flex-shrink-0 w-full"
+          className="w-full"
+          // Pin to the viewport bottom so every row (QWERTY + digits + SPACE
+          // row) is always visible regardless of how tall the parent screen
+          // happens to be. Pre-fix the keyboard sat in normal flow and the
+          // lower rows were clipped on short Chromebox / in-a-browser views,
+          // which is exactly what a tester just reported on kiosk.shital's
+          // Gift Aid screen (only the 1-0 row was visible).
           style={{
+            position: 'fixed',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 50,
             background: '#F9FAFB',
             borderTop: `3px solid ${accent}`,
             boxShadow: '0 -4px 24px rgba(0,0,0,0.12)',
