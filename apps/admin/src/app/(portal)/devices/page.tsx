@@ -263,6 +263,64 @@ export default function DevicesPage() {
     setDrawerOpen(true)
   }
 
+  // ── Clone ────────────────────────────────────────────────────────────────────
+  // Pre-fills the create drawer with every setting from the source device
+  // except the fields that must stay unique or get re-chosen manually: name
+  // (nudged to "<name> (copy)"), card reader (blank so the operator picks a
+  // different physical reader), serial, IP, location, device username/
+  // password. Form state uses the create path (editing=null) so pressing
+  // Save POSTs a new record, including the device token the backend
+  // generates — same flow as pressing "+ Add Device" with every option
+  // already filled in.
+  const openClone = (d: KioskDevice) => {
+    setEditing(null)
+    setForm({
+      name: `${d.name} (copy)`,
+      description: d.description,
+      device_type: d.device_type,
+      branch_id: d.branch_id,
+      location: '',
+      latitude:  d.latitude  ?? '',
+      longitude: d.longitude ?? '',
+      status: d.status,
+      screen_profile_id: d.screen_profile_id || '',
+      peak_start: d.peak_start, peak_end: d.peak_end,
+      off_peak_playlist_id: d.off_peak_playlist_id || '',
+      default_donate_amount: d.default_donate_amount,
+      // Reader intentionally cleared — the whole point of cloning is to
+      // attach a DIFFERENT reader to the new device.
+      card_reader_id: '',
+      serial_number: '', ip_address: '',
+      notes: d.notes,
+      kiosk_theme: (d.kiosk_theme || 'lotus') as KioskThemeId,
+      org_name: d.org_name || '', org_logo_url: d.org_logo_url || '',
+      device_username: '', device_password: '',
+      show_monthly_giving: d.show_monthly_giving ?? false,
+      enable_gift_aid: d.enable_gift_aid ?? false,
+      tap_and_go: d.tap_and_go ?? true,
+      donate_title: d.donate_title || 'Tap & Donate',
+      monthly_giving_text: d.monthly_giving_text || 'Make a big impact from just £5/month',
+      monthly_giving_amount: d.monthly_giving_amount ?? 5,
+      confirmation_text: d.confirmation_text || '',
+      bg_color: d.bg_color || '',
+      menu_profile_id: d.menu_profile_id || '',
+      menu_options: {
+        test_print:  d.menu_options?.test_print  ?? true,
+        theme_cycle: d.menu_options?.theme_cycle ?? true,
+        refresh:     d.menu_options?.refresh     ?? true,
+        admin:       d.menu_options?.admin       ?? true,
+      },
+      donation_mode:      (d.donation_mode === 'project' ? 'project' : 'quick') as 'quick' | 'project',
+      linked_project_ids: d.linked_project_ids || [],
+      gupt_daan_enabled:  d.gupt_daan_enabled ?? false,
+      enabled_tiles:      d.enabled_tiles || [],
+      tier_profile_id:    d.tier_profile_id || '',
+      pairing_pin_input: '',
+    })
+    setError('')
+    setDrawerOpen(true)
+  }
+
   // ── Save ─────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!form.name.trim()) { setError('Device name is required'); return }
@@ -628,6 +686,14 @@ export default function DevicesPage() {
                         </a>
                       )
                     })()}
+                    <button
+                      onClick={() => openClone(d)}
+                      title="Make a copy of this device — opens the new-device drawer pre-filled with every setting from this one. Reader, serial, IP and device credentials are intentionally blank for the clone."
+                      className="px-3 py-2 rounded-xl text-xs font-bold text-sky-300/80 hover:text-sky-200 hover:bg-sky-900/20 transition-colors inline-flex items-center gap-1"
+                      style={{ border: '1px solid rgba(56,189,248,0.25)' }}
+                    >
+                      ⧉ Clone
+                    </button>
                     <button
                       onClick={() => handleDelete(d.id)}
                       disabled={deleting === d.id}
