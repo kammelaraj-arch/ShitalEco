@@ -1678,24 +1678,41 @@ async def stripe_webhook(request: Request):
 
 @router.get("/sumup/checkout/{checkout_id}")
 async def sumup_checkout_status(checkout_id: str):
-    """
-    Return SumUp checkout status. Checks the Redis webhook cache first
-    (populated by POST /sumup/webhook the instant payment completes) then
-    falls back to polling the SumUp API directly.
-    """
+    """Report the terminal status of a Solo-reader checkout.
 
+    Previous implementation treated GET /v0.1/checkouts/{id} as the
+    source of truth and fell back to GET /transactions/history only when
+    that first call returned PENDING. In production the Checkouts API
+    lags Solo reader taps by tens of seconds (sometimes minutes) with
+    status: PENDING, transactions: [] — leaving the kiosk UI stuck on
+    "Waiting for card…" and the donation row stuck on PENDING even
+    though the card had been charged.
 
-    # Normalize SumUp's various vocabularies to a single set:
-    #   PAID     — donor's card charged successfully
-    #   FAILED   — declined / rejected
-    #   EXPIRED  — donor walked away / session timeout
-    #   CANCELLED — donor or app cancelled before tap
-    #   PENDING  — still waiting
-    # Solo reader checkouts use SUCCESSFUL; Checkouts-API uses PAID; transactions
-    # array uses SUCCESSFUL/PAID interchangeably. Without normalization the
-    # kiosk frontend's `status === 'PAID'` check missed Solo reader successes
-    # and the app sat stuck on "Waiting for card..." after the card was tapped.
+    This handler now resolves the status in one pass against the
+    authoritative Solo-reader source (merchant transactions, which
+    SumUp updates within seconds):
+
+      Step 1  Redis cache (populated by POST /sumup/webhook). Fastest
+              path. Only used when a terminal status is already cached.
+      Step 2  Look up the donation that owns this checkout_id by
+              matching donations.payment_ref. The donation's reference
+              is what we send to SumUp as checkout_reference /
+              foreign_transaction_id.
+      Step 3  GET /v2.1/merchants/{code}/transactions?checkout_reference=…
+              — SumUp's authoritative transaction index. A SUCCESSFUL /
+              FAILED / CANCELLED row here means the tap landed on the
+              reader. This returns within 1-2s of the tap in practice.
+      Step 4  If no transaction yet (donor hasn't tapped), fall through
+              to GET /v0.1/checkouts/{id}. Useful for the window between
+              the checkout being pushed to the reader and the donor
+              tapping their card.
+
+    The "return_url"/"webhook" delivery path still works for anyone who
+    configures a merchant-level webhook in SumUp's dashboard — Step 1
+    will short-circuit this handler before we touch the HTTP APIs.
+    """
     def _normalize_sumup_status(raw: str | None) -> str:
+        """Collapse SumUp's three vocabularies to one."""
         s = (raw or "PENDING").upper().strip()
         if s in {"PAID", "SUCCESSFUL", "SUCCESS", "COMPLETED"}:
             return "PAID"
@@ -1707,102 +1724,107 @@ async def sumup_checkout_status(checkout_id: str):
             return "EXPIRED"
         return "PENDING"
 
-    # Fast path: webhook already delivered the final status
+    # ── Step 1: webhook cache (when it lands, it beats everything) ──────────
     try:
         cached = await cache_get(f"sumup:checkout:{checkout_id}")
         if cached and cached.get("status") not in (None, "PENDING"):
-            return {"status": _normalize_sumup_status(cached.get("status")),
-                    "raw_status": cached.get("status"), "source": "webhook"}
+            return {
+                "status":     _normalize_sumup_status(cached.get("status")),
+                "raw_status": cached.get("status"),
+                "source":     "webhook",
+            }
     except Exception:
-        cached = None  # Redis unavailable — fall through to API poll
+        pass
 
     access_token = await SecretsManager.get("SUMUP_ACCESS_TOKEN") or settings.SUMUP_ACCESS_TOKEN
     if not access_token:
         return {"status": "error", "error": "SumUp not configured"}
+    merchant_code = (
+        await SecretsManager.get("SUMUP_MERCHANT_CODE")
+        or settings.SUMUP_MERCHANT_CODE
+    )
 
+    # ── Step 2: find the donation reference that SumUp knows this tap by ────
+    foreign_ref = ""
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-        data = resp.json()
-        # Solo reader: the checkout.status often stays PENDING while the
-        # transactions[] array carries the real outcome. Promote a
-        # transaction-level SUCCESSFUL/FAILED to the checkout status so
-        # polling sees the terminal state.
-        raw_status = data.get("status", "PENDING")
-        txns = data.get("transactions") or []
-        if txns:
-            t_status = (txns[-1] or {}).get("status")
-            if t_status and (raw_status == "PENDING" or not raw_status):
-                raw_status = t_status
-        normalized = _normalize_sumup_status(raw_status)
+        async with SessionLocal() as _db:
+            _row = (await _db.execute(text("""
+                SELECT reference FROM donations
+                 WHERE COALESCE(payment_ref, '') = :cid
+                   AND deleted_at IS NULL
+                 ORDER BY created_at DESC
+                 LIMIT 1
+            """), {"cid": checkout_id})).mappings().one_or_none()
+            if _row:
+                foreign_ref = (_row["reference"] or "").strip()
+    except Exception:  # noqa: BLE001
+        foreign_ref = ""
 
-        # Transactions-history fallback — observed in production: for some
-        # Solo reader checkouts the /v0.1/checkouts/{id} endpoint keeps
-        # reporting PENDING with transactions: [] for a minute or longer
-        # even after the card has been tapped and SumUp has settled the
-        # payment. The transactions-history endpoint (/v2.1) reflects the
-        # tap within seconds. When the primary path still shows PENDING,
-        # we look up the donation that owns this checkout_id, pull its
-        # order reference (which the kiosk sent as checkout_reference /
-        # foreign_transaction_id), and search a small window of recent
-        # transactions for a match. First real "SUCCESSFUL" / "FAILED"
-        # match wins.
-        if normalized == "PENDING":
-            merchant_code = (
-                await SecretsManager.get("SUMUP_MERCHANT_CODE")
-                or settings.SUMUP_MERCHANT_CODE
-            )
-            foreign_ref = ""
-            try:
-                async with SessionLocal() as _db:
-                    _row = (await _db.execute(text("""
-                        SELECT reference FROM donations
-                         WHERE COALESCE(payment_ref, '') = :cid
-                           AND deleted_at IS NULL
-                         ORDER BY created_at DESC
-                         LIMIT 1
-                    """), {"cid": checkout_id})).mappings().one_or_none()
-                    if _row:
-                        foreign_ref = (_row["reference"] or "").strip()
-            except Exception:  # noqa: BLE001
-                pass
-            if merchant_code and foreign_ref:
-                try:
-                    async with httpx.AsyncClient(timeout=8) as _c:
-                        _r = await _c.get(
-                            f"https://api.sumup.com/v2.1/merchants/{merchant_code}/transactions/history",
-                            headers={"Authorization": f"Bearer {access_token}"},
-                            params={"limit": 20, "order": "descending"},
-                        )
-                    if _r.is_success:
-                        _hits = ((_r.json() or {}).get("items")
-                                 or (_r.json() or {}).get("transactions") or [])
-                        for _t in _hits:
-                            _fref = (_t.get("foreign_transaction_id")
-                                     or _t.get("checkout_reference") or "")
-                            if _fref and _fref == foreign_ref:
-                                raw_status = _t.get("status") or raw_status
-                                normalized = _normalize_sumup_status(raw_status)
-                                data["_transactions_history_fallback"] = {
-                                    "foreign_ref":      foreign_ref,
-                                    "transaction_code": _t.get("transaction_code"),
-                                }
-                                break
-                except Exception:  # noqa: BLE001
-                    pass
+    # ── Step 3: primary — authoritative transaction lookup ──────────────────
+    source = "transactions"
+    raw_status = "PENDING"
+    tx_code = ""
+    if merchant_code and foreign_ref:
+        try:
+            async with httpx.AsyncClient(timeout=8) as _c:
+                _r = await _c.get(
+                    f"https://api.sumup.com/v2.1/merchants/{merchant_code}/transactions/history",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params={"limit": 20, "order": "descending"},
+                )
+            if _r.is_success:
+                for _t in ((_r.json() or {}).get("items")
+                           or (_r.json() or {}).get("transactions") or []):
+                    _fref = (_t.get("foreign_transaction_id")
+                             or _t.get("checkout_reference") or "")
+                    if _fref and _fref == foreign_ref:
+                        raw_status = _t.get("status") or raw_status
+                        tx_code = _t.get("transaction_code") or ""
+                        break
+        except Exception:  # noqa: BLE001
+            pass
 
-        if normalized != "PENDING":
-            try:
-                await cache_set(f"sumup:checkout:{checkout_id}",
-                                {"status": normalized}, ttl=3600)
-            except Exception:
-                pass
-        return {"status": normalized, "raw_status": raw_status, "raw": data}
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+    normalized = _normalize_sumup_status(raw_status)
+
+    # ── Step 4: fallback — the Checkouts endpoint for the pre-tap window ────
+    checkouts_data: dict[str, Any] = {}
+    if normalized == "PENDING":
+        source = "checkouts"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"https://api.sumup.com/v0.1/checkouts/{checkout_id}",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+            checkouts_data = resp.json() or {}
+            raw_status = checkouts_data.get("status") or "PENDING"
+            # Promote transactions[-1] if the Checkouts status is still PENDING
+            # but the Solo reader already attached a transaction (older merchants
+            # see this shape instead of the clean /transactions row).
+            _txns = checkouts_data.get("transactions") or []
+            if _txns:
+                _ts = (_txns[-1] or {}).get("status")
+                if _ts and (raw_status == "PENDING" or not raw_status):
+                    raw_status = _ts
+            normalized = _normalize_sumup_status(raw_status)
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    if normalized != "PENDING":
+        try:
+            await cache_set(f"sumup:checkout:{checkout_id}",
+                            {"status": normalized}, ttl=3600)
+        except Exception:
+            pass
+
+    return {
+        "status":           normalized,
+        "raw_status":       raw_status,
+        "source":           source,
+        "foreign_ref":      foreign_ref,
+        "transaction_code": tx_code,
+        "raw":              checkouts_data or None,
+    }
 
 
 @router.get("/sumup/configured-kiosks")
