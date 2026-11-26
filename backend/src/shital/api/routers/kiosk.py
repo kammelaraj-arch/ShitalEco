@@ -3707,15 +3707,16 @@ async def sumup_diagnostics(username: str = "", limit: int = 5) -> dict[str, Any
 
     # ── Last N transactions (newest first) ────────────────────────────────────
     # SumUp's /transactions/history returns oldest-first by default. Pull
-    # a larger window and sort descending in Python to actually show the
-    # latest N. order=desc is the documented param; we also sort locally
-    # as a belt-and-braces in case it's ignored by this endpoint version.
+    # SumUp wants the full word "descending" — "desc" is silently ignored
+    # and the endpoint falls back to ascending (oldest-first), which is why
+    # this diagnostic used to show April/May 2026 as "latest". We still
+    # sort client-side as a belt-and-braces.
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             tx = await client.get(
                 f"{base}/v2.1/merchants/{merchant_code}/transactions/history",
                 headers=headers,
-                params={"limit": 50, "order": "desc"},
+                params={"limit": 50, "order": "descending"},
             )
             if tx.is_success:
                 data = tx.json() or {}
