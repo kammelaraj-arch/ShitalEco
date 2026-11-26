@@ -83,46 +83,10 @@ const OUTCOME_BADGE: Record<string, string> = {
 const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-saffron-400/50'
 const lbl = 'block text-white/50 text-xs font-semibold uppercase tracking-wide mb-1.5'
 
-// Inline help tooltip — sits next to a label to explain fields without
-// crowding the form. Keep copy short; use StepIntro for longer context.
-function HelpTip({ text }: { text: string }) {
-  return (
-    <span
-      title={text}
-      className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-white/20 bg-white/5 text-white/60 text-[10px] font-bold cursor-help ml-1 align-middle"
-      aria-label={text}
-    >?</span>
-  )
-}
-
-// Card that opens each wizard step with purpose + what good looks like
-// + a concrete charity example. Teaches without forcing people to read
-// a manual.
-function StepIntro({
-  title, why, goodLooks, example,
-}: {
-  title: string
-  why: string
-  goodLooks: string
-  example: string
-}) {
-  return (
-    <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/10 to-sky-500/5 p-4">
-      <p className="text-sky-300 text-[11px] font-black uppercase tracking-widest mb-1.5">💡 {title}</p>
-      <p className="text-white/80 text-sm mb-2">{why}</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-        <div className="rounded-lg bg-black/30 border border-white/5 p-3">
-          <p className="text-emerald-300 text-[10px] font-black uppercase tracking-widest mb-1">✓ What good looks like</p>
-          <p className="text-white/70 text-xs leading-relaxed">{goodLooks}</p>
-        </div>
-        <div className="rounded-lg bg-black/30 border border-white/5 p-3">
-          <p className="text-saffron-300 text-[10px] font-black uppercase tracking-widest mb-1">📝 Example</p>
-          <p className="text-white/70 text-xs leading-relaxed italic">{example}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
+// (StepIntro and HelpTip were removed in #466 — the step title tells
+// trustees which step they're on; each field's placeholder and the
+// small helper <p> below it carry the "what good looks like" guidance
+// without stacking four help surfaces per field.)
 
 interface Form {
   title: string; background: string; recommendation: string
@@ -637,10 +601,6 @@ export default function ResolutionsPage() {
                               : 'bg-white/10 text-white/60'
                           }`}>{done ? '✓' : i + 1}</span>
                           <span className="uppercase tracking-wide">{s.title}</span>
-                          <span title={s.hint}
-                            className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold ${
-                              active ? 'bg-white/25 text-white' : 'bg-white/10 text-white/50 group-hover:bg-white/20'
-                            }`}>?</span>
                         </button>
                         {i < STEPS.length - 1 && <span className="text-white/20 text-sm px-1">›</span>}
                       </div>
@@ -679,38 +639,26 @@ export default function ResolutionsPage() {
               <div className="flex-1 overflow-y-auto">
                 <div className="px-6 py-6 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-6 max-w-[1600px] mx-auto">
                   <div className="min-w-0 space-y-6">
-                    {/* Step title bar — matches "SELECTED ASSET / Change asset" row */}
-                    <div className="rounded-2xl border border-white/10 bg-white/3 px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
-                      <div className="min-w-0">
-                        <p className="text-white/40 text-[11px] font-bold uppercase tracking-widest">Step {currentStepIdx + 1} of {STEPS.length}</p>
-                        <p className="text-white font-black text-base">{STEPS[currentStepIdx]?.title}</p>
-                        <p className="text-white/50 text-xs mt-0.5">{STEPS[currentStepIdx]?.hint}</p>
-                      </div>
-                      {editing && wizStep !== 'basics' && (
+                    {editing && wizStep !== 'basics' && (
+                      <div className="flex justify-end">
                         <button onClick={() => setWizStep('basics')}
-                          className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-white/80 text-xs font-bold hover:bg-white/10">
+                          className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-white/70 text-xs font-bold hover:bg-white/10">
                           Change basics
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )}
 
                 {wizStep === 'basics' && (
                   <div className="w-full space-y-4">
-                    <StepIntro
-                      title="Basics — what is being decided?"
-                      why="Set the headline so trustees know at a glance what they are voting on. A good title reads like a motion on a meeting agenda."
-                      goodLooks="Specific, actionable, starts with a verb (Approve / Adopt / Appoint / Terminate). Names the figure or person. Avoids jargon."
-                      example="“Approve Diwali 2026 festival budget of £15,000 funded from the General Fund, with £3,000 contingency.”"
-                    />
                     <div>
-                      <label className={lbl}>Title *<HelpTip text="Reads on the agenda, in the voting email, in the signed PDF — write it so a trustee skimming an email understands it." /></label>
+                      <label className={lbl}>Title *</label>
                       <input disabled={locked} value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} className={inp}
                         placeholder="e.g. Approve Diwali 2026 festival budget of £15,000" />
                       <p className="text-white/40 text-xs mt-1">Write it like a motion — verb first, specific, under 120 characters.</p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className={lbl}>Category<HelpTip text="Operational = day-to-day. Policy = new/updated written policy. Contract = any engagement over the delegated limit. Officer election = Chair/Treasurer/Secretary appointment. Constitutional = anything that amends the governing document (CC26 §11)." /></label>
+                        <label className={lbl}>Category</label>
                         <select disabled={locked} value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value as Category }))} className={inp}>
                           {(['OPERATIONAL', 'OFFICER_ELECTION', 'POLICY', 'CONTRACT', 'CONSTITUTIONAL'] as Category[]).map(c =>
                             <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
@@ -760,13 +708,6 @@ export default function ResolutionsPage() {
 
                 {wizStep === 'context' && (
                   <div className="w-full space-y-5">
-                    <StepIntro
-                      title="Context — the case for the decision"
-                      why="Trustees should be able to vote without asking you a single question. Capture the story (Background), the ask (Recommendation), and everything they'd want to read (Attachments + info-requests to staff)."
-                      goodLooks="Background is 3-6 bullet points of facts. Recommendation is one sentence beginning with 'That the board…'. Supporting files include quotes, prior decisions, and any compliance checks (Charity Commission CC26 §4, 'informed decisions')."
-                      example="Background: 2024 Diwali attendance 4,200; hall capacity 3,500 breached. Recommendation: That the board approve a second service on 2 Nov 2026 at 6pm and £15,000 contingent budget."
-                    />
-
                     {/* AI draft */}
                     <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4">
                       <div className="flex items-center gap-2 mb-2">
@@ -793,7 +734,7 @@ export default function ResolutionsPage() {
                     </div>
 
                     <div>
-                      <label className={lbl}>Background<HelpTip text="The facts and the 'why now' — not the ask itself. Bullet points, dates, figures. Link prior minutes or policies in the toolbar's 🔗 Link button." /></label>
+                      <label className={lbl}>Background</label>
                       <RichTextEditor
                         value={form.background}
                         onChange={(html) => setForm(p => ({ ...p, background: html }))}
@@ -804,7 +745,7 @@ export default function ResolutionsPage() {
                       <p className="text-white/40 text-xs mt-1">Example: “The 2024 Diwali service hit 4,200 attendees against hall capacity 3,500. A fire-safety review flagged the overflow. The CEO proposes a second service for 2026.”</p>
                     </div>
                     <div>
-                      <label className={lbl}>Recommendation<HelpTip text="One sentence starting with 'That the board…' — this is the motion that goes on the signed PDF and the vote-invite email." /></label>
+                      <label className={lbl}>Recommendation</label>
                       <RichTextEditor
                         value={form.recommendation}
                         onChange={(html) => setForm(p => ({ ...p, recommendation: html }))}
@@ -866,15 +807,9 @@ export default function ResolutionsPage() {
 
                 {wizStep === 'impact' && (
                   <div className="w-full space-y-4">
-                    <StepIntro
-                      title="Impact — risk and money"
-                      why="Trustees are legally responsible for the charity's assets and beneficiaries (Charities Act 2011 §3). This section is the paper trail that proves they weighed risk and cost before voting."
-                      goodLooks="Risk lists what could go wrong, who is affected, and the mitigation. Budget names the fund line, one-off vs recurring, and any match-funding. Numbers in £, no ranges."
-                      example="Risk: Second service means 240 extra car journeys → neighbour complaints. Mitigation: 4 marshals + shuttle from Harrow car park (CC26 taxonomy: OPERATIONAL / REPUTATIONAL · likelihood 3 · impact 2). Budget: £15,000 one-off from General Fund + £3,000 contingency. No recurring cost."
-                    />
                     <div>
                       <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <label className={lbl + ' mb-0'}>Risk / Impact<HelpTip text="What could go wrong (safeguarding, financial, reputational, operational), who it affects, and how it will be mitigated. Risk Register entry will be auto-created on publish if scope is Strategic / Operational / Compliance." /></label>
+                        <label className={lbl + ' mb-0'}>Risk / Impact</label>
                         {editing?.id && (
                           <button type="button" disabled={locked}
                             onClick={() => {
@@ -903,7 +838,7 @@ export default function ResolutionsPage() {
                     </div>
                     <div>
                       <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <label className={lbl + ' mb-0'}>Budget Impact<HelpTip text="Name the fund (General / Restricted / Capital), one-off vs recurring, VAT treatment, any match-funding or external restriction. Charity SORP §4.33 requires separate disclosure of restricted-fund movements." /></label>
+                        <label className={lbl + ' mb-0'}>Budget Impact</label>
                         {editing?.id && (
                           <button type="button" disabled={locked}
                             onClick={() => {
@@ -938,12 +873,6 @@ export default function ResolutionsPage() {
 
                 {wizStep === 'review' && (
                   <div className="w-full space-y-4">
-                    <StepIntro
-                      title="Review — publish when you're happy"
-                      why="Once you publish, the text locks. Any edit after publish needs a fresh resolution. Vote invites go out immediately."
-                      goodLooks="All sections filled, at least one supporting file, every REQUIRED info-request submitted. The Progress circle (footer) is ≥ 80%."
-                      example="Save → come back → make one last change → Publish & email invites. Trustees receive a magic link within ~10 seconds."
-                    />
                     {editing?.id && <ConflictsBanner resolutionId={editing.id} locked={locked} />}
                     <p className="text-white/50 text-xs uppercase tracking-widest font-bold">Preview — this is what trustees will see</p>
                     <div className="rounded-2xl border border-white/10 bg-white/3 p-5 space-y-4">
