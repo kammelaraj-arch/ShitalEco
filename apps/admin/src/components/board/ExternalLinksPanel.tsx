@@ -5,11 +5,13 @@
 
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api'
+import { SharePointPicker } from '@/components/board/SharePointPicker'
 
 interface LinkRow {
   id: string
   label: string
   url: string
+  source?: string
   added_by_name: string
   added_at: string
 }
@@ -20,6 +22,7 @@ export function ExternalLinksPanel({ resolutionId, locked }: { resolutionId: str
   const [url,   setUrl]   = useState('')
   const [busy,  setBusy]  = useState(false)
   const [error, setError] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   async function load() {
     try {
@@ -55,21 +58,40 @@ export function ExternalLinksPanel({ resolutionId, locked }: { resolutionId: str
   return (
     <div className="space-y-3">
       {items.length === 0 && <p className="text-xs text-gray-500">No links yet.</p>}
-      {items.map(l => (
-        <div key={l.id} className="flex items-start gap-3 rounded border border-gray-200 bg-gray-50 px-3 py-2">
-          <div className="flex-1 min-w-0">
-            <a href={l.url} target="_blank" rel="noreferrer"
-               className="font-medium text-sm text-indigo-700 hover:underline break-all">{l.label}</a>
-            <div className="text-[11px] text-gray-500 truncate">{l.url}</div>
-            <div className="text-[10px] text-gray-400">added by {l.added_by_name || 'unknown'}</div>
+      {items.map(l => {
+        const isSharePoint = (l.source || '').toLowerCase() === 'sharepoint'
+        return (
+          <div key={l.id} className="flex items-start gap-3 rounded border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                {isSharePoint && (
+                  <span className="shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                    SharePoint
+                  </span>
+                )}
+                <a href={l.url} target="_blank" rel="noreferrer"
+                   className="font-medium text-sm text-indigo-700 hover:underline break-all">{l.label}</a>
+              </div>
+              <div className="text-[11px] text-gray-500 truncate">{l.url}</div>
+              <div className="text-[10px] text-gray-400">added by {l.added_by_name || 'unknown'}</div>
+            </div>
+            {!locked && (
+              <button onClick={() => del(l.id)} className="text-xs text-red-600 hover:underline">Remove</button>
+            )}
           </div>
-          {!locked && (
-            <button onClick={() => del(l.id)} className="text-xs text-red-600 hover:underline">Remove</button>
-          )}
-        </div>
-      ))}
+        )
+      })}
       {!locked && (
         <div className="flex flex-col gap-2 rounded border border-dashed border-gray-300 p-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Add a document</span>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="rounded border border-blue-600/40 bg-blue-600/10 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-600/20">
+              📁 Pick from SharePoint
+            </button>
+          </div>
           <div className="flex gap-2">
             <input placeholder="Label (e.g. Surveyor's report)" value={label} onChange={e => setLabel(e.target.value)}
               className="flex-1 rounded border border-gray-300 px-2 py-1 text-sm" />
@@ -85,6 +107,13 @@ export function ExternalLinksPanel({ resolutionId, locked }: { resolutionId: str
         </div>
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {pickerOpen && (
+        <SharePointPicker
+          resolutionId={resolutionId}
+          onClose={() => setPickerOpen(false)}
+          onPicked={load}
+        />
+      )}
     </div>
   )
 }

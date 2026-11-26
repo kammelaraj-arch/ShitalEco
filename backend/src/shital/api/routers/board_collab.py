@@ -70,8 +70,9 @@ async def assert_info_requests_fulfilled(rid: str) -> None:
 
 # ─── External links ───────────────────────────────────────────────────────────
 class ExternalLinkIn(BaseModel):
-    label: str
-    url:   str
+    label:  str
+    url:    str
+    source: str = "manual"  # "manual" | "sharepoint" (future: "drive", "s3", ...)
 
 
 @router.get("/admin/board/resolutions/{rid}/external-links")
@@ -80,7 +81,9 @@ async def list_external_links(rid: str, ctx: CurrentSpace) -> dict[str, Any]:
     await _ensure_resolution_exists(rid)
     async with SessionLocal() as db:
         rows = (await db.execute(text("""
-            SELECT id, label, url, added_by_name, added_at
+            SELECT id, label, url,
+                   COALESCE(source, 'manual') AS source,
+                   added_by_name, added_at
             FROM   resolution_external_links
             WHERE  resolution_id = CAST(:id AS uuid)
             ORDER  BY added_at ASC
@@ -94,6 +97,9 @@ async def add_external_link(rid: str, body: ExternalLinkIn, ctx: CurrentSpace) -
     await _ensure_resolution_exists(rid)
     label = (body.label or "").strip()
     url   = (body.url or "").strip()
+    source = (body.source or "manual").strip().lower()
+    if source not in {"manual", "sharepoint"}:
+        source = "manual"
     if not label or not url:
         raise HTTPException(400, detail="label and url are required")
     if not (url.startswith("http://") or url.startswith("https://")):
@@ -104,16 +110,42 @@ async def add_external_link(rid: str, body: ExternalLinkIn, ctx: CurrentSpace) -
     async with SessionLocal() as db:
         await db.execute(text("""
             INSERT INTO resolution_external_links
-                (id, resolution_id, label, url, added_by, added_by_name)
+                (id, resolution_id, label, url, source, added_by, added_by_name)
             VALUES
-                (CAST(:id AS uuid), CAST(:rid AS uuid), :label, :url, CAST(:u AS uuid), :uname)
+                (CAST(:id AS uuid), CAST(:rid AS uuid), :label, :url, :src,
+                 CAST(:u AS uuid), :uname)
         """), {
-            "id": new_id, "rid": rid, "label": label, "url": url,
+            "id": new_id, "rid": rid, "label": label, "url": url, "src": source,
             "u": getattr(ctx, "user_id", None),
             "uname": getattr(ctx, "user_email", "") or "",
         })
         await db.commit()
-    return {"ok": True, "id": new_id}
+    return {"ok": True, "id": new_id, "source": source}
+
+
+# ─── SharePoint document picker ─────────────────────────────────────────────
+# Admin-only Graph search proxy — the wizard's "Pick from SharePoint" dialog
+# posts a query, this endpoint returns up to 25 doc-library hits with their
+# SharePoint webUrl. The caller then POSTs the chosen hit through the
+# existing /external-links endpoint with source="sharepoint".
+
+@router.get("/admin/board/sharepoint/search")
+async def sharepoint_search(ctx: CurrentSpace, q: str = "", top: int = 25) -> dict[str, Any]:
+    _require_admin(ctx)
+    query = (q or "").strip()
+    if not query:
+        return {"items": [], "configured": True}
+    try:
+        from shital.services.graph_sharepoint import search_files
+        items = await search_files(query, top=top)
+    except RuntimeError as exc:
+        msg = str(exc)
+        # Keep the UI usable when the tenant isn't wired for SharePoint —
+        # the modal will show a neutral "SharePoint not configured" banner
+        # instead of a red error box.
+        configured = "MS_CLIENT" not in msg and "MS_TENANT" not in msg
+        return {"items": [], "configured": configured, "error": msg[:220]}
+    return {"items": items, "configured": True}
 
 
 @router.delete("/admin/board/resolutions/{rid}/external-links/{link_id}")
