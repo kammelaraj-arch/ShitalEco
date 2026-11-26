@@ -1031,18 +1031,36 @@ async def sumup_checkout(body: SumUpCheckoutInput):
             # from SumUp's own records 15 min later.
             # Reference = 'DON-' || UPPER(SUBSTRING(basketId, 1, 8))
             # — set by apps/quick-donation/ProcessingScreen.tsx.
+            # Previously only matched "DON-*" rows created by quick-donation.
+            # Full-kiosk writes "ORD-*", so those rows were never stamped and
+            # stayed PENDING with empty payment_ref forever. We now match
+            # both prefixes AND store the server-generated checkout_reference
+            # (SHT-*-*) alongside the checkout_id. The reference is what
+            # SumUp's /transactions endpoint indexes a Solo-reader tap by,
+            # so the status-polling handler can look up the terminal row
+            # without a second round-trip through the laggy Checkouts API.
             if checkout_id and body.order_id:
-                donation_ref = "DON-" + (body.order_id[:8]).upper()
+                short_id = (body.order_id[:8] or "").upper()
                 try:
                     async with SessionLocal() as _db:
+                        # Idempotent column add; cheap on subsequent boots.
+                        # Living here means the stamp works on the very first
+                        # deploy of this fix even if the schema patcher
+                        # hasn't rerun yet.
+                        await _db.execute(text(
+                            "ALTER TABLE donations ADD COLUMN IF NOT EXISTS "
+                            "sumup_checkout_reference VARCHAR(80) NOT NULL DEFAULT ''",
+                        ))
                         await _db.execute(text("""
                             UPDATE donations
-                               SET payment_ref = :cid, updated_at = NOW()
-                             WHERE reference = :ref
+                               SET payment_ref = :cid,
+                                   sumup_checkout_reference = :xref,
+                                   updated_at = NOW()
+                             WHERE reference IN ('DON-' || :sid, 'ORD-' || :sid)
                                AND UPPER(COALESCE(payment_provider, '')) = 'SUMUP'
                                AND COALESCE(payment_ref, '') = ''
                                AND deleted_at IS NULL
-                        """), {"cid": checkout_id, "ref": donation_ref})
+                        """), {"cid": checkout_id, "xref": checkout_ref, "sid": short_id})
                         await _db.commit()
                 except Exception:  # noqa: BLE001
                     # Best-effort — never fail the checkout push on a
@@ -1744,19 +1762,23 @@ async def sumup_checkout_status(checkout_id: str):
         or settings.SUMUP_MERCHANT_CODE
     )
 
-    # ── Step 2: find the donation reference that SumUp knows this tap by ────
+    # ── Step 2: find the SumUp checkout_reference (SHT-*-*) that SumUp
+    #     indexes the Solo-reader tap by. Prefer the server-stamped
+    #     `sumup_checkout_reference` column; fall back to the donation's
+    #     own reference for rows created before this fix.
     foreign_ref = ""
     try:
         async with SessionLocal() as _db:
             _row = (await _db.execute(text("""
-                SELECT reference FROM donations
+                SELECT COALESCE(NULLIF(sumup_checkout_reference, ''), reference) AS ref
+                  FROM donations
                  WHERE COALESCE(payment_ref, '') = :cid
                    AND deleted_at IS NULL
                  ORDER BY created_at DESC
                  LIMIT 1
             """), {"cid": checkout_id})).mappings().one_or_none()
             if _row:
-                foreign_ref = (_row["reference"] or "").strip()
+                foreign_ref = (_row["ref"] or "").strip()
     except Exception:  # noqa: BLE001
         foreign_ref = ""
 
@@ -1775,9 +1797,17 @@ async def sumup_checkout_status(checkout_id: str):
             if _r.is_success:
                 for _t in ((_r.json() or {}).get("items")
                            or (_r.json() or {}).get("transactions") or []):
-                    _fref = (_t.get("foreign_transaction_id")
-                             or _t.get("checkout_reference") or "")
-                    if _fref and _fref == foreign_ref:
+                    # SumUp exposes the reference under both
+                    # `checkout_reference` (modern) and
+                    # `foreign_transaction_id` (older history payloads).
+                    # Accept either; the server-stamped value we wrote on
+                    # donation.sumup_checkout_reference (SHT-*-*) matches
+                    # SumUp's checkout_reference exactly.
+                    _candidates = {
+                        (_t.get("checkout_reference") or "").strip(),
+                        (_t.get("foreign_transaction_id") or "").strip(),
+                    }
+                    if foreign_ref and foreign_ref in _candidates:
                         raw_status = _t.get("status") or raw_status
                         tx_code = _t.get("transaction_code") or ""
                         break

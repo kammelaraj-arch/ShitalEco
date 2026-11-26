@@ -2792,6 +2792,12 @@ async def _patch_schema() -> None:
         # exactly what the provider said next to our interpretation, so
         # a mismatch is obvious and auditable.
         "ALTER TABLE donations ADD COLUMN IF NOT EXISTS source_status VARCHAR(50) DEFAULT NULL",
+        # Server-generated SumUp checkout_reference (SHT-<id12>-<rand6>).
+        # SumUp's /v2.1/transactions indexes a Solo-reader tap by this
+        # value, so storing it on the donation at checkout time lets the
+        # status-polling handler look up the terminal row without going
+        # through the laggy /v0.1/checkouts endpoint.
+        "ALTER TABLE donations ADD COLUMN IF NOT EXISTS sumup_checkout_reference VARCHAR(80) NOT NULL DEFAULT ''",
         # Partial unique index to guarantee the Stripe import never
         # double-inserts a donation for the same charge, even under
         # concurrent runs (manual button + daily background task +
