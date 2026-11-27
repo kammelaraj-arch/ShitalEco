@@ -4660,7 +4660,7 @@ async def _patch_schema() -> None:
                   updated_at           = NOW()
             WHERE UPPER(COALESCE(payment_provider, '')) = 'SUMUP'
               AND UPPER(COALESCE(status, '')) = 'PENDING'
-              AND created_at < NOW() - INTERVAL '24 hours'
+              AND created_at < NOW() - INTERVAL '1 hour'
               AND deleted_at IS NULL""",
 
         # Single-row counter table for the SumUp stale-pending reaper.
