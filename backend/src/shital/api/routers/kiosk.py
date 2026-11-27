@@ -603,15 +603,22 @@ async def create_terminal_payment_intent(body: TerminalPaymentInput):
 
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
-        # Stripe deprecated `payment_method_types` across SetupIntent /
-        # PaymentIntent / Checkout.Session the same way (#264, #274).
-        # `payment_method_options={"card_present": {}}` tells Stripe this
-        # intent is for a Terminal reader; `automatic_payment_methods` with
-        # allow_redirects="never" keeps the online methods out.
+        # Terminal PaymentIntents MUST declare card_present as a payment
+        # method type — automatic_payment_methods=True only enables the
+        # online methods (card / Link / wallets) and Stripe refuses with
+        # "PaymentIntent must accept an in-person payment method" when a
+        # Terminal reader tries to process it.
+        #
+        # 27-Nov: user hit this exact error on kiosk.shital.org.uk —
+        # "Request req_g0IhdqHzNeVQb7: PaymentIntent must accept an
+        # in-person payment method." Previous attempt used
+        # automatic_payment_methods + payment_method_options which
+        # enables the online methods but doesn't add card_present to
+        # the type list. Stripe's Terminal docs are explicit:
+        # payment_method_types=["card_present"] is required.
         intent = stripe.PaymentIntent.create(
             amount=body.amount_pence, currency=body.currency.lower(),
-            payment_method_options={"card_present": {}},
-            automatic_payment_methods={"enabled": True, "allow_redirects": "never"},
+            payment_method_types=["card_present"],
             capture_method="automatic",
             description=body.description, metadata={"order_id": body.order_id, "reader_id": body.reader_id},
         )
