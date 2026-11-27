@@ -4635,6 +4635,34 @@ async def _patch_schema() -> None:
         "  AND COALESCE(payment_ref, '') <> '' "
         "  AND deleted_at IS NULL",
 
+        # Expire abandoned-cart SumUp PENDING rows. The background
+        # reaper `run_boot_reap_once()` is the design-time path for this
+        # (and the 15-min recovery loop), but on prod the diag has
+        # repeatedly reported `boot_reap_ran: false`, `total_runs: 0` —
+        # the loop isn't firing, and operators keep seeing week-old
+        # PENDING rows piling up on the Donations page. This SQL runs
+        # inside the schema patch, which IS known to fire on every
+        # boot, so it's the one place we can be sure the sweep happens.
+        #
+        # Scope: SumUp rows with empty payment_ref (no checkout_id
+        # stamped, so no SumUp transaction could ever match them),
+        # PENDING for more than 15 minutes. These are abandoned taps
+        # by construction — SumUp never saw a card for them. Flip to
+        # CANCELLED with a clear reason the Reason column surfaces.
+        # Tight: non-SumUp providers, PENDING rows with a payment_ref
+        # set (the reconcile path still owns those), and anything
+        # newer than 15 minutes are untouched.
+        """UPDATE donations
+              SET status = 'CANCELLED',
+                  last_failure_code    = 'abandoned_no_card_presented',
+                  last_failure_message = 'No card was presented to the reader before the checkout expired. Donor walked away.',
+                  updated_at           = NOW()
+            WHERE UPPER(COALESCE(payment_provider, '')) = 'SUMUP'
+              AND UPPER(COALESCE(status, '')) = 'PENDING'
+              AND COALESCE(payment_ref, '') = ''
+              AND created_at < NOW() - INTERVAL '15 minutes'
+              AND deleted_at IS NULL""",
+
         # Single-row counter table for the SumUp stale-pending reaper.
         # Needed because the in-process _REAP_STATE dict is per-uvicorn-
         # worker, so a /sumup/diag call hitting a different worker from
