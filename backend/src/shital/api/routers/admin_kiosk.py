@@ -382,3 +382,83 @@ async def list_order_items(order_ref: str = "", branch_id: str = "", page: int =
         total = int(count_row["cnt"]) if count_row else 0
 
     return {"items": [dict(r) for r in rows], "total": total, "page": page, "per_page": per_page}
+
+
+# ─── Abandonment rate ────────────────────────────────────────────────────
+
+@router.get("/donations/abandonment-rate")
+async def donations_abandonment_rate(days: int = 30) -> dict[str, Any]:
+    """Per-amount abandonment rate for SumUp donations over the last N days.
+
+    'Abandonment' means a donation row got created (checkout pushed to the
+    reader) but no card was ever presented — ends up PENDING / FAILED /
+    CANCELLED. SumUp's own data confirms (entry_mode='none', events=[]) —
+    this isn't declines, it's donors walking away.
+
+    The hunch most charity operators care about: is the suggested amount
+    too high? £3 and £5 tiers often show much higher abandonment than
+    £1 or £2 — this endpoint makes that visible per tier.
+
+    Returns:
+      total_attempts, successful, abandoned, abandonment_rate (%)
+      per_amount: [
+        { amount, attempts, successful, abandoned, rate }, …
+      ]  — sorted by attempts desc so the busiest tiers float to the top.
+
+    Public (no auth) — read-only, aggregate counts only, no donor PII."""
+    from sqlalchemy import text
+    from shital.core.fabrics.database import SessionLocal
+
+    days = max(1, min(int(days), 365))
+    async with SessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT
+                CAST(amount AS NUMERIC(10,2))                              AS amount,
+                COUNT(*)                                                   AS attempts,
+                COUNT(*) FILTER (
+                    WHERE UPPER(COALESCE(status,'')) = 'COMPLETED'
+                )                                                          AS successful,
+                COUNT(*) FILTER (
+                    WHERE UPPER(COALESCE(status,'')) IN (
+                        'PENDING', 'FAILED', 'CANCELLED', 'CANCELED', 'EXPIRED'
+                    )
+                )                                                          AS abandoned
+            FROM donations
+            WHERE UPPER(COALESCE(payment_provider, '')) = 'SUMUP'
+              AND created_at >= NOW() - (:days || ' days')::interval
+              AND deleted_at IS NULL
+            GROUP BY amount
+            HAVING COUNT(*) >= 2
+            ORDER BY COUNT(*) DESC
+            LIMIT 25
+        """), {"days": str(days)})).mappings().all()
+
+    per_amount = []
+    tot_attempts = 0
+    tot_successful = 0
+    tot_abandoned = 0
+    for r in rows:
+        a = int(r["attempts"] or 0)
+        s = int(r["successful"] or 0)
+        ab = int(r["abandoned"] or 0)
+        rate = round((ab / a) * 100, 1) if a else 0.0
+        per_amount.append({
+            "amount":      float(r["amount"]),
+            "attempts":    a,
+            "successful":  s,
+            "abandoned":   ab,
+            "rate":        rate,
+        })
+        tot_attempts += a
+        tot_successful += s
+        tot_abandoned += ab
+
+    overall_rate = round((tot_abandoned / tot_attempts) * 100, 1) if tot_attempts else 0.0
+    return {
+        "days_window":       days,
+        "total_attempts":    tot_attempts,
+        "successful":        tot_successful,
+        "abandoned":         tot_abandoned,
+        "abandonment_rate":  overall_rate,
+        "per_amount":        per_amount,
+    }
