@@ -163,6 +163,15 @@ class DeviceIn(BaseModel):
     # touches card_reader_id. Not persisted from the request body — the
     # value stored in the DB is auto-generated at create time and stable.
     pairing_pin: str | None = None
+    # When present on Create, the server treats this POST as a clone of
+    # the named kiosk and requires `pairing_pin` to match that source
+    # kiosk's PIN. Blocks the clone-button loophole: without this guard,
+    # pressing Clone + Save with no PIN prompt effectively copies a
+    # kiosk's whole config (branch, theme, Gift Aid, project links,
+    # confirmation text, bg colour, org logo) with zero physical-access
+    # proof. Ignored on Update. Never persisted — purely a one-shot
+    # access check for the Create call.
+    cloned_from_device_id: str | None = None
     # Project donation mode (QUICK_DONATION devices only). When mode='project'
     # the Quick Donation client renders a 6-tile grid of linked projects
     # instead of tap-and-go amount tiles. linked_project_ids is admin-ordered
@@ -375,6 +384,58 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
     pw_hash = _bcrypt.hashpw(body.device_password.encode(), _bcrypt.gensalt(12)).decode() if body.device_password else None
 
     async with SessionLocal() as db:
+        # Clone-source PIN check. When the UI's Clone button sent this
+        # POST, it tells us which kiosk was cloned via
+        # `cloned_from_device_id`; we then verify the supplied
+        # `pairing_pin` matches that source kiosk's stored PIN. Without
+        # this guard the Clone button was a silent snapshot-copy of any
+        # kiosk's config (branch, theme, Gift Aid, projects, etc.), with
+        # zero physical-access proof — same gap we closed on Edit and
+        # Delete. Scoped tight: only runs when the field is set, so
+        # a normal "+ Add Device" POST is unaffected.
+        if body.cloned_from_device_id:
+            src_row = (await db.execute(text("""
+                SELECT pairing_pin, name
+                  FROM kiosk_devices
+                 WHERE id = CAST(:id AS UUID)
+                   AND deleted_at IS NULL
+            """), {"id": body.cloned_from_device_id})).mappings().first()
+            if not src_row:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error": "clone_source_not_found",
+                        "message": "The kiosk you tried to clone no longer exists.",
+                    },
+                )
+            supplied = (body.pairing_pin or "").strip()
+            stored   = (src_row["pairing_pin"] or "").strip()
+            if not supplied:
+                raise HTTPException(
+                    status_code=428,
+                    detail={
+                        "error": "pairing_pin_required",
+                        "message": (
+                            f"Cloning kiosk '{src_row['name']}' requires its "
+                            f"4-digit pairing PIN (written on the back of the "
+                            f"physical device). Read it off the source kiosk "
+                            f"and try again."
+                        ),
+                    },
+                )
+            if supplied != stored:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error": "pairing_pin_incorrect",
+                        "message": (
+                            f"The pairing PIN you entered doesn't match "
+                            f"kiosk '{src_row['name']}'. Check you're reading "
+                            f"it off the back of the correct source kiosk."
+                        ),
+                    },
+                )
+
         # Reader-conflict guard. A reader can only be at one till at a
         # time — reject the Create if the chosen reader is already on
         # another ACTIVE kiosk. Returns the conflicting kiosk's name so

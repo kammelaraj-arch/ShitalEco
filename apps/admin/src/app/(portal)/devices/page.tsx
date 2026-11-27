@@ -127,6 +127,10 @@ const EMPTY_FORM = {
   // an existing kiosk; backend ignores it on create and on an edit that
   // doesn't touch card_reader_id.
   pairing_pin_input: '',
+  // Set by openClone to the source kiosk's id. Tells the backend the
+  // POST is a clone and must verify pairing_pin_input matches the
+  // source kiosk's PIN. Empty on a plain "+ Add Device".
+  cloned_from_device_id: '',
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -258,6 +262,7 @@ export default function DevicesPage() {
       enabled_tiles:      d.enabled_tiles || [],
       tier_profile_id:    d.tier_profile_id || '',
       pairing_pin_input: '',
+      cloned_from_device_id: '',
     })
     setError('')
     setDrawerOpen(true)
@@ -273,6 +278,18 @@ export default function DevicesPage() {
   // generates — same flow as pressing "+ Add Device" with every option
   // already filled in.
   const openClone = (d: KioskDevice) => {
+    // Clone requires the SOURCE kiosk's pairing PIN — same physical-
+    // access proof as swap-reader and delete. Without it, pressing
+    // Clone + Save silently snapshots another kiosk's config. Prompt
+    // BEFORE opening the drawer so the operator reads the PIN off the
+    // source kiosk first.
+    const sourcePin = prompt(
+      `Enter the pairing PIN written on the back of kiosk "${d.name}".\n\n` +
+      `Cloning copies every setting from "${d.name}" (branch, theme, ` +
+      `Gift Aid, project links, confirmation text, bg colour, org logo). ` +
+      `The PIN proves you're physically at the source kiosk.`
+    )
+    if (!sourcePin || !sourcePin.trim()) return
     setEditing(null)
     setForm({
       name: `${d.name} (copy)`,
@@ -315,7 +332,10 @@ export default function DevicesPage() {
       gupt_daan_enabled:  d.gupt_daan_enabled ?? false,
       enabled_tiles:      d.enabled_tiles || [],
       tier_profile_id:    d.tier_profile_id || '',
-      pairing_pin_input: '',
+      // Seeded from the Clone prompt — the backend verifies it against
+      // the source kiosk's stored PIN when cloned_from_device_id is set.
+      pairing_pin_input: sourcePin.trim(),
+      cloned_from_device_id: d.id,
     })
     setError('')
     setDrawerOpen(true)
@@ -346,6 +366,12 @@ export default function DevicesPage() {
         latitude:  form.latitude  === '' ? null : Number(form.latitude),
         longitude: form.longitude === '' ? null : Number(form.longitude),
       }
+      // Send pairing_pin when the backend expects one: either the admin
+      // is swapping a reader on an existing kiosk, OR the drawer was
+      // opened by the Clone button (cloned_from_device_id set, the PIN
+      // seeded at Clone-prompt time proves physical access to the source).
+      const isClone = !editing && !!form.cloned_from_device_id
+      const sendPin = readerChanged || isClone
       const bodyWithReader = {
         ...body,
         card_reader_id: form.card_reader_id || null,
@@ -353,7 +379,9 @@ export default function DevicesPage() {
         // Empty string → send null so the backend clears the FK (device
         // falls back to hardcoded tier defaults).
         tier_profile_id: form.tier_profile_id || null,
-        pairing_pin: readerChanged ? form.pairing_pin_input.trim() : null,
+        pairing_pin: sendPin ? form.pairing_pin_input.trim() : null,
+        // Only set on a Clone POST — the backend ignores it on PUT.
+        cloned_from_device_id: isClone ? form.cloned_from_device_id : null,
       }
       // `pairing_pin_input` is a UI-only field name; the server expects
       // `pairing_pin`. Strip the UI-only alias from the body.
