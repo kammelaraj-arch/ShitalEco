@@ -80,12 +80,11 @@ const ALL_COLUMNS = [
   { key: 'payment_ref',      label: 'Payment Ref',    default: false, always: false },
   { key: 'reference',        label: 'Reference',      default: false, always: false },
   { key: 'status',           label: 'Status',         default: true,  always: true  },
-  // Raw provider-reported failure / pending reason — default OFF so the
-  // table stays compact. The Status cell itself carries a native-tooltip
-  // + ⓘ indicator with the same message, so the information is one
-  // hover away without stealing a column. Operators who want the full
-  // reason inline can toggle it on from the column picker.
-  { key: 'reason',           label: 'Reason',         default: false, always: false },
+  // Raw provider-reported failure / pending reason. Default ON per operator
+  // request (27-Nov) — a CANCELLED or FAILED row needs to say WHY at a
+  // glance without having to hover the status pill. Operators who want
+  // the table more compact can toggle it off from the column picker.
+  { key: 'reason',           label: 'Reason',         default: true,  always: false },
 ] as const
 
 type ColumnKey = typeof ALL_COLUMNS[number]['key']
