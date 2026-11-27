@@ -407,6 +407,7 @@ async def donations_abandonment_rate(days: int = 30) -> dict[str, Any]:
 
     Public (no auth) — read-only, aggregate counts only, no donor PII."""
     from sqlalchemy import text
+
     from shital.core.fabrics.database import SessionLocal
 
     days = max(1, min(int(days), 365))
