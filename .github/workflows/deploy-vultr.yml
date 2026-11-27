@@ -72,6 +72,30 @@ jobs:
             # ── Clone / update repo ───────────────────────────────────────────
             if [ -d /opt/shitaleco/.git ]; then
               cd /opt/shitaleco
+              # Clear stale git locks from an interrupted previous deploy.
+              # If any real git process is still running, fuser lets us
+              # see it; we only remove locks when nothing holds them.
+              # Seen in deploy #754/#755/#756 on 27-Nov — the previous
+              # deploy's git fetch was interrupted and left
+              # /opt/shitaleco/.git/index.lock behind, which made every
+              # subsequent deploy's git fetch bail with "File exists".
+              for lock in .git/index.lock .git/shallow.lock .git/HEAD.lock \
+                          .git/config.lock .git/packed-refs.lock; do
+                if [ -f "$lock" ]; then
+                  # Only remove if no running process holds it. If
+                  # fuser isn't installed, fall through and remove —
+                  # the webhook deployer is single-threaded against
+                  # this directory, so a stray lock is always stale.
+                  if command -v fuser >/dev/null 2>&1; then
+                    fuser "$lock" >/dev/null 2>&1 \
+                      && echo "  !!! $lock is held by a running process — leaving it" \
+                      || { echo "  clearing stale $lock"; rm -f "$lock"; }
+                  else
+                    echo "  fuser missing — clearing $lock"
+                    rm -f "$lock"
+                  fi
+                fi
+              done
               git fetch origin
               git reset --hard origin/main
             else
