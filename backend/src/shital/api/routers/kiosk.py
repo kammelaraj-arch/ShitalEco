@@ -603,28 +603,47 @@ async def create_terminal_payment_intent(body: TerminalPaymentInput):
 
     stripe.api_key = await SecretsManager.get("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY)
     try:
-        # Terminal PaymentIntents MUST declare card_present as a payment
-        # method type — automatic_payment_methods=True only enables the
-        # online methods (card / Link / wallets) and Stripe refuses with
-        # "PaymentIntent must accept an in-person payment method" when a
-        # Terminal reader tries to process it.
+        # Stripe Terminal is tricky because this account is on the new
+        # API version that deprecated payment_method_types. Stripe wants
+        # us to use `automatic_payment_methods` + Dashboard-managed
+        # method list. For `card_present` to be included in the intent
+        # under this scheme, the operator must have ENABLED Card present
+        # in Stripe Dashboard → Settings → Payment methods
+        # (https://dashboard.stripe.com/settings/payment_methods).
         #
-        # 27-Nov: user hit this exact error on kiosk.shital.org.uk —
-        # "Request req_g0IhdqHzNeVQb7: PaymentIntent must accept an
-        # in-person payment method." Previous attempt used
-        # automatic_payment_methods + payment_method_options which
-        # enables the online methods but doesn't add card_present to
-        # the type list. Stripe's Terminal docs are explicit:
-        # payment_method_types=["card_present"] is required.
+        # `payment_method_options={"card_present": {}}` configures the
+        # card-present flow; `automatic_payment_methods` enables it
+        # alongside the Dashboard's enabled methods.
         intent = stripe.PaymentIntent.create(
             amount=body.amount_pence, currency=body.currency.lower(),
-            payment_method_types=["card_present"],
+            payment_method_options={"card_present": {}},
+            automatic_payment_methods={"enabled": True, "allow_redirects": "never"},
             capture_method="automatic",
             description=body.description, metadata={"order_id": body.order_id, "reader_id": body.reader_id},
         )
         return {"payment_intent_id": intent.id, "client_secret": intent.client_secret, "status": intent.status}
     except Exception as e:
-        return {"error": str(e)}
+        # Human-friendly reason when Stripe rejects for the exact two
+        # reasons seen on this account on 27-Nov:
+        #   - "PaymentIntent must accept an in-person payment method"
+        #     → Dashboard has 'Card present' disabled
+        #   - "The payment_method_types parameter is no longer supported"
+        #     → tried to override on the new API, which forbids it
+        # Point the admin at the Dashboard fix rather than leaving them
+        # with a raw Stripe error.
+        msg = str(e)
+        if "must accept an in-person" in msg or "card_present" in msg:
+            return {
+                "error": (
+                    "Stripe says this payment doesn't accept in-person methods. "
+                    "Enable 'Card present' in Stripe Dashboard → Settings → "
+                    "Payment methods (https://dashboard.stripe.com/settings/"
+                    "payment_methods) for this account. This has to be an admin "
+                    "toggle in Stripe — there's no way to force it from here."
+                ),
+                "raw": msg,
+            }
+        return {"error": msg}
 
 
 # ─── Online Payment Intent (Google Pay / Apple Pay / web cards) ──────────────
