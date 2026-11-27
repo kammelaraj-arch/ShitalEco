@@ -3878,6 +3878,25 @@ async def sumup_diagnostics(username: str = "", limit: int = 5) -> dict[str, Any
                                 row_out["status_detail"]  = dj.get("status_detail", "") or ""
                                 row_out["decline_reason"] = dj.get("decline_reason", "") or ""
                                 row_out["entry_mode"]     = dj.get("entry_mode", "") or ""
+                                # Surface every top-level key SumUp returned
+                                # for a FAILED tx + the events[] list — our
+                                # first pass guessed at the field names and
+                                # came back empty. Keep raw so we can see
+                                # what SumUp actually ships for a decline.
+                                # Trimmed to 2000 chars so the diag stays
+                                # legible in a browser.
+                                row_out["detail_keys"] = sorted(dj.keys())
+                                row_out["events"] = dj.get("events") or []
+                                row_out["card"]   = dj.get("card") or {}
+                                row_out["payment_type"] = dj.get("payment_type", "") or ""
+                                # Common SumUp reason aliases seen in prod
+                                for alt in ("status_reason", "reason",
+                                            "failure_reason", "error_code",
+                                            "error_message", "decline_code",
+                                            "internal_id", "simple_status"):
+                                    v = dj.get(alt)
+                                    if v:
+                                        row_out[f"alt_{alt}"] = v
                                 # Heuristic: which "side" the failure is on.
                                 #  - card_side: card declined / blocked / insufficient funds
                                 #  - user_cancelled: donor pressed cancel on the reader
