@@ -128,10 +128,17 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
         # so a crash in the sumup sweep setup doesn't stop it firing.
         # Idempotent and fast (single UPDATE), so cost is negligible.
         try:
+            logger.info("boot_reap_sumup_starting")
             await run_boot_reap_once()
+            logger.info("boot_reap_sumup_returned")
         except Exception as _reap_exc:
+            # Logs "skipped" when the top-level call throws — this
+            # catches import errors, DB pool not ready, etc. The reap
+            # function itself swallows inner errors, so landing here
+            # means something outside the function failed.
             logger.warning("boot_reap_sumup_skipped",
-                           error=str(_reap_exc))
+                           error=str(_reap_exc),
+                           error_type=type(_reap_exc).__name__)
         _recovery_task = _asyncio.create_task(recovery_loop_supervised())
         # Dedicated 60 s cadence for Stripe monthly-giving reconcile so a
         # just-paid subscription self-heals to ACTIVE within a minute of

@@ -134,25 +134,24 @@ async def reap_stale_pending_sumup(ttl_minutes: int = 15) -> int:
 
 
 async def run_boot_reap_once() -> None:
-    """Fire the reaper once on backend boot — before the 60 s init delay
-    of the main loop — so a deploy restart immediately clears any stale
-    PENDING backlog. Guarded by the shared ``boot_reap_ran`` flag so a
-    worker that already ran it doesn't repeat; a fresh container with a
-    fresh row runs once.
+    """Fire the reaper on backend boot — before the 60 s init delay of
+    the main loop — so a deploy restart immediately clears any stale
+    PENDING backlog.
+
+    Previously guarded by the shared ``boot_reap_ran`` flag so a worker
+    that already ran it didn't repeat. We've since seen the opposite
+    failure in prod: the diag endpoint reporting
+    ``boot_reap_ran: false`` + ``total_runs: 0`` for days while PENDING
+    rows piled up — meaning the function didn't run once, let alone
+    flip the flag. Dropped the guard: the reaper's own
+    `reap_stale_pending_sumup()` is idempotent (deletes nothing, flips
+    old PENDING rows to EXPIRED) and cheap, so running it per boot on
+    every worker is harmless. The ``boot_reap_ran`` flag is still set
+    in finally so the diag endpoint can tell "did this process complete
+    its boot reap" vs "never fired".
 
     If the DB isn't ready yet (schema patch still running, pool not
     initialised) the error is caught and logged so boot continues."""
-    try:
-        async with SessionLocal() as db:
-            row = (await db.execute(text(
-                "SELECT boot_reap_ran FROM sumup_reaper_state WHERE id = 1"
-            ))).mappings().one_or_none()
-            if row and bool(row["boot_reap_ran"]):
-                return
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("boot_reap_sumup_flag_lookup_failed", error=str(exc))
-        # Fall through — try to run the reap anyway.
-
     try:
         n = await reap_stale_pending_sumup(ttl_minutes=15)
         logger.info("boot_reap_sumup", reaped=n)
