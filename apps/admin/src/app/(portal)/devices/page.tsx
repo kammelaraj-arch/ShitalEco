@@ -375,10 +375,27 @@ export default function DevicesPage() {
   }
 
   // ── Delete ───────────────────────────────────────────────────────────────────
+  // Requires the pairing PIN written on the back of the physical kiosk —
+  // the backend enforces this so a delete + re-create can't be used to
+  // silently swap the paired card reader.
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this device? This cannot be undone.')) return
+    const pairingPin = prompt(
+      'Enter the pairing PIN written on the back of this kiosk.\n\n' +
+      'This is the same 4-digit PIN used when swapping its card reader. ' +
+      'It stops delete + re-create being used to silently change which ' +
+      'reader this kiosk is paired to.'
+    )
+    if (!pairingPin) return
     setDeleting(id)
-    await apiFetch(`/kiosk-devices/${id}`, { method: 'DELETE' }).catch(() => {})
+    try {
+      await apiFetch(`/kiosk-devices/${id}?pairing_pin=${encodeURIComponent(pairingPin.trim())}`, {
+        method: 'DELETE',
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      alert(`Delete refused.\n\n${msg}`)
+    }
     await load()
     setDeleting(null)
   }

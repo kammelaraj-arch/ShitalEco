@@ -23,6 +23,7 @@ from sqlalchemy import text
 
 from shital.api.deps import CurrentSpace, OptionalSpace
 from shital.core.fabrics.database import SessionLocal
+from shital.services.audit import record_audit, snapshot
 
 router = APIRouter(prefix="/kiosk-devices", tags=["kiosk-devices"])
 
@@ -33,6 +34,40 @@ STATUSES     = {"ACTIVE", "INACTIVE", "MAINTENANCE"}
 def _require_admin(ctx: CurrentSpace) -> None:
     if ctx.role not in ("SUPER_ADMIN", "ADMIN"):
         raise HTTPException(status_code=403, detail="SUPER_ADMIN or ADMIN required")
+
+
+async def _reader_in_use_elsewhere(
+    db, reader_id: str | None, exclude_device_id: str | None,
+) -> dict[str, str] | None:
+    """Return the other kiosk already holding this reader, or None.
+
+    A single physical card reader can only be at one till at a time. The
+    user hit the 26-Nov symptom where three ACTIVE kiosks (FKKW, On Main
+    Hundi, WQKK1) all pointed at the same SumUp Solo row because the
+    Create/Edit endpoints never checked. This helper is the write-time
+    guard that stops that happening again: if the chosen reader is
+    already on another non-deleted ACTIVE kiosk (other than the one
+    being edited), the caller gets 409 with the conflicting kiosk's
+    name so the admin can see at a glance which till would steal the
+    reader.
+    """
+    if not reader_id:
+        return None
+    params = {"rid": reader_id}
+    exclude_clause = ""
+    if exclude_device_id:
+        exclude_clause = "AND id::text <> :exc"
+        params["exc"] = str(exclude_device_id)
+    row = (await db.execute(text(f"""
+        SELECT id::text AS id, name
+          FROM kiosk_devices
+         WHERE card_reader_id = CAST(:rid AS UUID)
+           AND deleted_at IS NULL
+           AND UPPER(COALESCE(status, '')) = 'ACTIVE'
+           {exclude_clause}
+         LIMIT 1
+    """), params)).mappings().first()
+    return dict(row) if row else None
 
 
 def _gen_token() -> str:
@@ -340,6 +375,28 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
     pw_hash = _bcrypt.hashpw(body.device_password.encode(), _bcrypt.gensalt(12)).decode() if body.device_password else None
 
     async with SessionLocal() as db:
+        # Reader-conflict guard. A reader can only be at one till at a
+        # time — reject the Create if the chosen reader is already on
+        # another ACTIVE kiosk. Returns the conflicting kiosk's name so
+        # the admin can decide whether to free the reader there first.
+        conflict = await _reader_in_use_elsewhere(db, body.card_reader_id, None)
+        if conflict:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "reader_already_assigned",
+                    "message": (
+                        f"That card reader is already paired with kiosk "
+                        f"'{conflict['name']}'. A reader can only be at one "
+                        f"kiosk at a time — detach it from the other kiosk "
+                        f"first (Edit → clear Card Reader), or pick a "
+                        f"different reader for this one."
+                    ),
+                    "conflicting_kiosk_id":   conflict["id"],
+                    "conflicting_kiosk_name": conflict["name"],
+                },
+            )
+
         # Pick a pairing PIN that doesn't clash with any active kiosk.
         # Cheap pre-check before INSERT; the unique partial index is the
         # DB-level safety net if two concurrent creates both land on the
@@ -404,7 +461,19 @@ async def create_device(body: DeviceIn, ctx: CurrentSpace) -> dict[str, Any]:
             "now": now,
         })
         await db.commit()
+        after = await snapshot(db, "kiosk_devices", device_id)
 
+    await record_audit(
+        actor_email=ctx.user_email, actor_role=ctx.role,
+        action="create", entity_type="kiosk_devices", entity_id=device_id,
+        branch_id=body.branch_id,
+        source_endpoint="POST /api/v1/kiosk-devices",
+        before=None, after=after,
+        diff_summary=(
+            f"created kiosk '{body.name}' ({body.device_type}) "
+            f"with card_reader_id={body.card_reader_id or 'NULL'}"
+        ),
+    )
     return {"ok": True, "id": device_id, "device_token": token, "pairing_pin": pairing_pin}
 
 
@@ -473,6 +542,33 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
                         ),
                     },
                 )
+            # Reader-conflict guard. The new reader must not already be in
+            # use by another active kiosk (excluding this one). Same guard
+            # as Create; stops the admin picking an already-paired reader
+            # from the dropdown. Matches the reader-changed branch so a
+            # normal name/theme edit never pays the query cost.
+            conflict = await _reader_in_use_elsewhere(db, new_reader, device_id)
+            if conflict:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "reader_already_assigned",
+                        "message": (
+                            f"That card reader is already paired with kiosk "
+                            f"'{conflict['name']}'. A reader can only be at "
+                            f"one kiosk at a time — detach it from the other "
+                            f"kiosk first (Edit → clear Card Reader), or "
+                            f"pick a different reader."
+                        ),
+                        "conflicting_kiosk_id":   conflict["id"],
+                        "conflicting_kiosk_name": conflict["name"],
+                    },
+                )
+
+        # Snapshot BEFORE the write for the audit diff. Taken inside the
+        # reader-changed branch above would miss plain edits; taken here
+        # catches every save.
+        before = await snapshot(db, "kiosk_devices", device_id)
 
         # Bump the profile version so paired clients re-fetch their config
         # on their next heartbeat. The version is a monotonic counter — not
@@ -543,7 +639,23 @@ async def update_device(device_id: str, body: DeviceIn, ctx: CurrentSpace) -> di
         await db.commit()
         if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Device not found")
+        after = await snapshot(db, "kiosk_devices", device_id)
 
+    summary_bits: list[str] = []
+    if reader_changed:
+        summary_bits.append(f"card_reader_id: {old_reader or 'NULL'} → {new_reader or 'NULL'}")
+    if before and after and before.get("name") != after.get("name"):
+        summary_bits.append(f"name: '{before.get('name')}' → '{after.get('name')}'")
+    if before and after and before.get("status") != after.get("status"):
+        summary_bits.append(f"status: {before.get('status')} → {after.get('status')}")
+    await record_audit(
+        actor_email=ctx.user_email, actor_role=ctx.role,
+        action="update", entity_type="kiosk_devices", entity_id=device_id,
+        branch_id=body.branch_id,
+        source_endpoint="PUT /api/v1/kiosk-devices/{id}",
+        before=before, after=after,
+        diff_summary="; ".join(summary_bits) if summary_bits else None,
+    )
     return {"ok": True, "profile_version": (before_row["profile_version"] or 0) + 1}
 
 
@@ -649,10 +761,52 @@ async def regen_token(device_id: str, ctx: CurrentSpace) -> dict[str, Any]:
 # ── Delete (soft) ─────────────────────────────────────────────────────────────
 
 @router.delete("/{device_id}", status_code=204)
-async def delete_device(device_id: str, ctx: CurrentSpace) -> None:
+async def delete_device(
+    device_id: str,
+    ctx: CurrentSpace,
+    pairing_pin: str = "",
+) -> None:
+    """Soft-delete a kiosk. Requires pairing PIN — without this guard the
+    "silent reader swap" trick works: delete the kiosk then create a new
+    one with the same name pointing at a different reader, no PIN prompt
+    anywhere. Now the PIN is enforced at the delete boundary too, matching
+    the Edit boundary."""
     _require_admin(ctx)
 
     async with SessionLocal() as db:
+        before = await snapshot(db, "kiosk_devices", device_id)
+        if not before:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        supplied = (pairing_pin or "").strip()
+        stored   = (before.get("pairing_pin") or "").strip()
+        if not supplied:
+            raise HTTPException(
+                status_code=428,
+                detail={
+                    "error": "pairing_pin_required",
+                    "message": (
+                        "Deleting a kiosk requires the pairing PIN written "
+                        "on the back of the physical device. This is the "
+                        "same PIN used when swapping its card reader — it "
+                        "stops a delete+re-create being used to silently "
+                        "change the reader paired to this kiosk."
+                    ),
+                },
+            )
+        if supplied != stored:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "pairing_pin_incorrect",
+                    "message": (
+                        "The pairing PIN you entered doesn't match this "
+                        "kiosk. Check you're reading the PIN off the back "
+                        "of the correct physical kiosk."
+                    ),
+                },
+            )
+
         result = await db.execute(
             text("UPDATE kiosk_devices SET deleted_at = NOW(), status = 'INACTIVE' WHERE id = :id AND deleted_at IS NULL"),
             {"id": device_id},
@@ -660,3 +814,16 @@ async def delete_device(device_id: str, ctx: CurrentSpace) -> None:
         await db.commit()
         if result.rowcount == 0:  # type: ignore[attr-defined]
             raise HTTPException(status_code=404, detail="Device not found")
+        after = await snapshot(db, "kiosk_devices", device_id)
+
+    await record_audit(
+        actor_email=ctx.user_email, actor_role=ctx.role,
+        action="delete", entity_type="kiosk_devices", entity_id=device_id,
+        branch_id=before.get("branch_id") if before else None,
+        source_endpoint="DELETE /api/v1/kiosk-devices/{id}",
+        before=before, after=after,
+        diff_summary=(
+            f"soft-deleted kiosk '{before.get('name')}' (was paired with "
+            f"card_reader_id={before.get('card_reader_id') or 'NULL'})"
+        ),
+    )
