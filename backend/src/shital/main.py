@@ -4577,14 +4577,23 @@ async def _patch_schema() -> None:
         #
         # Guarded with exact conditions so re-runs are no-ops and nothing
         # else can be touched: label must match the three-lowercase-word
-        # pattern AND stripe_reader_id must be empty/null AND provider
-        # currently must be 'stripe_terminal'.
+        # pattern AND provider is not already 'sumup'. We now ALSO clear
+        # any leftover stripe_reader_id / clover_device_id on the row —
+        # the first attempt (26-Nov) required stripe_reader_id to be
+        # empty, but card_reader_health.py line 85-87 documents that
+        # Wembley rows carry a 'tmr_Gcuz1QQB6nzqMs' placeholder which
+        # was never a real Stripe terminal; that placeholder is why the
+        # first fix silently missed this row. A 3-word friendly label is
+        # unambiguous evidence this is a SumUp Solo (Stripe/Clover never
+        # use that convention), so clearing the stale foreign-id is
+        # safe and matches the heal action in card_reader_health.py:303.
         """UPDATE terminal_devices
-              SET provider   = 'sumup',
-                  updated_at = NOW()
+              SET provider         = 'sumup',
+                  stripe_reader_id = NULL,
+                  clover_device_id = NULL,
+                  updated_at       = NOW()
             WHERE LOWER(COALESCE(label, '')) ~ '^[a-z]+-[a-z]+-[a-z]+$'
-              AND LOWER(COALESCE(provider, '')) = 'stripe_terminal'
-              AND COALESCE(stripe_reader_id, '') = ''
+              AND LOWER(COALESCE(provider, '')) <> 'sumup'
               AND deleted_at IS NULL""",
 
         # Dedup SumUp donations rows. Same bug pattern as the
