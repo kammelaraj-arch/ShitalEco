@@ -58,7 +58,17 @@ export async function apiFetch<T = unknown>(
       throw new Error('Session expired. Please log in again.')
     }
 
-    if (res.ok) return res.json() as Promise<T>
+    if (res.ok) {
+      // 204 No Content (and any empty-body 2xx) must NOT be run through
+      // .json() — that throws "Unexpected end of JSON input" and the
+      // caller can't tell a successful DELETE from a real failure. Hand
+      // back undefined; callers that expect a body already type T, so
+      // it's an opt-in cast on their side.
+      if (res.status === 204 || res.headers.get('content-length') === '0') {
+        return undefined as unknown as T
+      }
+      return res.json() as Promise<T>
+    }
 
     // Auto-retry on gateway/timeout errors
     if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES) {
