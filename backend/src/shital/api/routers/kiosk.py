@@ -3848,14 +3848,63 @@ async def sumup_diagnostics(username: str = "", limit: int = 5) -> dict[str, Any
                     reverse=True,
                 )
                 for t in items_sorted[:limit]:
-                    out["recent_transactions"].append({
+                    row_out: dict[str, Any] = {
                         "transaction_code": t.get("transaction_code"),
                         "status":           t.get("status"),
                         "amount":           t.get("amount"),
                         "currency":         t.get("currency"),
                         "timestamp":        t.get("timestamp"),
                         "foreign_tx_id":    t.get("foreign_transaction_id"),
-                    })
+                    }
+                    # For FAILED / CANCELLED rows, pull the per-transaction
+                    # detail so the diag shows WHY SumUp says the tap didn't
+                    # land — operator asked "unsuccessful because of our
+                    # code or tech issue or card side?". SumUp returns the
+                    # reason under `status_detail` / `decline_reason` on
+                    # the single-transaction endpoint (NOT on the history
+                    # list). We categorise it in-line so a human can scan
+                    # the diag without decoding SumUp's codes.
+                    if (t.get("status") or "").upper() in ("FAILED", "CANCELLED", "CANCELED"):
+                        try:
+                            det = await client.get(
+                                f"{base}/v2.1/merchants/{merchant_code}/transactions",
+                                headers=headers,
+                                params={"transaction_code": t.get("transaction_code") or ""},
+                            )
+                            if det.is_success:
+                                dj = det.json() or {}
+                                if isinstance(dj, list):
+                                    dj = dj[0] if dj else {}
+                                row_out["status_detail"]  = dj.get("status_detail", "") or ""
+                                row_out["decline_reason"] = dj.get("decline_reason", "") or ""
+                                row_out["entry_mode"]     = dj.get("entry_mode", "") or ""
+                                # Heuristic: which "side" the failure is on.
+                                #  - card_side: card declined / blocked / insufficient funds
+                                #  - user_cancelled: donor pressed cancel on the reader
+                                #  - tech_side: connection / device / timeout
+                                sd = (row_out["status_detail"] or "").lower()
+                                dr = (row_out["decline_reason"] or "").lower()
+                                blob = f"{sd} {dr}"
+                                if any(k in blob for k in (
+                                    "declined", "insufficient", "blocked",
+                                    "expired", "pin", "limit", "do_not_honor",
+                                    "do_not_honour", "fraud", "card_not_supported",
+                                )):
+                                    row_out["likely_cause"] = "card_side"
+                                elif any(k in blob for k in (
+                                    "cancel", "aborted", "user_cancel",
+                                )):
+                                    row_out["likely_cause"] = "user_cancelled"
+                                elif any(k in blob for k in (
+                                    "timeout", "connection", "network",
+                                    "device", "reader", "unavailable",
+                                )):
+                                    row_out["likely_cause"] = "tech_side"
+                                else:
+                                    row_out["likely_cause"] = "unknown"
+                        except Exception:  # noqa: BLE001
+                            pass
+                    out["recent_transactions"].append(row_out)
             else:
                 out["errors"].append(f"tx_api_{tx.status_code}: {tx.text[:120]}")
     except Exception as e:  # noqa: BLE001
