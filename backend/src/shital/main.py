@@ -4556,6 +4556,69 @@ async def _patch_schema() -> None:
         "ON payment_transactions(provider, external_id) "
         "WHERE external_id <> ''",
 
+        # One-off reader-provider repair for the specific 26-Nov symptom
+        # user hit: three kiosks (FKKW, On Main Hundi, WQKK1) showed
+        # STRIPE in System Ops because a SumUp Solo row in
+        # terminal_devices had its provider column set to
+        # 'stripe_terminal'. SumUp Solo readers get an auto-assigned
+        # three-word friendly label (e.g. "honeydew-everyone-then") that
+        # no other provider ever uses — see
+        # card_reader_health.py line 72-74. The label alone is
+        # unambiguous evidence, and the row had no stripe_reader_id set
+        # at all, so this is safe to flip server-side without needing
+        # the auto-heal loop (which operator policy disabled on 26-Oct).
+        #
+        # Guarded with exact conditions so re-runs are no-ops and nothing
+        # else can be touched: label must match the three-lowercase-word
+        # pattern AND stripe_reader_id must be empty/null AND provider
+        # currently must be 'stripe_terminal'.
+        """UPDATE terminal_devices
+              SET provider   = 'sumup',
+                  updated_at = NOW()
+            WHERE LOWER(COALESCE(label, '')) ~ '^[a-z]+-[a-z]+-[a-z]+$'
+              AND LOWER(COALESCE(provider, '')) = 'stripe_terminal'
+              AND COALESCE(stripe_reader_id, '') = ''
+              AND deleted_at IS NULL""",
+
+        # Dedup SumUp donations rows. Same bug pattern as the
+        # payment_transactions dupes earlier in this file: multiple
+        # writers (tap/pay endpoint, sumup webhook, kiosk poll
+        # confirmOrder, reconcile sweep) can each insert a donation row
+        # for the same SumUp tap when they race, because none of them
+        # hold a UNIQUE guard on payment_ref. User saw four COMPLETED
+        # £2 anonymous rows at 16:55 on the Donations page from one tap.
+        #
+        # Keeps the oldest row per (payment_provider, payment_ref) where
+        # payment_ref is non-empty and the row is COMPLETED. Deletes the
+        # rest (hard delete — the dupes carry no distinct donor identity
+        # or Gift Aid signature so there's nothing to preserve). Scoped
+        # tight on purpose: ignores PENDING rows (their payment_ref is
+        # usually blank), ignores rows with no payment_ref at all
+        # (manual/cash entries), and only touches SUMUP so Stripe /
+        # PayPal flows are untouched.
+        """DELETE FROM donations
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                  FROM donations
+                 WHERE UPPER(COALESCE(payment_provider, '')) = 'SUMUP'
+                   AND UPPER(COALESCE(status, '')) = 'COMPLETED'
+                   AND COALESCE(payment_ref, '') <> ''
+                   AND deleted_at IS NULL
+                 GROUP BY payment_provider, payment_ref
+            )
+            AND UPPER(COALESCE(payment_provider, '')) = 'SUMUP'
+            AND UPPER(COALESCE(status, '')) = 'COMPLETED'
+            AND COALESCE(payment_ref, '') <> ''
+            AND deleted_at IS NULL""",
+        # Belt and braces — future races can't re-create the dupes.
+        # Partial so PENDING rows (empty payment_ref) and
+        # non-SumUp providers are unaffected.
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_donations_sumup_payment_ref "
+        "ON donations(payment_ref) "
+        "WHERE UPPER(COALESCE(payment_provider, '')) = 'SUMUP' "
+        "  AND COALESCE(payment_ref, '') <> '' "
+        "  AND deleted_at IS NULL",
+
         # Single-row counter table for the SumUp stale-pending reaper.
         # Needed because the in-process _REAP_STATE dict is per-uvicorn-
         # worker, so a /sumup/diag call hitting a different worker from
