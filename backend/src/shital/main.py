@@ -4644,14 +4644,15 @@ async def _patch_schema() -> None:
         # inside the schema patch, which IS known to fire on every
         # boot, so it's the one place we can be sure the sweep happens.
         #
-        # Scope: SumUp rows with empty payment_ref (no checkout_id
-        # stamped, so no SumUp transaction could ever match them),
-        # PENDING for more than 15 minutes. These are abandoned taps
-        # by construction — SumUp never saw a card for them. Flip to
-        # CANCELLED with a clear reason the Reason column surfaces.
-        # Tight: non-SumUp providers, PENDING rows with a payment_ref
-        # set (the reconcile path still owns those), and anything
-        # newer than 15 minutes are untouched.
+        # Scope: SumUp PENDING rows older than 24 hours — regardless of
+        # whether a payment_ref/checkout_id was stamped. First attempt
+        # restricted this to rows with empty payment_ref, which filtered
+        # OUT the 14 rows the user showed us (every one of them had the
+        # checkout_id stamped by /sumup/checkout but no donor ever
+        # presented a card, so no SumUp transaction exists for them).
+        # The 24-hour TTL gives the reconcile loop a full day to flip
+        # legitimately-paid PENDINGs to COMPLETED — anything still
+        # PENDING after 24h is abandoned by every reasonable measure.
         """UPDATE donations
               SET status = 'CANCELLED',
                   last_failure_code    = 'abandoned_no_card_presented',
@@ -4659,8 +4660,7 @@ async def _patch_schema() -> None:
                   updated_at           = NOW()
             WHERE UPPER(COALESCE(payment_provider, '')) = 'SUMUP'
               AND UPPER(COALESCE(status, '')) = 'PENDING'
-              AND COALESCE(payment_ref, '') = ''
-              AND created_at < NOW() - INTERVAL '15 minutes'
+              AND created_at < NOW() - INTERVAL '24 hours'
               AND deleted_at IS NULL""",
 
         # Single-row counter table for the SumUp stale-pending reaper.
