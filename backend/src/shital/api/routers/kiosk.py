@@ -3898,13 +3898,32 @@ async def sumup_diagnostics(username: str = "", limit: int = 5) -> dict[str, Any
                                     if v:
                                         row_out[f"alt_{alt}"] = v
                                 # Heuristic: which "side" the failure is on.
-                                #  - card_side: card declined / blocked / insufficient funds
-                                #  - user_cancelled: donor pressed cancel on the reader
+                                #  - abandoned_no_card_presented: no card ever
+                                #      touched the reader (donor walked away,
+                                #      operator mis-pressed, reader timeout).
+                                #      Identified by entry_mode='none' AND
+                                #      empty card AND empty events — SumUp's
+                                #      own data shape for "nothing happened".
+                                #      This was the actual 27-Nov finding on
+                                #      prod: all 'Unsuccessful' entries were
+                                #      abandonments, not declines.
+                                #  - card_side: card declined / blocked /
+                                #      insufficient funds
+                                #  - user_cancelled: donor pressed cancel on
+                                #      the reader (SumUp sometimes tags this
+                                #      with text when a tap started then
+                                #      aborted mid-flight)
                                 #  - tech_side: connection / device / timeout
                                 sd = (row_out["status_detail"] or "").lower()
                                 dr = (row_out["decline_reason"] or "").lower()
                                 blob = f"{sd} {dr}"
-                                if any(k in blob for k in (
+                                em = (row_out.get("entry_mode") or "").lower()
+                                card_obj   = row_out.get("card") or {}
+                                events_arr = row_out.get("events") or []
+                                if (em in ("none", "") and not card_obj and not events_arr
+                                        and not blob.strip()):
+                                    row_out["likely_cause"] = "abandoned_no_card_presented"
+                                elif any(k in blob for k in (
                                     "declined", "insufficient", "blocked",
                                     "expired", "pin", "limit", "do_not_honor",
                                     "do_not_honour", "fraud", "card_not_supported",

@@ -139,6 +139,17 @@ export default function DonationsPage() {
   const [giftAidOnly, setGiftAidOnly]     = useState(false)
   const [search, setSearch]               = useState('')
 
+  // Abandonment metric — populated independently of the filtered dataset
+  // (always last 30 days of SumUp attempts) so trustees can see the real
+  // walk-away rate even when they're looking at a narrower window.
+  const [abandonment, setAbandonment] = useState<{
+    total_attempts:    number
+    successful:        number
+    abandoned:         number
+    abandonment_rate:  number
+    per_amount:        Array<{ amount: number; attempts: number; successful: number; abandoned: number; rate: number }>
+  } | null>(null)
+
   // Column toggle — visible columns persist in localStorage so each trustee
   // keeps their own view. Defaults come from ALL_COLUMNS.
   const [visibleCols, setVisibleCols] = useState<Set<ColumnKey>>(() => {
@@ -342,6 +353,22 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
   }, [fromDate, toDate, filterBranch, filterSource, filterPurpose, filterStatus, filterDevice, pageSize, page])
 
   useEffect(() => { load() }, [load])
+
+  // Abandonment metric fetched once per page load — rolling 30-day
+  // window, independent of the filtered table above so trustees always
+  // see the tap-reality even while they're drilling into a subset.
+  useEffect(() => {
+    apiFetch<{
+      total_attempts:   number
+      successful:       number
+      abandoned:        number
+      abandonment_rate: number
+      per_amount:       Array<{ amount: number; attempts: number; successful: number; abandoned: number; rate: number }>
+    }>('/admin/donations/abandonment-rate?days=30')
+      .then(d => setAbandonment(d))
+      .catch(() => { /* non-fatal */ })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const openNew = () => {
     setEditing(null)
@@ -757,6 +784,24 @@ TAAA3G3B6EH  5.00   2026-06-07 09:57`
               sub:   `${gaN} of ${grandN} eligible · 25% reclaim`,
               icon: '🇬🇧', color: 'from-blue-600 to-indigo-500',
             },
+            // SumUp abandonment — only shows when the backend returned
+            // data. Scoped to last 30 days regardless of the filter so
+            // the rate is comparable session-to-session. "Worst tier"
+            // is the amount with the highest abandonment % (not the
+            // highest volume) — that's the one worth re-thinking in the
+            // kiosk layout.
+            ...(abandonment && abandonment.total_attempts > 0 ? [(() => {
+              const worst = [...abandonment.per_amount]
+                .filter(p => p.attempts >= 3)
+                .sort((a, b) => b.rate - a.rate)[0]
+              return {
+                label: 'Abandon rate (30d SumUp)',
+                value: `${abandonment.abandonment_rate}%`,
+                sub:   `${abandonment.abandoned} of ${abandonment.total_attempts} taps walked away` +
+                       (worst ? ` · worst tier £${worst.amount}: ${worst.rate}%` : ''),
+                icon: '👋', color: 'from-rose-600 to-pink-500',
+              }
+            })()] : []),
           ]
         })().map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
