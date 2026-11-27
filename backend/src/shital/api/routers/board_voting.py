@@ -105,17 +105,108 @@ async def _audit(
     })
 
 
-# ─── Admin: send invites ──────────────────────────────────────────────────────
+# ─── Admin: recipient picker + send invites ─────────────────────────────────
+
+@router.get("/admin/board/resolutions/{resolution_id}/vote-recipients")
+async def list_vote_recipients(
+    resolution_id: str, ctx: CurrentSpace,
+) -> dict[str, Any]:
+    """Return the list of active trustees + whether a token has already been
+    issued for this resolution. Powers the chair's per-recipient checkbox
+    list on the Review step — avoids blasting the whole board when a
+    targeted ping is all that's needed."""
+    _require_admin(ctx)
+    if not _looks_uuid(resolution_id):
+        raise HTTPException(400, detail="resolution_id must be UUID")
+
+    from sqlalchemy import text
+
+    from shital.core.fabrics.database import SessionLocal
+
+    async with SessionLocal() as db:
+        res = (await db.execute(text("""
+            SELECT id, status FROM resolutions WHERE id::text = :id
+        """), {"id": resolution_id})).mappings().one_or_none()
+        if not res:
+            raise HTTPException(404, detail="Resolution not found")
+
+        rows = (await db.execute(text("""
+            SELECT t.id::text         AS id,
+                   t.full_name        AS full_name,
+                   t.email            AS email,
+                   t.phone            AS phone,
+                   t.role             AS role,
+                   t.is_active        AS is_active,
+                   tok.sent_at        AS last_sent_at,
+                   tok.sent_via       AS last_sent_via,
+                   CASE WHEN v.id IS NOT NULL THEN TRUE ELSE FALSE END AS has_voted
+            FROM   trustees t
+            LEFT   JOIN resolution_vote_tokens tok
+              ON   tok.trustee_id = t.id AND tok.resolution_id = CAST(:rid AS uuid)
+            LEFT   JOIN resolution_votes v
+              ON   v.trustee_id = t.id AND v.resolution_id::text = :rid
+            WHERE  t.is_active = true
+            ORDER  BY t.role, t.full_name
+        """), {"rid": str(res["id"])})).mappings().all()
+
+    items = []
+    for r in rows:
+        items.append({
+            "id":            r["id"],
+            "full_name":     r["full_name"],
+            "email":         r["email"] or "",
+            "phone":         r["phone"] or "",
+            "role":          r["role"],
+            "is_active":     bool(r["is_active"]),
+            "has_voted":     bool(r["has_voted"]),
+            "last_sent_at":  r["last_sent_at"].isoformat() if r.get("last_sent_at") else None,
+            "last_sent_via": r["last_sent_via"] or "",
+            "email_ok":      bool((r["email"] or "").strip()),
+            "sms_ok":        bool((r["phone"] or "").strip()),
+        })
+    return {"items": items, "resolution_status": res["status"]}
+
+
+class _SendInvitesIn(BaseModel):
+    trustee_ids: list[str] | None = None   # None / empty → send to all active
+    channels:    list[str] | None = None   # defaults to ["EMAIL"]
+
+
+async def _send_invite_sms(
+    *, full_name: str, phone: str, token: str, resolution_title: str,
+) -> dict[str, Any]:
+    """Send the magic-link via SMS. Short body — SMSs are 160 chars so we
+    include the title (truncated) + the link and nothing else."""
+    from shital.core.fabrics.secrets import SecretsManager
+    from shital.services.sms.dispatcher import dispatch_sms
+
+    admin_base = await SecretsManager.get("ADMIN_BASE_URL") or "https://admin.shital.org.uk"
+    link = f"{admin_base.rstrip('/')}/admin/board/vote/#token={token}"
+    title = (resolution_title or "").strip()
+    if len(title) > 50:
+        title = title[:47] + "…"
+    body = f"SHITAL board vote: '{title}'. {full_name}, tap: {link} (PIN required)"
+    return await dispatch_sms(to_phone=phone, body=body)
+
 
 @router.post("/admin/board/resolutions/{resolution_id}/send-vote-invites")
 async def send_vote_invites(
     resolution_id: str, request: Request, ctx: CurrentSpace,
+    body: _SendInvitesIn | None = None,
 ) -> dict[str, Any]:
-    """Generate per-trustee magic-link tokens and email them. Idempotent —
-    re-running returns the same tokens (it doesn't rotate)."""
+    """Generate per-trustee magic-link tokens and send them. Idempotent on
+    the token — re-running reuses the existing token rather than rotating.
+    Accepts a targeted ``trustee_ids`` list; when omitted, every active
+    trustee gets an invite (prior behaviour). ``channels`` defaults to
+    ``["EMAIL"]``; set to ``["EMAIL", "SMS"]`` to fire both."""
     _require_admin(ctx)
     if not _looks_uuid(resolution_id):
         raise HTTPException(400, detail="resolution_id must be UUID")
+
+    want_ids = set((body.trustee_ids or []) if body else [])
+    channels_raw = (body.channels if body and body.channels else ["EMAIL"])
+    channels = [c.strip().upper() for c in channels_raw if c and c.strip()]
+    channels = [c for c in channels if c in {"EMAIL", "SMS"}] or ["EMAIL"]
 
     from sqlalchemy import text
 
@@ -134,17 +225,31 @@ async def send_vote_invites(
                 detail=f"Can only invite on an OPEN resolution; current: {res['status']}",
             )
 
-        trustees = (await db.execute(text("""
-            SELECT id, full_name, email, role FROM trustees
-            WHERE  is_active = true AND email <> ''
+        trustees_all = (await db.execute(text("""
+            SELECT id, full_name, email, phone, role FROM trustees
+            WHERE  is_active = true
             ORDER  BY role, full_name
         """))).mappings().all()
-        if not trustees:
-            raise HTTPException(400, detail={"errors": ["No active trustees with an email on file"]})
+
+        # Targeted selection (when provided), otherwise fall back to "all".
+        if want_ids:
+            trustees = [t for t in trustees_all if str(t["id"]) in want_ids]
+            if not trustees:
+                raise HTTPException(400, detail={"errors": [
+                    "None of the selected trustee_ids match an active trustee",
+                ]})
+        else:
+            trustees = [t for t in trustees_all if (t["email"] or "").strip()]
+            if not trustees:
+                raise HTTPException(400, detail={
+                    "errors": ["No active trustees with an email on file"],
+                })
 
         sent: list[str] = []
         skipped: list[str] = []
-        failed: list[str] = []
+        email_failed: list[str] = []
+        sms_failed: list[str] = []
+        sms_sent: list[str] = []
 
         for t in trustees:
             # Get-or-create token for this (resolution, trustee).
@@ -157,45 +262,71 @@ async def send_vote_invites(
                 skipped.append(t["full_name"])
             else:
                 token = secrets.token_urlsafe(40)
+                primary_channel = "EMAIL" if "EMAIL" in channels else "SMS"
                 await db.execute(text("""
                     INSERT INTO resolution_vote_tokens
                         (id, token, resolution_id, trustee_id, sent_via, sent_at)
-                    VALUES (:id, :tok, :rid, :tid, 'EMAIL', :now)
+                    VALUES (:id, :tok, :rid, :tid, :via, :now)
                 """), {
                     "id": str(uuid.uuid4()), "tok": token,
-                    "rid": str(res["id"]), "tid": str(t["id"]), "now": now,
+                    "rid": str(res["id"]), "tid": str(t["id"]),
+                    "via": primary_channel, "now": now,
                 })
                 sent.append(t["full_name"])
 
-            # Email the link.
-            try:
-                await _send_invite_email(
-                    full_name=t["full_name"], email=t["email"], token=token,
-                    resolution_title=res["title"],
-                    resolution_id=str(res["id"]),
-                    triggered_by=ctx.user_email,
-                )
-            except Exception as exc:
-                failed.append(f"{t['full_name']} ({exc})")
+            if "EMAIL" in channels and (t["email"] or "").strip():
+                try:
+                    await _send_invite_email(
+                        full_name=t["full_name"], email=t["email"], token=token,
+                        resolution_title=res["title"],
+                        resolution_id=str(res["id"]),
+                        triggered_by=ctx.user_email,
+                    )
+                except Exception as exc:
+                    email_failed.append(f"{t['full_name']} ({exc})")
+
+            if "SMS" in channels and (t["phone"] or "").strip():
+                try:
+                    result = await _send_invite_sms(
+                        full_name=t["full_name"], phone=t["phone"],
+                        token=token, resolution_title=res["title"],
+                    )
+                    if result.get("ok"):
+                        sms_sent.append(t["full_name"])
+                    else:
+                        sms_failed.append(f"{t['full_name']} ({result.get('reason') or result.get('provider')})")
+                except Exception as exc:  # noqa: BLE001
+                    sms_failed.append(f"{t['full_name']} ({exc})")
 
         await _audit(
             db, action="VOTE_INVITES_SENT", entity_type="resolutions",
             entity_id=resolution_id, actor_id=str(ctx.user_id),
             actor_name=ctx.user_email,
-            metadata={"sent": len(sent), "reused": len(skipped),
-                      "failed": len(failed)},
+            metadata={
+                "channels":        channels,
+                "selected":        list(want_ids) or "all",
+                "trustees_total":  len(trustees),
+                "tokens_created":  len(sent),
+                "tokens_reused":   len(skipped),
+                "email_failed":    len(email_failed),
+                "sms_sent":        len(sms_sent),
+                "sms_failed":      len(sms_failed),
+            },
             ip=(request.client.host if request.client else ""),
             ua=request.headers.get("user-agent", ""),
         )
         await db.commit()
 
     return {
-        "resolution_id": resolution_id,
-        "trustees_total": len(trustees),
-        "tokens_created": len(sent),
-        "tokens_reused": len(skipped),
-        "email_failed": failed,
-        "success": True,
+        "resolution_id":    resolution_id,
+        "channels":         channels,
+        "trustees_total":   len(trustees),
+        "tokens_created":   len(sent),
+        "tokens_reused":    len(skipped),
+        "email_failed":     email_failed,
+        "sms_sent":         sms_sent,
+        "sms_failed":       sms_failed,
+        "success":          True,
     }
 
 

@@ -6,6 +6,7 @@ import { RichTextEditor } from '@/components/board/RichTextEditor'
 import { CollabDrawer } from '@/components/board/CollabDrawer'
 import { ExternalLinksPanel } from '@/components/board/ExternalLinksPanel'
 import { StructuredRiskPanel, StructuredBudgetPanel } from '@/components/board/StructuredImpact'
+import { VoteRecipientsPanel } from '@/components/board/VoteRecipientsPanel'
 import { AnnouncementPanel } from '@/components/board/AnnouncementPanel'
 import { ConditionsPanel } from '@/components/board/ConditionsPanel'
 import { SignoffPanel } from '@/components/board/SignoffPanel'
@@ -908,6 +909,12 @@ export default function ResolutionsPage() {
                 {wizStep === 'review' && (
                   <div className="w-full space-y-4">
                     {editing?.id && <ConflictsBanner resolutionId={editing.id} locked={locked} />}
+                    {editing?.id && (
+                      <VoteRecipientsPanel
+                        resolutionId={editing.id}
+                        resolutionIsOpen={editing.status === 'OPEN'}
+                      />
+                    )}
                     <p className="text-white/50 text-xs uppercase tracking-widest font-bold">Preview — this is what trustees will see</p>
                     <div className="rounded-2xl border border-white/10 bg-white/3 p-5 space-y-4">
                       <div>
