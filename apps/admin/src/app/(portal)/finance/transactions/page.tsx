@@ -324,7 +324,13 @@ export default function TransactionsPage() {
       const url = which === 'all'
         ? `/admin/finance/sync/all`
         : `/admin/finance/sync/${which}`
-      const body = which === 'all' ? { days: 2 } : {}
+      // Empty body on both paths: the backend's _cursor_from_last picks
+      // up from the LAST successful sync's end-timestamp, so each click
+      // resumes exactly where the previous run stopped. Sending
+      // { days: 2 } here forced a hard 2-day window and silently
+      // dropped anything older — which is why the user saw "+0 new"
+      // even when real taps existed outside that window.
+      const body = {}
       const r = await apiFetch<{
         status?: string; results?: Array<{ provider: string; status: string; fetched?: number; inserted?: number; updated?: number; error?: string; reason?: string }>;
         fetched?: number; inserted?: number; updated?: number; error?: string; reason?: string;
