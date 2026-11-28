@@ -32,7 +32,13 @@ jobs:
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           PAYMENT_SYNC_TOKEN: ${{ secrets.PAYMENT_SYNC_TOKEN }}
-          DAYS: ${{ github.event.inputs.days || '2' }}
+          # Default 7 days per nightly run so a missed cron (GitHub
+          # Actions delay, repo paused, token rotated) catches up
+          # automatically instead of leaking transactions silently. The
+          # dedupe UNIQUE index on (provider, external_id) means
+          # re-syncing days already covered is a no-op cost-wise.
+          # Overridable at dispatch time via the `days` input.
+          DAYS: ${{ github.event.inputs.days || '7' }}
         run: |
           set -euo pipefail
           if [ -z "${API_BASE_URL:-}" ] || [ -z "${PAYMENT_SYNC_TOKEN:-}" ]; then
